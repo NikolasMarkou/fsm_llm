@@ -57,6 +57,7 @@ from fsm_llm.engine.session import SessionState, session_state_from_projection
 from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog, LogCorruptError
 from fsm_llm.runtime.stores import FrameProjection, fold_stack, turn_cut
+from fsm_llm.runtime.stores.session import public_context
 
 from .budget import budget_kwargs
 from .events import record_forked, record_restored_frame, record_resumed
@@ -295,7 +296,7 @@ class ForkMixin(_ApiSurface):
             )
             child_id, _ = manager.start_conversation(
                 fsm_id,
-                initial_context=state.context_data,
+                initial_context=public_context(state.context_data),
                 suppress_start=True,
                 **kept,
                 **budget,

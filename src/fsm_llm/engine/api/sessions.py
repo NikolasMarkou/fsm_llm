@@ -21,6 +21,7 @@ from fsm_llm.engine.session import (
 )
 from fsm_llm.logging import logger
 from fsm_llm.memory import WorkingMemory
+from fsm_llm.runtime.stores.session import public_context
 
 from .events import record_restored
 from .surface import _ApiSurface
@@ -215,8 +216,15 @@ class SessionsMixin(_ApiSurface):
         kept_id: dict[str, Any] = (
             {} if conversation_id is None else {"_conversation_id": conversation_id}
         )
+        # A snapshot is a file: only its public keys seed the context (`public_context`, the
+        # one rule of the fold), never an internal one such as a forged `_approval_granted`
+        # (the declared transcript keys come through `_restorable_internal` below). The filter
+        # sits HERE, at the restore, and never in `start_conversation`: agents seed
+        # `_max_iterations` there on purpose (D-026 of plan 0068b055).
         conv_id, _ = self.start_conversation(
-            initial_context=state.context_data, _suppress_start=True, **kept_id
+            initial_context=public_context(state.context_data),
+            _suppress_start=True,
+            **kept_id,
         )
 
         current_fsm_id = self._get_current_fsm_conversation_id(conv_id)

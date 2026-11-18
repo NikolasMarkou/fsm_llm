@@ -9,6 +9,7 @@ cannot run is a log fact, and a symlinked log is refused before the lock.
 from __future__ import annotations
 
 import copy
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -16,11 +17,13 @@ from typing import Any
 
 import pytest
 
-from fsm_llm import API
+from fsm_llm import API, FileSessionStore
 from fsm_llm.core.definitions import RunBudgetExceededError
+from fsm_llm.engine.api import forks
 from fsm_llm.llm import LLMInterface
 from fsm_llm.runtime import EventLog, EventType, LogCorruptError, retention
 from fsm_llm.runtime.privacy import SHAPE_FIELDS
+from fsm_llm.testing import ScriptedLLM
 from tests.conftest import symlink_or_skip
 from tests.test_fsm_llm.test_event_log_forks import (
     _GRANT,
@@ -325,3 +328,68 @@ class TestASymlinkedLogIsRefusedBeforeTheLock:
             _api(fresh).resume(cid)
         assert target.stat().st_size == size and path.is_symlink()
         assert not fresh.has_writer(cid)
+
+
+_FORGED: dict[str, Any] = {"_approval_granted": _GRANT, "_run_output_keys": ["x"]}
+
+
+def _tamper(path: Path, **forged: Any) -> None:
+    """Write *forged* into the ``context_data`` of the session file at *path*."""
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    saved["context_data"].update(forged)
+    path.write_text(json.dumps(saved), encoding="utf-8")
+
+
+class TestAPlainRestoreSeedsOnlyPublicKeys:
+    """A1 (engine audit 1.1, the hole carried since 21e6f00d): a session file is a file, so its
+    ``context_data`` may hold a forged driver grant. The ONE restore body filters it; a
+    conversation start (agents seed ``_max_iterations`` there) is never filtered."""
+
+    def test_a_tampered_session_file_cannot_carry_a_grant_into_a_restore(
+        self, tmp_path: Path
+    ) -> None:
+        store = FileSessionStore(tmp_path)
+        api = API(
+            copy.deepcopy(_ROOT),
+            llm_interface=ScriptedLLM([], default_response="ok"),
+            session_store=store,
+        )
+        cid, _ = api.start_conversation()
+        api.update_context(cid, {"x": 1})
+        api.save_session(cid)
+        _tamper(tmp_path / f"{cid}.json", **_FORGED)
+        restored, _ = api.restore_session(cid) or ("", None)
+        raw = _raw(api, restored)
+        assert raw["x"] == 1
+        assert not raw.keys() & _FORGED.keys()
+
+    def test_a_conversation_start_still_seeds_an_internal_key(self) -> None:
+        """The negative control: the filter sits at the restore, never at the start."""
+        api = API(
+            copy.deepcopy(_ROOT), llm_interface=ScriptedLLM([], default_response="ok")
+        )
+        cid, _ = api.start_conversation(initial_context={"_max_iterations": 3})
+        assert _raw(api, cid)["_max_iterations"] == 3
+
+    @pytest.mark.parametrize("route", _ROUTES)
+    def test_a_forged_fold_never_seeds_the_root_or_a_frame(
+        self, log: EventLog, monkeypatch: pytest.MonkeyPatch, route: str
+    ) -> None:
+        """The restore seams themselves, behind the fold: a projection that carries the grant in
+        the root and in a frame (a fold that stopped filtering) still seeds neither."""
+        api = _api(log)
+        tid = _forge(log, api, child=_KIDS, child_context={"topic": "x"})
+        real = forks.fold_stack
+
+        def lying(events: Any, get_json: Any) -> Any:
+            projection = real(events, get_json)
+            for state in (projection.root, *(f.state for f in projection.frames)):
+                state.context_data.update(_FORGED)
+            return projection
+
+        monkeypatch.setattr(forks, "fold_stack", lying)
+        root = _restore(log, api, tid, route)
+        for conversation in (root, _kid_id(api, root)):
+            raw = _raw(api, conversation)
+            assert raw["name" if conversation == root else "topic"]
+            assert not raw.keys() & _FORGED.keys()
