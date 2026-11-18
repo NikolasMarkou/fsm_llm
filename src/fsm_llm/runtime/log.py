@@ -49,6 +49,7 @@ from fsm_llm.runtime.events import (
     EventPayloadError,
     EventType,
     LogCorruptError,
+    LogLockedError,
     LogWriteError,
     canonical_json,
     check_depth,
@@ -250,6 +251,38 @@ class EventLog:
                 writer = JsonlWriter(self._logs / f"{conversation_id}{LOG_SUFFIX}")
                 self._writers[conversation_id] = writer
             return writer
+
+    def has_writer(self, conversation_id: str) -> bool:
+        """True while this log holds the writer (and so the lock) of *conversation_id*."""
+        with self._guard:
+            return conversation_id in self._writers
+
+    def open_existing(self, conversation_id: str) -> int:
+        """Take the writer of an EXISTING log and return its last ``seq`` (``resume`` reads after).
+
+        Interface contract (caller: ``API.resume``, plan 5a6a1f80): the lock is taken here, BEFORE
+        the caller reads anything, so what it then reads is what it will continue. A torn tail is
+        cut and the ``seq`` continues, by the one code of ``JsonlWriter``. The writer stays until
+        ``release`` or ``close``. ``FileNotFoundError`` for an id with no log, and then no log, no
+        ``.lock`` and no directory was created. ``LogLockedError`` when another process or
+        ``EventLog`` holds the lock, and when THIS log already holds a writer for the id (two
+        ``API`` objects share one ``EventLog`` and so one writer: the lock cannot tell them
+        apart). ``LogCorruptError`` for a damaged log (the lock is released again),
+        ``EventPayloadError`` for a bad id, ``LogWriteError`` for a closed log or an OS failure.
+        """
+        check_conversation_id(conversation_id)
+        with self._guard:
+            if self._closed:
+                raise LogWriteError("the event log is closed")
+            if conversation_id in self._writers:
+                raise LogLockedError(
+                    f"log {conversation_id}{LOG_SUFFIX} already has a live writer in this EventLog"
+                )
+            writer = JsonlWriter(
+                self._logs / f"{conversation_id}{LOG_SUFFIX}", create=False
+            )
+            self._writers[conversation_id] = writer
+            return writer.last_seq
 
     def _envelope(
         self, conversation_id: str, kind: Any, frame: Any, fields: Mapping[str, Any]

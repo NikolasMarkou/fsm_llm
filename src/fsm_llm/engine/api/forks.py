@@ -1,8 +1,12 @@
-"""``API.fork`` (``ForkMixin``): a new conversation tree from the state of an old one at the end
-of its Nth turn, read from the event log (plan 5a6a1f80, step 4, roadmap row 1.4).
+"""``API.fork`` and ``API.resume`` (``ForkMixin``): a new conversation tree from the state of an
+old one at the end of its Nth turn, and the SAME tree continued after a crash or a close, both
+read from the event log (plan 5a6a1f80, steps 4 and 5, roadmap row 1.4).
 
-Layer ``engine``. The log is the only source; nothing is read from a live conversation, no
-``conv_lock`` and no writer lock is taken, and the source log is never written.
+Layer ``engine``. The log is the only source; nothing is read from a live conversation. ``fork``
+takes no ``conv_lock`` and no writer lock and never writes the source log. ``resume`` takes the
+writer lock FIRST and writes the log it continues. Both rebuild the stack through the ONE restore
+body (``SessionsMixin._restore_conversation``) and ``_add_restored_frame``: ``resume`` is not a
+second restore path.
 
 Interface contract:
     - ``fork(conversation_id, *, at_turn) -> (new_conversation_id, SessionState)``: *at_turn* counts
@@ -20,6 +24,21 @@ Interface contract:
     - The fork's own log is self-sufficient: a ``fork`` record with the root state and, per frame
       above the root, a ``restored`` ``stack/push`` (D-006 of the plan), so a fork of a fork and a
       ``restore_session`` of it need no help from the source.
+    - ``resume(conversation_id) -> (conversation_id, SessionState)``: the SAME id and the SAME log,
+      the whole stack rebuilt with its own ids (root and frames keep them). Order: the id must not
+      be live in this ``API``; ``EventLog.open_existing`` takes the writer lock BEFORE anything is
+      read (an unknown id raises ``FSMError`` and creates no file and no ``.lock``; another
+      process or ``EventLog`` holding the lock, or another ``API`` of the same ``EventLog``, is
+      ``LogLockedError``); the whole log is folded (a torn tail is cut by the writer, an open turn
+      contributes its pre-turn state and is never closed by a ``turn/end`` of ours); then a
+      ``context/record`` ``source: "resume"`` with ``resumed_from: {seq}`` and, for each tool call
+      the log could not resolve, a ``tool/result`` ``status: "unknown"``. Those calls are listed
+      ONCE in ``state.metadata["unknown_tool_calls"]`` and are never re-run; the next resume
+      reports none. A conversation in a terminal state resumes as an ended one
+      (``has_conversation_ended``); an ended-conversation cache entry of the id is dropped. Needs
+      an event log. Failure: ``FSMError`` (no log, no state, live id), ``LogLockedError``,
+      ``LogCorruptError`` as ``fork``; any failure after the lock releases the writer and ends
+      what was built. A budget is not persisted: the resumed tree starts with a fresh one (D-011).
 """
 
 from __future__ import annotations
@@ -37,7 +56,7 @@ from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog, LogCorruptError
 from fsm_llm.runtime.stores import FrameProjection, fold_stack, turn_cut
 
-from .events import record_forked, record_restored_frame
+from .events import record_forked, record_restored_frame, record_resumed
 from .helpers import _require_classifier_interface
 from .stack import FSMStackFrame
 from .surface import _ApiSurface
@@ -159,8 +178,80 @@ class ForkMixin(_ApiSurface):
 
         return self._restore_conversation(state, record), state
 
-    def _add_restored_frame(self, root_id: str, prepared: _Prepared) -> None:
+    def resume(self, conversation_id: str) -> tuple[str, SessionState]:
+        """Continue *conversation_id* on its own log after a crash or a close.
+
+        See the module docstring for the contract.
+
+        Args:
+            conversation_id: Root id of a tree whose log exists and is not held by a writer.
+
+        Returns:
+            ``(conversation_id, state)``: the same id and the folded root; ``state.metadata
+            ["unknown_tool_calls"]`` lists the in-flight tool calls, once.
+
+        Raises:
+            FSMError: no event log, no log for the id, no state in it, or the id is live here.
+            LogLockedError: another writer holds the log.
+            LogCorruptError: a damaged log or a frame the log cannot give back.
+        """
+        log = self._event_log
+        if log is None:
+            raise FSMError("resume needs an event log: build the API with event_log=")
+        with self._stack_lock:
+            live = conversation_id in self.conversation_stacks
+        if live:
+            raise FSMError(f"conversation '{conversation_id}' is live in this API")
+        try:
+            log.open_existing(conversation_id)  # the lock comes BEFORE any read
+        except FileNotFoundError:
+            raise FSMError(
+                f"no event log for conversation '{conversation_id}'"
+            ) from None
+        resumed = False
+        try:
+            projection = fold_stack(log.read(conversation_id), log.get_json)
+            if projection is None:
+                raise FSMError(
+                    f"conversation '{conversation_id}' has no recorded state"
+                )
+            prepared = [_prepare(self, log, frame) for frame in projection.frames]
+            state = session_state_from_projection(
+                projection.root, stack_depth=projection.depth
+            )
+            if state.fsm_id != self.fsm_id:
+                logger.warning(
+                    f"resume: '{conversation_id}' was recorded under fsm_id='{state.fsm_id}' "
+                    f"but this API instance is fsm_id='{self.fsm_id}': resuming anyway"
+                )
+            lineage = {"seq": projection.root.last_seq}
+            unknown = projection.root.unknown_tool_calls
+
+            def record(root_id: str) -> None:
+                for frame in prepared:
+                    self._add_restored_frame(root_id, frame, keep_id=True)
+                with self._stack_lock:
+                    top = self.conversation_stacks[root_id]
+                    top_id, top_frame = top[-1].conversation_id, len(top) - 1
+                record_resumed(self, root_id, top_id, top_frame, lineage, unknown)
+
+            self._restore_conversation(state, record, conversation_id=conversation_id)
+            resumed = True
+        finally:
+            # a no-op when the restore teardown already ended the conversation and freed it
+            if not resumed:
+                log.release(conversation_id)
+        with self._stack_lock:
+            self._ended_conversations.pop(conversation_id, None)
+        return conversation_id, state
+
+    def _add_restored_frame(
+        self, root_id: str, prepared: _Prepared, *, keep_id: bool = False
+    ) -> None:
         """Rebuild one frame on top of the stack of *root_id*, exactly as ``push_fsm`` adds one.
+
+        *keep_id* (``resume``) starts the frame under the id the log gave it and writes no push
+        record (the log has it); ``fork`` mints an id and records a ``restored`` push.
 
         The temporary definition and the in-flight id are registered BEFORE the start, the frame
         is appended and the id released from "pending" in ONE ``_stack_lock`` hold, and a failure
@@ -176,8 +267,16 @@ class ForkMixin(_ApiSurface):
             with self._stack_lock:
                 self._temp_fsm_definitions[fsm_id] = prepared.definition
                 self._pending_push_ids.add(fsm_id)
+            kept = (
+                {"conversation_id": prepared.frame.child_conversation_id}
+                if keep_id
+                else {}
+            )
             child_id, _ = manager.start_conversation(
-                fsm_id, initial_context=state.context_data, suppress_start=True
+                fsm_id,
+                initial_context=state.context_data,
+                suppress_start=True,
+                **kept,
             )
             manager.seed_restored_conversation(
                 child_id,
@@ -208,6 +307,8 @@ class ForkMixin(_ApiSurface):
         finally:
             if not added:
                 self._rollback_push(fsm_id, child_id)
+        if keep_id:
+            return
         record_restored_frame(
             self,
             root_id,

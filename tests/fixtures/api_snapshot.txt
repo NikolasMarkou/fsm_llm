@@ -27,6 +27,7 @@ fsm_llm.API class
   def register_handler(self, handler: FSMHandler) -> None
   def register_handlers(self, handlers: list[FSMHandler]) -> None
   def restore_session(self, session_id: str) -> tuple[str, SessionState] | None
+  def resume(self, conversation_id: str) -> tuple[str, SessionState]
   def run_until_terminal(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], None] | None = None, seconds_exempt_states: Collection[str] = ()) -> tuple[AdvanceResult, ...]
   def run_until_terminal_stream(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], None] | None = None, seconds_exempt_states: Collection[str] = ()) -> Iterator[str]
   def save_session(self, conversation_id: str) -> None

@@ -559,6 +559,11 @@
       "delta": 1,
       "reason": "step 4 of plan 5a6a1f80: new anchor at the frame trust rule of fork (engine/api/forks.py, _frame_internal): a frame above the root is rebuilt from a log-sourced definition that is not trusted, only the default transcript name is restored, never declared_internal_keys(definition); no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "step 5 of plan 5a6a1f80: new anchor at record_resumed (engine/api/events.py): the resume record and the unknown tool results go to the top frame of the resumed stack (a lower frame reads as a lost pop to the stack fold), no closing turn/end, results after the record; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-007"
     }
   ]
 }

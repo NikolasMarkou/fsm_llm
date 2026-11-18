@@ -231,14 +231,19 @@ class JsonlWriter:
           every event is encoded first, so a refused payload writes nothing. Not crash
           atomic: a kill inside the write leaves a whole-line prefix of the batch (never a
           half line once the next writer cut the tail). An empty list writes nothing.
+        - ``JsonlWriter(path, create=False)`` (``EventLog.open_existing``, plan 5a6a1f80): the log must
+          already exist. A missing log raises ``FileNotFoundError`` BEFORE anything is created (no
+          directory, no ``.lock``, no log); the lock is taken before the log is scanned, and the
+          torn-tail repair and the ``seq`` continuation are the same code as for a new writer.
         - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays. A
           writer that is dropped without ``close`` is closed by its finalizer, so a forgotten
           one frees its two descriptors and the lock when the object is collected (do not rely
           on it: a long-running host closes, see ``EventLog``).
     """
 
-    def __init__(self, path: str | os.PathLike[str]) -> None:
+    def __init__(self, path: str | os.PathLike[str], *, create: bool = True) -> None:
         self.path = Path(path)
+        self._create = create
         name = self.path.name
         if not name.endswith(LOG_SUFFIX):
             raise EventPayloadError(
@@ -255,6 +260,8 @@ class JsonlWriter:
             self._open()
             opened = True
         except OSError as exc:
+            if not create and isinstance(exc, FileNotFoundError):
+                raise  # an unknown id: the caller says so, nothing was created
             raise LogWriteError(
                 f"cannot open log {self.path.name}: {type(exc).__name__} "
                 f"{exc.strerror or exc.errno}"
@@ -269,7 +276,11 @@ class JsonlWriter:
         return self._seq
 
     def _open(self) -> None:
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self._create:
+            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        else:
+            # an unknown id raises FileNotFoundError here, before any file is made
+            os.stat(self.path)
         lock_path = self.path.with_name(self.conversation_id + LOCK_SUFFIX)
         self._lock_fd = os.open(
             lock_path, os.O_RDWR | os.O_CREAT | _binary_flag(), 0o600
@@ -282,7 +293,10 @@ class JsonlWriter:
         existed = self.path.exists()
         self._fd = os.open(
             self.path,
-            os.O_WRONLY | os.O_APPEND | os.O_CREAT | _binary_flag(),
+            os.O_WRONLY
+            | os.O_APPEND
+            | (os.O_CREAT if self._create else 0)
+            | _binary_flag(),
             0o600,
         )
         if not existed:

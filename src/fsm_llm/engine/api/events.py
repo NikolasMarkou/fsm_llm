@@ -61,6 +61,14 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       the frame's current state, so the fork's own log folds to its stack with no help from the
       source (a fork of a fork). Unlike ``record_push`` it is strict: any field that cannot be
       written RAISES, because a fork log that lost a frame would restore a shorter stack.
+    - ``record_resumed(api, conversation_id, top_id, top_frame, resumed_from, unknown_calls)``:
+      appends the ``context/record`` (``source: "resume"``, ``resumed_from: {seq}``) with the state of
+      the TOP frame (manager id *top_id*, frame *top_frame*, always the top: an event at a lower
+      frame would read as a lost pop to the stack fold), then ONE batch of ``tool/result`` events
+      (``status: "unknown"``, ``call_frame`` the frame of the call) for each tool call the log
+      could not resolve, also at the top frame, so the next fold reports none. Results come after
+      the record, so a resume that fails leaves the calls unresolved to be reported again. A failed
+      write RAISES and the restore's own teardown ends the half-resumed conversation.
     - ``release_event_writer(api, conversation_id)``: closes the writer of a finished root
       conversation (no file descriptor or lock stays with it). ``close_event_log(api)``: closes an
       owned log only.
@@ -321,6 +329,54 @@ def record_restored_frame(
         return_context_ref=log.put_json(filter_context(return_context)),
         state_ref=state_ref_of(api.fsm_manager, log, child_id),
     )
+
+
+def record_resumed(
+    api: _ApiSurface,
+    conversation_id: str,
+    top_id: str,
+    top_frame: int,
+    resumed_from: Mapping[str, Any],
+    unknown_calls: Sequence[Mapping[str, Any]],
+) -> None:
+    """Append the ``resume`` record and the ``unknown`` results of a resumed tree (strict)."""
+    log = getattr(api, "_event_log", None)
+    if log is None:
+        return
+    # DECISION plan-2026-11-18T071726-5a6a1f80/D-007
+    # Both writes go to the TOP frame of the resumed stack (`top_frame`), never to frame 0 and
+    # never to the frame a tool call was made at. The stack fold infers a lost `stack/pop` from
+    # any event at a frame below the top (D-004 clause c), so a record at a lower frame would
+    # make the next fold drop every frame above it: a runner's tool call at frame 0 stays
+    # unresolved while its child frames are open. Do NOT call `record_state(frame=0)` here, do NOT
+    # write a closing `turn/end` for a killed turn (it fakes an outcome the engine never decided;
+    # the next `turn/start` supersedes the open one), and do NOT write the `unknown` results
+    # before the resume record: a resume that fails must leave the calls unresolved so the next
+    # resume reports them again. See decisions.md D-007.
+    record_state(
+        api.fsm_manager,
+        log,
+        top_id,
+        source="resume",
+        frame=top_frame,
+        root_id=conversation_id,
+        resumed_from=dict(resumed_from),
+    )
+    if unknown_calls:
+        log.append_batch(
+            conversation_id,
+            [
+                {
+                    "type": EventType.TOOL_RESULT,
+                    "name": call.get("name"),
+                    "call_id": call.get("call_id"),
+                    "status": "unknown",
+                    "call_frame": call.get("frame"),
+                }
+                for call in unknown_calls
+            ],
+            frame=top_frame,
+        )
 
 
 def release_event_writer(api: _ApiSurface, conversation_id: str) -> None:
