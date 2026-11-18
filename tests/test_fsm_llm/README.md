@@ -1,6 +1,6 @@
 # test_fsm_llm
 
-The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 94 test files (7,751 collected tests) plus a `fixtures/` package of labelled secret-filter data.
+The pytest suite for the core `fsm_llm` framework, at `tests/test_fsm_llm/`. It holds 102 test files (8,230 collected tests) plus a `fixtures/` package of labelled secret-filter data.
 
 ## What it is for
 
@@ -30,7 +30,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 ## Files
 
 - `conftest.py` - the `minimal_fsm_dict` fixture (a one-state FSM with only required fields) and the `log` fixture (an `EventLog` in a temporary directory, closed at teardown, shared by the event log tests).
-- `event_log_support.py` - helpers the event log test files share (scripted provider replies and chunks, a wrapper interface, the child process environment, the reopen after a kill, `tree_files` and `tree_bytes` that skip byte-range-locked `.lock` files). Not collected: the name has no `test_` prefix.
+- `event_log_support.py` - helpers the event log test files share (scripted provider replies and chunks, a wrapper interface, the child process environment, the reopen after a kill, `tree_files` and `tree_bytes` that skip byte-range-locked `.lock` files, and `child_process` and `wait_ready` that start a child Python process and wait for its announced point). Not collected: the name has no `test_` prefix.
 - `support.py` - helpers that more than one test file uses (FSM builders, fake provider responses, scripted providers). Not collected: the name has no `test_` prefix.
 - `kind_corpus.py` - the corpus and recording code behind `test_kind_equality.py` (the 14 example FSMs, the agent, `native_fc`, meta and reasoning builders, the 32 synthesis-bench FSMs and hand-written completion and synthesize fixtures, plus three scripted turns). Not collected; `python -m tests.test_fsm_llm.kind_corpus --write` regenerates the baseline, `--show CASE` prints one record.
 - `fixtures/` - labelled corpora for the secret filter (`context_key_corpus.py`, `holdout_key_corpus.py`, `census_key_corpus.py`).
@@ -65,7 +65,7 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_memory.py` - `WorkingMemory` buffers, serialization, copies and concurrency.
 - `test_session.py` - `FileSessionStore` id validation, soft failures, fsync-before-replace, file logging after a failed sink add, and the default save hook.
 - `test_llm_observer.py` - the request observer of `LiteLLMInterface._send` (D-002): the allow-list of what an observer sees, fail-closed `begin_send` and a `end_send` that never breaks a reply, stream and retry paths, no observer and no scope, and the shared send path and its usage meter unchanged with an observer installed.
-- `test_event_log_format.py` - the event log format of `fsm_llm.runtime`: the closed vocabulary (21 declared types, 13 produced), the safe encoder and decoder (one ASCII line per event, hostile and deep values cannot recurse), depth check, `to_jsonable`, the errors and constants, and a source scan that bans the forbidden file and JSON idioms in `src/fsm_llm/runtime`.
+- `test_event_log_format.py` - the event log format of `fsm_llm.runtime`: the closed vocabulary (21 declared types, 14 produced), the safe encoder and decoder (one ASCII line per event, hostile and deep values cannot recurse), depth check, `to_jsonable`, the errors and constants, and a source scan that bans the forbidden file and JSON idioms in `src/fsm_llm/runtime`.
 - `test_event_log_jsonl.py` - the JSONL store: unbuffered append, the newline as the only commit marker, a torn tail cut by the next lock holder and ignored by readers, a bad middle line raises, the fsync policy, open flags, id rules, the advisory lock and the acknowledged-event proof across processes.
 - `test_event_log_blobs.py` - the content-addressed blob store: hash and ref rules, a tampered or wrong-hash blob refused, write-if-absent, a stray `.tmp` ignored, races between threads and a child process.
 - `test_event_log_api.py` - `EventLog`: append, read and query, the clock injected and `seq` as the order, checkpoint fsyncs counted, fail-closed writes, the `tool/call` side-effect rule, the secret filter and the blob rules.
@@ -75,6 +75,14 @@ The `fixtures/` package holds three hand-written lists of context key names and 
 - `test_event_log_sessions.py` - session projections: `SessionProjection` v2 and its one v1 migration, the reader of old `FileSessionStore` files, the fold of a log (rolled-back turns, a pushed child, a future event type, a `None` delta value kept as the write keeps it), `EventLogSessionStore`, restore seeding with the declared-key allow-list and the lineage record, and a completion state.
 - `test_event_log_acceptance.py` - in-process acceptance proofs: the roadmap Log test (every `llm/request` rebuilt byte for byte from the log, on the provider path and per call kind on the engine path), strangler parity of a real interface (replies, data, history, snapshot, `usage()` and the exact provider requests, with a failed Pass 2 and its retry), and the privacy corpus end to end.
 - `test_event_log_crash.py` - crash proofs: a child killed with `Popen.kill()` mid turn restores to the last committed turn with the in-flight tool as unknown, a death at every event offset (clean and torn) of a tool exchange and a rolled-back turn, the torn tail repaired by the next writer, and the exact fsync count of a scripted run.
+- `test_event_log_stack.py` - the stack in the event log: the push and pop records, `fold_stack` on hand-built tapes under the recovery rule (one test per clause: a gap, a duplicate, a forged record), `turn_cut`, and a real stacked conversation folded after every state-carrying append and compared with what the live `API` showed.
+- `test_event_log_stack_crash.py` - crash proofs of the stack: a death at every write offset, a torn tail of every length of a push and pop line, a lost or replayed push or pop, and a real `Popen.kill()` at frame 1 followed by resume, plus a second process holding the writer lock.
+- `test_event_log_resume.py` - the seams of fork and resume: the id-preserving `FSMManager.start_conversation(conversation_id=)`, the one restore body shared with `restore_session`, and `API.resume` (the writer lock before any read, the stack with its own ids, an in-flight tool reported once and never run, a freed lock after every failure).
+- `test_event_log_forks.py` - `API.fork`: a new conversation tree from the state of an old one at the end of its Nth turn with the whole stack rebuilt from the log, the forged routes (hand-written trees whose blobs lie), the refusals and the teardown at every stage of the rebuild.
+- `test_event_log_privacy.py` - privacy of the event log: the `shape` level read as bytes (no user text, no model text, no ref, no `blobs/`), `LogPrivacyError` on every fold, fork, resume and restore, and the redaction hook (fail closed, after the built-in filters).
+- `test_event_log_retention.py` - `EventLog.prune`: logs by file mtime or count, blobs by mark and sweep with a grace, held writers and `.lock` files left alone, and a model differential over random trees of logs, forks and blobs.
+- `test_turn_budgets.py` - core turn budgets: lifetime `max_steps` and `max_seconds` per conversation and per pushed frame on `API`, `start_conversation`, `push_fsm` and `FSMManager`, charged after the claim and before any model call, a spent budget raising `RunBudgetExceededError` on the next turn, and `None` changing nothing.
+- `test_usage_projection.py` - usage as a projection: the ledger with a marker that `reset_usage()` moves without losing history, and the one record shape and one fold shared by the ledger and the events of the log.
 - `test_strands_features.py` - schema-enforced output, invocation state, streaming, session save and restore.
 - `test_streaming_history_seam.py` - history stays consistent when a stream fails or is abandoned.
 - `test_stack_lifecycle_seam.py` - races in `push_fsm`/`pop_fsm` and stale-conversation cleanup.
