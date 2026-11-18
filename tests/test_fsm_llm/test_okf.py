@@ -3516,7 +3516,7 @@ class TestCreateOkfHandlerRefusals:
         with pytest.raises(OKFError):
             create_okf_handler(OKFBundle(), timing=timing)
 
-    @pytest.mark.parametrize("query_key", ["", 5, ["q"]])
+    @pytest.mark.parametrize("query_key", ["", "   ", "\t\n", 5, ["q"]])
     def test_query_key_must_be_none_or_a_name(self, query_key: Any) -> None:
         with pytest.raises(OKFError):
             create_okf_handler(OKFBundle(), query_key=query_key)

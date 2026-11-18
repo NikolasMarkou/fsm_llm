@@ -84,7 +84,9 @@ def create_okf_handler(
     state_names = tuple(states)
     if not all(isinstance(s, str) for s in state_names):
         raise OKFError(f"states must hold str names, got {state_names!r}")
-    if query_key is not None and (not isinstance(query_key, str) or not query_key):
+    if query_key is not None and (
+        not isinstance(query_key, str) or not query_key.strip()
+    ):
         raise OKFError(f"query_key must be None or a non-blank str, got {query_key!r}")
 
     def summarize(ctx: dict[str, Any]) -> dict[str, Any]:
