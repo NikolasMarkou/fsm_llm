@@ -185,7 +185,7 @@ A compiled procedure is stored as `verified`. That means the gates above passed:
 
 `FSMLibrary(path)` is a directory. Each procedure is stored under the sha256 of its canonical definition: `definitions/<sha256>.json` and `records/<sha256>.json`, with `traces/`, `scenarios/` and `patches/` beside them. Every write goes to a temp file, is synced, then replaced into place; a corrupt file raises `LibraryError` and is never overwritten, and a symlink is refused. Two processes on one directory are last writer wins on the run counters.
 
-A record has a lifecycle: `draft`, `verified`, `trusted`, `deprecated`. A compile is stored `verified`. A human moves it to `trusted` with `library.approve(digest, by)`, or run counts do when `policy.trust_after_successes` is set (never for a repaired child). Nothing leaves `deprecated`. A synthesize state's `min_lifecycle` (`verified` or `trusted`) says which stored procedures it will run.
+A record has a lifecycle: `draft`, `verified`, `trusted`, `deprecated`. A compile is stored `verified`. A human moves it to `trusted` with `library.approve(digest, by)`, or run counts do when `policy.trust_after_successes` is set (never for a repaired child). Nothing leaves `deprecated`: a compile that reproduces a deprecated digest raises `SynthesisRefusedError` with `lifecycle_too_low` (the compile is spent), and one that reproduces a `draft` digest returns it `verified`. A synthesize state's `min_lifecycle` (`verified` or `trusted`) says which stored procedures it will run.
 
 ### Reuse
 

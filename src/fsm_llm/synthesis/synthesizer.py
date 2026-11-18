@@ -61,9 +61,12 @@ from .constants import (
     APPROVAL_UNTRUSTED_LABEL,
     CODE_SIMULATION_INCOMPLETE,
     GATE_SIMULATION,
+    LIFECYCLE_DEPRECATED,
+    LIFECYCLE_DRAFT,
     LIFECYCLE_VERIFIED,
     REASON_APPROVAL_DENIED,
     REASON_APPROVAL_REQUIRED,
+    REASON_LIFECYCLE_TOO_LOW,
     REASON_REVIEWER_ERROR,
 )
 from .exceptions import SynthesisError, SynthesisRefusedError
@@ -414,6 +417,9 @@ class FSMSynthesizer:
         or set ``reuse_min_score=1.0``. A hit makes no strong call. A compile that needs approval
         (policy, or any ``completion`` tool) goes to ``reviewer`` and is
         stored ``verified`` only when approved.
+        A compile whose digest is already stored keeps the stored lifecycle: a
+        ``draft`` is verified, a ``deprecated`` one raises
+        ``SynthesisRefusedError`` (``lifecycle_too_low``).
         """
         ins, keys = _checked(goal, inputs, return_keys)
         policy, library = self.policy, self.library
@@ -478,6 +484,17 @@ class FSMSynthesizer:
                 approved_by=approver,
                 lifecycle=LIFECYCLE_VERIFIED,
             )
+            # `put` is idempotent: a digest stored earlier keeps its lifecycle,
+            # so the record may be older than this compile. A draft is verified
+            # (the compile just passed every gate), a deprecated one stays
+            # deprecated and is refused, never returned as a ready procedure.
+            if saved.lifecycle == LIFECYCLE_DEPRECATED:
+                raise SynthesisRefusedError(
+                    "the compile reproduced a deprecated procedure",
+                    REASON_LIFECYCLE_TOO_LOW,
+                )
+            if saved.lifecycle == LIFECYCLE_DRAFT:
+                saved = library.verify(digest)
             if result.simulation is not None and result.simulation.scenarios:
                 library.add_scenarios(digest, result.simulation.scenarios)
         return Procedure(

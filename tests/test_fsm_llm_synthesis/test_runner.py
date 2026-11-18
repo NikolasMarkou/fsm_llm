@@ -969,6 +969,26 @@ class TestFailuresAreFixedReasons:
         assert rig.library is not None
         assert rig.library.get_record(rig.digest).stats["runs"] == 0
 
+    def test_a_compile_that_reproduces_a_deprecated_digest_is_no_procedure(
+        self, valid_fsm, tmp_path
+    ):
+        first = _rig(valid_fsm, tmp_path)
+        first.runner.run(first.conv, max_steps=20)
+        assert first.library is not None
+        first.library.deprecate(first.digest)
+
+        rig = _rig(valid_fsm, tmp_path)
+        rig.runner.run(rig.conv, max_steps=10)
+
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.result == {
+            "status": "failed",
+            "procedure_id": None,
+            "version": None,
+            "reason": "lifecycle_too_low",
+        }
+        assert rig.names == ["failed"]
+
     @pytest.mark.parametrize(
         ("gates", "require", "reason"),
         [

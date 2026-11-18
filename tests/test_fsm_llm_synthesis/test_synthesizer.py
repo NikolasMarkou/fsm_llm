@@ -715,6 +715,32 @@ class TestObtainLibrary:
         assert again.source == "library" and again.digest == first.digest
         assert again.data == first.data and len(llm.requests) == 1
 
+    def test_a_compile_that_reproduces_a_draft_returns_it_verified(
+        self, tmp_path, valid_fsm
+    ):
+        first, _ = _obtainer(tmp_path / "a", [_text(valid_fsm)])
+        definition = first.obtain(GOAL, return_keys=RET).definition
+        synth, llm = _obtainer(tmp_path / "b", [_text(valid_fsm)])
+        stored = synth.library.put(
+            definition, goal=GOAL, inputs_required=[], return_keys=RET
+        )
+        assert stored.lifecycle == "draft"  # a draft is never a search hit
+        proc = synth.obtain(GOAL, return_keys=RET)
+        assert proc.source == "compiled" and len(llm.requests) == 1
+        assert proc.record is not None and proc.record.lifecycle == "verified"
+        assert synth.library.get_record(proc.digest).lifecycle == "verified"
+
+    def test_a_compile_that_reproduces_a_deprecated_digest_is_refused(
+        self, tmp_path, valid_fsm
+    ):
+        synth, llm = _obtainer(tmp_path, [_text(valid_fsm), _text(valid_fsm)])
+        digest = synth.obtain(GOAL, return_keys=RET).digest
+        synth.library.deprecate(digest)
+        with pytest.raises(SynthesisRefusedError) as err:
+            synth.obtain(GOAL, return_keys=RET)
+        assert err.value.code == "lifecycle_too_low" and len(llm.requests) == 2
+        assert synth.library.get_record(digest).lifecycle == "deprecated"
+
     @pytest.mark.parametrize(
         "kw",
         [
