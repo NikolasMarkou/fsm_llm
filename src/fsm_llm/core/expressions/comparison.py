@@ -230,7 +230,7 @@ def _numeric_equal(a: Any, b: Any) -> bool:
         if isinstance(side, str) and not _PLAIN_NUMBER_RE.fullmatch(side):
             return False
     try:
-        return _as_float(a) == _as_float(b)
+        return bool(_as_float(a) == _as_float(b))
     except (TypeError, ValueError):
         return False
 

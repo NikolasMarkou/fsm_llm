@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fsm_llm.core.definitions import TransitionEvaluationError
 from fsm_llm.logging import logger
@@ -210,4 +210,4 @@ def _op_missing_some(values: list, data: dict[str, Any], _depth: int) -> list[st
         raise TransitionEvaluationError(
             f"missing_some names must be a list of keys, got {type(values[1]).__name__}"
         )
-    return missing_some(data, minimum, values[1])
+    return missing_some(data, minimum, cast("list[str]", values[1]))
