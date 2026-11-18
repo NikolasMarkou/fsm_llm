@@ -160,14 +160,16 @@ class StackMixin(_ApiSurface):
                     preserve_history=preserve_history,
                     fsm_id=processed_fsm_id,
                 )
-                self.conversation_stacks[conversation_id].append(new_frame)
+                stack = self.conversation_stacks[conversation_id]
+                stack.append(new_frame)
+                # The depth this push logs is the stack length at ITS append, read in the same
+                # hold: a second push between two holds made the first one log the other's.
+                stack_depth = len(stack)
                 # Frame now references the def; clear the in-flight guard
                 # atomically with the append (same _stack_lock hold). See D-011.
                 self._pending_push_ids.discard(processed_fsm_id)
                 push_succeeded = True
 
-            with self._stack_lock:
-                stack_depth = len(self.conversation_stacks.get(conversation_id, []))
             record_push(
                 self,
                 conversation_id,
@@ -373,21 +375,36 @@ class StackMixin(_ApiSurface):
                     current_frame, previous_frame, current_fsm_context
                 )
 
+            refused = False
             try:
                 self.fsm_manager.end_conversation(current_frame.conversation_id)
+            except Exception:
+                # A REFUSED end (`ConversationBusyError`: a turn holds the child's lock past the
+                # timeout) tears nothing down, so the child instance is still registered: keep
+                # its frame, as `API.end_conversation` does (D-050 and D-053 of plan 8a03483a,
+                # anchored in lifecycle.py). Dropping it orphans a live child that no stack
+                # entry reaches and that ending the root never ends. `has_instance` is read
+                # HERE, outside `_stack_lock` (never held across a manager call).
+                refused = self.fsm_manager.has_instance(current_frame.conversation_id)
+                raise
             finally:
-                # Re-acquire lock only to mutate the stack
-                with self._stack_lock:
-                    inner_stack = self.conversation_stacks.get(conversation_id) or []
-                    for idx in range(len(inner_stack) - 1, -1, -1):
-                        if inner_stack[idx] is current_frame:
-                            del inner_stack[idx]
-                            break
-                    else:
-                        logger.debug(
-                            f"pop_fsm: frame {current_frame.conversation_id} already "
-                            f"absent from stack {conversation_id}; nothing to remove"
+                if not refused:
+                    # Re-acquire lock only to mutate the stack
+                    with self._stack_lock:
+                        inner_stack = (
+                            self.conversation_stacks.get(conversation_id) or []
                         )
+                        for idx in range(len(inner_stack) - 1, -1, -1):
+                            if inner_stack[idx] is current_frame:
+                                del inner_stack[idx]
+                                break
+                        else:
+                            logger.debug(
+                                f"pop_fsm: frame {current_frame.conversation_id} already "
+                                f"absent from stack {conversation_id}; nothing to remove"
+                            )
+                        # the depth this pop logs: the stack right after ITS removal
+                        stack_depth = len(inner_stack)
 
             # The popped frame is gone; release any temp def it was the last
             # frame to reference (D-011). Reference-aware, so a sub-FSM shared
@@ -395,8 +412,6 @@ class StackMixin(_ApiSurface):
             self._release_unreferenced_temp_definitions()
 
             response = self._generate_resume_message(context_to_merge)
-            with self._stack_lock:
-                stack_depth = len(self.conversation_stacks.get(conversation_id, []))
             record_pop(
                 self,
                 conversation_id,

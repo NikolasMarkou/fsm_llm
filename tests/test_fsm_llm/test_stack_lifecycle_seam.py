@@ -24,7 +24,7 @@ import time as _real_time
 import pytest
 
 from fsm_llm import FileSessionStore
-from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, FSMError
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.testing import MockLLM2Interface
 from tests.conftest import bind_api_clock
@@ -175,6 +175,156 @@ class TestPopPushRace:
         api.pop_fsm(conv_id)
         assert _frame_ids(api, conv_id) == [conv_id]
         assert doomed_id not in _frame_ids(api, conv_id)
+
+
+class TestPopKeepsTheFrameWhenTheEndIsRefused:
+    """A3 (engine audit 2.1, D-050 and D-053 of plan 8a03483a): ``FSMManager.end_conversation``
+    refuses with ``ConversationBusyError`` while a turn holds the child's lock, and tears nothing
+    down. ``pop_fsm`` used to drop the frame anyway, so the child was orphaned: no stack entry
+    reached it, and ending the root left it alive for good."""
+
+    def test_a_refused_child_end_keeps_the_frame_and_the_root_can_still_end_it(
+        self, api, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "fsm_llm.engine.fsm.snapshots.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2
+        )
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        child_id = api.get_sub_conversation_id(conv_id)
+        child_lock = api.fsm_manager._conversation_locks[child_id]
+        turn_started, turn_may_end = threading.Event(), threading.Event()
+
+        def a_turn_on_the_child():
+            with child_lock:
+                turn_started.set()
+                turn_may_end.wait(WAIT_TIMEOUT)
+
+        turn = threading.Thread(target=a_turn_on_the_child, name="child-turn")
+        real_read = api._get_frame_context
+
+        def read_then_start_the_turn(frame):
+            context = real_read(
+                frame
+            )  # the pop's context read is done: the turn starts now
+            turn.start()
+            assert turn_started.wait(WAIT_TIMEOUT)
+            return context
+
+        monkeypatch.setattr(api, "_get_frame_context", read_then_start_the_turn)
+        try:
+            with pytest.raises(ConversationBusyError):
+                api.pop_fsm(conv_id)
+        finally:
+            turn_may_end.set()
+            turn.join(WAIT_TIMEOUT)
+        assert not turn.is_alive()
+
+        assert (
+            api.get_stack_depth(conv_id) == 2
+        )  # nothing was torn down: the frame stays
+        assert _frame_ids(api, conv_id)[-1] == child_id
+        with api._stack_lock:
+            assert api._temp_fsm_definitions  # still referenced by that frame
+        api.end_conversation(conv_id)  # and the root still reaches and ends the child
+        assert api.fsm_manager.instances == {}
+        assert api.fsm_manager._conversation_locks == {}
+
+    def test_an_end_that_fails_after_tearing_the_child_down_still_drops_the_frame(
+        self, api
+    ):
+        """The negative control: only a REFUSED end (the instance still registered) keeps the
+        frame. An end that tore the child down and then failed drops it, as before, so the stack
+        cannot keep a ghost frame."""
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        real_end = api.fsm_manager.end_conversation
+
+        def end_then_fail(child_id, *args, **kwargs):
+            real_end(child_id, *args, **kwargs)
+            raise FSMError("failed after the teardown")
+
+        api.fsm_manager.end_conversation = end_then_fail
+        with pytest.raises(FSMError, match="after the teardown"):
+            api.pop_fsm(conv_id)
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.fsm_manager.instances.keys() == {conv_id}
+
+
+class _AfterReleaseLock:
+    """The ``_stack_lock`` of an ``API``, calling *hook* right after every release: a test forces
+    another push or pop into the exact gap between two holds of one operation."""
+
+    def __init__(self, inner, hook):
+        self._inner, self._hook = inner, hook
+
+    def __enter__(self):
+        self._inner.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self._inner.release()
+        self._hook()
+
+    def acquire(self, *args, **kwargs):
+        return self._inner.acquire(*args, **kwargs)
+
+    def release(self):
+        self._inner.release()
+
+
+class TestPushAndPopRecordTheDepthOfTheirOwnHold:
+    """A3 (engine audit 2.6): the depth an event carries is read in the SAME hold that changes the
+    stack. A second push or pop landing between two holds made the first one log the other's."""
+
+    @staticmethod
+    def _depths(api, monkeypatch, name, at):
+        """Record ``(child id, depth)`` of every ``name`` event."""
+        events = []
+        monkeypatch.setattr(
+            f"fsm_llm.engine.api.stack.{name}",
+            lambda *args, **kwargs: events.append((args[2], args[at])),
+        )
+        return events
+
+    def test_a_push_logs_the_depth_of_its_own_append(self, api, monkeypatch):
+        conv_id, _ = api.start_conversation()
+        events = self._depths(api, monkeypatch, "record_push", 5)
+        armed = [True]
+
+        def second_push_after_the_first_append():
+            if armed[0] and len(api.conversation_stacks[conv_id]) == 2:
+                armed[0] = False
+                api.push_fsm(conv_id, _make_fsm("sub2"))
+
+        api._stack_lock = _AfterReleaseLock(
+            api._stack_lock, second_push_after_the_first_append
+        )
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+
+        frames = _frame_ids(api, conv_id)
+        assert len(frames) == 3 and len(events) == 2
+        for child_id, depth in events:
+            assert depth == frames.index(child_id) + 1
+
+    def test_a_pop_logs_the_depth_of_its_own_removal(self, api, monkeypatch):
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        events = self._depths(api, monkeypatch, "record_pop", 6)
+        armed = [True]
+
+        def a_push_after_the_removal():
+            if armed[0] and len(api.conversation_stacks[conv_id]) == 1:
+                armed[0] = False
+                api.push_fsm(conv_id, _make_fsm("sub2"))
+
+        api._stack_lock = _AfterReleaseLock(api._stack_lock, a_push_after_the_removal)
+        api.pop_fsm(conv_id)
+
+        assert len(_frame_ids(api, conv_id)) == 2
+        assert [depth for _, depth in events] == [
+            1
+        ]  # the stack right after ITS removal
 
 
 class TestSingleThreadedStackNonRegression:
