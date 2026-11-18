@@ -1570,8 +1570,9 @@ class TestStep05A5:
     """A5: after a transition into a different state, each of that state's
     classification fields that is still unset (absent or None) is classified
     on the same message, one classifier call per field. Self-loops,
-    agent-managed FSMs, already-set fields and ``handler_only_keys`` cost no
-    call (plan-2026-09-21T203800-8a03483a/D-006)."""
+    agent-managed FSMs and already-set fields cost no call
+    (plan-2026-09-21T203800-8a03483a/D-006); a framework ``result_key`` is
+    never classified, a listed ``handler_only_keys`` entry is."""
 
     def test_a5_intent_for_next_state_is_classified_after_transition(self):
         api, conv_id, _ = _api(_a5_fsm())
@@ -1627,15 +1628,18 @@ class TestStep05A5:
         assert len(cap.calls) == 1
         assert "intent" not in api.get_data(conv_id)
 
-    def test_a5_handler_only_key_not_classified(self):
-        """Guard (passes on the pre-step source)."""
+    def test_a5_listed_handler_only_key_is_classified(self):
+        """Flipped on purpose (plan-2026-11-18T194536-52ce5464/D-002, the owner's
+        option A): an author-listed ``handler_only_keys`` entry stays classifiable,
+        after a transition as in Pass 1; only a framework ``result_key`` is closed
+        (``TestResultKeyClosedToClassification``)."""
         api, conv_id, _ = _api(_a5_fsm(handler_only_keys=["intent"]))
         with _ClassifierCapture("buy", 0.9) as cap:
             api.converse("hi, I want to buy", conv_id)
 
         assert api.get_current_state(conv_id) == "triage"
-        assert cap.calls == []
-        assert "intent" not in api.get_data(conv_id)
+        assert len(cap.calls) == 1
+        assert api.get_data(conv_id)["intent"] == "buy"
 
     def test_a5_agent_managed_fsm_costs_no_call(self):
         """Guard (passes on the pre-step source)."""
@@ -1646,3 +1650,88 @@ class TestStep05A5:
 
         assert api.get_current_state(conv_id) == "triage"
         assert cap.calls == []
+
+
+_TOOL = {"type": "function", "function": {"name": "f"}}
+_FAILED_EDGE = {
+    "target_state": "end",
+    "description": "failed",
+    "conditions": [
+        {
+            "description": "c",
+            "requires_context_keys": ["synthesis_result"],
+            "logic": {
+                "in": [{"var": "synthesis_result.status"}, ["failed", "aborted"]]
+            },
+        },
+    ],
+}
+_NEVER = {
+    "description": "never",
+    "logic": {"==": [{"var": "never_set_flag"}, True]},
+}
+_KIND_STATES = {
+    "completion_result": {
+        "completion": {"tools": [_TOOL]},
+        "transitions": [{"target_state": "end", "description": "go"}],
+    },
+    "synthesis_result": {
+        "synthesize": {"goal": "g", "return_keys": ["k"], "on_failure": "end"},
+        "transitions": [_FAILED_EDGE],
+    },
+}
+
+
+def _closed_fsm(result_key: str, *, after_transition: bool) -> dict[str, Any]:
+    """State ``a`` classifies two fields: ``intent`` (listed in
+    ``handler_only_keys``) and one named like the ``result_key`` of the completion
+    or synthesize state ``c``. ``a`` is the initial state, or is entered from
+    ``start`` on the first message."""
+
+    def state(sid: str, **spec: Any) -> dict[str, Any]:
+        return {"id": sid, "description": "d", "purpose": "p", **spec}
+
+    fields = [
+        {**_a5_config(name).model_dump(), "required": False}
+        for name in ("intent", result_key)
+    ]
+    to_c = {"target_state": "c", "description": "never", "conditions": [_NEVER]}
+    states = {
+        "a": state("a", classification_extractions=fields, transitions=[to_c]),
+        "c": state("c", **_KIND_STATES[result_key]),
+        "end": state("end"),
+    }
+    if after_transition:
+        states["start"] = state(
+            "start", transitions=[{"target_state": "a", "description": "always"}]
+        )
+    return {
+        "name": "closed",
+        "description": "d",
+        "initial_state": "start" if after_transition else "a",
+        "handler_only_keys": ["intent"],
+        "states": states,
+    }
+
+
+class TestResultKeyClosedToClassification:
+    """D-002 of plan 52ce5464 (option A, approved by the owner): the ``result_key``
+    of a completion or synthesize state is written by that kind alone, so no
+    classification channel (Pass 1, its retry, after a transition) may write it; a
+    listed ``handler_only_keys`` entry stays classifiable on all of them."""
+
+    @pytest.mark.parametrize("after_transition", [False, True])
+    @pytest.mark.parametrize("result_key", sorted(_KIND_STATES))
+    def test_only_the_listed_key_is_classified(self, result_key, after_transition):
+        fsm = FSMDefinition(
+            **_closed_fsm(result_key, after_transition=after_transition)
+        )
+        api, conv_id, _ = _api(fsm)
+        with _ClassifierCapture("buy", 0.9) as cap:
+            api.converse("I want to buy", conv_id)
+
+        assert api.get_current_state(conv_id) == "a"
+        assert len(cap.calls) == 1
+        data = _raw_data(api, conv_id)
+        assert data["intent"] == "buy"
+        assert result_key not in data

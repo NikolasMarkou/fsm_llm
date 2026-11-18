@@ -1654,7 +1654,8 @@ class TestVerifierHooks:
         )
         assert [f.code for f in analyze_liveness(definition)] == []
         self._swap_conversation(
-            monkeypatch, produced_keys=lambda state, handler_only: frozenset()
+            monkeypatch,
+            produced_keys=lambda state, handler_only, result_names=None: frozenset(),
         )
         assert [f.code for f in analyze_liveness(definition)] == ["cycle-no-exit"]
 
@@ -1705,7 +1706,19 @@ class TestVerifierHooks:
         assert sk.CONVERSATION.lint_raw("s", {}, {}, services) == []
         assert sk.SYNTHESIZE.lint_raw("s", {"synthesize": {}}, {}, services) == []
         assert sk.CONVERSATION.raw_result_key({}, services) is None
-        assert sk.SYNTHESIZE.raw_result_key({"synthesize": {}}, services) is None
+        # D-002 of plan 52ce5464: the synthesize kind names its result key too, and
+        # a three-argument services object (no default of its own) stays valid. The
+        # leaf cannot import the constant, so the default is pinned equal to it.
+        from fsm_llm.core.definitions import DEFAULT_SYNTHESIS_RESULT_KEY
+
+        assert services.default_synthesis_result_key == DEFAULT_SYNTHESIS_RESULT_KEY
+        assert sk.SYNTHESIZE.raw_result_key({"synthesize": {}}, services) == (
+            "synthesis_result"
+        )
+        assert (
+            sk.SYNTHESIZE.raw_result_key({"synthesize": {"result_key": "r"}}, services)
+            == "r"
+        )
         assert sk.COMPLETION.raw_result_key({"completion": {}}, services) == "k"
         assert (
             sk.COMPLETION.raw_result_key({"completion": {"result_key": "r"}}, services)

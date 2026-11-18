@@ -3421,6 +3421,70 @@ class TestValidatorWarnsOnCompletionStates:
             f"'intake' {channel} names '{_RESULT}'" in w for w in result.warnings
         )
 
+    @pytest.mark.parametrize(
+        "channel",
+        ["field_extractions", "required_context_keys", "classification_extractions"],
+    )
+    def test_an_extraction_of_a_synthesize_result_key_is_a_warning(self, channel: str):
+        """D-002 of plan 52ce5464: the synthesize kind owns its result key as the
+        completion kind does, and the warning names the runner as its writer."""
+        key = "synthesis_result"
+        entries: dict[str, list[Any]] = {
+            "field_extractions": [
+                {"field_name": key, "field_type": "str", "extraction_instructions": "x"}
+            ],
+            "required_context_keys": [key],
+            "classification_extractions": [
+                {
+                    "field_name": key,
+                    "intents": [{"name": n, "description": n} for n in "ab"],
+                    "fallback_intent": "b",
+                }
+            ],
+        }
+        failed = {
+            "target_state": "end",
+            "description": "failed",
+            "conditions": [
+                {
+                    "description": "c",
+                    "requires_context_keys": [key],
+                    "logic": {"in": [{"var": f"{key}.status"}, ["failed", "aborted"]]},
+                }
+            ],
+        }
+        state = {"description": "d", "purpose": "p"}
+        fsm = {
+            "name": "n",
+            "description": "d",
+            "initial_state": "a",
+            "states": {
+                "a": {
+                    "id": "a",
+                    **state,
+                    channel: entries[channel],
+                    "transitions": [{"target_state": "s", "description": "go"}],
+                },
+                "s": {
+                    "id": "s",
+                    **state,
+                    "synthesize": {
+                        "goal": "g",
+                        "return_keys": ["k"],
+                        "on_failure": "end",
+                    },
+                    "transitions": [failed],
+                },
+                "end": {"id": "end", **state},
+            },
+        }
+        result = FSMValidator(fsm).validate()
+        assert any(
+            f"'a' {channel} names '{key}', a key only handlers or the synthesis "
+            "runner write" in w
+            for w in result.warnings
+        )
+
     def test_an_extraction_of_a_handler_only_key_is_a_warning(self):
         fsm = _tool_fsm()
         fsm["handler_only_keys"] = ["verdict"]

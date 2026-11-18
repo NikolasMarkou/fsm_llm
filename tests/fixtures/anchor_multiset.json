@@ -604,6 +604,11 @@
       "delta": 1,
       "reason": "step 15.1 of plan 5a6a1f80 (review fix C1): D-009 is now also anchored at the frame builder of fold_stack (runtime/stores/stack.py): the return context and the shared key names of a restored frame lose every internal-prefixed key at the one reader that fork and resume share, never at the callers; no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "step 3.1 of plan 52ce5464 (B1, the owner's option A): D-002 is anchored once at the post-transition classification filter (engine/kinds/conversation/post_transition.py): a framework result key is closed to every classification channel, an author-listed handler_only_keys entry stays classifiable and supersedes the clause \"or handler_only_keys\" of D-006 of plan 8a03483a in place; no other token was added or lost",
+      "token": "plan-2026-11-18T194536-52ce5464/D-002"
     }
   ]
 }

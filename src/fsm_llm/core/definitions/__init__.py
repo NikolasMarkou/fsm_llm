@@ -71,6 +71,7 @@ from .fsm import (
     handler_only_names,
     orphaned_states_message,
     reachable_from,
+    result_key_names,
     unknown_initial_state_message,
 )
 from .kinds import (
@@ -189,6 +190,7 @@ __all__ = [
     "logic_referenced_keys",
     "orphaned_states_message",
     "reachable_from",
+    "result_key_names",
     "typed_field_extraction",
     "unknown_initial_state_message",
 ]

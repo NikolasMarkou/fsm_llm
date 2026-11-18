@@ -57,11 +57,14 @@ Interface contract:
     mints nothing (completion, synthesize). The ONE minting rule: the pipeline
     builds its extraction configs from it and the data-flow and liveness
     analyses read the same tuple (never re-spell it elsewhere).
-  - ``produced_keys(state, handler_only)``: the keys the state can write on
-    arrival or while the conversation sits in it: ``minted_keys`` plus its
-    classification fields, minus ``handler_only``, plus its own ``result_key``
-    (only that state writes it). A ``frozenset``. The one arrival rule of G3
-    and G4 (``core.verify.flow.declared_available``).
+  - ``produced_keys(state, handler_only, result_names=None)``: the keys the
+    state can write on arrival or while the conversation sits in it:
+    ``minted_keys`` minus ``handler_only``, plus its classification fields minus
+    ``result_names`` (the result keys of the whole definition: classification may
+    write a listed ``handler_only`` key, never a result key; ``None`` closes
+    classification by ``handler_only`` too), plus its own ``result_key`` (only
+    that state writes it). A ``frozenset``. The one arrival rule of G3 and G4
+    (``core.verify.flow.declared_available``).
   - ``sample_results(state)``: the sample results the loader runs the state's
     edges on, a tuple of ``(label, result)`` (``None`` is "no result yet");
     empty for a kind that has none. Shaped as the kind's runner writes its
@@ -114,11 +117,13 @@ Interface contract:
     state of the kind (the runner refuses it with ``completion_unsupported``).
     Data, not a hook.
 
-- ``RawLintServices``: the three facts the raw lint needs and this leaf may not
+- ``RawLintServices``: the facts the raw lint needs and this leaf may not
   import (``result_kinds`` the reply kinds of a completion reply read off
   ``CompletionResponse``, ``default_result_key`` the completion result key a
   state without one gets, ``string_literals`` the string leaves of a JsonLogic
-  node); ``validator`` builds one from its own imports.
+  node, ``default_synthesis_result_key`` the synthesize result key a state
+  without one gets, defaulted because this leaf cannot import ``limits``);
+  ``validator`` builds one from its own imports.
 
 - ``raw_kinds(state_dict)``: the specs a raw state dict holds a config for, in
   registry order (the raw twin of ``kind_of``, used by the validator's lint).
@@ -234,13 +239,22 @@ def _no_minted_keys(state: Any) -> tuple[str, ...]:
     return ()
 
 
-def _produced_keys(state: Any, handler_only: frozenset[str]) -> frozenset[str]:
-    """The default ``produced_keys``: see the module contract."""
+def _produced_keys(
+    state: Any,
+    handler_only: frozenset[str],
+    result_names: frozenset[str] | None = None,
+) -> frozenset[str]:
+    """The default ``produced_keys``: see the module contract.
+
+    A classification field is closed only by a result key (``result_names``), as
+    at run time; ``None`` closes it by ``handler_only``, the pre-D-002 rule.
+    """
     spec = kind_of(state)
-    keys = set(spec.minted_keys(state)) | {
+    closed = handler_only if result_names is None else result_names
+    keys = set(spec.minted_keys(state)) - handler_only
+    keys |= {
         c.field_name for c in getattr(state, "classification_extractions", None) or []
-    }
-    keys -= handler_only
+    } - closed
     own = spec.result_key(state)
     return frozenset(keys | {own}) if own else frozenset(keys)
 
@@ -287,6 +301,7 @@ class RawLintServices:
     result_kinds: tuple[str, ...]
     default_result_key: str
     string_literals: Callable[[Any], set[str]]
+    default_synthesis_result_key: str = "synthesis_result"
 
 
 def _no_lint(
@@ -331,6 +346,13 @@ def _completion_lint_raw(
 
 def _completion_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
     key: str = state["completion"].get("result_key") or services.default_result_key
+    return key
+
+
+def _synthesize_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
+    key: str = (
+        state["synthesize"].get("result_key") or services.default_synthesis_result_key
+    )
     return key
 
 
@@ -554,7 +576,7 @@ class KindSpec:
     forbidden_declarations: tuple[str, ...] = ()
     dryrun_judged: bool = True
     minted_keys: Callable[[Any], tuple[str, ...]] = _no_minted_keys
-    produced_keys: Callable[[Any, frozenset[str]], frozenset[str]] = _produced_keys
+    produced_keys: Callable[..., frozenset[str]] = _produced_keys
     check_state: Callable[[Any], str | None] = _no_state_problem
     sample_results: Callable[[Any], tuple[tuple[str, dict[str, Any] | None], ...]] = (
         _no_samples
@@ -623,6 +645,7 @@ SYNTHESIZE = KindSpec(
     check_state=_synthesize_check_state,
     sample_results=_synthesize_samples,
     check_definition=_synthesize_check_definition,
+    raw_result_key=_synthesize_raw_result_key,
 )
 
 KINDS: tuple[KindSpec, ...] = (CONVERSATION, COMPLETION, SYNTHESIZE)

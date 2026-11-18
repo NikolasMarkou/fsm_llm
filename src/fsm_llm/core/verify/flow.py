@@ -23,6 +23,7 @@ from fsm_llm.core.definitions import (
     logic_has_unresolvable_reads,
     logic_referenced_keys,
     reachable_from,
+    result_key_names,
 )
 from fsm_llm.core.state_kinds import kind_of
 
@@ -114,10 +115,14 @@ def _result_key(state: State) -> str | None:
     return kind_of(state).result_key(state)
 
 
-def _produced(state: State, handler_only: frozenset[str]) -> frozenset[str]:
+def _produced(
+    state: State, handler_only: frozenset[str], results: frozenset[str]
+) -> frozenset[str]:
     """Keys `state` can write on arrival or while the conversation sits in it
-    (its kind's `produced_keys` hook, which also reads the one minting rule)."""
-    return kind_of(state).produced_keys(state, handler_only)
+    (its kind's `produced_keys` hook, which also reads the one minting rule).
+    `results` are the result keys of the definition: classification may write a
+    listed handler-only key, never one of them (D-002 of plan 52ce5464)."""
+    return kind_of(state).produced_keys(state, handler_only, results)
 
 
 def _proven(transition: Transition) -> set[str]:
@@ -213,13 +218,14 @@ def declared_available(
         unreachable from the initial state are absent. Never raises.
     """
     handler_only = handler_only_names(definition)
+    results = result_key_names(definition)
     arrival = _forward_meet(
         definition,
         frozenset(inputs),
-        lambda state, _t, here: here | _produced(state, handler_only),
+        lambda state, _t, here: here | _produced(state, handler_only, results),
     )
     return {
-        sid: keys | _produced(definition.states[sid], handler_only)
+        sid: keys | _produced(definition.states[sid], handler_only, results)
         for sid, keys in arrival.items()
     }
 
@@ -263,6 +269,7 @@ def analyze_data_flow(
     states = definition.states
     given = frozenset(inputs)
     handler_only = handler_only_names(definition)
+    results = result_key_names(definition)
     available = declared_available(definition, given)
     findings: list[FlowFinding] = []
 
@@ -307,7 +314,9 @@ def analyze_data_flow(
     wanted = tuple(dict.fromkeys(return_keys))
     terminals = [sid for sid in available if not states[sid].transitions]
     if wanted and terminals:
-        ever = given.union(*(_produced(states[sid], handler_only) for sid in available))
+        ever = given.union(
+            *(_produced(states[sid], handler_only, results) for sid in available)
+        )
         proven = _guaranteed(definition, given)
         for sid in terminals:
             for key in wanted:

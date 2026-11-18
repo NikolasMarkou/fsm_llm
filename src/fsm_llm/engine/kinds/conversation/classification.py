@@ -74,7 +74,9 @@ class ConversationClassificationMixin(_ConversationSurface):
             Dict of extracted key-value pairs to merge into context.
         """
         log = logger.bind(conversation_id=conversation_id)
-        configs = configs_override or current_state.classification_extractions or []
+        configs = configs_override or self._classification_configs(
+            current_state, instance
+        )
         if not configs:
             return {}
 

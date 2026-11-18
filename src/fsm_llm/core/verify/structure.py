@@ -15,6 +15,7 @@ from fsm_llm.constants import (
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
 )
 from fsm_llm.core.definitions import (
+    DEFAULT_SYNTHESIS_RESULT_KEY,
     CompletionResponse,
     FSMDefinition,
     State,
@@ -36,6 +37,15 @@ if TYPE_CHECKING:
 _RESULT_KINDS: tuple[str, ...] = get_args(
     CompletionResponse.model_fields["kind"].annotation
 )
+
+
+# Who writes the result key of a kind, for the warning of an extraction channel
+# that names it (D-002 of plan 52ce5464: every channel is closed to it).
+_COMPLETION_WRITER = "a completion call"
+_RESULT_WRITERS = {
+    "completion": _COMPLETION_WRITER,
+    "synthesize": "the synthesis runner",
+}
 
 
 def _string_literals(node: Any) -> set[str]:
@@ -303,22 +313,26 @@ class StructureMixin:
           not cover a result kind it can produce).
         - An extraction channel (``field_extractions``,
           ``classification_extractions``, ``required_context_keys``) naming a
-          handler-owned key: a kind's ``raw_result_key``, or a
-          ``handler_only_keys`` entry (classification on those is reported by
-          ``_validate_handler_only_keys``). The pipeline never extracts such a
-          key, so the declaration is dead.
+          handler-owned key: a kind's ``raw_result_key`` (closed to every
+          channel, classification included: D-002 of plan 52ce5464), or a
+          ``handler_only_keys`` entry (classification may write one, so that
+          channel is reported by ``_validate_handler_only_keys`` instead). The
+          pipeline never extracts such a key, so the declaration is dead.
         """
         services = RawLintServices(
             result_kinds=_RESULT_KINDS,
             default_result_key=DEFAULT_COMPLETION_RESULT_KEY,
             string_literals=_string_literals,
+            default_synthesis_result_key=DEFAULT_SYNTHESIS_RESULT_KEY,
         )
-        result_keys: set[str] = set()
+        result_keys: dict[str, str] = {}
         for state_id, state in self.states.items():
             for spec in raw_kinds(state):
                 key = spec.raw_result_key(state, services)
                 if key is not None:
-                    result_keys.add(key)
+                    result_keys[key] = _RESULT_WRITERS.get(
+                        spec.name, _COMPLETION_WRITER
+                    )
                 for message in spec.lint_raw(state_id, state, self.fsm_data, services):
                     self.result.add_warning(message)
         handler_only = set(self.fsm_data.get("handler_only_keys") or [])
@@ -340,10 +354,10 @@ class StructureMixin:
                     key in handler_only and channel != "classification_extractions"
                 )
                 if owned:
+                    writer = result_keys.get(key, _COMPLETION_WRITER)
                     self.result.add_warning(
                         f"State '{state_id}' {channel} names '{key}', a key only "
-                        "handlers or a completion call write: it is never "
-                        "extracted"
+                        f"handlers or {writer} write: it is never extracted"
                     )
 
     def _validate_unknown_keys(self):

@@ -43,6 +43,10 @@ class _ConversationSurface:
             conversation_id: str,
         ) -> dict[str, Any]: ...
 
+        def _classification_configs(
+            self, state: State, instance: FSMInstance
+        ) -> list[ClassificationExtractionConfig]: ...
+
         def _execute_classification_extractions(
             self,
             current_state: State,

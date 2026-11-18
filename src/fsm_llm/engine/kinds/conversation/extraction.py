@@ -14,11 +14,14 @@ from typing import Any
 
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.core.definitions import (
+    ClassificationExtractionConfig,
     DataExtractionResponse,
     FieldExtractionConfig,
     FieldExtractionResponse,
     FSMInstance,
+    State,
     handler_only_names,
+    result_key_names,
 )
 from fsm_llm.llm.ollama import is_ollama_model
 from fsm_llm.logging import logger
@@ -42,6 +45,22 @@ class ConversationExtractionMixin(_ConversationSurface):
         its own list, not the root's. Returns an empty set for the default.
         """
         return handler_only_names(self._services.fsm_resolver(instance.fsm_id))
+
+    def _classification_configs(
+        self, state: State, instance: FSMInstance
+    ) -> list[ClassificationExtractionConfig]:
+        """The classification entries of ``state`` that may run: those not named
+        like a framework ``result_key`` (completion or synthesize), which only its
+        own kind writes. The ONE filter of Pass 1, its retry loop and the
+        classification loop; the pass after a transition applies the same rule
+        (``post_transition.py``, where the decision is anchored). An author-listed
+        ``handler_only_keys`` entry stays classifiable. Returns a new list."""
+        closed = result_key_names(self._services.fsm_resolver(instance.fsm_id))
+        return [
+            c
+            for c in state.classification_extractions or []
+            if c.field_name not in closed
+        ]
 
     def _execute_data_extraction(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
@@ -72,7 +91,9 @@ class ConversationExtractionMixin(_ConversationSurface):
         ]
 
         has_field_configs = bool(all_configs)
-        has_classification_configs = bool(current_state.classification_extractions)
+        has_classification_configs = bool(
+            self._classification_configs(current_state, instance)
+        )
 
         has_extraction_instructions = bool(current_state.extraction_instructions)
 
@@ -191,7 +212,7 @@ class ConversationExtractionMixin(_ConversationSurface):
                 missing_class_configs = (
                     [
                         cfg
-                        for cfg in (current_state.classification_extractions or [])
+                        for cfg in self._classification_configs(current_state, instance)
                         if cfg.required
                         and cfg.field_name not in extracted_data
                         and cfg.field_name not in existing_context

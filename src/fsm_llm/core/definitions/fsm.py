@@ -27,24 +27,34 @@ from .state import State
 from .transition import logic_referenced_keys
 
 
-def handler_only_names(definition: FSMDefinition) -> frozenset[str]:
-    """Keys no extraction may write (D-033): the FSM author's
-    ``handler_only_keys`` plus the ``result_key`` of every completion state (only
-    its own completion call writes it, D-021) and of every synthesize state (only
-    the runner writes it, D-002 of plan 2cefeb61).
+def result_key_names(definition: FSMDefinition) -> frozenset[str]:
+    """The ``result_key`` of every completion and synthesize state: the keys no
+    extraction channel may write, classification included (only the state's own
+    completion call writes its key, D-021, and only the runner writes a
+    synthesize key, D-002 of plan 2cefeb61).
 
-    The one answer shared by ``MessagePipeline._handler_only_keys`` and
-    ``flow_analysis``. The result keys come from the kind registry
-    (``KindSpec.result_key``), never from a branch on the kind configs. Takes a
-    loaded definition, returns a new frozenset (empty for a definition with none
-    of the three), never raises.
+    Read from the kind registry (``KindSpec.result_key``), never from a branch on
+    the kind configs. Takes a loaded definition, returns a new frozenset (empty
+    for a definition with no such state), never raises.
     """
-    results = {
+    return frozenset(
         key
         for state in definition.states.values()
         if (key := kind_of(state).result_key(state)) is not None
-    }
-    return frozenset(definition.handler_only_keys) | results
+    )
+
+
+def handler_only_names(definition: FSMDefinition) -> frozenset[str]:
+    """Keys no field or bulk extraction may write (D-033): the FSM author's
+    ``handler_only_keys`` plus ``result_key_names``.
+
+    The one answer shared by ``MessagePipeline._handler_only_keys`` and
+    ``flow_analysis``. Classification is a separate channel: it may write a
+    LISTED key (D-033 trade-off (c), kept by D-002 of plan 52ce5464) and never a
+    result key. Takes a loaded definition, returns a new frozenset (empty for a
+    definition with none of the three), never raises.
+    """
+    return frozenset(definition.handler_only_keys) | result_key_names(definition)
 
 
 def reachable_from(
@@ -168,7 +178,8 @@ class FSMDefinition(BaseModel):
     # pipeline consults it at three filters (bulk return, per-field configs,
     # post-transition configs). A listed key that is also a
     # classification_extractions field is NOT covered (classification writes
-    # are a separate channel).
+    # are a separate channel, in Pass 1 and after a transition: D-002 of plan
+    # 52ce5464); only a framework result key is closed to classification.
     handler_only_keys: list[str] = Field(
         default_factory=list,
         description=(

@@ -478,6 +478,36 @@ _FLOW_CASES = {
         [],
         {"return_keys": ("intent",)},
     ),
+    # D-002 of plan 52ce5464: a listed handler_only key stays classifiable, so
+    # it is produced; a framework result key is closed to classification.
+    "handler_only_classification_field": (
+        {
+            "a": {
+                "classification_extractions": [_INTENTS],
+                "transitions": [_edge("b", logic=_gate("intent"))],
+            },
+            "b": {},
+        },
+        [],
+        {"handler_only": ("intent",)},
+    ),
+    "result_key_classification_field": (
+        {
+            "a": {
+                "classification_extractions": [
+                    {**_INTENTS, "field_name": "completion_result"}
+                ],
+                "transitions": [_edge("b", logic=_gate("completion_result"))],
+            },
+            "b": {
+                "completion": {"response_format_key": "_rf"},
+                "transitions": [_edge("c", logic=_FINAL)],
+            },
+            "c": {},
+        },
+        [("undeclared-read", "a")],
+        {},
+    ),
     "return_key_produced_not_gated": (
         {"a": {"required_context_keys": ["k"], "transitions": [_edge("b")]}, "b": {}},
         [(_NOT_GUARANTEED, "b")],

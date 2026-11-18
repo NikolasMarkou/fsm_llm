@@ -13,7 +13,12 @@ from typing import Any
 
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.context import clean_context_keys
-from fsm_llm.core.definitions import DataExtractionResponse, FSMInstance, State
+from fsm_llm.core.definitions import (
+    DataExtractionResponse,
+    FSMInstance,
+    State,
+    result_key_names,
+)
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming
 from fsm_llm.logging import logger
 
@@ -96,15 +101,26 @@ class ConversationPostTransitionMixin(_ConversationSurface):
         # None), once, through the same commit below. Budget: +1 classifier
         # call per unset classification field of a different, non-agent new
         # state. Do NOT include set fields, self-loops (the state's own pass
-        # just classified this message), agent FSMs (guarded above) or
-        # `handler_only_keys` (D-033). Do NOT drop the `revisit` exclusion
-        # of classification-owning states: a full re-run there would buy
-        # the bulk call on top of these.
+        # just classified this message) or agent FSMs (guarded above); the
+        # clause "or `handler_only_keys` (D-033)" is SUPERSEDED by the anchor
+        # below. Do NOT drop the `revisit` exclusion of classification-owning
+        # states: a full re-run there would buy the bulk call on top of these.
+        # DECISION plan-2026-11-18T194536-52ce5464/D-002: the owner approved
+        # option A on 2026-11-18 ("approve option A"). A framework `result_key`
+        # (completion or synthesize state) is closed to EVERY classification
+        # channel, here too; an author-listed `handler_only_keys` entry is NOT:
+        # the classifier may set it, in Pass 1 and now after a transition (+1
+        # classifier call per unset listed field of the new state). Do NOT filter
+        # by `handler_only` here again (that re-closes the listed key and makes
+        # Pass 1 and this pass disagree) and do NOT drop the result-key filter
+        # (a classified `completion_result` starves the completion call). The
+        # same rule filters Pass 1: `_classification_configs` in extraction.py.
+        closed = result_key_names(self._services.fsm_resolver(instance.fsm_id))
         class_configs = (
             [
                 c
                 for c in new_state.classification_extractions or []
-                if c.field_name not in handler_only
+                if c.field_name not in closed
                 and instance.context.data.get(c.field_name) is None
             ]
             if previous_state != instance.current_state
