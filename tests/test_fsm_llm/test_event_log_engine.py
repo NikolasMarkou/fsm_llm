@@ -32,7 +32,7 @@ from fsm_llm.runtime import (
     bind,
     current_scope,
 )
-from fsm_llm.runtime.stores import jsonl
+from fsm_llm.runtime.stores import fold_session, jsonl
 from fsm_llm.runtime.usage import usage_from_events
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm.event_log_support import _chunk, _reply, _Wrapper, tree_bytes
@@ -558,6 +558,17 @@ class TestAHugeInt:
         assert f"<int:{big.bit_length()} bits>".encode() in stored
 
 
+class _AbortsMidStream(ScriptedLLM):
+    """Streams two chunks, then dies the way a ^C or ``sys.exit`` does."""
+
+    abort: type[BaseException] = KeyboardInterrupt
+
+    def generate_response_stream(self, request: Any) -> Any:
+        yield "par"
+        yield "tial"
+        raise self.abort
+
+
 class _RaisesBeforeItsIterator(ScriptedLLM):
     """A plain ``def``: it opens the connection eagerly and fails before any iterator exists."""
 
@@ -608,3 +619,29 @@ class TestAStreamThroughTheEngine:
         assert not [e for e in _of(log, cid, "llm/response") if e.get("stream")]
         assert usage_from_events(log.read(cid)).errors == 1  # the outage is counted
         assert _of(log, cid, END)[-1]["outcome"] == "rolled_back"
+
+    @pytest.mark.parametrize("abort", [KeyboardInterrupt, SystemExit])
+    def test_a_non_exception_abort_mid_stream_is_an_abandoned_reply_and_no_provider_error(
+        self, log: EventLog, abort: type[BaseException]
+    ) -> None:
+        """The pin of what a ^C does (D5): the reply is ``abandoned``, the turn ``interrupted``,
+        no ``provider/error`` (only an ``Exception`` is an outage), and a restore holds what the
+        live conversation holds."""
+        llm = _AbortsMidStream(responses={"chat": "ok"})
+        llm.abort = abort
+        api = _api(log, llm)
+        cid, _ = api.start_conversation()
+        with pytest.raises(abort):
+            "".join(api.converse_stream("hi", cid))
+        events = [e for e in log.read(cid) if e["type"].startswith(("llm/", "turn/"))]
+        assert [e["type"] for e in events][-3:] == [
+            "llm/request",
+            "llm/response",
+            "turn/end",
+        ]
+        assert events[-2]["abandoned"] is True and events[-2]["stream"] is True
+        assert events[-1]["outcome"] == "interrupted"
+        assert not _of(log, cid, "provider/error")
+        restored = fold_session(log.read(cid), log.get_json)
+        assert restored is not None
+        assert restored.conversation_history == api.get_conversation_history(cid)

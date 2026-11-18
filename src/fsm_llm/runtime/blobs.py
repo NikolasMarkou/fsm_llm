@@ -13,7 +13,9 @@ A read re-hashes, so a torn, tampered or substituted file is refused, never retu
 Unverified until the Windows run: ``os.replace`` onto a target another process holds open
 (``PermissionError`` there, handled below and simulated in the tests), antivirus holding a
 fresh file, and path length on a runner (the relative path is 71 characters). Power-loss
-durability is argued, not tested: a new blob is fsynced and so is its directory (POSIX).
+durability is argued, not tested: a new blob is fsynced and so is its directory (POSIX); the
+entries of ``blobs/`` and ``logs/`` in the log root are not fsynced, so after a power loss that
+hits the first write into a fresh root the whole directory can be missing.
 """
 
 from __future__ import annotations

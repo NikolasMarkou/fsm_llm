@@ -15,7 +15,10 @@ every platform).
 Unverified until the Windows run: ``msvcrt.locking`` on a real file (contention and release
 when the process dies), the effect of ``O_BINARY`` on the raw fd, ``os.ftruncate`` on an
 ``O_APPEND`` handle, and killing a Windows child. Power-loss durability is argued, not tested:
-a checkpoint append is followed by ``os.fsync`` (see ``append``); nothing else is.
+a checkpoint append is followed by ``os.fsync`` (see ``append``); nothing else is. The
+directory fsync covers a new file's entry in its own directory only: the entries of ``logs/`` and
+``blobs/`` in the log root are not fsynced either (a power loss on the first write into a fresh
+root can lose the directory).
 """
 
 from __future__ import annotations

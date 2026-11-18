@@ -32,8 +32,11 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
       stream (and a mid-stream error). Any other interface (a double, a mock, a custom class, a
       wrapper) is logged here: the ``llm/request`` checkpoint BEFORE the call, ``llm/response``
       after, ``provider/error`` when an ``Exception`` escapes (a stream that raised writes no
-      ``llm/response``). The inner observer is switched off for the call (for a stream, per
-      chunk), so a wrapper around a ``LiteLLMInterface`` is not logged twice. The request blob
+      ``llm/response``; a non-``Exception`` abort such as ``KeyboardInterrupt`` or ``SystemExit``
+      mid-stream is no outage: it writes ``llm/response`` with ``abandoned`` and no
+      ``provider/error``, and the turn ends ``interrupted``). The inner observer is switched
+      off for the call (for a stream, per chunk), so a wrapper around a ``LiteLLMInterface`` is
+      not logged twice. The request blob
       of an engine call is redacted (``redact_context``: secret-looking context entries of the
       request object become ``<redacted>``). A request that cannot be logged raises
       ``LogWriteError`` and the call is
