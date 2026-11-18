@@ -18,16 +18,24 @@ A legitimate number that looks like a count (a limit such as the 800-line module
 listed on purpose; the failure message says how.
 
 Shapes (`N` is a number of digits, with thousands commas and an optional `+`, that is not
-part of a version, a date, an id, a path or a `$` amount; matched on one line, text with
-its whitespace collapsed):
+part of a version, a date, an id, a path, the head of a decimal or a `$` amount; it may
+carry a backtick or bold wrapper, and so may the noun; matched on one line, text with its
+whitespace collapsed):
 
-* S1 `N (word){0,2} test files | test modules | test cases | tests | collected`
+* S1 `N (word){0,2} test files | test modules | test cases | tests | collected`; a word may
+  be a backticked name
 * S2 `collects N`, `collected N`
-* S3 a marker name in backticks followed by `(N` (`slow`, `integration`, `real_llm`,
-  `examples`, `live`), and `N (of them) slow | live | gated | real_llm`
-* S4 `N (word) files | modules | lines | contracts`
-* S5 a table row led by a backticked `test_x.py` or `test_suite/` that holds a bare
-  numeric cell (the match is the first cell, ` | `, the numeric cell)
+* S3a a marker name in backticks (`slow`, `integration`, `real_llm`, `examples`, `live`)
+  followed by `N`, `(N`, `: N` or `= N`
+* S3b `N (of them) slow | live | gated | real_llm`, the marker in backticks or not
+* S4 `N (word) files | modules | lines | contracts`; a word may be a backticked name
+  (`79 `test_*.py` files`)
+* S5 a table row whose first cell is a test file or suite folder (`test_x.py`, `tests/test_x.py`,
+  `test_suite/`; in backticks or not, bare or a link) and that holds a bare numeric cell
+  (the match is the first cell, ` | `, the numeric cell)
+* S6 a labelled count: `suite | test | file | module | line | contract count (N)` (also
+  `count: N`, `count is N`) and `tests: N`
+* S7 a run outcome: `N passed | skipped | xfailed | xpassed | deselected`
 
 A line is scanned in full, a fenced block included (the counts of the root AGENTS.md lived
 in bash fences). `TestShapes` holds the contract: lines that MUST hit and lines that MUST
@@ -39,11 +47,21 @@ as UTF-8 with no NUL byte, that is not a symlink. Never read: `plans/`,
 `EVALUATE.md` (an append-only run log) and any `docs/*roadmap.md` (a dated planning page).
 Not run when `git` is missing or the checkout is not a git repository.
 
-NOT detected, on purpose (a human reads these): a number written as a word ("seven
-subpackages"), a product count without a shape above ("18 agent patterns", "9 strategies",
-"100 runnable examples"), a range ("10-12 tests"), and anything in `.py` comments or
-docstrings. The guard catches the common creep, a `(N tests)` pasted into a doc; it is not
-a proof that no count is left.
+NOT detected (a human reads these; the guard catches the common creep, a `(N tests)`
+pasted into a doc, and is not a proof that no count is left):
+
+* a number written as a word ("seven subpackages", "a dozen tests"), a vague quantifier
+  ("several hundred"), and a range ("10-12 tests");
+* a product count without a shape above ("18 agent patterns", "9 strategies", "100 runnable
+  examples", "11 step types");
+* a run outcome other than `passed`, `skipped`, `xfailed`, `xpassed` and `deselected` (`N
+  failed` collides with status words such as an HTTP `400 failed`), and `N errors`;
+* a count split across a wrapped line (a line is read alone, so `103` at the end of one line
+  and `test files` at the start of the next are two non-matches);
+* a test-file table row whose first cell is not a test file or suite name (a prose label, a
+  module name), or whose count sits in a cell with other text (`12 cases`, `about 12`);
+* a count after a noun that is not one of those listed (`tests = 12` is read, `files = 12`
+  is not), and a number in any `.py` comment or docstring.
 
 Regenerate after removing a count, after deleting a file that held one, or on purpose when
 a new document needs a limit:
@@ -76,28 +94,45 @@ EXEMPT_PATHS = ("CHANGELOG.md", "EVALUATE.md")
 #: Globs that are never read; `fnmatchcase`, so Windows case and separator rules do not apply.
 EXEMPT_GLOBS = ("docs/*roadmap.md",)
 
-# A number: not part of a version (0.13.0), an id (D-004, 21e6f00d), a path, a `$` amount
-# or the tail of a thousands group (the `,` of "$1,200").
-_N = r"(?<![\w.\-/`$])(?<!\d,)(?:\d{1,3}(?:,\d{3})+|\d+)\+?"
-_WORD = r"(?:[A-Za-z][\w\-]*\s+)"
+# A number: not part of a version (0.13.0), an id (D-004, 21e6f00d), a path, a `$` amount,
+# the tail of a thousands group (the `,` of "$1,200") or the head of a decimal (`3.11`);
+# it may carry a backtick or bold wrapper (`8,259`, **8,259**).
+_W = r"(?:\*\*|`)?"
+_NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)\+?"
+_N = rf"(?<![\w.\-/$])(?<!\d,){_W}{_NUM}{_W}(?!\.\d)"
+# A word between a number and its noun; a backticked name counts (79 `test_*.py` files).
+_WORD = r"(?:`[^`\n]+`\s+|[A-Za-z][\w\-]*\s+)"
+_MARK = r"(?:slow|integration|real_llm|examples|live)"
 SHAPES: dict[str, re.Pattern[str]] = {
     "S1": re.compile(
-        rf"{_N}\s+{_WORD}{{0,2}}(?:test files?|test modules|test cases|tests?|collected)\b",
+        rf"{_N}\s+{_WORD}{{0,2}}[`*]*"
+        r"(?:test files?|test modules|test cases|tests?|collected)\b[`*]*",
         re.IGNORECASE,
     ),
     "S2": re.compile(rf"\bcollect(?:s|ed)\s+{_N}", re.IGNORECASE),
-    "S3a": re.compile(
-        rf"`(?:slow|integration|real_llm|examples|live)`\s*\(\s*{_N}", re.IGNORECASE
-    ),
+    "S3a": re.compile(rf"`{_MARK}`\s*(?:[(:=]\s*)?{_N}", re.IGNORECASE),
     "S3b": re.compile(
-        rf"{_N}\s+(?:of them\s+)?(?:slow|live|gated|real_llm)\b", re.IGNORECASE
+        rf"{_N}\s+(?:of them\s+)?[`*]*(?:slow|live|gated|real_llm)\b[`*]*",
+        re.IGNORECASE,
     ),
     "S4": re.compile(
-        rf"{_N}\s+{_WORD}?(?:files?|modules?|lines|contracts)\b", re.IGNORECASE
+        rf"{_N}\s+{_WORD}?[`*]*(?:files?|modules?|lines|contracts)\b[`*]*",
+        re.IGNORECASE,
+    ),
+    "S7": re.compile(
+        rf"{_N}\s+[`*]*(?:passed|skipped|xfailed|xpassed|deselected)\b[`*]*",
+        re.IGNORECASE,
+    ),
+    "S6": re.compile(
+        r"\b(?:(?:suite|test|file|module|line|contract)s?\s+counts?\s*(?:[(:=]|is|of|was)?"
+        rf"|tests?\s*[:=])\s*{_N}",
+        re.IGNORECASE,
     ),
 }
-_S5_ROW = re.compile(r"^\s*\|\s*`(?:test_\w+\.py|test_\w+/)`")
+_S5_ROW = re.compile(r"^\s*\|")
+_S5_LEAD = re.compile(r"^(?:[\w.\-]+/)*test_\w+(?:\.py|/)$")
 _S5_CELL = re.compile(r"^(?:\d{1,3}(?:,\d{3})+|\d+)\+?(?:\s*\(.*\))?$")
+_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
 def is_exempt(rel: str) -> bool:
@@ -135,10 +170,12 @@ def shape_hits(line: str) -> dict[str, list[str]]:
             hits[name] = found
     if _S5_ROW.match(line):
         cells = _cells(line)
-        for cell in cells[1:]:
-            if _S5_CELL.match(cell):
-                hits["S5"] = [" | ".join((" ".join(cells[0].split()), cell))]
-                break
+        lead = _LINK.sub(r"\1", cells[0]).replace("`", "").replace("*", "").strip()
+        if _S5_LEAD.match(lead):
+            for cell in cells[1:]:
+                if _S5_CELL.match(cell.replace("`", "").replace("*", "").strip()):
+                    hits["S5"] = [" | ".join((" ".join(cells[0].split()), cell))]
+                    break
     return hits
 
 
@@ -217,9 +254,10 @@ class TestTheRealTree:
         assert not bad, (
             "doc count ratchet: a document states a count (a test, file, module, line "
             "or contract count drifts; a reader measures it with `make test` or "
-            "`pytest --collect-only -q`). State no count; or, for a real limit or an "
-            f"illustration, or when a count was removed, run `{REGENERATE}` and commit "
-            "the allowlist:\n  " + "\n  ".join(bad)
+            "`pytest --collect-only -q`). State no count. Regenerate only when a count "
+            f"was removed (`{REGENERATE}`) or for a real limit or an illustration; an "
+            "ADDED entry of the allowlist must be one of those two, so read the fixture "
+            "diff before you commit it:\n  " + "\n  ".join(bad)
         )
 
     def test_the_allowlist_is_the_rendering_of_its_own_data(self) -> None:
@@ -269,6 +307,28 @@ MUST_HIT = [
     ("| `test_fsm_llm_agents/` | 3,428 | the agents suite |", {"S5"}),
     ("| `test_x.py` | 21 (8 slow) | an entry |", {"S5", "S3b"}),
     ("| `test_y.py` | 7+ | an entry |", {"S5"}),
+    # the forms the first version of the guard missed
+    ("`slow` 51", {"S3a"}),
+    ("`integration`: 20", {"S3a"}),
+    ("14 `slow`", {"S3b"}),
+    ("8 **live**", {"S3b"}),
+    ("51 `slow` tests", {"S1", "S3b"}),
+    ("**8,259** tests", {"S1"}),
+    ("`8,259` tests", {"S1"}),
+    ("8,259 `tests`", {"S1"}),
+    ("79 `test_*.py` files", {"S4"}),
+    ("suite count (558)", {"S6"}),
+    ("test count (420)", {"S6"}),
+    ("the file count is 12", {"S6"}),
+    ("Tests: 438", {"S6"}),
+    ("18,583 passed", {"S7"}),
+    ("19,049 deselected", {"S7"}),
+    ("5 skipped", {"S7"}),
+    ("| test_a.py | 12 |", {"S5"}),
+    ("| [`test_a.py`](x) | 12 |", {"S5"}),
+    ("| `tests/test_x.py` | 12 |", {"S5"}),
+    ("| `test_a.py` | **12** |", {"S5"}),
+    ("| `test_fsm_llm_agents/` | `3,428` |", {"S5"}),
 ]
 #: Lines that state no count: versions, ids, dates, ports, money, limits of another kind.
 MUST_NOT_HIT = [
@@ -290,6 +350,29 @@ MUST_NOT_HIT = [
     "the 1.5 files rule and a 3.5 lines rule",
     "run `make test` to measure the suite",
     "a test file with many tests",
+    "`live` 3.11 and `slow` 3.12",
+    "Tests: 3.11",
+    "a `slow` run and a **live** run",
+    "the `3.11` leg has python lines",
+    "3 retries failed and the 5th test passed",
+    "returns 400 `failed` for a bad key",
+    "| `test_a.py` | wiring | 3.11 |",
+    "| `test_a.py` | 12 cases |",
+    "| `tests/` | 12 |",
+    "| a prose label | 12 |",
+]
+#: Counts the guard does NOT read, on purpose; the docstring names each class. A line that
+#: starts to hit moves to MUST_HIT and the docstring changes with it.
+KNOWN_MISSES = [
+    "seven subpackages and a dozen tests",
+    "18 agent patterns and 9 strategies",
+    "10-12 tests",
+    "9 failed",
+    "| `test_a.py` | 12 cases |",
+    "| module_a | 12 |",
+    "files = 12",
+    "about 103",
+    "test files in the folder",
 ]
 
 
@@ -310,6 +393,13 @@ class TestShapes:
     def test_one_span_found_by_two_shapes_counts_once(self) -> None:
         assert set(shape_hits("103 test files")) == {"S1", "S4"}
         assert matches_in_text("103 test files") == {"103 test files": 1}
+
+    @pytest.mark.parametrize("line", KNOWN_MISSES)
+    def test_a_documented_miss_is_a_miss(self, line: str) -> None:
+        assert shape_hits(line) == {}, line
+
+    def test_a_count_split_across_a_wrapped_line_is_not_read(self) -> None:
+        assert matches_in_text("about 103\ntest files in the folder") == {}
 
     def test_every_shape_has_a_line_that_only_it_hits(self) -> None:
         """Disabling one shape must turn a test red: each has its own unique line."""
@@ -397,6 +487,29 @@ class TestMutants:
         )
         assert problems(self._scan(tmp_path), allowed) == [
             "docs/clean.md: '`test_a.py` | 12' x1, the allowlist has 0"
+        ]
+
+    @pytest.mark.parametrize(
+        ("line", "matched"),
+        [
+            ("14 `slow`", "14 `slow`"),
+            ("`slow` 51", "`slow` 51"),
+            ("79 `test_*.py` files", "79 `test_*.py` files"),
+            ("suite count (558)", "suite count (558"),
+            ("test count (420)", "test count (420"),
+            ("**8,259** tests", "**8,259** tests"),
+            ("19,049 deselected", "19,049 deselected"),
+            ("| test_a.py | 12 |", "test_a.py | 12"),
+            ("| [`test_a.py`](x) | 12 |", "[`test_a.py`](x) | 12"),
+        ],
+    )
+    def test_a_count_in_a_form_the_first_guard_missed_fails(
+        self, tmp_path: Path, line: str, matched: str
+    ) -> None:
+        allowed = self._tree(tmp_path)
+        (tmp_path / "docs" / "clean.md").write_text(line + "\n", encoding="utf-8")
+        assert problems(self._scan(tmp_path), allowed) == [
+            f"docs/clean.md: {matched!r} x1, the allowlist has 0"
         ]
 
     def test_a_removed_count_or_a_deleted_file_asks_for_a_regeneration(

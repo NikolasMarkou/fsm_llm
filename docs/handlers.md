@@ -221,7 +221,7 @@ def test_handler_execution_order():
 
 - **Agents**: POST_TRANSITION executes tools, PRE_TRANSITION enforces budgets, CONTEXT_UPDATE checks HITL approval
 - **Reasoning**: Validation, tracing, context pruning, retry limiting handlers
-- **Monitor**: Registers at every timing point (priority 9999) as pure observers -- returns `{}`, never modifies state
+- **Monitor**: Registers at every timing point but POST_TRANSITION (priority 9999) as pure observers -- returns `{}`, never modifies state
 - **Workflows**: Manages step execution directly via async pipeline; ConversationStep has its own handler system
 
 ## Next steps

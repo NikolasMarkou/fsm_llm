@@ -189,7 +189,23 @@ class TestTheRealReadme:
         assert "Good Places to Help" not in headings
 
 
-class TestTheReadmeNumbersAreTrue:
+def _unknown_strategies(text: str) -> set[str]:
+    """Backticked snake_case names after "reasoning strategies" that `ReasoningType` lacks.
+
+    The README may name none (it names none today); a name it gives must be a member value.
+    """
+    from fsm_llm.reasoning import ReasoningType
+
+    values = {member.value for member in ReasoningType}
+    named: set[str] = set()
+    for line in _outside_fences(text).splitlines():
+        if "reasoning strateg" in line:
+            tail = line.split("reasoning strateg", 1)[1]
+            named |= set(re.findall(r"`([a-z_]+)`", tail))
+    return named - values
+
+
+class TestTheReadmeNamesAreTrue:
     """Every name the showcase README gives is checked against the code; no number is asserted."""
 
     def test_the_agent_patterns_are_the_ones_create_agent_accepts(self, readme):
@@ -200,13 +216,23 @@ class TestTheReadmeNumbersAreTrue:
         named -= {"AgentGraph"}
         assert named == set(_PATTERNS)
 
-    def test_the_readme_names_the_reasoning_engine_and_its_strategies(self, readme):
-        from fsm_llm.reasoning import ReasoningEngine, ReasoningType
+    def test_the_readme_names_the_reasoning_engine(self, readme):
+        from fsm_llm.reasoning import ReasoningEngine
 
         assert "reasoning strategies" in readme
         assert "ReasoningEngine.solve_problem" in readme
         assert hasattr(ReasoningEngine, "solve_problem")
-        assert list(ReasoningType)
+
+    def test_every_reasoning_strategy_the_readme_names_exists(self, readme):
+        assert _unknown_strategies(readme) == set()
+
+    def test_a_strategy_that_does_not_exist_is_caught(self, readme):
+        old = "one of the reasoning strategies"
+        assert old in readme, "the mutant anchor is gone"
+        mutated = readme.replace(old, old + " (`analytical`, `telepathic`)", 1)
+        assert _unknown_strategies(mutated) == {"telepathic"}
+        known = readme.replace(old, old + " (`analytical`, `hybrid`)", 1)
+        assert _unknown_strategies(known) == set()
 
     def test_every_workflow_step_factory_the_readme_names_exists(self, readme):
         import fsm_llm.workflows as workflows
