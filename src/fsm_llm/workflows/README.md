@@ -24,13 +24,13 @@ flowchart TD
 
 Each step returns a result with `success`, some `data` (merged into the context), and `next_step_id`. The engine follows `next_step_id` until a step pauses, ends, or fails. An instance moves through the statuses `pending`, `running`, `waiting`, and ends as `completed`, `failed`, or `cancelled`.
 
-There are 11 step types: automatic (run a function, move on), API call, condition (yes/no branch), switch (branch on a context value), LLM processing, wait for event, timer, FSM conversation, agent, parallel (run several steps at once), and retry (re-run a step with a growing delay).
+The step types are: automatic (run a function, move on), API call, condition (yes/no branch), switch (branch on a context value), LLM processing, wait for event, timer, FSM conversation, agent, parallel (run several steps at once), and retry (re-run a step with a growing delay).
 
 ## Files
 
 - `engine/` - `WorkflowEngine`: starts and drives instances, delivers events, runs timers and deadlines, cancels, cleans up, calls hooks. Also `Timer`. A package since step 91 of plan d454fd62: `engine.py` (the shell), the mixins `status`, `lifecycle`, `driver`, `events`, `timers`, `resources` and `queries`, `helpers` and `surface`.
-- `steps/` - a package: `base.py` (the `WorkflowStep` base class), `helpers.py` (the step executor and the user-callable call), and the 11 step classes by group: `routing.py`, `calls.py`, `waits.py`, `conversation.py`, `agent.py`, `composite.py`.
-- `dsl.py` - short factory functions (`create_workflow`, `auto_step`, `condition_step`, ...), `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`; `build()` always validates, returns a fresh definition and raises `BuildError` chained from the workflow error), and three pattern helpers that register a set of steps without wiring them together.
+- `steps/` - a package: `base.py` (the `WorkflowStep` base class), `helpers.py` (the step executor and the user-callable call), and the step classes by group: `routing.py`, `calls.py`, `waits.py`, `conversation.py`, `agent.py`, `composite.py`.
+- `dsl.py` - short factory functions (`create_workflow`, `auto_step`, `condition_step`, ...), `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`; `build()` always validates, returns a fresh definition and raises `BuildError` chained from the workflow error), and pattern helpers that register a set of steps without wiring them together.
 - `definitions.py` - `WorkflowDefinition` with validation (targets exist, all steps reachable, no loop that never pauses).
 - `models.py` - statuses, events, step results, instances, history entries, event listeners, wait settings.
 - `dependency_resolver.py` - `DependencyResolver`: sorts steps with declared dependencies into "waves" that could run in parallel. A standalone helper; the engine does not use it.

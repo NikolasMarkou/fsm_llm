@@ -16,20 +16,11 @@
   "800 lines": 1
  },
  "src/fsm_llm/AGENTS.md": {
-  "1,399 lines": 1,
-  "211 lines": 1,
   "800 lines": 1
- },
- "src/fsm_llm/agents/AGENTS.md": {
-  "12 files": 1
  },
  "src/fsm_llm/monitor/static/AGENTS.md": {
   "2,728 lines": 1,
   "8 screen modules": 1
- },
- "src/fsm_llm/reasoning/AGENTS.md": {
-  "232 collected": 1,
-  "9 strategy modules": 1
  },
  "tests/AGENTS.md": {
   "0 tests": 1,

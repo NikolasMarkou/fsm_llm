@@ -29,7 +29,7 @@ The examples score is a heuristic: it reads the example's exit code, timing and 
 
 ## Files
 
-- `__main__.py` - the `fsm-llm-eval` command and its two subcommands.
+- `__main__.py` - the `fsm-llm-eval` command and its subcommands.
 - `config.py` - `EvalConfig` (every setting with its default), loading JSON config files, merging settings layers, choosing the model.
 - `examples.py` - finds, runs and reports example scripts.
 - `scoring.py` - the 0-4 heuristic that reads an example's output.
@@ -117,4 +117,4 @@ print(report.overall)   # {"k": ..., "n": ..., "rate": ..., "wilson_ci": [lo, hi
 - Example timeouts: a per-example table value wins over the category value, which wins over `--timeout`. To change a tabled example's timeout, set `example_timeouts` (or `category_timeouts`) in a `--config` file.
 - A timed-out example keeps its partial output and scores 1. An example whose interpreter cannot start scores 0.
 - Import it as `from fsm_llm import eval as fsm_eval`, or import names directly (`from fsm_llm.eval import wilson_ci`), so the builtin `eval` is not shadowed. `import fsm_llm` alone does not load this package.
-- A sample dataset is in `evaluation/datasets/simple_greeting_cases.json`. Its three `simple_greeting` cases check plumbing only (their transitions are unconditional, so any model passes); `name_is_extracted`, over `evaluation/datasets/name_capture_fsm.json`, passes only when the model extracts the user's name. Write your cases like the last one: make the pass depend on what the model does.
+- A sample dataset is in `evaluation/datasets/simple_greeting_cases.json`. Its `simple_greeting` cases check plumbing only (their transitions are unconditional, so any model passes); `name_is_extracted`, over `evaluation/datasets/name_capture_fsm.json`, passes only when the model extracts the user's name. Write your cases like the last one: make the pass depend on what the model does.

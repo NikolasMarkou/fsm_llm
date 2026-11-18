@@ -23,28 +23,28 @@ flowchart TD
 ```
 
 - The engine starts an orchestrator conversation with the problem in its context and runs it with message-free steps (core `run_until_terminal`, no user message) until it reaches `final_answer`, for at most 170 steps in total (50 for the orchestrator plus 30 per strategy run, one run per attempt).
-- As soon as the orchestrator extracts `problem_type`, a handler (a Python function the FSM runs at a set point) runs a second FSM, the classifier, which looks at domain, structure and needs and recommends one of the nine strategies. It gets at most 10 steps.
+- As soon as the orchestrator extracts `problem_type`, a handler (a Python function the FSM runs at a set point) runs a second FSM, the classifier, which looks at domain, structure and needs and recommends one of the strategies. It gets at most 10 steps.
 - When the orchestrator enters `execute_reasoning`, a handler chooses the strategy FSM. The same run pushes it on top of the orchestrator (FSM stacking) by type, steps it for at most 30 steps, then pops it and copies its results back into the orchestrator. Each entry to `execute_reasoning` also clears `proposed_solution`, `key_insights` and `validation_result`, so a retry produces and validates a new answer.
-- When a `proposed_solution` appears, a validator runs four checks: there is an answer, there are key insights (not needed for arithmetic), the answer is longer than 20 characters (not needed for arithmetic), and it shares at least one non-trivial word with the question (not checked for arithmetic).
+- When a `proposed_solution` appears, a validator runs these checks: there is an answer, there are key insights (not needed for arithmetic), the answer is longer than 20 characters (not needed for arithmetic), and it shares at least one non-trivial word with the question (not checked for arithmetic).
 
-The nine strategies and their number of states:
+The strategies and the result key each one fills:
 
-| Strategy | States | Main result key |
-| --- | --- | --- |
-| `simple_calculator` | 2 | `calculation_result` |
-| `analytical` | 4 | `integrated_analysis`, `key_insights` |
-| `deductive` | 3 | `conclusion` |
-| `inductive` | 4 | `hypothesis` |
-| `abductive` (best explanation) | 4 | `best_hypothesis` |
-| `analogical` | 5 | `adapted_solution_or_understanding` |
-| `creative` | 4 | `best_creative_solution` |
-| `critical` | 5 | `critical_assessment` |
-| `hybrid` | 7 | `final_hybrid_solution` |
+| Strategy | Main result key |
+| --- | --- |
+| `simple_calculator` | `calculation_result` |
+| `analytical` | `integrated_analysis`, `key_insights` |
+| `deductive` | `conclusion` |
+| `inductive` | `hypothesis` |
+| `abductive` (best explanation) | `best_hypothesis` |
+| `analogical` | `adapted_solution_or_understanding` |
+| `creative` | `best_creative_solution` |
+| `critical` | `critical_assessment` |
+| `hybrid` | `final_hybrid_solution` |
 
 ## Files
 
 - `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the hooks and handlers.
-- `reasoning_modes/` - all 11 FSM definitions as Python dictionaries, one module per FSM (orchestrator, classifier, nine strategies), and the `ALL_REASONING_FSMS` registry (`registry.py`); the package re-exports them.
+- `reasoning_modes/` - the FSM definitions as Python dictionaries, one module per FSM (orchestrator, classifier, and the strategies), and the `ALL_REASONING_FSMS` registry (`registry.py`); the package re-exports them.
 - `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.
 - `definitions.py` - Pydantic models for steps, traces, validation, classification, problems and solutions.
 - `constants.py` - reasoning types, state names, context key names, limits, and message text.
