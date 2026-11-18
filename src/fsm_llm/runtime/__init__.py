@@ -6,8 +6,8 @@ the L3 siblings above it, so it imports ``core``, ``llm`` and the kernel only, a
 imported by them. It holds the vocabulary and the safe encoder of the format (``events``),
 its flat constants, the blob store (``blobs``), the JSONL store (``stores``), the checkpoint
 rule (``checkpoint``), the log object that ties them together (``log.EventLog``), the privacy
-levels and the redaction hook (``privacy``) and the turn scope the engine reaches it through
-(``scope``).
+levels and the redaction hook (``privacy``), the explicit retention (``retention``) and the
+turn scope the engine reaches it through (``scope``).
 
 This ``__init__`` is the one import surface of the package (a static ``__all__``);
 a private name is imported from the module that defines it.
@@ -37,6 +37,7 @@ from .events import (
 )
 from .log import EventLog, filter_context, warn_on_failure
 from .privacy import PrivacyLevel, RedactionKind
+from .retention import PruneReport
 from .scope import (
     LlmCall,
     TurnScope,
@@ -64,6 +65,7 @@ __all__ = [
     "LogPrivacyError",
     "LogWriteError",
     "PrivacyLevel",
+    "PruneReport",
     "RedactionKind",
     "TurnOutcome",
     "TurnScope",

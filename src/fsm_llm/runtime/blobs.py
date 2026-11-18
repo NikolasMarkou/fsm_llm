@@ -43,8 +43,15 @@ _REF_PREFIX = "sha256:"
 _VERIFY_TRIES = 20
 _VERIFY_PAUSE_SECONDS = 0.005
 
-# Indirection a test patches to simulate a lost race or a failing disk, read at call time.
+# Indirections a test patches to simulate a lost race or a failing disk, read at call time.
 _replace = os.replace
+_utime = os.utime
+
+
+def blob_path(blobs_dir: Path, ref: str) -> Path:
+    """The file of a checked *ref* under *blobs_dir*: ``<aa>/<62 hex>``, the one layout rule."""
+    digest = ref[len(_REF_PREFIX) :]
+    return blobs_dir / digest[:2] / digest[2:]
 
 
 def blob_ref(data: bytes) -> str:
@@ -59,7 +66,8 @@ class BlobStore:
         - ``BlobStore(root)``: *root* is the log root (the directory holding ``logs/`` and
           ``blobs/``). Does no I/O; nothing is created until the first ``put``.
         - ``put(data: bytes) -> ref``: stores *data* and returns its reference; the same
-          bytes always give the same reference and one file. ``EventPayloadError`` for a
+          bytes always give the same reference and one file (a present blob's mtime is
+          refreshed, best effort, so a prune counts a re-put young). ``EventPayloadError`` for a
           non-bytes value or one over ``MAX_BLOB_BYTES`` (nothing written), ``LogWriteError``
           for an ``OSError`` (no temp file is left behind).
         - ``put_json(value) -> ref``: ``put`` of ``canonical_json(value)``, so the same value
@@ -82,8 +90,7 @@ class BlobStore:
         """Return the file path of *ref* (``blobs/<aa>/<62 hex>``) without touching the disk."""
         if not isinstance(ref, str) or not BLOB_REF_RE.fullmatch(ref):
             raise EventPayloadError(f"not a blob reference: {ref!r:.80}")
-        digest = ref[len(_REF_PREFIX) :]
-        return self._dir / digest[:2] / digest[2:]
+        return blob_path(self._dir, ref)
 
     def exists(self, ref: str) -> bool:
         """Return True when a file is stored under *ref* (its bytes are not checked)."""
@@ -121,7 +128,7 @@ class BlobStore:
             )
         ref = blob_ref(data)
         path = self.path_for(ref)
-        if _has_size(path, len(data)):
+        if _has_size(path, len(data)) and _touch(path):
             return ref  # present: the name is the hash, so the content is the caller's again
         try:
             self._write_new(path, data, ref)
@@ -178,6 +185,17 @@ def _has_size(path: Path, size: int) -> bool:
     except OSError:
         return False
     return stat.S_ISREG(info.st_mode) and info.st_size == size
+
+
+def _touch(path: Path) -> bool:
+    """Refresh the mtime of *path* (best effort); False only when it is gone: ``put`` rewrites."""
+    try:
+        _utime(path)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        pass
+    return True
 
 
 def _read(path: Path) -> bytes:

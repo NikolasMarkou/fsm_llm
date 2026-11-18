@@ -66,6 +66,7 @@ from fsm_llm.runtime.privacy import (
     run_redaction,
     shape_only,
 )
+from fsm_llm.runtime.retention import PruneReport, prune_root
 from fsm_llm.runtime.stores.jsonl import (
     LOG_SUFFIX,
     JsonlWriter,
@@ -615,6 +616,30 @@ class EventLog:
             name=name,
             call_id=call_id,
             status="ok",
+        )
+
+    def prune(
+        self,
+        *,
+        max_age_seconds: float | None = None,
+        max_logs: int | None = None,
+        blob_grace_seconds: float = 3600.0,
+        dry_run: bool = False,
+    ) -> PruneReport:
+        """Delete old logs, then the blobs no remaining log names; the default deletes nothing.
+
+        Explicit only (``runtime.retention``, plan 5a6a1f80): a log is a candidate when its file
+        mtime (never ``ts``) is *max_age_seconds* old or more than *max_logs* newer logs exist,
+        and one whose writer lock is held is skipped (``logs_busy``). Then blobs no remaining
+        log or live blob names and older than *blob_grace_seconds* go. *dry_run* changes
+        nothing. ``ValueError`` for a negative limit.
+        """
+        return prune_root(
+            self.root,
+            max_age_seconds=max_age_seconds,
+            max_logs=max_logs,
+            blob_grace_seconds=blob_grace_seconds,
+            dry_run=dry_run,
         )
 
     def release(self, conversation_id: str) -> None:

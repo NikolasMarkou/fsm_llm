@@ -589,6 +589,11 @@
       "delta": 1,
       "reason": "step 10 of plan 5a6a1f80: new anchor at EventLog._envelope (runtime/log.py): the privacy level is applied where every event passes (the shape allow-list and the lvl marker), never in the producers, never by dropping only large fields or keeping a ref, never inferred from a missing state_ref; the default stays values; no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-016"
+    },
+    {
+      "delta": 1,
+      "reason": "step 11 of plan 5a6a1f80: new anchor at prune_root (runtime/retention.py): retention is an explicit call whose default deletes nothing, a log goes only under its non-blocking writer lock, a .lock file is never unlinked or read, blobs are swept by mark (logs and live blobs, transitive) and sweep with a grace, never by a thread, a sidecar count or an age from ts; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-018"
     }
   ]
 }

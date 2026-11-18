@@ -1146,6 +1146,7 @@
     "fsm_llm.runtime.events",
     "fsm_llm.runtime.log",
     "fsm_llm.runtime.privacy",
+    "fsm_llm.runtime.retention",
     "fsm_llm.runtime.scope",
     "fsm_llm.runtime.stores",
     "fsm_llm.runtime.stores.jsonl",

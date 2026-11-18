@@ -25,6 +25,7 @@ import os
 import sys
 import threading
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +127,37 @@ def _release_lock(fd: int) -> None:
         pass  # closing the handle below releases it anyway
     finally:
         os.close(fd)
+
+
+@contextmanager
+def exclusive_lock(
+    log_dir: Path, conversation_id: str, *, create: bool = True
+) -> Iterator[bool]:
+    """Yield True while the caller holds the writer lock ``<id>.lock`` (caller: retention).
+
+    Refused, never waited for: a live writer of this process or another, or a lock file that
+    cannot be opened, yields False. The file is never read or unlinked. With *create* False a
+    missing lock file yields True and creates nothing (no writer ever existed).
+    """
+    path = log_dir / (check_conversation_id(conversation_id) + LOCK_SUFFIX)
+    try:
+        fd = os.open(
+            path, os.O_RDWR | _binary_flag() | (os.O_CREAT if create else 0), 0o600
+        )
+    except FileNotFoundError:
+        yield True
+        return
+    except OSError:
+        yield False
+        return
+    try:
+        try:
+            held = _try_lock(fd)
+        except OSError:
+            held = False
+        yield held
+    finally:
+        _release_lock(fd)
 
 
 def fsync_directory(directory: Path) -> None:
