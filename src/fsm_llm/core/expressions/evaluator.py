@@ -38,6 +38,11 @@ def _op_has_context(values: list, data: dict[str, Any], _depth: int) -> bool:
     if len(values) == 2:
         context_obj = evaluate_logic(values[0], data, _depth + 1)
         key = evaluate_logic(values[1], data, _depth + 1)
+        if not isinstance(key, str):
+            # Same as the one-argument form; a list or dict key would raise an
+            # unhashable TypeError out of `in` on the public evaluator.
+            logger.warning(f"has_context expected string key, got {type(key)}")
+            return False
         if not isinstance(context_obj, dict):
             logger.warning(
                 f"has_context expected dict as first argument, got {type(context_obj)}"

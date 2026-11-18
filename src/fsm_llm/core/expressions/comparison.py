@@ -175,11 +175,12 @@ def less(a: Any, b: Any, *args: Any) -> bool:
           strings), native comparison is used: less("abc", "def") = True.
         - Chained comparisons evaluate left-to-right
         - Never raises: operands that cannot be ordered at all (a ``TypeError``
-          from the native comparison) give False
+          from the native comparison) give False, and an ``int`` past float
+          range is compared as the exact ``int`` (``_as_float``)
     """
     # Always attempt numeric conversion for comparisons
     try:
-        a, b = float(a), float(b)
+        a, b = _as_float(a), _as_float(b)
     except (TypeError, ValueError):
         pass  # Fall back to native comparison
 
@@ -220,9 +221,25 @@ def _numeric_equal(a: Any, b: Any) -> bool:
         if isinstance(side, str) and not _PLAIN_NUMBER_RE.fullmatch(side):
             return False
     try:
-        return float(a) == float(b)
+        return _as_float(a) == _as_float(b)
     except (TypeError, ValueError):
         return False
+
+
+def _as_float(value: Any) -> Any:
+    """``float(value)``, or the exact ``int`` when it is past float range.
+
+    Interface contract: ``value`` any object; returns a ``float``, or the same
+    ``int`` when ``float()`` raises ``OverflowError`` (a 400-digit int an LLM
+    extraction can carry). Python orders and compares an ``int`` against a
+    ``float`` exactly, so the callers (``less`` and ``_numeric_equal``) stay
+    correct. Any other ``float()`` failure (``TypeError``, ``ValueError``) is
+    the caller's: both already catch it.
+    """
+    try:
+        return float(value)
+    except OverflowError:
+        return value
 
 
 # JSON-style number text only: optional sign, digits with an optional

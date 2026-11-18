@@ -204,4 +204,10 @@ def _op_missing_some(values: list, data: dict[str, Any], _depth: int) -> list[st
         raise TransitionEvaluationError(
             f"missing_some minimum must be an integer, got {type(values[0]).__name__}"
         )
+    if not isinstance(values[1], list | tuple | str | dict):
+        # A raise, never `[]`: `[]` reads "nothing missing", so a negated gate
+        # (`{"!": [{"missing_some": ...}]}`) would pass on a malformed list.
+        raise TransitionEvaluationError(
+            f"missing_some names must be a list of keys, got {type(values[1]).__name__}"
+        )
     return missing_some(data, minimum, values[1])

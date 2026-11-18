@@ -20,6 +20,7 @@ from fsm_llm.core.definitions import (
     Transition,
     TransitionCondition,
     TransitionEvaluation,
+    TransitionEvaluationError,
     TransitionEvaluationResult,
 )
 from fsm_llm.core.expressions import (
@@ -1211,3 +1212,125 @@ class TestOperatorSweep:
         monkeypatch.setattr(evaluator, "_evaluate_short_circuit", spy)
         assert evaluate_logic({operator: [True, 1, 2]}, {}) == "spied"
         assert seen == [operator]
+
+
+_BIG = 10**400
+
+#: The 33 operand shapes of the plan's fuzz: huge ints, NaN, inf, bool, digit
+#: strings, lists, dicts, None and nested logic.
+_FUZZ_SHAPES: list[Any] = [
+    None, True, False, 0, 1, 2, -1, 1.5, _BIG, -_BIG, float("nan"), float("inf"),
+    "a", "", "5", "1.a", [], ["a"], [1], [[1]], [["a"]], [None], [{"var": "x"}],
+    {}, {"var": "a"}, {"var": []}, {"var": "lst"}, {"var": "d"}, {"var": "x"},
+    {"var": "nokey"}, {"cat": ["a", "b"]}, {"missing": ["a"]}, {"merge": [[1], [2]]},
+]  # fmt: skip
+
+
+def _shape_id(shape: Any) -> str:
+    return repr(shape)[:24]
+
+
+_FUZZ_DATA = {"x": "a", "lst": ["a"], "d": {"a": 1}, "a": 1, "s": "x"}
+
+
+class TestHugeIntOrdering:
+    """C1: an int past float range (reachable from an LLM extraction: json.loads
+    accepts 4300 digits) used to raise OverflowError inside ``float()``, so every
+    ordering, ``!=`` and mixed ``==`` with it answered a silent wrong False."""
+
+    @pytest.mark.parametrize(
+        ("logic", "expected"),
+        [
+            ({"<": [1, _BIG]}, True),
+            ({"<": [_BIG, _BIG * 10]}, True),
+            ({"<": ["5", _BIG]}, True),
+            ({"<": [_BIG, 1]}, False),
+            ({">=": [_BIG, 1]}, True),
+            ({">": [-_BIG, 1]}, False),
+            ({"<=": [_BIG, _BIG]}, True),
+            ({"!=": [_BIG, "100"]}, True),
+            ({"==": [_BIG, "100"]}, False),
+            ({"<": [1, _BIG, _BIG * 10]}, True),
+        ],
+    )
+    def test_ordering_and_equality_with_a_huge_int(self, logic, expected):
+        assert evaluate_logic(logic) is expected
+
+    def test_a_gate_on_an_extracted_huge_int(self):
+        assert evaluate_logic({">=": [{"var": "n"}, 18]}, {"n": _BIG}) is True
+
+    def test_the_comparison_functions_never_raise(self):
+        assert comparison.less(_BIG, _BIG * 10) is True
+        assert comparison.soft_equals(_BIG, "100") is False
+        assert comparison._numeric_equal(_BIG, _BIG) is True
+        assert comparison._numeric_equal(_BIG, "100") is False
+
+    def test_the_plain_number_gate_still_comes_first_for_equality(self):
+        """D-048: a huge int does not make a non-literal string numeric."""
+        assert comparison._numeric_equal(_BIG, "inf") is False
+        assert comparison._numeric_equal("1_000", 1000) is False
+
+
+class TestLogicRaisesOnlyTransitionEvaluationError:
+    """C1: ``evaluate_logic`` is public and logs, never leaks a bare TypeError."""
+
+    @pytest.mark.parametrize("key", _FUZZ_SHAPES, ids=_shape_id)
+    def test_has_context_with_a_non_string_key_is_false(self, key):
+        for logic in (
+            {"has_context": [{"var": ""}, key]},
+            {"has_context": [{"var": "d"}, key]},
+        ):
+            try:
+                result = evaluate_logic(logic, _FUZZ_DATA)
+            except TransitionEvaluationError:
+                continue
+            assert isinstance(result, bool)
+
+    def test_has_context_two_argument_non_string_key_warns_and_is_false(self):
+        with _captured_fsm_llm_warnings() as records:
+            assert (
+                evaluate_logic({"has_context": [{"var": ""}, ["a"]]}, {"a": 1}) is False
+            )
+        assert any("has_context" in r for r in records)
+        assert evaluate_logic({"has_context": [{"var": ""}, "a"]}, {"a": 1}) is True
+
+    @pytest.mark.parametrize(
+        "names", [None, True, 0, 5, 1.5, _BIG, float("nan")], ids=_shape_id
+    )
+    def test_missing_some_non_list_names_raises_not_empty(self, names):
+        with pytest.raises(TransitionEvaluationError, match="missing_some"):
+            evaluate_logic({"missing_some": [1, names]}, {})
+
+    def test_a_negated_missing_some_gate_does_not_pass_on_bad_names(self):
+        """Why it raises: returning ``[]`` would read as "nothing missing"."""
+        gate = {"!": [{"missing_some": [1, 5]}]}
+        with pytest.raises(TransitionEvaluationError):
+            evaluate_logic(gate, {})
+
+    @pytest.mark.parametrize("shape", _FUZZ_SHAPES, ids=_shape_id)
+    def test_sweep_no_other_exception_escapes_the_public_evaluator(self, shape):
+        logics = [
+            {"has_context": [shape, shape]},
+            {"missing_some": [1, shape]},
+            {"missing_some": [shape, ["a"]]},
+            *({op: [shape, other]} for op in ("<", "<=", ">", ">=", "==", "!=")
+              for other in (_BIG, 1, "5")),
+        ]  # fmt: skip
+        for logic in logics:
+            try:
+                evaluate_logic(logic, _FUZZ_DATA)
+            except TransitionEvaluationError:
+                pass
+
+    @pytest.mark.parametrize("a", _FUZZ_SHAPES, ids=_shape_id)
+    def test_sweep_the_comparison_functions_never_raise(self, a):
+        for b in (_BIG, -_BIG, "5", None, a):
+            for fn in (
+                comparison.less,
+                comparison.less_or_equal,
+                comparison.greater,
+                comparison.greater_or_equal,
+                comparison.soft_equals,
+                comparison.hard_equals,
+            ):
+                assert isinstance(fn(a, b), bool)
