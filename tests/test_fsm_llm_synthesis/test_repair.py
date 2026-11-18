@@ -585,11 +585,30 @@ class TestNotPromoted:
         assert res.code == code and not res.promote and not res.written
         assert rig.tree() == before and rig.untouched()
 
-    def test_nothing_to_replay_is_refused_after_the_child_passed_g6b(self, tmp_path):
-        rig = Rig(tmp_path, stored=False)
+    def test_nothing_to_replay_is_refused_before_approval_and_simulation(
+        self, tmp_path
+    ):
+        asked: list[Any] = []
+        rig = Rig(
+            tmp_path,
+            stored=False,
+            policy=SynthesisPolicy(require_approval=True),
+            reviewer=lambda request: asked.append(request) or True,
+        )
         before = rig.tree()
         res = rig.repair(write=True)
         assert res.code == "no-replay-set" and rig.tree() == before
+        assert asked == [] and rig.untouched()  # no human asked, no model call
+
+    def test_an_empty_replay_set_still_comes_after_the_cheap_refusals(self, tmp_path):
+        """``no-replay-set`` is model-free but not first: a patch the scope, the
+        gates or the lineage refuse says why, whatever the replay set holds."""
+        rig = Rig(tmp_path, stored=False)
+        bad = [{"op": "replace", "path": "/states/done/purpose", "value": "x"}]
+        assert rig.repair(bad).code == "patch-refused"
+        assert Rig(tmp_path / "b", stored=False, failures=0).repair().code == (
+            "too-few-failures"
+        )
 
     def test_a_spent_replay_bound_is_not_a_partial_verdict(self, tmp_path, monkeypatch):
         rig = Rig(tmp_path)

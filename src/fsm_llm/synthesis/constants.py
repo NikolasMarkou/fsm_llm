@@ -125,6 +125,8 @@ PATCH_CODES = (
 )
 
 # --- Promotion (D-053): every way ``repair_procedure`` ends, in order of check ---
+# ``no-replay-set`` is model-free and sits right after ``child-exists``, before the
+# approval and G6b it used to follow (plan 52ce5464 E7); D-053's text names the old order.
 PROMOTION_CODES = (
     "parent-not-live",
     "parent-not-canonical",
@@ -134,9 +136,9 @@ PROMOTION_CODES = (
     "gates-failed",
     "no-op",
     "child-exists",
+    "no-replay-set",
     "approval-refused",
     "simulation-failed",
-    "no-replay-set",
     "replay-incomplete",
     "regressed",
     "no-improvement",

@@ -193,10 +193,11 @@ def repair_procedure(
     ``diagnose`` calls a procedure fault; a written repair consumes the traces it
     used, so only newer runs count next time) are checked; ``apply_patch`` is scoped to the diagnosed
     states; the child must pass G1 to G6a, differ from the parent and from every
-    stored record, be approved when ``needs_approval`` says so, and pass G6b; the
-    replay set (the parent's stored scenarios plus ``replay_scripts``, each
-    ``{"kind", "turns"}``, a ``kind`` of ``happy`` or ``correction`` must end
-    with the return keys) runs ``policy.replay_trials`` times on parent and
+    stored record; the replay set (the parent's stored scenarios plus
+    ``replay_scripts``, each ``{"kind", "turns"}``, a ``kind`` of ``happy`` or
+    ``correction`` must end with the return keys) must not be empty
+    (``no-replay-set``, checked before any approval or simulation is spent); the
+    child must then be approved when ``needs_approval`` says so and pass G6b; the replay set runs ``policy.replay_trials`` times on parent and
     child with ``simulator``'s interface, and ``decide`` judges the counts. Only
     ``write=True`` with ``promote`` stores the child (``verified``, never
     ``trusted``; its record, scenarios and ``patches/<child>.json``), retires the
@@ -256,6 +257,8 @@ def repair_procedure(
         return stop("child-exists", child)
     except LibraryError:
         pass  # no record yet (a corrupt one fails loud in `put`)
+    if not scripts:  # model-free: nothing to replay, so no approval or G6b is spent
+        return stop("no-replay-set", child)
     goal = str(record.provenance["goal"] or "")
     try:
         approver = synthesizer.approval(
@@ -273,8 +276,6 @@ def repair_procedure(
         return stop("simulation-failed", child)
     if not sim.passed:
         return stop("simulation-failed", child)
-    if not scripts:
-        return stop("no-replay-set", child)
     replays = [
         simulator.replay(
             d,
