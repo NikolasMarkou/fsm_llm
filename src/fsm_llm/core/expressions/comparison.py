@@ -170,19 +170,27 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         False
 
     Note:
-        - Numeric conversion is always attempted first: less("10", "2") compares
-          as float(10) < float(2) = False. If conversion fails (e.g. non-numeric
-          strings), native comparison is used: less("abc", "def") = True.
+        - Numeric conversion is attempted first: less("10", "2") compares
+          as float(10) < float(2) = False. A string side must be a plain number
+          (``_PLAIN_NUMBER_RE`` after ``strip()``: not "inf", "1_000" or
+          non-ASCII digits); otherwise native comparison is used:
+          less("abc", "def") = True.
         - Chained comparisons evaluate left-to-right
         - Never raises: operands that cannot be ordered at all (a ``TypeError``
           from the native comparison) give False, and an ``int`` past float
           range is compared as the exact ``int`` (``_as_float``)
     """
-    # Always attempt numeric conversion for comparisons
-    try:
-        a, b = _as_float(a), _as_float(b)
-    except (TypeError, ValueError):
-        pass  # Fall back to native comparison
+    # Numeric conversion is attempted unless a string side is not a plain
+    # number: bare `float()` accepts "inf", "1_000" and non-ASCII digits that
+    # `==` refuses (D-048). Padding is trimmed, so " 25" still orders.
+    if all(
+        not isinstance(side, str) or _PLAIN_NUMBER_RE.fullmatch(side.strip())
+        for side in (a, b)
+    ):
+        try:
+            a, b = _as_float(a), _as_float(b)
+        except (TypeError, ValueError):
+            pass  # Fall back to native comparison
 
     # Perform the primary comparison
     try:
@@ -209,7 +217,8 @@ def _numeric_equal(a: Any, b: Any) -> bool:
     D-023 that kept ``soft_equals`` out of it) but NOT everywhere: ``<=``/``>=``
     also accept two numeric strings spelled differently (``"01" <= "1"``,
     ``"1" >= "1.0"``) and a ``bool`` against a numeric string (``True <= "1"``),
-    all of which ``==`` rejects. ``<`` and ``>`` never use this helper. A
+    all of which ``==`` rejects. ``<`` and ``>`` never use this helper, but gate
+    their own string operands the same way (padding trimmed). A
     ``str`` side must be a plain decimal/scientific literal
     (``_PLAIN_NUMBER_RE``); ``"1_000"``, ``" 1 "``, ``"inf"`` are not numbers.
     """

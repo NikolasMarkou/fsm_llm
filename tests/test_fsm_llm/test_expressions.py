@@ -1334,3 +1334,25 @@ class TestLogicRaisesOnlyTransitionEvaluationError:
                 comparison.hard_equals,
             ):
                 assert isinstance(fn(a, b), bool)
+
+
+class TestOrderingUsesThePlainNumberGate:
+    """C2: ``<``/``>``/``<=``/``>=`` coerced a string with bare ``float()``, so
+    ``"inf"``, ``"1_000"`` and non-ASCII digits passed ``>=`` while ``==``
+    refused them (D-048). Padding stays allowed (``" 25"``)."""
+
+    @pytest.mark.parametrize("value", ["inf", "Infinity", "-inf", "1_000", "١٠٠٠"])
+    def test_a_non_literal_string_never_passes_a_numeric_gate(self, value):
+        for op in ("<", ">", "<=", ">="):
+            assert evaluate_logic({op: [{"var": "age"}, 18]}, {"age": value}) is False
+            assert evaluate_logic({op: [18, {"var": "age"}]}, {"age": value}) is False
+
+    @pytest.mark.parametrize("value", ["25", " 25", "25 ", "\t2.5e1\n", "+25"])
+    def test_a_padded_or_plain_number_still_orders(self, value):
+        assert evaluate_logic({">=": [{"var": "age"}, 18]}, {"age": value}) is True
+        assert evaluate_logic({"<": [18, {"var": "age"}]}, {"age": value}) is True
+        assert evaluate_logic({"<": [{"var": "age"}, 18]}, {"age": value}) is False
+
+    def test_two_non_numeric_strings_still_order_natively(self):
+        assert evaluate_logic({"<": ["abc", "abd"]}) is True
+        assert evaluate_logic({"<": ["5", "abc"]}) is True
