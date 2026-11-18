@@ -47,7 +47,7 @@ from fsm_llm.runtime.stores.jsonl import (
     check_conversation_id,
     read_events,
 )
-from tests.conftest import current_timing_factor
+from tests.conftest import current_timing_factor, symlink_or_skip
 from tests.test_fsm_llm.event_log_support import child_env, reopen_after_kill
 
 JSONL_SOURCE = (
@@ -730,6 +730,115 @@ class TestLock:
         monkeypatch.setattr(jsonl, "_try_lock", broken)
         with pytest.raises(LogWriteError):
             JsonlWriter(tmp_path / "logs" / "nolock.jsonl")
+
+
+class TestASymlinkNeverRedirectsTheWriter:
+    """D1 (plan 52ce5464): a link at ``<id>.jsonl`` or ``<id>.lock`` must not send a write
+    (or the torn-tail cut) to a file outside the log root. Writing under ``logs/`` needs the
+    same trust as the session directory, so this is defense in depth with a data-destroying
+    worst case: a victim file with no trailing newline used to be cut to zero bytes."""
+
+    @staticmethod
+    def _refusal(path: Path, create: bool) -> BaseException | None:
+        """The error a writer open raises (captured by type, never a bare except), or None."""
+        try:
+            JsonlWriter(path, create=create).close()
+        except (LogCorruptError, LogWriteError) as exc:
+            return exc
+        return None
+
+    @pytest.mark.parametrize("victim", [b"precious=1 no newline", b"a\nb\nprecious"])
+    def test_a_link_to_a_file_is_refused_and_the_victim_keeps_every_byte(
+        self, tmp_path: Path, victim: bytes
+    ) -> None:
+        target = tmp_path / "victim.txt"
+        target.write_bytes(victim)
+        path = tmp_path / "logs" / "r1.jsonl"
+        path.parent.mkdir()
+        symlink_or_skip(path, target)
+        refusal = self._refusal(path, create=True)
+        assert target.read_bytes() == victim  # first: the data, whatever was raised
+        assert isinstance(refusal, LogCorruptError), refusal
+        assert "not a regular file" in str(refusal)
+        assert path.is_symlink()
+
+    def test_a_dangling_link_is_refused_and_the_target_is_never_created(
+        self, tmp_path: Path
+    ) -> None:
+        target = tmp_path / "outside" / "made.txt"
+        target.parent.mkdir()
+        path = tmp_path / "logs" / "r1.jsonl"
+        path.parent.mkdir()
+        symlink_or_skip(path, target)
+        refusal = self._refusal(path, create=True)
+        assert not target.exists()
+        assert isinstance(refusal, LogCorruptError), refusal
+
+    def test_a_directory_at_the_log_path_is_refused_in_create_mode(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "logs" / "r1.jsonl"
+        path.mkdir(parents=True)
+        assert isinstance(self._refusal(path, create=True), LogCorruptError)
+
+    @pytest.mark.parametrize("create", [True, False])
+    def test_a_dangling_lock_link_is_a_write_error_and_creates_nothing(
+        self, tmp_path: Path, create: bool
+    ) -> None:
+        if not hasattr(os, "O_NOFOLLOW"):
+            pytest.skip(
+                "no O_NOFOLLOW here (Windows): only the Windows legs can show it"
+            )
+        path = tmp_path / "logs" / "r1.jsonl"
+        JsonlWriter(path).close()  # a real log, so create=False reaches the lock
+        lock = path.with_name("r1.lock")
+        lock.unlink()
+        target = tmp_path / "outside" / "lock-made.txt"
+        target.parent.mkdir()
+        symlink_or_skip(lock, target)
+        refusal = self._refusal(path, create=create)
+        assert not target.exists()
+        assert isinstance(refusal, LogWriteError), refusal
+
+    def test_the_log_and_the_lock_are_opened_with_no_follow_where_there_is_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        if not hasattr(os, "O_NOFOLLOW"):
+            pytest.skip("no O_NOFOLLOW here (Windows)")
+        real_open = os.open
+        seen: dict[str, int] = {}
+
+        def spy(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+            seen[Path(path).name] = seen.get(Path(path).name, 0) | flags
+            return real_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", spy)
+        JsonlWriter(tmp_path / "logs" / "nf.jsonl").close()
+        assert seen["nf.jsonl"] & os.O_NOFOLLOW
+        assert seen["nf.lock"] & os.O_NOFOLLOW
+
+    def test_without_o_nofollow_the_flag_is_zero_and_a_plain_log_still_opens(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+        assert jsonl._nofollow() == 0
+        writer = JsonlWriter(tmp_path / "logs" / "plain.jsonl")
+        assert writer.append(_event()) == 1
+        writer.close()
+
+    def test_the_lstat_guard_alone_protects_the_victim_where_there_is_no_o_nofollow(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # the Windows case: no O_NOFOLLOW, so the lstat guard is the whole defense
+        monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+        target = tmp_path / "victim.txt"
+        target.write_bytes(b"precious=1 no newline")
+        path = tmp_path / "logs" / "r1.jsonl"
+        path.parent.mkdir()
+        symlink_or_skip(path, target)
+        refusal = self._refusal(path, create=True)
+        assert target.read_bytes() == b"precious=1 no newline"
+        assert isinstance(refusal, LogCorruptError), refusal
 
 
 class TestADroppedHolder:

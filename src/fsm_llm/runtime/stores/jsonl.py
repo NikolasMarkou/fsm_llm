@@ -67,6 +67,12 @@ def _binary_flag() -> int:
     return getattr(os, "O_BINARY", 0)
 
 
+def _nofollow() -> int:
+    """``os.O_NOFOLLOW`` where the platform has it, else 0 (Windows: the ``lstat`` guard of
+    ``JsonlWriter._open`` is then the whole defense). Read at call time, like ``_binary_flag``."""
+    return getattr(os, "O_NOFOLLOW", 0)
+
+
 def check_conversation_id(conversation_id: str) -> str:
     """Return *conversation_id* when it is a safe file name on every platform.
 
@@ -143,7 +149,9 @@ def exclusive_lock(
     path = log_dir / (check_conversation_id(conversation_id) + LOCK_SUFFIX)
     try:
         fd = os.open(
-            path, os.O_RDWR | _binary_flag() | (os.O_CREAT if create else 0), 0o600
+            path,
+            os.O_RDWR | _binary_flag() | _nofollow() | (os.O_CREAT if create else 0),
+            0o600,
         )
     except FileNotFoundError:
         yield True
@@ -270,6 +278,11 @@ class JsonlWriter:
           link, ``LogCorruptError``: the appends would land outside the log root); the lock is
           taken before the log is scanned, and the
           torn-tail repair and the ``seq`` continuation are the same code as for a new writer.
+          A log path that is not a regular file is refused in BOTH modes (before the lock is
+          opened), and the log and the lock are opened with ``O_NOFOLLOW`` where the platform has
+          it, so a link at ``<id>.lock`` is ``LogWriteError`` and never followed. Windows has no
+          ``O_NOFOLLOW``: there the ``lstat`` check is the whole defense (unverified until the
+          Windows run).
         - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays. A
           writer that is dropped without ``close`` is closed by its finalizer, so a forgotten
           one frees its two descriptors and the lock when the object is collected (do not rely
@@ -313,16 +326,23 @@ class JsonlWriter:
     def _open(self) -> None:
         if self._create:
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # A log is a regular file under the log root: a symbolic link (dangling or not) would
+        # send the appends, and the torn-tail cut, to a file elsewhere. Both modes look before
+        # anything is opened; an unknown id raises FileNotFoundError here, before any file is
+        # made, and only a creating writer may meet a missing file.
+        try:
+            mode = os.lstat(self.path).st_mode
+        except FileNotFoundError:
+            if not self._create:
+                raise
         else:
-            # an unknown id raises FileNotFoundError here, before any file is made. A log is a
-            # regular file under the log root: a symbolic link would send the appends elsewhere.
-            if not stat.S_ISREG(os.lstat(self.path).st_mode):
+            if not stat.S_ISREG(mode):
                 raise LogCorruptError(
                     f"log {self.path.name} is not a regular file (a link or a directory)"
                 )
         lock_path = self.path.with_name(self.conversation_id + LOCK_SUFFIX)
         self._lock_fd = os.open(
-            lock_path, os.O_RDWR | os.O_CREAT | _binary_flag(), 0o600
+            lock_path, os.O_RDWR | os.O_CREAT | _binary_flag() | _nofollow(), 0o600
         )
         if not _try_lock(self._lock_fd):
             raise LogLockedError(
@@ -335,7 +355,8 @@ class JsonlWriter:
             os.O_WRONLY
             | os.O_APPEND
             | (os.O_CREAT if self._create else 0)
-            | _binary_flag(),
+            | _binary_flag()
+            | _nofollow(),
             0o600,
         )
         if not existed:
