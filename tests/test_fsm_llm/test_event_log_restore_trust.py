@@ -20,11 +20,14 @@ import pytest
 from fsm_llm import API, FileSessionStore
 from fsm_llm.core.definitions import RunBudgetExceededError
 from fsm_llm.engine.api import forks
+from fsm_llm.engine.session import EventLogSessionStore
 from fsm_llm.llm import LLMInterface
 from fsm_llm.runtime import EventLog, EventType, LogCorruptError, retention
 from fsm_llm.runtime.privacy import SHAPE_FIELDS
+from fsm_llm.runtime.stores import fold_session, fold_stack
 from fsm_llm.testing import ScriptedLLM
 from tests.conftest import symlink_or_skip
+from tests.test_fsm_llm import test_event_log_forks as _forks
 from tests.test_fsm_llm.test_event_log_forks import (
     _GRANT,
     _KIDS,
@@ -393,3 +396,145 @@ class TestAPlainRestoreSeedsOnlyPublicKeys:
             raw = _raw(api, conversation)
             assert raw["name" if conversation == root else "topic"]
             assert not raw.keys() & _FORGED.keys()
+
+
+_BAD_MEMORY: list[Any] = [
+    {"working_memory": "bad"},
+    {"working_memory": ["x"]},
+    {"working_memory": 5},
+    {"working_memory": {}, "hidden_buffers": "abc"},
+    {"working_memory": {}, "hidden_buffers": [1, 2]},
+    {"working_memory": {}, "hidden_buffers": 5},
+    {"working_memory": {}, "hidden_buffers": {"a": 1}},
+]
+_BAD_DELTAS: list[Any] = [
+    {"context": "oops", "internal": ["x"]},
+    {"context": [1, 2]},
+    {"internal": 5},
+    {"context": {"x": 1}, "internal": "no"},
+]
+
+
+@pytest.fixture
+def forge_blob(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """``forge_blob(state, **fields)``: every state blob ``_forge`` writes for *state* carries
+    *fields* as given (a forged blob, written by hand into the log's blob store)."""
+    extra: dict[str, dict[str, Any]] = {}
+    real = _forks._sblob
+
+    def sblob(fsm_id: str, state: str, internal: Any = None, **context: Any) -> Any:
+        blob = real(fsm_id, state, internal, **context)
+        blob.update(extra.get(state, {}))
+        return blob
+
+    monkeypatch.setattr(_forks, "_sblob", sblob)
+    return lambda state, **fields: extra.setdefault(state, {}).update(fields)
+
+
+def _restore_through(log: EventLog, route: str, tid: str, at_turn: int) -> None:
+    """Rebuild the tree *tid* through *route* (fork, resume or the session store)."""
+    if route == "store":
+        api = _api(log, session_store=EventLogSessionStore(log))
+        api.restore_session(tid)
+    elif route == "fold":
+        fold_session(log.read(tid), log.get_json)
+    elif route == "stack":
+        fold_stack(log.read(tid), log.get_json)
+    else:
+        api = _api(log)
+        if route == "fork":
+            api.fork(tid, at_turn=at_turn)
+        else:
+            log.release(tid)
+            api.resume(tid)
+
+
+def _delta(log: EventLog, tid: str, delta: Any, frame: int) -> None:
+    log.append(
+        tid,
+        EventType.CONTEXT_RECORD,
+        frame=frame,
+        source="u",
+        keys=[],
+        delta_ref=log.put_json(delta),
+    )
+
+
+class TestAForgedBlobIsCorruptAtTheFold:
+    """D2 (runtime audit 1.4): the fold checks the type of every part of a state blob and of a
+    delta, so a forged log says ``LogCorruptError`` and never a raw ``ValueError`` or a
+    ``frozenset("abc")``. The honest writer emits a dict (or None), a list of str and dict parts."""
+
+    @pytest.mark.parametrize("route", ["fork", "resume", "store", "fold"])
+    @pytest.mark.parametrize("forged", _BAD_MEMORY)
+    def test_a_forged_root_memory_or_hidden_buffer_is_corrupt(
+        self, log: EventLog, forge_blob: Any, route: str, forged: dict[str, Any]
+    ) -> None:
+        forge_blob("chat", **forged)
+        tid = _forge(log, _api(log))
+        with pytest.raises(LogCorruptError):
+            _restore_through(log, route, tid, at_turn=1)
+        if route in ("fork", "resume"):
+            _nothing_left(_api(log), log)
+
+    # a fork at turn 1 cuts before a delta appended after that turn, so it is not a route here
+    @pytest.mark.parametrize("route", ["resume", "store", "fold", "stack"])
+    @pytest.mark.parametrize("delta", _BAD_DELTAS)
+    def test_a_forged_root_delta_part_is_corrupt(
+        self, log: EventLog, route: str, delta: Any
+    ) -> None:
+        tid = _forge(log, _api(log))
+        _delta(log, tid, delta, frame=0)
+        with pytest.raises(LogCorruptError):
+            _restore_through(log, route, tid, at_turn=1)
+
+    @pytest.mark.parametrize("route", ["fork", "resume", "stack"])
+    @pytest.mark.parametrize("forged", _BAD_MEMORY)
+    def test_a_forged_frame_memory_or_hidden_buffer_is_corrupt(
+        self, log: EventLog, forge_blob: Any, route: str, forged: dict[str, Any]
+    ) -> None:
+        forge_blob("hello", **forged)
+        tid = _forge(log, _api(log), child=_KIDS)
+        with pytest.raises(LogCorruptError):
+            _restore_through(log, route, tid, at_turn=2)
+
+    # a fork at turn 2 cuts before a delta appended after the child's turn, so it is not a route
+    @pytest.mark.parametrize("route", ["resume", "stack"])
+    @pytest.mark.parametrize("delta", _BAD_DELTAS)
+    def test_a_forged_frame_delta_part_is_corrupt(
+        self, log: EventLog, route: str, delta: Any
+    ) -> None:
+        tid = _forge(log, _api(log), child=_KIDS)
+        _delta(log, tid, delta, frame=1)
+        with pytest.raises(LogCorruptError):
+            _restore_through(log, route, tid, at_turn=2)
+
+    def test_the_fold_stack_refuses_a_forged_root_and_a_forged_frame(
+        self, log: EventLog, forge_blob: Any
+    ) -> None:
+        forge_blob("chat", working_memory="bad")
+        tid = _forge(log, _api(log), child=_KIDS)
+        with pytest.raises(LogCorruptError):
+            fold_stack(log.read(tid), log.get_json)
+
+    @pytest.mark.parametrize(
+        "delta", [{}, {"context": None}, {"internal": None}, {"context": {"x": 1}}]
+    )
+    def test_an_honest_delta_and_an_honest_blob_still_fold(
+        self, log: EventLog, forge_blob: Any, delta: Any
+    ) -> None:
+        """The negative control: None parts are empty, a dict part applies, a real memory and a
+        list of names come back as written."""
+        forge_blob("chat", working_memory={"main": {"k": "v"}}, hidden_buffers=["h"])
+        tid = _forge(log, _api(log))
+        _delta(log, tid, delta, frame=0)
+        projection = fold_session(log.read(tid), log.get_json)
+        assert projection is not None
+        assert projection.working_memory == {
+            "buffers": {"main": {"k": "v"}},
+            "hidden_buffers": ["h"],
+        }
+        assert projection.context_data["name"] == "Ann"
+        assert ("x" in projection.context_data) == (
+            "context" in delta and bool(delta["context"])
+        )

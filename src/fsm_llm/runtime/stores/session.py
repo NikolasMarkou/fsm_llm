@@ -185,15 +185,18 @@ def projection_from_legacy_file(path: str | os.PathLike[str]) -> SessionProjecti
 
 
 def _apply_delta(context: dict[str, Any], internal: dict[str, Any], delta: Any) -> None:
-    """Apply one ``update_context`` delta blob; a ``None`` value is a value, as in the write."""
+    """Apply one ``update_context`` delta blob; a ``None`` value is a value, as in the write.
+
+    The writer always emits both parts as objects: an absent or ``None`` part is empty, any
+    other part that is not an object is a forged blob (``LogCorruptError``, never skipped).
+    """
     if not isinstance(delta, dict):
         raise LogCorruptError("a context delta blob is not a JSON object")
-    for target, part, keep_internal in (
-        (context, delta.get("context"), False),
-        (internal, delta.get("internal"), True),
+    for target, name, keep_internal in (
+        (context, "context", False),
+        (internal, "internal", True),
     ):
-        if not isinstance(part, dict):
-            continue
+        part = _mapping(delta, name, "delta part")
         for key, value in part.items():
             if not keep_internal and has_internal_prefix(key):
                 continue
@@ -244,13 +247,37 @@ def fold_session(
     return build_projection(ref, deltas, load_blob, conversation_id, last_seq, tools)
 
 
-def _mapping(blob: Mapping[str, Any], key: str) -> dict[str, Any]:
+def _mapping(
+    blob: Mapping[str, Any], key: str, what: str = "state blob field"
+) -> dict[str, Any]:
     value = blob.get(key)
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise LogCorruptError(f"state blob field {key!r} is not a JSON object")
+        raise LogCorruptError(f"{what} {key!r} is not a JSON object")
     return value
+
+
+def _working_memory(blob: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The ``working_memory`` of a state blob for the projection: ``None`` when it has none.
+
+    Checks what the honest writer guarantees (``snapshots.py``: the buffers are an object and
+    ``hidden_buffers`` a sorted list of names), so a forged blob is ``LogCorruptError`` here and
+    never a raw ``ValueError``, a ``frozenset("abc")`` or a set of numbers at the restore.
+    """
+    memory = blob.get("working_memory")
+    hidden = blob.get("hidden_buffers")
+    if hidden is None:
+        hidden = []
+    if not isinstance(hidden, list) or not all(isinstance(n, str) for n in hidden):
+        raise LogCorruptError(
+            "state blob field 'hidden_buffers' is not a list of names"
+        )
+    if memory is None:
+        return None
+    if not isinstance(memory, dict):
+        raise LogCorruptError("state blob field 'working_memory' is not a JSON object")
+    return {"buffers": memory, "hidden_buffers": hidden}
 
 
 def build_projection(
@@ -279,7 +306,6 @@ def build_projection(
     internal = dict(_mapping(blob, "internal"))
     for delta_ref in deltas:
         _apply_delta(context, internal, load_blob(delta_ref))
-    memory = blob.get("working_memory")
     return _validated(
         {
             "conversation_id": conversation_id,
@@ -288,14 +314,7 @@ def build_projection(
             "context_data": context,
             "conversation_history": blob.get("conversation_history") or [],
             "conversation_summary": blob.get("conversation_summary"),
-            "working_memory": (
-                None
-                if memory is None
-                else {
-                    "buffers": memory,
-                    "hidden_buffers": blob.get("hidden_buffers") or [],
-                }
-            ),
+            "working_memory": _working_memory(blob),
             "provenance": _mapping(blob, "provenance"),
             "completion_context": internal,
             "unknown_tool_calls": unresolved_tool_calls(tools),
