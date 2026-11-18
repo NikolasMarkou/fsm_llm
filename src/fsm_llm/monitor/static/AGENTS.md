@@ -43,9 +43,9 @@ Control flow in `app.js`:
 | File | Role | Notes |
 | --- | --- | --- |
 | `app.js` | Boot, navigation, delegation, polling | `VALID_PAGES = dashboard, control, visualizer, logs, builder, settings`; exports nothing |
-| `style.css` | Theme and components | Design tokens on `:root` (`--bg`, `--surface`, `--primary`, `--primary-dim`, `--success`, `--warning`, `--danger`, `--info`, `--text*`, `--space-*`, `--radius-*`, `--shadow-*`, `--font-body`, `--font-mono`); 2,728 lines |
+| `style.css` | Theme and components | Design tokens on `:root` (`--bg`, `--surface`, `--primary`, `--primary-dim`, `--success`, `--warning`, `--danger`, `--info`, `--text*`, `--space-*`, `--radius-*`, `--shadow-*`, `--font-body`, `--font-mono`) |
 | `flows.json` | Pattern graphs for the Visualizer | Hand-maintained; schema under Data shapes |
-| `pages/` | 8 screen modules | `dashboard`, `control`, `conversations`, `launch`, `visualizer`, `builder`, `logs`, `settings` |
+| `pages/` | Screen modules | `dashboard`, `control`, `conversations`, `launch`, `visualizer`, `builder`, `logs`, `settings` |
 | `services/` | `api.js`, `auth.js`, `state.js`, `ws.js` | REST client, API key, shared state, WebSocket |
 | `utils/` | `dom.js`, `format.js`, `markdown.js`, `graph.js` | `esc()`, formatting, safe Markdown subset, BFS SVG layout |
 
@@ -57,7 +57,7 @@ Control flow in `app.js`:
 - `dashboard.js`: metric cards, event feed (max 50), instance grid (12/page), activity table (20/page), optional custom panels and alerts from `/api/dashboard/config`. Exports include `refreshInstances` (shared by several pages), `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `refreshActivityTable`, `loadDashboardConfig`, `setNavigateToInstance`.
 - `control.js`: unified instance table (25/page) and right-side drawer with per-type detail (FSM, workflow, agent), agent trace, workflow Send Event form, cancel and destroy. Exports include `refreshControlCenter`, `renderUnifiedTable`, `updateRunningAgents`, `refreshDetailPanel`, `openDrawer`, `closeDrawer`, `navigateToInstance`, `setDeps`. The drawer polls every 2000 ms through `state.detailPollTimer`; refreshes are token-guarded so only the latest paints.
 - `conversations.js`: conversation detail and chat in the drawer, End conversation; `showConversationInDrawer`, `showConversationDetail`, `addTypingIndicator`, `removeTypingIndicator`, `setDeps`. `_detailRequestId` drops stale responses.
-- `launch.js`: launch modal for FSMs (preset or pasted JSON), workflow presets, agents with stub tools (`TOOL_TEMPLATES`, 15 entries). Launch FSM also starts one conversation and opens it in the drawer after 500 ms.
+- `launch.js`: launch modal for FSMs (preset or pasted JSON), workflow presets, agents with stub tools (`TOOL_TEMPLATES`). Launch FSM also starts one conversation and opens it in the drawer after 500 ms.
 - `visualizer.js`: FSM, agent, and workflow graphs through `utils/graph.js`, preset dropdown, resizable split pane (`initVizDivider`).
 - `builder.js`: chat with the meta-builder (`/api/builder/start`, `/send`, DELETE), result summary, copy, download (`artifact.json`), launch. Workflow artifacts cannot be launched.
 - `logs.js`: `appendLogs`, `syncLogs`, `onShowLogs`. Level pills, search highlight, pause buffer (cap 5000), DOM cap 1000, de-dup by `timestamp|level|module:line|message`, sidebar error badge.
@@ -91,8 +91,8 @@ Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`,
   - `dashboard_config_version` -> `dashboardConfigChanged()` (refetches `/api/dashboard/config`).
 - Main page-level payloads: instance (`instance_id`, `instance_type` fsm|workflow|agent, `label`, `status`, `source`, `conversation_count`, `agent_type`, `task`, `active_workflows`, `created_at`); activity row (`item_type` fsm_conversation|agent_task|workflow_instance, `item_id`, `instance_id`, `label`, `current_step`, `detail`, `status`, `is_terminal`); config (`refresh_interval`, `max_events`, `max_log_lines`, `log_level`, `show_internal_keys`, `auto_scroll_logs`); log record (`timestamp`, `level`, `module`, `line`, `message`, `conversation_id`).
 - `flows.json`: `{agents: {<AgentClass>: {description, nodes[], edges[]}}, workflows: {<id>: {name, description, nodes[], edges[]}}}`. Node `{id, label, description, is_initial, is_terminal}` (workflow nodes also carry `step_type`). Edge `{from, to, label}`.
-  - Agents (12): `ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `DebateAgent`, `SelfConsistencyAgent`, `REWOOAgent`, `PromptChainAgent`, `EvaluatorOptimizerAgent`, `MakerCheckerAgent`, `OrchestratorAgent`, `ADaPTAgent`, `ReasoningReactAgent`.
-  - Workflows (5): `order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`.
+  - Agents: `ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `DebateAgent`, `SelfConsistencyAgent`, `REWOOAgent`, `PromptChainAgent`, `EvaluatorOptimizerAgent`, `MakerCheckerAgent`, `OrchestratorAgent`, `ADaPTAgent`, `ReasoningReactAgent`.
+  - Workflows: `order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`.
   - `server/application.py` `_load_flows()` reads it into `_flows` inside `configure()`, and again in `get_flows()` when `_flows` is empty (a missing file gives `{"agents": {}, "workflows": {}}`). Served by the two visualize routes; unknown names give 404 with `detail`. Also reachable raw at `/static/flows.json`.
 
 ## Invariants and constraints

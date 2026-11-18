@@ -32,9 +32,9 @@ flowchart TD
 | `dashboard.js` | Metrics, event feed (max 50 entries), instance grid (12/page), activity table (20/page), custom panels and alerts | `refreshInstances` is shared with control, launch, builder, conversations |
 | `control.js` | Unified table (25/page), drawer, per-type detail, agent trace, workflow Send Event form | Drawer polls every 2000 ms via `state.detailPollTimer`, skipped while the conversation sub-view is shown |
 | `conversations.js` | Conversation detail and chat in the drawer, End conversation | `_detailRequestId` drops stale responses; `_sendingConvId` defers re-renders during a send |
-| `launch.js` | Launch modal | `TOOL_TEMPLATES` (15 stub tools); default FSM temperature 0.5, agent `max_iterations` 10 |
+| `launch.js` | Launch modal | `TOOL_TEMPLATES` (the stub tools); default FSM temperature 0.5, agent `max_iterations` 10 |
 | `visualizer.js` | Graph rendering for fsm/agent/workflow, preset dropdown, split pane | Uses `renderGraph` from `utils/graph.js` |
-| `builder.js` | Meta-builder chat and launch | `AGENT_TYPE_MAP` lowercase -> class name (11 entries); `_sessionToken` drops replies from abandoned sessions |
+| `builder.js` | Meta-builder chat and launch | `AGENT_TYPE_MAP` lowercase -> class name; `_sessionToken` drops replies from abandoned sessions |
 | `logs.js` | Log stream | Pause buffer cap 5000, DOM cap 1000, de-dup key set cap 10000 |
 | `settings.js` | Config form and API key field | Reset defaults 1.0 / 1000 / 5000 / INFO; client bounds in `LIMITS` |
 

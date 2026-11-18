@@ -33,7 +33,7 @@ flowchart LR
 - `dashboard.js` - metric cards, event feed, instance grid, activity table, optional custom dashboard panels and alerts.
 - `control.js` - instance table, detail drawer for FSM, workflow, and agent instances, agent trace view, workflow Send Event form, cancel and destroy actions.
 - `conversations.js` - conversation detail view and chat box inside the drawer, End conversation; its typing indicator is reused by the builder.
-- `launch.js` - launch modal for FSMs, workflows, and agents, including 15 ready-made stub tool templates.
+- `launch.js` - launch modal for FSMs, workflows, and agents, including ready-made stub tool templates.
 - `visualizer.js` - FSM, agent, and workflow graph drawing, preset dropdown, resizable split pane.
 - `builder.js` - chat session with the meta-builder, internal state panel, result summary, copy, download, and launch.
 - `logs.js` - log stream with pause buffer, level pills, search highlight, sidebar error badge.

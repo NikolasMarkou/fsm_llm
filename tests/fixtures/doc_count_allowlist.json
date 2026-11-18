@@ -18,10 +18,6 @@
  "src/fsm_llm/AGENTS.md": {
   "800 lines": 1
  },
- "src/fsm_llm/monitor/static/AGENTS.md": {
-  "2,728 lines": 1,
-  "8 screen modules": 1
- },
  "tests/AGENTS.md": {
   "0 tests": 1,
   "1 test": 2,

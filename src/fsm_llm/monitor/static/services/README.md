@@ -4,7 +4,7 @@ Browser-side plumbing for the FSM-LLM Monitor web dashboard (`src/fsm_llm/monito
 
 ## What it is for
 
-The FSM-LLM Monitor is a web dashboard served by the `fsm_llm.monitor` Python package (FastAPI) and started with the `fsm-llm-monitor` command. Its frontend is plain JavaScript ES modules with no framework and no build step. This folder holds the four modules every page relies on. They talk to the server (`fetch` for REST calls, one WebSocket for live pushes), keep one shared state object so pages do not each track their own copy, and handle the optional monitor API key.
+The FSM-LLM Monitor is a web dashboard served by the `fsm_llm.monitor` Python package (FastAPI) and started with the `fsm-llm-monitor` command. Its frontend is plain JavaScript ES modules with no framework and no build step. This folder holds the modules every page relies on. They talk to the server (`fetch` for REST calls, one WebSocket for live pushes), keep one shared state object so pages do not each track their own copy, and handle the optional monitor API key.
 
 ## How it works
 

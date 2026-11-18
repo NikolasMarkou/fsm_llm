@@ -50,4 +50,4 @@ renderGraph('viz-svg', {
 - Nodes the layout cannot reach from the initial node all go in one extra layer at the end.
 - `showToast` shows a success style only when the type is exactly `'success'`; any other type gets the error style. It also copies the text into the `#toast-live` element so screen readers announce it.
 - `copyToClipboard` falls back to the old `document.execCommand('copy')` path and always resolves to `true`.
-- There are no JavaScript unit tests. Python tests only check that the four files exist and are served.
+- There are no JavaScript unit tests. Python tests only check that the files exist and are served.
