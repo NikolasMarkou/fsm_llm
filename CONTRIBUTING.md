@@ -58,7 +58,7 @@ fsm_llm/
 │   ├── core/verify/, core/visualize/   # Validator, data-flow and liveness analysis; diagrams and graph export
 │   ├── handlers/              # Handler system, HandlerBuilder, create_handler
 │   ├── llm/                   # LLMInterface and LiteLLMInterface (llm/providers/litellm.py is the only litellm import), reply parsing
-│   ├── runtime/               # The opt-in durable event log: EventLog, JSONL and blob stores, turn scope, session projection (imports core, llm and the kernel only)
+│   ├── runtime/               # The opt-in durable event log: EventLog, JSONL and blob stores, turn scope, session and stack projections (API.fork and API.resume read them), privacy levels, retention, usage fold (imports core, llm and the kernel only)
 │   ├── context/               # Context cleaning, compaction, filtering and the prompt builders (context/layout/)
 │   ├── engine/classification.py, session.py, builders.py   # Classifier, session store, API/FSMManager builders
 │   ├── security/, constants.py, logging.py, memory.py, env.py   # Key filtering, path confinement, limits, logging, working memory, .env loader

@@ -175,7 +175,7 @@ Every compile runs these checks, in this order, and reports all failures, not ju
 7. **G6b, simulation** (`simulation.py`), only when a `Simulator` is given. A scripted happy path built from the definition, plus scenarios of four kinds written by one model call (`missing_info`, `correction`, `off_topic`, `adversarial`), are played against the procedure on the simulator's interface. It passes when the happy path and the overall pass rate both reach `policy.min_pass_rate` (default 0.5) and the happy path moves past the first state. `require_simulation=True` makes it mandatory.
 8. **G7, approval.** Required when `policy.require_approval` is set or a `completion` state lists tools. See Approval below.
 
-When the gates pass, an abort path is injected: a silent `abort` terminal state and a priority 0 edge to it from every non-terminal state, gated on the handler-only key `procedure_abort`. The runner sets that key when the child spends its turn budget, so no model reply can forge or block it. G1 and G2 run again on the injected form. The names `abort`, `procedure_abort` and `synthesis_result` are reserved: a compile may not declare, read or write them.
+When the gates pass, an abort path is injected: a silent `abort` terminal state and a priority 0 edge to it from every non-terminal state, gated on the handler-only key `procedure_abort`. The runner no longer sets that key: the engine bounds the child with the lifetime turn budget of its frame (`max_steps=policy.max_turns`), so the injected edge never fires and stays until roadmap P7.1 removes it. G1 and G2 run again on the injected form. The names `abort`, `procedure_abort` and `synthesis_result` are reserved: a compile may not declare, read or write them.
 
 ### What `verified` means
 
@@ -198,7 +198,7 @@ A hit is re-verified (G1 to G6a on the stored form) before it runs. A hit that f
 
 ## Running a procedure
 
-`ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)` serves a host definition. Per conversation it settles three things as the host runs: it pops an ended child, aborts a child that spent `policy.max_turns` steps (it sets `procedure_abort`), and starts a pending synthesize state (write `running`, `obtain`, check that the procedure may run, push it as a child with no inherited context).
+`ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)` serves a host definition. Per conversation it settles three things as the host runs: it pops an ended child, aborts a child whose frame spent `policy.max_turns` turns (the engine's lifetime count: the runner keeps none, writes `{status: aborted, reason: budget_spent}` and ends the child without a merge), and starts a pending synthesize state (write `running`, `obtain`, check that the procedure may run, push it as a child with no inherited context).
 
 - `run(conversation_id, *, max_steps, max_seconds=None)` runs message-free on core `run_until_terminal`. A spent budget raises `RunBudgetExceededError`.
 - `converse(conversation_id, message) -> str` is one user turn.
@@ -211,7 +211,7 @@ Things to know when you run one:
 - The result key is skip-if-set: a state that must run again on re-entry has to clear `synthesis_result` on entry (core `clear_keys_on_entry`). A child FSM you push yourself with `API.push_fsm` does not inherit the parent's value of its own synthesize `result_key` (the child's edges, which must read it, would route on the stale result before any run wrote one); pass it in `context_to_pass` if you want it.
 - One thread per conversation, like `API.converse`. The runner holds no lock.
 - A nested synthesize state (depth 2) works only for a procedure that returns one of its inputs.
-- `policy.max_turns` is the only turn bound. Core has none.
+- `policy.max_turns` is the child's turn bound, and the engine enforces it: it is the `max_steps` of the child frame's turn budget (core turn budgets, `API.push_fsm(max_steps=)`), counted over the frame's whole life and not per run call. A host can bound its own conversation the same way with `API(max_steps=)`.
 - Two interfaces are metered separately: the strong one inside the synthesizer, the cheap one on the host `API`.
 
 ## Agent tools
@@ -255,7 +255,7 @@ Procedures that fail in use can be improved, and the loop is built so that a use
 
 - Size of a procedure: `max_states` 12, `max_transitions_per_state` 6, `max_fields_per_state` 10, `max_text_chars` 600.
 - Compile: `max_repair_rounds` 3, `max_compile_tokens` 8192, `max_synthesis_seconds` 300.
-- Run: `max_turns` 40 steps of the child in total.
+- Run: `max_turns` 40 turns of the child in total (the engine's lifetime count of its frame).
 - Simulation: `max_sim_turns` 12, `sim_trials` 2, `min_pass_rate` 0.5, `max_simulation_calls` 400.
 - Repair: `repair_min_failures` 3, `max_repairs_per_lineage` 3 (counted over the whole tree from the root).
 
@@ -308,7 +308,7 @@ Which rows predate which fix: every s0 row predates all of the above; s1 rows pr
 - Procedures cannot call tools. A compile may list `completion` tools (and then needs approval), but the runner and `run_procedure` refuse to run one.
 - A corrupt library file blocks retrieval for the whole library until a human fixes it.
 - Two signals of misbehaviour (an out-of-scope intent and a raw malformed extraction) are not recorded by core, so `diagnose` cannot use them.
-- The runner marks a provider outage from the host interface's error counter (`usage().errors`). A host that calls `reset_usage()` during a run, or an interface with no meter, gets the outage recorded as `budget_spent`, which `diagnose` reads as a procedure fault. A shared interface can give a false outage mark, which fails closed.
+- The runner marks a provider outage from a position it takes when it pushes the child: the event log of the host `API` when it has one (the errors of the child's frame after that position, so `reset_usage()` mid-run and an interface with no meter do not hide it), else the interface ledger (a position that survives `reset_usage()`), else the interface's own `usage().errors`, else 0. A host interface with no meter and no event log gets an outage recorded as `budget_spent`, which `diagnose` reads as a procedure fault. With only the ledger, a shared interface can give a false outage mark, which fails closed.
 - Importing the package loads `fsm_llm.agents`, `fsm_llm.reasoning` and `fsm_llm.eval`.
 
 See `src/fsm_llm/synthesis/README.md` and `src/fsm_llm/synthesis/AGENTS.md` for the file list and the contracts, and `docs/api_reference.md` for signatures.

@@ -29,6 +29,8 @@ API(
     *,
     executors: Mapping[str, StateExecutor] | None = None,
     event_log: EventLog | str | os.PathLike[str] | None = None,
+    max_steps: int | None = None,
+    max_seconds: float | None = None,
     **llm_kwargs,
 )
 ```
@@ -127,11 +129,62 @@ api = API.from_file("bot.json", model="gpt-4o-mini",
 new_conv_id, state = api.restore_session(conv_id)
 ```
 
-Event types are the closed `fsm_llm.runtime.EventType` vocabulary (21 declared, 13 written today: `turn/start`, `turn/end` with an outcome of `committed`, `rolled_back`, `abandoned` or `interrupted`, `llm/request`, `llm/response`, `provider/error`, `executor/start`, `executor/result`, `transition`, `stack/push`, `stack/pop`, `context/record`, `tool/call`, `tool/result`). `EventLogSessionStore(log, *, legacy_dir=None)` is read-only (`save` is a no-op, `delete` raises `EventLogError`): `load` folds the log into the state of the last committed turn (or the pre-turn state of a turn that never ended), reads an old `FileSessionStore` file from `legacy_dir` through a versioned projection (`fsm_llm.runtime.stores.session.SessionProjection`, version 2, one migration from version 1) when the log has no state for the id, and reports tool calls with no result as `unknown` in `SessionState.metadata["unknown_tool_calls"]` (never retried). A completion state restored mid tool exchange continues from the transcript the log carries; a restore from a `FileSessionStore` snapshot still refuses it. `EventLog.tool_call(conversation_id, *, name, call_id, arguments, side_effecting=True)` is the checkpoint context manager a consumer wraps a tool run in (the product tool runners do not call it yet).
+Event types are the closed `fsm_llm.runtime.EventType` vocabulary (21 declared, 14 written today: `turn/start`, `turn/end` with an outcome of `committed`, `rolled_back`, `abandoned` or `interrupted`, `llm/request`, `llm/response`, `provider/error`, `executor/start`, `executor/result`, `transition`, `stack/push`, `stack/pop`, `context/record`, `tool/call`, `tool/result`, `decision`, the last one a refused turn of a spent turn budget). `EventLogSessionStore(log, *, legacy_dir=None)` is read-only (`save` is a no-op, `delete` raises `EventLogError`): `load` folds the log into the state of the last committed turn (or the pre-turn state of a turn that never ended), reads an old `FileSessionStore` file from `legacy_dir` through a versioned projection (`fsm_llm.runtime.stores.session.SessionProjection`, version 2, one migration from version 1) when the log has no state for the id, and reports tool calls with no result as `unknown` in `SessionState.metadata["unknown_tool_calls"]` (never retried). A completion state restored mid tool exchange continues from the transcript the log carries; a restore from a `FileSessionStore` snapshot still refuses it. `EventLog.tool_call(conversation_id, *, name, call_id, arguments, side_effecting=True)` is the checkpoint context manager a consumer wraps a tool run in (the product tool runners do not call it yet).
 
-Limits: the request of the greeting model call is not logged (its text is in the start record); stack restore, `fork` and `resume` are roadmap row 1.4; a prompt is stored as the model saw it, not rebuilt from the layout (rows 1.9 and 2.3). The log holds user text and prompts as the model saw them, so keep the log directory as private as the session directory: only context entries that are secret-looking by the repository rule are redacted, and a `*_token` key whose value is not token-shaped is not secret-looking by that rule. Power-loss durability is argued, not tested, and the file lock, the raw file descriptor and killing a writer are proven on Linux only; the CI Windows legs cover them there. Source: `src/fsm_llm/runtime/log.py`, `src/fsm_llm/runtime/stores/jsonl.py`, `src/fsm_llm/runtime/blobs.py`.
+Limits: the request of the greeting model call is not logged (its text is in the start record); a prompt is stored as the model saw it, not rebuilt from the layout (rows 1.9 and 2.3). The log holds user text and prompts as the model saw them, so keep the log directory as private as the session directory: at the default level `values` only context entries that are secret-looking by the repository rule are redacted (a `*_token` key whose value is not token-shaped is not), and free text such as a card number typed into a message reaches disk unless the redaction hook below handles it. Power-loss durability is argued, not tested, and the file lock, the raw file descriptor and killing a writer are proven on Linux only; the Windows legs of CI have not run them yet, so every Windows behavior of the log is unverified until they do. Not done: compressed blobs (zstd) and an SQLite store (deferred, the log stays JSONL with versioned events), and the monitor view of the log (roadmap row 1.10). Source: `src/fsm_llm/runtime/log.py`, `src/fsm_llm/runtime/stores/jsonl.py`, `src/fsm_llm/runtime/blobs.py`.
 
 Operation and more limits: every conversation that is appended to keeps two file descriptors and the file's advisory lock until it ends (`API.end_conversation` releases its writer), the API or the log is closed, or a dropped writer is collected (its finalizer closes it); nothing caps the number of writers, so a long-running host must end its conversations or close the `API` (or the `EventLog`). A failed write poisons the writer of that tree and every later append of it raises `LogWriteError`; close the `EventLog`, or release the id (`EventLog.release(conversation_id)`, which the next append undoes by reopening, repairing a torn tail and continuing the `seq`). A late append of a straggler thread after the release reopens a writer. A secret-looking context value is stored as `<redacted>`, and a restore from the log puts the placeholder back as the value (a `missing` or `has_context` check then sees the key as present). A JSON schema in the request blob of an interface that does not reach `_send` has the `properties` it names like a secret renamed by the same filter (a restore never replays a request blob), and tool-call arguments in a transcript are redacted by entry name when they are a JSON object. Windows frees the lock of a killed process asynchronously, so a reopen right after a crash can briefly see the log locked (unverified until the Windows run). Power loss is not covered beyond the fsync argument.
+
+#### Fork and resume (`API.fork`, `API.resume`)
+
+Both read the log and need `event_log=` (`FSMError` without one). Both rebuild a pushed FSM stack, which a snapshot (`save_session`, `restore_session`) never does: a snapshot holds the root frame only.
+
+```python
+# A new conversation from the state at the end of turn 3 (0 is the state before the first turn):
+new_id, state = api.fork(conv_id, at_turn=3)           # -> (new_conversation_id, SessionState)
+
+# After a crash or a close, the SAME conversation on the SAME log:
+api = API.from_file("bot.json", model="gpt-4o-mini", event_log=EventLog("./run-log"))
+conv_id, state = api.resume(conv_id)                   # -> (conversation_id, SessionState)
+state.metadata.get("unknown_tool_calls")               # in-flight tool calls, listed once, never re-run
+```
+
+`fork(conversation_id, *, at_turn)` starts a conversation with a minted id from the state of the source at the end of its Nth turn: `at_turn` counts the `turn/end` events of every frame in log order (a rolled-back turn counts, the greeting is not a turn). It reads only committed lines through its own file descriptor, so the source may be live (this API, another process): it takes no conversation lock and no writer lock and never writes the source log. An `at_turn` that is not an int of 0 or more, is past the last finished turn or names a turn that has not finished raises `ValueError`; an unknown id raises `FSMError` and creates no file. The fork's own log is self-sufficient (a `fork` record with the root state and a `restored` `stack/push` per frame), so a fork of a fork and a `resume` of a fork work. `SessionState.stack_depth` is the real depth of the rebuilt stack.
+
+`resume(conversation_id)` keeps the id, the log and the ids of every frame; `seq` continues from the last acknowledged event and a torn tail is cut. The writer lock is taken before the log is read, so another process or `EventLog` holding it raises `LogLockedError`, an id that is live in this API raises `FSMError`, and an unknown id raises `FSMError` and creates neither file nor lock. A tool call the log could not resolve is written once as a `tool/result` with `status: "unknown"` and is never run again; a turn killed in flight gets no closing `turn/end` (the next `turn/start` supersedes it) and resumes at its pre-turn state; a conversation in a terminal state resumes as ended. A failure after the lock was taken releases it and ends what was built.
+
+Trust: a frame above the root comes from a definition stored in a log blob and is not trusted as written. It must load as an `FSMDefinition` and its recomputed `fsm_id` must equal the logged one, only internal keys that definition declares are seeded, a transcript is accepted only under the default `messages_key` name, and `response_format_key` values are not restored (a child that was mid a structured-output turn does not continue). A forged blob therefore cannot carry the driver-only grant `_approval_granted`, a run-output key or `_run_output_keys`. A definition that is unrecorded, deleted, tampered with or has the wrong `fsm_id` raises `LogCorruptError`. A `shape` log (below) cannot be forked or resumed (`LogPrivacyError`). Fork, resume and `restore_session` start the rebuilt tree with a FRESH turn budget from the API defaults: a spent budget is not persisted.
+
+#### Turn budgets (`max_steps`, `max_seconds`)
+
+`API(max_steps=, max_seconds=)` (the default for the root conversation and every pushed frame), `start_conversation(max_steps=, max_seconds=)`, `push_fsm(..., max_steps=, max_seconds=)` and `APIBuilder.set_max_steps` and `set_max_seconds` give a conversation a lifetime budget of turns and seconds, off by default (`None` changes nothing). It is separate from the per-call `run_until_terminal(max_steps=)`. Each root and each frame has one private record in the manager, kept outside the context, the metadata, handlers and the rollback snapshot, so no model-extractable key and no rollback can reset or refund it. It is charged at the start of a turn, before any model call, by `converse`, `advance` and both streams (a stream counts at its first `next()`); a rolled-back turn counts and the greeting does not. When it is spent the next turn raises `RunBudgetExceededError` and leaves no lock or active-turn residue, and with an event log one `decision` event (`kind: "budget_spent"`) is written. The conversation is not ended and the engine never pops a spent frame (the driver does). `FSMManager.turn_budget_spent(conversation_id)` (`"seconds"`, `"steps"` or `None`) and `turn_budget_steps(conversation_id)` read the record.
+
+#### Usage as a projection
+
+`LiteLLMInterface.usage()` and `reset_usage()` keep their signatures and values. The meter is now a ledger that only grows and `reset_usage()` moves a marker, so a position taken before a reset (`mark()`, `since(mark)`) stays valid. `fsm_llm.runtime.usage.usage_from_events(events)` folds the `llm/response` and `provider/error` events of a log into the same `LLMUsage` through the same record shape and fold (`fsm_llm.llm.usage.UsageRecord`, `fold`); `llm/response` events carry inline `prompt_tokens`, `completion_tokens`, `total_tokens` and a `stream` flag. `provider_errors_since(log, root_id, frame, after_seq)` answers "errors since sequence N". A reader uses one source and never adds the ledger to the events. Cost is not here (roadmap row 2.1). Differences: a stream that errors mid-read is one error in the projection and an answered call in the meter, and an interface with no meter and no log reads 0 errors.
+
+#### Privacy levels and the redaction hook
+
+```python
+from fsm_llm.runtime import EventLog, PrivacyLevel
+
+def redact(kind, value):               # kind: prompt, response, user_message, state, delta, arguments, definition
+    return scrub(value)                # must be pure and deterministic, returns a JSON value
+
+log = EventLog("./run-log", privacy=PrivacyLevel.SHAPE)          # no user text, no prompt, no blob, no ref
+log = EventLog("./run-log", redact=redact)                       # level values (the default) plus a hook
+```
+
+`EventLog(root, *, privacy=PrivacyLevel.VALUES, redact=None)`. At `shape` every event keeps only an allow-list of fields (ids, names, counts, outcomes, codes, the sorted names of tool arguments) and the reserved field `lvl: "shape"`; nothing carries a `*_ref` and no `blobs/` directory is written, yet `rolled_back` and `abandoned` turns are still told apart. A shape log, and a values log a shape writer later continued, cannot be restored, forked or resumed: every fold raises `LogPrivacyError` (an `FSMError`). A shape log still says which states a conversation visited and when. The hook runs inside the log, after the built-in secret filters and before encoding, on a deep copy; a hook that raises, returns a non-JSON or too deeply nested value, or is set while raw bytes are written refuses the checkpoint, so the model call is not made (fail closed). Free text is handled only by this hook: the log ships no scanner. A hook that rewrites a `state` or `definition` blob can make a later fork or resume fail. The log directory stays as private as the session directory at either level.
+
+#### Retention (`EventLog.prune`)
+
+```python
+report = log.prune(max_age_seconds=30 * 86400, max_logs=None, blob_grace_seconds=3600.0, dry_run=True)
+# -> PruneReport(logs_removed, logs_busy, blobs_removed, blobs_young, bytes_freed)
+```
+
+Explicit only: no thread, no automatic call, and with neither `max_age_seconds` nor `max_logs` nothing is read or deleted. A log's age is its file modification time (never `ts`); a log whose writer lock is held is skipped and counted in `logs_busy`; `.lock` files are never removed. Afterwards blobs that no remaining log or live blob names and that are older than the grace are removed, so blobs a fork shares survive the source log; a re-put of an old blob refreshes it. `dry_run=True` changes nothing and reports the same counts. A resumable crashed conversation that is old enough is deleted when you ask. A refused delete (`PermissionError`) is skipped and counted, and its Windows behavior is unverified until the Windows legs run.
 
 ### State & Data Queries
 
@@ -153,7 +206,8 @@ api.get_llm_interface()                  # -> LLMInterface
 response = api.push_fsm(conv_id, new_fsm,
     context_to_pass={"step": "details"},
     shared_context_keys=["user_id"],
-    preserve_history=True, inherit_context=True)
+    preserve_history=True, inherit_context=True,
+    max_steps=20, max_seconds=60.0)           # optional lifetime turn budget of this frame
 # push_fsm returns the sub-FSM's first message (a str), not an id. All calls take the ROOT id.
 response = api.pop_fsm(conv_id,
     context_to_return={"complete": True},
@@ -214,7 +268,7 @@ except BuildError as exc:
     print(exc.errors, exc.__cause__)
 ```
 
-- `APIBuilder`: one setter per `API` parameter (`set_definition`, `set_llm_interface`, `set_model`, `set_api_key`, `set_temperature`, `set_max_tokens`, `set_llm_option(name, value)` (`build()` refuses a name that repeats a named `API` parameter and names the typed setter), `add_handler`, `set_handler_error_mode`, `set_transition_config`, `set_session_store`, `set_handler_timeout`, `set_max_history_size`, `set_max_message_length`, `set_max_fsm_cache_size`, `set_event_log`). Only set values reach `API(...)`, so `API`'s own rules (an `llm_interface` refuses other LLM settings) apply unchanged and come back as `BuildError`. No definition is a `BuildError`.
+- `APIBuilder`: one setter per `API` parameter (`set_definition`, `set_llm_interface`, `set_model`, `set_api_key`, `set_temperature`, `set_max_tokens`, `set_llm_option(name, value)` (`build()` refuses a name that repeats a named `API` parameter and names the typed setter), `add_handler`, `set_handler_error_mode`, `set_transition_config`, `set_session_store`, `set_handler_timeout`, `set_max_history_size`, `set_max_message_length`, `set_max_fsm_cache_size`, `set_event_log`, `set_max_steps`, `set_max_seconds`). Only set values reach `API(...)`, so `API`'s own rules (an `llm_interface` refuses other LLM settings) apply unchanged and come back as `BuildError`. No definition is a `BuildError`.
 - `FSMManagerBuilder`: `set_fsm_loader`, `set_llm_interface`, the three prompt builders, `set_transition_evaluator`, `set_max_history_size`, `set_max_message_length`, `set_handler_system`, `set_handler_error_mode`, `set_max_fsm_cache_size`, `build() -> FSMManager`.
 - `fsm_llm.agents.ConfiguredAgentBuilder`: `set_pattern`, `add_tool` (or `set_tool_registry`, not both), `set_config`, `set_config_option`, typed config setters (`set_model`, `set_temperature`, `set_max_tokens`, `set_max_iterations`, `set_timeout_seconds`), `set_system_prompt` (a `create_agent` argument, not an `AgentConfig` field), `set_hitl`, `set_option(name, value)`; `build()` calls `create_agent` on a shallow copy of the config (callables inside it stay shared). `set_option` passes any other `create_agent` keyword; `build()` refuses a name that repeats a named parameter (`pattern`, `tools`, `config`, `system_prompt`, ...) and names the typed setter to use.
 
@@ -262,7 +316,7 @@ if reply.kind == "calls":
     results = [str(run_tool(c.name, c.arguments)) for c in reply.calls]
     messages_to_append = tool_exchange(reply.text, reply.calls, results)
 llm.usage()          # LLMUsage{calls, errors, usage_missing, prompt/completion/total_tokens, by_kind}
-llm.reset_usage()    # returns the snapshot it cleared
+llm.reset_usage()    # returns the snapshot and starts counting from zero (a marker moves, history is kept)
 
 vectors = LiteLLMEmbedder("ollama/embeddinggemma-2:740m").embed(["a", "b"])  # one request
 ```
@@ -986,7 +1040,7 @@ reply = runner.converse(conv_id, "four, Friday")  # or one user turn
 runner.end_conversation(conv_id)
 ```
 
-`hook(conversation_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child that spends `policy.max_turns` steps in total is aborted through the handler-only key `procedure_abort`. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.runner`.
+`hook(conversation_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child whose frame spends `policy.max_turns` turns in total (the engine's lifetime turn budget, `max_steps=policy.max_turns` at the push) ends as `aborted` with reason `budget_spent` and nothing merges. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.runner`.
 
 ### Agents (`fsm_llm.agents`)
 
@@ -1065,7 +1119,7 @@ FSMError
 ├── LLMResponseError
 ├── TransitionEvaluationError
 ├── ClassificationError (-> ClassificationResponseError)
-├── RunBudgetExceededError (run_until_terminal spent max_steps or max_seconds)
+├── RunBudgetExceededError (run_until_terminal spent max_steps or max_seconds, or a conversation or pushed frame spent its lifetime turn budget)
 ├── BuildError (also a ValueError: a builder's build() refused; .errors, cause chained)
 ├── OKFError (exported from fsm_llm; raised by fsm_llm.okf: missing or unreadable bundle root, a refused write (escape, replace unasked, encode failure, too deep, too large or cyclic extra values, frontmatter over 16,384 bytes, a file over 262,144 bytes), a refused handler-factory argument; bundle content never raises it)
 ├── SkillError (exported from fsm_llm; raised by fsm_llm.skills: caller misuse (no path, a root that is missing or not a directory) or a refused skill read (unknown name, unsafe path, symlink, directory, binary or oversize file); skill content never raises it)

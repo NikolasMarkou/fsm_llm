@@ -29,17 +29,19 @@ FSM-LLM uses a **2-pass architecture** that separates data extraction, transitio
 
 Conversation state lives in in-memory dicts by default. Attaching a `SessionStore`
 (e.g. `FileSessionStore`) adds durable, cross-restart persistence -- state is saved after each
-`converse()` and restored via `restore_session()`.
+`converse()` and restored via `restore_session()`. A snapshot holds the root frame only; with
+the opt-in event log (`API(event_log=)`), `API.fork` and `API.resume` rebuild a whole pushed FSM stack
+from the log (see the `runtime` row of Package Layout and the Event Log section of `docs/api_reference.md`).
 
 ## Core Components
 
 ### API (`engine/api/`)
 
-User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking.
+User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking. `fork` and `resume` (`engine/api/forks.py`) rebuild a conversation tree from the event log; `max_steps` and `max_seconds` give the root and each pushed frame a lifetime turn budget.
 
 ### FSMManager (`engine/fsm/`) + MessagePipeline (`engine/turn/`)
 
-FSMManager handles FSM instance lifecycle with per-conversation thread locks and LRU FSM cache. MessagePipeline implements the 2-pass processing:
+FSMManager handles FSM instance lifecycle with per-conversation thread locks and LRU FSM cache. It also owns the optional lifetime turn budget (`engine/fsm/budget.py`): one private record per manager conversation id (the root and every pushed frame), charged on the turn entry before any model call, outside the context, the metadata and the rollback snapshot, so no handler, extraction or rollback can reset it; a spent frame raises `RunBudgetExceededError` on its next turn and the engine never pops it. MessagePipeline implements the 2-pass processing:
 
 ```
 Pass 1: PRE_PROCESSING handlers → LLM extract data → CONTEXT_UPDATE handlers
@@ -245,7 +247,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the sev
 | `handlers` | `fsm_llm.handlers` | The handler system, `HandlerBuilder`, `create_handler` |
 | `policy` | `fsm_llm.policy` | Approval types and the human-in-the-loop manager; imports `tools` and none of `context`, `okf`, `skills` (the contract `policy-imports-no-sibling-layer`: the row sits above the siblings, so only the contract keeps it off them) |
 | Independent siblings | `context`, `okf`, `skills`, `tools` | Context compaction and prompt builders (`context.layout`); Open Knowledge Format; Agent Skills; the tool registry and tool models |
-| `runtime` | `fsm_llm.runtime` | The opt-in durable event log: `EventLog` (`runtime/log.py`), the JSONL store (`runtime/stores/jsonl.py`), `BlobStore` (`runtime/blobs.py`), the format (`runtime/events.py`) and the turn scope (`runtime/scope.py`); imports `core`, `llm` and the kernel only |
+| `runtime` | `fsm_llm.runtime` | The opt-in durable event log: `EventLog` (`runtime/log.py`), the JSONL store (`runtime/stores/jsonl.py`), `BlobStore` (`runtime/blobs.py`), the format (`runtime/events.py`), the turn scope (`runtime/scope.py`), the session and stack projections (`runtime/stores/session.py`, `runtime/stores/stack.py`: the folds `restore_session`, `API.fork` and `API.resume` read), privacy levels and the redaction hook (`runtime/privacy.py`), explicit retention (`runtime/retention.py`) and the usage fold (`runtime/usage.py`); imports `core`, `llm` and the kernel only; the log directory is as private as a session directory |
 | `llm` | `fsm_llm.llm` | `LLMInterface`, `LiteLLMInterface` (the one litellm import), the embedder, reply parsing |
 | `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses), `core.visualize` |
 | Kernel | `constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`, `cli_support` | Small modules any layer may import; they import no layer |
