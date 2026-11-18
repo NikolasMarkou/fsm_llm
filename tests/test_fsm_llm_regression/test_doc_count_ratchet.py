@@ -131,7 +131,7 @@ SHAPES: dict[str, re.Pattern[str]] = {
 }
 _S5_ROW = re.compile(r"^\s*\|")
 _S5_LEAD = re.compile(r"^(?:[\w.\-]+/)*test_\w+(?:\.py|/)$")
-_S5_CELL = re.compile(r"^(?:\d{1,3}(?:,\d{3})+|\d+)\+?(?:\s*\(.*\))?$")
+_S5_CELL = re.compile(rf"^{_NUM}(?:\s*\(.*\))?$")
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
@@ -368,7 +368,6 @@ KNOWN_MISSES = [
     "18 agent patterns and 9 strategies",
     "10-12 tests",
     "9 failed",
-    "| `test_a.py` | 12 cases |",
     "| module_a | 12 |",
     "files = 12",
     "about 103",
