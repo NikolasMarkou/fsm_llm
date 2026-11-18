@@ -1,6 +1,6 @@
 # test_fsm_llm_reasoning
 
-Unit tests for the reasoning engine in the FSM-LLM repository. The engine lives in `src/fsm_llm/reasoning/` and solves a problem by picking one of 9 reasoning strategies (each a finite state machine, or FSM) and running it through an orchestrator FSM.
+Unit tests for the reasoning engine in the FSM-LLM repository. The engine lives in `src/fsm_llm/reasoning/` and solves a problem by picking one of the reasoning strategies (each a finite state machine, or FSM) and running it through an orchestrator FSM.
 
 ## What it is for
 
@@ -13,17 +13,15 @@ Each test imports from `fsm_llm.reasoning.*` and calls classes or static methods
 ## Files
 
 - `__init__.py` - empty, marks the directory as a package.
-- `test_cli_logging.py` - 2 tests that the CLI `--verbose` flag turns library logging on and that it stays off without it.
-- `test_cli_output.py` - 12 tests that CLI JSON output and JSON save files list `reasoning_types_used` as a sorted list built from a real `ReasoningTrace`, that JSON output survives a value `json.dumps` cannot encode, that unencodable output is escaped on an ASCII terminal, and that `--quiet` prints the formatted output.
-- `test_constants.py` - 33 tests for `ReasoningType`, state name constants, `ContextKeys`, `HandlerNames`, `Defaults`, and message templates.
-- `test_definitions.py` - 28 tests for the Pydantic models (`ReasoningStep`, `ValidationResult`, `ReasoningTrace`, `ProblemContext`, `SolutionResult`, and others).
-- `test_engine.py` - 31 tests for models, handlers, `map_reasoning_type`, the rule that a missing reasoning FSM may only fall back to analytical, and the engine's regression classes (malformed user message, final solution keys, classification errors, removed dead code, execution time, only the orchestrator traces, classifier cleanup).
-- `test_engine_scripted.py` - 51 tests that run whole solves offline through the core engine with a scripted `LLMInterface`: orchestrator, classifier FSM, pushed and popped strategy FSM, validation retry loop, forced pop, spent step budget, failures that keep `partial_context`, caller context that cannot drive the push.
-- `test_exceptions.py` - 8 tests for `ReasoningError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
-- `test_golden_tables.py` - 24 tests that pin the 11 FSM definitions and the strategy tables by sha256.
-- `test_handlers.py` - 43 tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
-
-232 tests in total.
+- `test_cli_logging.py` - tests that the CLI `--verbose` flag turns library logging on and that it stays off without it.
+- `test_cli_output.py` - tests that CLI JSON output and JSON save files list `reasoning_types_used` as a sorted list built from a real `ReasoningTrace`, that JSON output survives a value `json.dumps` cannot encode, that unencodable output is escaped on an ASCII terminal, and that `--quiet` prints the formatted output.
+- `test_constants.py` - tests for `ReasoningType`, state name constants, `ContextKeys`, `HandlerNames`, `Defaults`, and message templates.
+- `test_definitions.py` - tests for the Pydantic models (`ReasoningStep`, `ValidationResult`, `ReasoningTrace`, `ProblemContext`, `SolutionResult`, and others).
+- `test_engine.py` - tests for models, handlers, `map_reasoning_type`, the rule that a missing reasoning FSM may only fall back to analytical, and the engine's regression classes (malformed user message, final solution keys, classification errors, removed dead code, execution time, only the orchestrator traces, classifier cleanup).
+- `test_engine_scripted.py` - tests that run whole solves offline through the core engine with a scripted `LLMInterface`: orchestrator, classifier FSM, pushed and popped strategy FSM, validation retry loop, forced pop, spent step budget, failures that keep `partial_context`, caller context that cannot drive the push.
+- `test_exceptions.py` - tests for `ReasoningError`, `ReasoningExecutionError`, `ReasoningClassificationError`.
+- `test_golden_tables.py` - tests that pin the FSM definitions and the strategy tables by sha256.
+- `test_handlers.py` - tests for `ReasoningHandlers`, `ContextManager`, and `OutputFormatter`.
 
 ## How to use it
 

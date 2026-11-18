@@ -1,6 +1,6 @@
 # test_fsm_llm_synthesis
 
-The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of the FSM-LLM repository, and for the pre-registered bench script `scripts/synthesis_bench.py`. It lives at `tests/test_fsm_llm_synthesis/`. Its test counts are not written here: the repository root `AGENTS.md` carries them, and `tests/test_packaging.py` checks them against collection.
+The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of the FSM-LLM repository, and for the pre-registered bench script `scripts/synthesis_bench.py`. It lives at `tests/test_fsm_llm_synthesis/`. No test count is written here; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_synthesis --collect-only -q | tail -1`.
 
 ## What it is for
 

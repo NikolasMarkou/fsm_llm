@@ -1,7 +1,7 @@
 # test_fsm_llm_synthesis
 
 Path: `tests/test_fsm_llm_synthesis`
-Purpose: Offline pytest suite for `fsm_llm.synthesis` (gates G1 to G7, library, runner, tools, traces, diagnosis, patch and repair) and for `scripts/synthesis_bench.py`. Counts live in the root `AGENTS.md`, not here.
+Purpose: Offline pytest suite for `fsm_llm.synthesis` (gates G1 to G7, library, runner, tools, traces, diagnosis, patch and repair) and for `scripts/synthesis_bench.py`.
 
 ## Scope
 
@@ -81,5 +81,5 @@ The package exports (`fsm_llm.synthesis.__all__`), the reason codes (`constants.
 - Name a test after the defect it guards; many docstrings start `Guards:` or name a review finding.
 - Prefer REAL objects (`API`, `FSMLibrary`, `ToolRegistry`) with scripted models over mocks of internals.
 - A new gate needs a test where it fails a compile and one where it stays silent. A new reason code goes in `constants.REASONS` and gets a test that branches on the code, not the message.
-- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_synthesis --collect-only -q | tail -1` and update the root `AGENTS.md` lines; `tests/test_packaging.py` checks those literals. Do not write a count in this folder's docs unless the doc-count script reads it.
+- No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_synthesis --collect-only -q | tail -1`.
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_synthesis/`; lint `.venv/bin/python -m ruff check tests/test_fsm_llm_synthesis`.

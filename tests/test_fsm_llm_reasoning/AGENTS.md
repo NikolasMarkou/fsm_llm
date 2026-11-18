@@ -1,7 +1,7 @@
 # test_fsm_llm_reasoning
 
 Path: `tests/test_fsm_llm_reasoning`
-Purpose: Offline unit tests (126) for the reasoning engine subpackage `fsm_llm.reasoning` (source in `src/fsm_llm/reasoning/`).
+Purpose: Offline unit tests for the reasoning engine subpackage `fsm_llm.reasoning` (source in `src/fsm_llm/reasoning/`).
 
 ## Scope
 
@@ -9,7 +9,7 @@ Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilit
 
 ## Architecture
 
-Tests call static methods and model constructors directly with small context dicts keyed by `ContextKeys` constants, or drive whole solves on a scripted interface (`test_engine_scripted.py`). Three further techniques recur:
+Tests call static methods and model constructors directly with small context dicts keyed by `ContextKeys` constants, or drive whole solves on a scripted interface (`test_engine_scripted.py`). Further techniques recur:
 
 - Bare engine: `object.__new__(ReasoningEngine)` plus a hand-set `engine.reasoning_fsms` dict, then call `engine._prepare_reasoning_execution(context)` (`test_engine.py::TestReasoningTypeFallback`).
 - Source assertions: `inspect.getsource(...)` on `ReasoningEngine`, `ReasoningEngine._classify_problem`, `ReasoningEngine._solve_problem_locked`, the `engine` module, and the `handlers` module, then string checks (`test_engine.py`, `test_handlers.py`, `test_constants.py`, `test_cli_output.py`).
@@ -19,20 +19,20 @@ Tests call static methods and model constructors directly with small context dic
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `test_cli_logging.py` | 2 parametrized cases: `["--verbose"]` gives 1 `I-PROBE` line in stderr, `[]` gives 0; `D-PROBE` never appears | Subprocess, `timeout=60`, deletes `FSM_LLM_LOG_LEVEL` |
+| `test_cli_logging.py` | The parametrized cases: `["--verbose"]` gives one `I-PROBE` line in stderr, `[]` gives none; `D-PROBE` never appears | Subprocess, `timeout=60`, deletes `FSM_LLM_LOG_LEVEL` |
 | `test_cli_output.py` | `_format_json_output` and `_save_as_json` fed a real `ReasoningTrace(...).model_dump()` write `reasoning_types_used` as a sorted list, never redacted; CLI escape of unencodable output, `--quiet` output, summary facts stated once | Uses `tmp_path`; includes the plan 5980fbb7 step 18 CLI fixes |
-| `test_constants.py` | 33 tests on constant values | Pins literal strings and numbers |
-| `test_definitions.py` | 28 tests on Pydantic models | Validators, computed properties, thresholds |
+| `test_constants.py` | Constant values | Pins literal strings and numbers |
+| `test_definitions.py` | Pydantic models | Validators, computed properties, thresholds |
 | `test_engine.py` | Models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009); audit regression classes (malformed user message, final solution keys, classification exception handling, removed dead code, `execution_time_seconds`, `direct computation` no special case, no classifier tracer, core truncation suffix, classifier cleanup warning) | Uses loguru sink for the warning; several assertions match literal source strings |
-| `test_engine_scripted.py` | 51 tests: whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
-| `test_exceptions.py` | 8 tests on the exception hierarchy | `details`, `reasoning_type` attributes |
-| `test_golden_tables.py` | 24 tests: sha256 of the canonical JSON of the 11 FSM definitions and of the strategy tables (enum, registry keys, aliases, descriptions, merge ladder, calculator cases, solution order) | Captured before the prompt sentences, state ids and tables were generated; a hash moves only on purpose |
-| `test_handlers.py` | 43 tests on `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
+| `test_engine_scripted.py` | Whole solves through core on `_ScriptedLLM` (also imported by `tests/test_fsm_llm_regression/test_engine_integration.py`) | Asserts calls, history, stack, retries, budget and failure details |
+| `test_exceptions.py` | The exception hierarchy | `details`, `reasoning_type` attributes |
+| `test_golden_tables.py` | sha256 of the canonical JSON of the FSM definitions and of the strategy tables (enum, registry keys, aliases, descriptions, merge ladder, calculator cases, solution order) | Captured before the prompt sentences, state ids and tables were generated; a hash moves only on purpose |
+| `test_handlers.py` | `ReasoningHandlers`, `ContextManager`, `OutputFormatter` | Validation, trace, pruning, merge, final solution |
 | `__init__.py` | Empty package marker | |
 
 ## Public interface under test
 
-- `ReasoningType` (str enum), exactly 9 values: `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical`, `hybrid`. Unknown value raises `ValueError`.
+- `ReasoningType` (str enum), exactly these values: `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical`, `hybrid`. Unknown value raises `ValueError`.
 - `OrchestratorStates`: `problem_analysis`, `strategy_selection`, `execute_reasoning`, `synthesize_solution`, `validate_refine`, `final_answer`.
 - `ClassifierStates`: `analyze_domain`, `analyze_structure`, `identify_reasoning_needs`, `recommend_strategy`.
 - `HandlerNames`: `OrchestratorProblemClassifier`, `OrchestratorStrategyExecutor`, `OrchestratorSolutionValidator`, `ReasoningTracer`, `ContextPruner`, `RetryLimiter`, `RetryKeyClearer`, `HybridLoopCounter`.
@@ -92,8 +92,8 @@ Model behaviour pinned in `test_definitions.py`:
 
 ## Working here
 
-- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/` (232 tests: cli_logging 2, cli_output 3, constants 26, definitions 28, engine 10, engine_scripted 51, exceptions 8, handlers 39).
+- Run: `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning/`.
 - Conventions: files `test_<module>.py`, classes `Test<Feature>`, local helpers prefixed `_` (for example `_make_engine`, `_PROBE`).
 - When changing a pinned constant, state name, or source string in `src/fsm_llm/reasoning/`, update the matching assertion here in the same change, and read any `# DECISION` anchors near the edited code first (D-009 fallback, D-016 verbose logging, D-004 logging off by default are referenced in these tests).
 - Keep tests offline: build engines with `object.__new__` and hand-set attributes rather than constructing `ReasoningEngine` with a model.
-- Adding or removing tests changes the collected count; the repo pins test counts in its root docs and `tests/test_packaging.py`, so re-measure with `pytest --collect-only -q | tail -1` and update those pins.
+- No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_reasoning --collect-only -q | tail -1`.

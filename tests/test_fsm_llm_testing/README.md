@@ -31,4 +31,4 @@ The pytest suite for `fsm_llm.testing`, the public test-helper subpackage of the
 ## Things to know
 
 - Run from the repository root. No test calls a model or a network.
-- The repository root `AGENTS.md` and `tests/AGENTS.md` state the suite counts; `tests/test_packaging.py` checks them against a fresh collection.
+- No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_testing --collect-only -q | tail -1`.
