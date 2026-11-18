@@ -29,6 +29,8 @@ from fsm_llm.runtime.stores import (
     turn_cut,
 )
 from fsm_llm.testing import ScriptedLLM
+from tests.test_fsm_llm.event_log_child import chat_fsm
+from tests.test_fsm_llm.event_log_child import stack_view as _view
 from tests.test_fsm_llm.support import _state
 
 _START, _END, _RECORD = (
@@ -500,26 +502,7 @@ class TestTheTurnCut:
 # A real stacked conversation
 # --------------------------------------------------------------
 
-_ROOT: dict[str, Any] = {
-    "name": "Stacker",
-    "description": "A root that chats and takes a child",
-    "initial_state": "chat",
-    "states": {
-        "chat": _state(
-            "chat",
-            required_context_keys=["name"],
-            response_instructions="Root reply",
-            transitions=[
-                {
-                    "target_state": "end",
-                    "description": "never",
-                    "conditions": [{"description": "n", "logic": {"==": [1, 2]}}],
-                }
-            ],
-        ),
-        "end": _state("end"),
-    },
-}
+_ROOT: dict[str, Any] = chat_fsm()
 _KID: dict[str, Any] = {
     "name": "Kid",
     "description": "A child that says hello and bye",
@@ -541,17 +524,6 @@ def _llm() -> ScriptedLLM:
         extraction_data={"name": "Ann"},
         responses={"chat": "root reply", "hello": "kid hello", "bye": "kid bye"},
     )
-
-
-def _view(api: API, root: str) -> tuple[int, list[tuple[str, dict[str, Any]]]]:
-    """What the LIVE api shows now: depth and, per frame, the state and the public data."""
-    with api._stack_lock:
-        ids = [frame.conversation_id for frame in api.conversation_stacks[root]]
-    manager = api.fsm_manager
-    return len(ids), [
-        (manager.get_conversation_state(i), manager.get_conversation_data(i))
-        for i in ids
-    ]
 
 
 def _folded_view(

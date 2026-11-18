@@ -24,6 +24,16 @@ Interface contract:
       then calls ``api.advance`` inside a second ``tool_call`` named ``in-flight``; the model
       double announces itself by writing *ready_file* (``conversation_id`` and ``expected``,
       through a temp file and ``os.replace`` so the parent never reads half of it) and blocks.
+
+Plan 5a6a1f80 step 6 (the stack): the same conversation one frame up. ``chat_fsm()`` is the root
+definition, ``stack_llm(replies, **kw)`` a ``ChildLLM`` that also answers the root, ``top_id`` the
+manager id of the top frame, ``stack_view(api, cid)`` the LIVE ``(depth, [(state, public data)])``
+(the golden view of the stack sweep; JSON turns its tuples into lists). ``stacked_start(api, log)``
+plays a root turn, a push with options and a tool exchange at frame 1 and returns the root id;
+``stacked_finish(api, cid)`` the answer, the pop with a merge, a root turn and a second push left
+open. ``main`` with ``stacked`` as its third argument runs ``stacked_main``: role ``run`` blocks at
+frame 1 inside an in-flight tool call; role ``resume <conversation_id>`` resumes that log,
+announces and holds the writer lock until its stdin is closed.
 """
 
 from __future__ import annotations
@@ -127,7 +137,10 @@ def tool_fsm() -> dict[str, Any]:
 
 
 class ChildLLM(ScriptedLLM):
-    """A scripted interface whose ``complete`` call number ``block_at`` never returns."""
+    """A scripted interface whose ``complete`` call number ``block_at`` never returns.
+
+    *script* is passed to ``ScriptedLLM`` (``extraction_data``, ``responses``).
+    """
 
     def __init__(
         self,
@@ -135,8 +148,9 @@ class ChildLLM(ScriptedLLM):
         *,
         block_at: int | None = None,
         on_block: Callable[[], None] | None = None,
+        **script: Any,
     ) -> None:
-        super().__init__(replies)
+        super().__init__(replies, **script)
         self.block_at = block_at
         self.on_block = on_block
 
@@ -173,8 +187,15 @@ def view(api: API, cid: str) -> dict[str, Any]:
 
 
 def drive_exchange(
-    api: API, log: EventLog, cid: str, mark: Callable[[], None] | None = None
+    api: API,
+    log: EventLog,
+    cid: str,
+    mark: Callable[[], None] | None = None,
+    *,
+    frame: int = 0,
 ) -> None:
+    """The exchange of the module docstring, at stack frame *frame* (the top one, root is 0)."""
+
     def done() -> None:
         if mark is not None:
             mark()
@@ -187,11 +208,15 @@ def drive_exchange(
     outputs: list[str] = []
     for call in result["calls"]:
         with log.tool_call(
-            cid, name=call["name"], call_id=call["id"], arguments=call["arguments"]
+            cid,
+            name=call["name"],
+            call_id=call["id"],
+            arguments=call["arguments"],
+            frame=frame,
         ):
             outputs.append(str(call["arguments"]["a"] + call["arguments"]["b"]))
     done()
-    transcript = api.fsm_manager.copy_raw_context_data(cid)[MESSAGES]
+    transcript = api.fsm_manager.copy_raw_context_data(top_id(api, cid))[MESSAGES]
     paired = tool_exchange(result["text"], result["calls"], outputs)
     api.update_context(cid, {MESSAGES: [*transcript, *paired], RESULT: None})
     done()
@@ -199,10 +224,104 @@ def drive_exchange(
     done()
 
 
-def _announce(ready: Path, cid: str, expected: dict[str, Any]) -> None:
+def chat_fsm() -> dict[str, Any]:
+    """The root of the stacked scenario: one chat state that extracts ``name`` and never ends."""
+    never = [{"description": "never", "logic": {"==": [1, 2]}}]
+    return {
+        "name": "Stacker",
+        "description": "A root that chats and takes a child",
+        "initial_state": "chat",
+        "states": {
+            "chat": _state(
+                "chat",
+                required_context_keys=["name"],
+                response_instructions="Root reply",
+                transitions=[
+                    {"target_state": "end", "description": "never", "conditions": never}
+                ],
+            ),
+            "end": _state("end"),
+        },
+    }
+
+
+def stack_llm(replies: list[CompletionResponse], **kw: Any) -> ChildLLM:
+    """A ``ChildLLM`` that also answers the root's extraction and reply."""
+    return ChildLLM(
+        replies,
+        extraction_data={"name": "Ann"},
+        responses={"chat": "root reply"},
+        **kw,
+    )
+
+
+def top_id(api: API, cid: str) -> str:
+    """The manager id of the top frame of the stack of root *cid* (*cid* itself when alone)."""
+    with api._stack_lock:
+        return api.conversation_stacks[cid][-1].conversation_id
+
+
+def stack_view(api: API, cid: str) -> tuple[int, list[tuple[str, dict[str, Any]]]]:
+    """What the LIVE api shows now: the depth and, per frame, the state and the public data."""
+    with api._stack_lock:
+        ids = [frame.conversation_id for frame in api.conversation_stacks[cid]]
+    manager = api.fsm_manager
+    return len(ids), [
+        (manager.get_conversation_state(i), manager.get_conversation_data(i))
+        for i in ids
+    ]
+
+
+PUSH_OPTIONS: dict[str, Any] = {
+    "context_to_pass": {"topic": "x"},
+    "return_context": {"answer": 42},
+    "shared_context_keys": ["name"],
+    "preserve_history": True,
+}
+
+
+def stacked_start(api: API, log: EventLog) -> str:
+    """A root turn, a push with options, the transcript and a tool exchange at frame 1."""
+    cid, _ = api.start_conversation()
+    assert api.converse("Ann", cid) == "root reply"
+    api.push_fsm(cid, tool_fsm(), **PUSH_OPTIONS)
+    api.update_context(cid, {MESSAGES: [{"role": "user", "content": QUESTION}]})
+    drive_exchange(api, log, cid, frame=1)
+    return cid
+
+
+def stacked_finish(api: API, cid: str) -> None:
+    """The model answers, the child pops with a merge, a root turn, a second push left open."""
+    api.advance(cid)  # call_model -> done, at frame 1
+    api.pop_fsm(cid, context_to_return={"result": 5})
+    assert api.converse("again", cid) == "root reply"
+    api.push_fsm(cid, tool_fsm())
+
+
+def stacked_main(argv: list[str]) -> None:
+    directory, ready, role = Path(argv[1]), Path(argv[2]), argv[4]
+    with EventLog(directory) as log:
+        if role == "resume":
+            api = API(chat_fsm(), llm_interface=stack_llm([]), event_log=log)
+            cid, _ = api.resume(argv[5])
+            _announce(ready, conversation_id=cid, expected=stack_view(api, cid))
+            sys.stdin.readline()  # hold the writer lock until the parent lets go
+            return
+        llm = stack_llm(scripted_replies(), block_at=1)
+        api = API(chat_fsm(), llm_interface=llm, event_log=log)
+        cid = stacked_start(api, log)
+        expected = stack_view(api, cid)
+        llm.on_block = lambda: _announce(ready, conversation_id=cid, expected=expected)
+        with log.tool_call(
+            cid, name="add", call_id="in-flight", arguments={"a": 1, "b": 1}, frame=1
+        ):
+            api.advance(cid)
+
+
+def _announce(ready: Path, **payload: Any) -> None:
     pending = ready.with_name(ready.name + ".tmp")
     pending.write_text(
-        json.dumps({"conversation_id": cid, "expected": expected}),
+        json.dumps(payload),
         encoding="utf-8",
         newline="",
     )
@@ -210,6 +329,8 @@ def _announce(ready: Path, cid: str, expected: dict[str, Any]) -> None:
 
 
 def main(argv: list[str]) -> None:
+    if argv[3:4] == ["stacked"]:
+        return stacked_main(argv)
     directory, ready = Path(argv[1]), Path(argv[2])
     log = EventLog(directory)
     llm = ChildLLM(scripted_replies(), block_at=1)
@@ -217,7 +338,7 @@ def main(argv: list[str]) -> None:
     cid = start(api)
     drive_exchange(api, log, cid)
     expected = view(api, cid)
-    llm.on_block = lambda: _announce(ready, cid, expected)
+    llm.on_block = lambda: _announce(ready, conversation_id=cid, expected=expected)
     # The tool is in flight while the second model call is made: a tool whose body asks the model.
     with log.tool_call(
         cid, name="add", call_id="in-flight", arguments={"a": 1, "b": 1}

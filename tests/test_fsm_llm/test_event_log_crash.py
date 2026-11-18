@@ -30,9 +30,7 @@ from __future__ import annotations
 import ast
 import copy
 import json
-import subprocess
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,16 +47,16 @@ from fsm_llm.runtime.stores import JsonlWriter, fold_session, jsonl, read_events
 from fsm_llm.testing import ScriptedLLM, final_reply
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import event_log_child as child
-from tests.test_fsm_llm.event_log_support import _Dead, child_env, reopen_after_kill
+from tests.test_fsm_llm.event_log_support import (
+    CHILD_MODULE,
+    _Dead,
+    child_env,
+    child_process,
+    reopen_after_kill,
+    wait_ready,
+)
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 from tests.test_fsm_llm.test_event_log_sessions import _CHAT
-
-REPO = Path(__file__).resolve().parents[2]
-CHILD_MODULE = "tests.test_fsm_llm.event_log_child"
-READY_SECONDS = (
-    300  # a deadline, scaled by the timing factor; the child imports fsm_llm
-)
-POLL_SECONDS = 0.05
 
 
 class _Crash:
@@ -486,34 +484,10 @@ def _run_until_blocked_then_kill(root: Path, ready: Path, err: Path) -> None:
     The wait is a bounded number of polls (scaled by the timing factor), not a clock read; a
     child that exits early fails the test with the tail of its stderr.
     """
-    with err.open("wb") as errfile:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", CHILD_MODULE, str(root), str(ready)],
-            cwd=REPO,
-            env=child_env(),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=errfile,
-        )
-        try:
-            polls = int(READY_SECONDS * current_timing_factor() / POLL_SECONDS)
-            for _ in range(polls):
-                if ready.exists():
-                    break
-                if proc.poll() is not None:
-                    tail = err.read_text(encoding="utf-8", errors="replace")[-2000:]
-                    pytest.fail(
-                        f"the child exited {proc.returncode} before it blocked: {tail}"
-                    )
-                time.sleep(POLL_SECONDS)
-            else:
-                pytest.fail("the child never reached its blocked model call")
-            proc.kill()  # SIGKILL on POSIX, TerminateProcess on Windows: the portable kill
-            proc.wait(timeout=60 * current_timing_factor())
-        finally:
-            if proc.poll() is None:
-                proc.kill()
-                proc.wait()
+    with child_process([CHILD_MODULE, str(root), str(ready)], err) as proc:
+        wait_ready(proc, ready, err)
+        proc.kill()  # SIGKILL on POSIX, TerminateProcess on Windows: the portable kill
+        proc.wait(timeout=60 * current_timing_factor())
 
 
 def _assert_resumes_and_continues(
@@ -549,22 +523,26 @@ class TestThisFile:
     def test_every_child_process_of_the_log_tests_gets_the_shared_environment(
         self,
     ) -> None:
-        for name in ("jsonl", "blobs", "crash"):
-            path = Path(__file__).with_name(f"test_event_log_{name}.py")
-            calls = (
-                node
-                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
-                if isinstance(node, ast.Call)
-            )
-            envs = {
-                ast.unparse(k.value)
-                for n in calls
-                for k in n.keywords
-                if k.arg == "env"
-            }
-            assert envs == {"child_env()"}, (
-                name
-            )  # cost-map flag, temp and home variables
+        here, started = Path(__file__).parent, 0
+        for name in (
+            "test_event_log_jsonl.py",
+            "test_event_log_blobs.py",
+            "test_event_log_stack_crash.py",
+            "event_log_support.py",
+        ):
+            tree = ast.parse((here / name).read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and ast.unparse(node.func) in {
+                    "subprocess.Popen",
+                    "subprocess.run",
+                }:
+                    envs = {
+                        ast.unparse(k.value) for k in node.keywords if k.arg == "env"
+                    }
+                    # cost-map flag, temp and home variables
+                    assert envs == {"child_env()"}, (name, node.lineno)
+                    started += 1
+        assert started >= 4  # none missed, none vacuous
 
     def test_no_test_of_this_file_carries_a_marker(self) -> None:
         # CI deselects slow, integration and real_llm: a marked kill test would never run there

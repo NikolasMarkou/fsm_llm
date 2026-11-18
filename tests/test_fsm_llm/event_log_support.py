@@ -10,19 +10,27 @@ process; ``child_env()`` is the one environment of every child Python process of
 ``*.lock`` files and ``tree_bytes(root)`` joins their bytes (the one way a test reads "every
 byte the log wrote": Windows refuses a read of a byte-range-locked file, even in the same
 process, so a test never reads a lock file).
+``child_process(args, err, *, stdin=DEVNULL)`` is a context manager that starts ``python -m
+<args>`` from the repository root with ``child_env()``, stderr in the file *err*, and kills and
+reaps it on exit if it still runs; ``wait_ready(proc, ready, err)`` polls (a bounded number of
+sleeps scaled by the timing factor, never a clock read) until the child has written *ready* and
+fails the test with the tail of *err* when the child exits first.
 The ``log`` fixture lives in this folder's ``conftest.py``.
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, TypeVar
 
+import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
@@ -32,6 +40,13 @@ from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.support import _child_env
 
 _T = TypeVar("_T")
+
+REPO = Path(__file__).resolve().parents[2]
+CHILD_MODULE = "tests.test_fsm_llm.event_log_child"
+READY_SECONDS = (
+    300  # a deadline, scaled by the timing factor; the child imports fsm_llm
+)
+POLL_SECONDS = 0.05
 
 
 class _Dead(BaseException):
@@ -118,3 +133,41 @@ def tree_files(root: str | os.PathLike[str]) -> list[Path]:
 def tree_bytes(root: str | os.PathLike[str]) -> bytes:
     """Return the concatenated bytes of ``tree_files(root)`` (empty when there are none)."""
     return b"".join(p.read_bytes() for p in tree_files(root))
+
+
+@contextmanager
+def child_process(
+    args: list[str], err: Path, *, stdin: int = subprocess.DEVNULL
+) -> Iterator[subprocess.Popen[bytes]]:
+    """Start ``python -m <args>`` and yield it; on exit kill and reap it if it still runs."""
+    with err.open("wb") as errfile:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", *args],
+            cwd=REPO,
+            env=child_env(),
+            stdin=stdin,
+            stdout=subprocess.DEVNULL,
+            stderr=errfile,
+        )
+    try:
+        yield proc
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        if proc.stdin is not None:
+            proc.stdin.close()
+
+
+def wait_ready(proc: subprocess.Popen[bytes], ready: Path, err: Path) -> None:
+    """Wait (a bounded number of polls) until *ready* exists; fail if the child exits first."""
+    for _ in range(int(READY_SECONDS * current_timing_factor() / POLL_SECONDS)):
+        if ready.exists():
+            return
+        if proc.poll() is not None:
+            tail = err.read_text(encoding="utf-8", errors="replace")[-2000:]
+            pytest.fail(
+                f"the child exited {proc.returncode} before it was ready: {tail}"
+            )
+        time.sleep(POLL_SECONDS)
+    pytest.fail("the child never reached its announced point")
