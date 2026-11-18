@@ -225,6 +225,22 @@ class TestCounting:
         with pytest.raises(Spent):
             api.converse("again", cid)
 
+    def test_the_public_reader_gives_the_charged_count_and_none_without_a_limit(
+        self,
+    ) -> None:
+        """The runner traces the engine's count instead of keeping its own: the reader is
+        the record's ``steps_taken``, ``None`` for no limit and for an unknown id."""
+        api, cid = _api(max_steps=3)
+        manager = api.fsm_manager
+        assert manager.turn_budget_steps(cid) == 0
+        api.converse("one", cid)
+        api.advance(cid)
+        assert manager.turn_budget_steps(cid) == _taken(api, cid) == 2
+        assert manager.turn_budget_steps("nobody") is None
+        free, free_cid = _api()
+        free.converse("one", free_cid)
+        assert free.fsm_manager.turn_budget_steps(free_cid) is None
+
     def test_a_turn_the_guard_refuses_is_not_charged(self) -> None:
         api, cid = _api(max_steps=1)
         manager = api.fsm_manager

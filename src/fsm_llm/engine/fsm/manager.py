@@ -561,6 +561,17 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         budget = self._turn_budgets.get(conversation_id)
         return None if budget is None else budget.spent()
 
+    def turn_budget_steps(self, conversation_id: str) -> int | None:
+        """Count the turns charged to ``conversation_id`` so far (its lifetime count).
+
+        Contract: the number of turns the budget has counted (a rolled-back turn included,
+        the greeting never), or ``None`` for a conversation with no limit, an unknown or
+        ended id. Reads one record and takes no lock; the same fact ``turn_budget_spent``
+        judges, so a driver that traces or reports steps reads it here and keeps no count.
+        """
+        budget = self._turn_budgets.get(conversation_id)
+        return None if budget is None else budget.steps_taken
+
     @with_conversation_context
     def end_conversation(self, conversation_id: str, log: Any = None) -> None:
         """End conversation and clean up resources."""

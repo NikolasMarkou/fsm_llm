@@ -569,6 +569,11 @@
       "delta": 2,
       "reason": "step 7 of plan 5a6a1f80: two new anchors for the lifetime turn budget: at TurnBudget (engine/fsm/budget.py, the record is private to the manager, never in context, metadata, a handler or a snapshot, one record per frame) and at the charge in _enter_turn (engine/fsm/turns.py, after the claim, undoing the claim before the raise, the event written after the lock is released); no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-010"
+    },
+    {
+      "delta": 1,
+      "reason": "step 8 of plan 5a6a1f80: new anchor at the abort path of ProcedureRunner._tick (synthesis/runner.py): the engine bounds a child through the max_steps of its frame and the manager says when that frame is spent, never a runner-side count, never the abort edge, never the text of RunBudgetExceededError; the second half of the D-029 anchor of plan 2cefeb61 (the runner's own child_steps) is superseded by it, the D-029, D-044 and D-061 tokens are all kept; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-012"
     }
   ]
 }

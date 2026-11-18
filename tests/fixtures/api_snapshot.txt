@@ -234,6 +234,7 @@ fsm_llm.FSMManager class
   def set_conversation_state(self, conversation_id: str, state_name: str) -> None
   def start_conversation(self, fsm_id: str, initial_context: dict[str, Any] | None = None, *, suppress_start: bool = False, conversation_id: str | None = None, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, str]
   def turn_budget_spent(self, conversation_id: str) -> str | None
+  def turn_budget_steps(self, conversation_id: str) -> int | None
   def update_conversation_context(self, conversation_id: str, context_update: dict[str, Any], log: Any = None) -> None
 fsm_llm.FSMManagerBuilder class
   def __init__(self) -> None

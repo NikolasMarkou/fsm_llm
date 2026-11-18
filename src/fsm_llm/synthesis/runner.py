@@ -14,10 +14,9 @@ seam.
 # every key is present and the child was not aborted. Do NOT pass
 # ``shared_context_keys`` at push (D-017): a failed or aborted child would then
 # merge partial data into the parent. Read the child's data BEFORE the pop
-# (after it the top of the stack is the parent). The child's steps are counted
-# by the runner's own ``_Run.child_steps``. Do NOT derive them from core's step
-# number: it restarts at 1 on every ``run_until_terminal`` call, so a host that
-# resumes after ``RunBudgetExceededError`` would never reach ``max_turns``.
+# (after it the top of the stack is the parent). [Second half superseded: the
+# child's turns are no longer counted here. The engine owns the count, a lifetime
+# budget of the child's frame (D-012 of plan 5a6a1f80, anchored at ``_tick``).]
 """
 
 from __future__ import annotations
@@ -42,7 +41,6 @@ from fsm_llm.engine.api.stack import ContextMergeStrategy
 from fsm_llm.logging import logger
 
 from .constants import (
-    ABORT_CONTEXT_KEY,
     ABORT_STATE_ID,
     LIFECYCLE_TRUSTED,
     LIFECYCLE_VERIFIED,
@@ -80,16 +78,14 @@ _ALLOWED_LIFECYCLES = {
 
 @dataclass
 class _Run:
-    """One procedure pushed by the runner. ``child_steps`` is the one count of the
-    steps it has had, kept by the runner and never read off core: a run-mode hook
-    call that finds the child on top and not ended counts the step before it (the
-    call that pushed it counts none), ``converse`` counts each user turn.
-    ``aborting`` once the abort is set."""
+    """One procedure pushed by the runner. The count of its turns is the engine's
+    (the child frame's lifetime budget, ``policy.max_turns``): ``traced`` is only
+    the last count a ``stepped`` event reported, a cursor for the trace and never a
+    gate."""
 
     procedure: Procedure
     config: SynthesizeConfig
-    child_steps: int = 0
-    aborting: bool = False
+    traced: int = 0
     errors0: int = 0  # the interface's error meter when the child was pushed
 
 
@@ -179,8 +175,9 @@ class ProcedureRunner:
         (``TypeError`` if not callable). Events: ``obtained`` (digest, version,
         source, rounds: failed compile rounds, seconds, calls and token counts
         spent: D-049), ``pushed`` (digest, step), ``stepped`` (digest, step: the
-        child's count, state, keys, kinds: one per counted child step),
-        ``aborted`` (digest, step, state, outcome: the runner set the abort;
+        engine's lifetime count of the child's turns, state, keys, kinds: one per
+        tick that finds new turns, a hand-driven turn included),
+        ``aborted`` (digest, step, state, outcome: the child's turn budget was spent;
         ``blocked``, ``ambiguous`` or ``deterministic`` in the child's state),
         ``popped`` (digest, status, reason, step: every pop) and ``failed``
         (reason, step, digest when a procedure was obtained, error: the
@@ -203,8 +200,9 @@ class ProcedureRunner:
         (``inherit_context=False``, only the declared inputs, the host persona).
         When the child ends it is popped and the final
         ``{status, procedure_id, version, reason}`` is written: ``ok`` (every
-        return key merged), ``aborted`` (the child spent ``policy.max_turns``
-        steps in total, across resumed ``run`` calls; nothing merged) or ``failed`` with a reason from ``constants``
+        return key merged), ``aborted`` (the child's frame spent its ``max_steps=policy.max_turns``
+        turns, the engine's lifetime count across resumed ``run`` calls and hand-driven
+        turns; the child is popped and nothing merged) or ``failed`` with a reason from ``constants``
         (nothing merged). The result key is skip-if-set: to run a state again on
         re-entry clear its result key on entry (``clear_keys_on_entry``). What
         ``obtain`` raises other than ``SynthesisError`` and ``ValueError`` (or
@@ -215,7 +213,9 @@ class ProcedureRunner:
         final ``failed`` result (a host that catches Ctrl-C and keeps the
         conversation never sees ``running``, and nothing obtains again), unwind
         the stack, and then propagate unchanged; so does anything a core call
-        outside that window raises.
+        outside that window raises, a spent budget of the HOST included (``run``'s
+        ``max_steps``, or an ``API`` default on the host's own frame): only the
+        child frame's own spent budget aborts the child.
 
     Bookkeeping: ``_runs`` maps a conversation id to the runs it has pushed,
     outermost first, and holds ``len(runs) == stack_depth - 1``; a longer list
@@ -246,7 +246,6 @@ class ProcedureRunner:
         """The ``before_step`` callable of ``conversation_id`` for ``run_until_terminal``."""
 
         def before_step(step: int) -> None:
-            self._count_child_step(conversation_id)
             self._tick(conversation_id, step)
 
         return before_step
@@ -265,12 +264,7 @@ class ProcedureRunner:
     def converse(self, conversation_id: str, message: str) -> str:
         """One user turn: settle, ``API.converse``, settle again."""
         replies = self._settle(conversation_id)
-        runs = self._runs_of(conversation_id)
         replies.append(self.api.converse(message, conversation_id))
-        if runs:
-            self._count(
-                conversation_id, runs[-1]
-            )  # a user turn is one step of the child
         replies += self._settle(conversation_id)
         return "\n".join(r for r in replies if r)
 
@@ -289,20 +283,25 @@ class ProcedureRunner:
         del runs[depth - 1 :]
         return runs if len(runs) == depth - 1 else None
 
-    def _count_child_step(self, conversation_id: str) -> None:
-        """Run mode: a hook call with a live child on top means it just had a step."""
-        runs = self._runs_of(conversation_id)
-        if runs and not self.api.has_conversation_ended(conversation_id):
-            self._count(conversation_id, runs[-1])
+    def _child_id(self, conversation_id: str) -> str:
+        """The manager conversation id of the frame on top of the stack."""
+        return self.api.get_sub_conversation_id(conversation_id)
 
-    def _count(self, conversation_id: str, run: _Run) -> None:
-        """Count one child step and trace it."""
-        run.child_steps += 1
+    def _trace_steps(self, conversation_id: str, run: _Run) -> None:
+        """Trace the turns the engine counted on the child since the last event.
+
+        One ``stepped`` event carries the engine's lifetime count (turns run by hand
+        count, and several turns between two ticks are one event); nothing is
+        counted here."""
+        taken = self.api.fsm_manager.turn_budget_steps(self._child_id(conversation_id))
+        if taken is None or taken <= run.traced:
+            return
+        run.traced = taken
         self._emit(
             "stepped",
             conversation_id,
             digest=run.procedure.digest,
-            step=run.child_steps,
+            step=taken,
             **self._view(conversation_id, run),
         )
 
@@ -343,26 +342,38 @@ class ProcedureRunner:
             return {}
 
     def _tick(self, conversation_id: str, step: int | None) -> list[str]:
-        """Pop an ended child, abort one over budget, else start a pending
-        synthesize state. ``step`` is core's next step number (run mode) or
-        ``None`` (converse mode); it only labels trace events."""
+        """Trace the child's turns, pop an ended child, abort one whose budget is
+        spent, else start a pending synthesize state. ``step`` is core's next step
+        number (run mode) or ``None`` (converse mode); it only labels trace events."""
         runs = self._runs_of(conversation_id)
         if runs is None:
             return []
         if runs:
             run = runs[-1]
-            if self.api.has_conversation_ended(conversation_id):
+            ended = self.api.has_conversation_ended(conversation_id)
+            # run mode offers an ended child to the hook for its pop and that call
+            # is not a step, so its last turn was never traced there; converse mode
+            # traces every user turn (kept as it was)
+            if step is None or not ended:
+                self._trace_steps(conversation_id, run)
+            if ended:
                 self._finish(conversation_id, run, step)
                 return []
-            if run.aborting:
-                return []
-            if run.child_steps >= self.synthesizer.policy.max_turns:
-                run.aborting = True
+            # DECISION plan-2026-11-18T071726-5a6a1f80/D-012
+            # The ENGINE bounds a child: `_push` gives its frame `max_steps=
+            # policy.max_turns` and the manager's record for THAT frame says when it
+            # is spent (`turn_budget_spent`, a fact of the frame, never the text of a
+            # `RunBudgetExceededError`, so a spent HOST budget still raises). Do NOT
+            # keep a runner-side count of child steps (it missed every turn run
+            # outside the hook and restarted with each resumed run), do NOT write
+            # `procedure_abort` or wait for the abort edge (only a compiled FSM has
+            # one) and do NOT merge anything of an aborted child.
+            if self.api.fsm_manager.turn_budget_spent(self._child_id(conversation_id)):
                 # DECISION plan-2026-11-10T194139-2cefeb61/D-044
-                # Read the outcome BEFORE the abort key is written: after it the
-                # abort edge passes and every outcome reads "deterministic".
+                # Read the outcome BEFORE the child is popped and the result
+                # written: afterwards the top frame is the parent, and its state
+                # says nothing of the child's edges.
                 view = self._view(conversation_id, run, outcome=True)
-                self.api.update_context(conversation_id, {ABORT_CONTEXT_KEY: True})
                 self._emit(
                     "aborted",
                     conversation_id,
@@ -370,6 +381,7 @@ class ProcedureRunner:
                     step=step,
                     **view,
                 )
+                self._finish(conversation_id, run, step, aborted=True)
                 return []
         definition = runs[-1].procedure.definition if runs else self._definition
         state = definition.states.get(self.api.get_current_state(conversation_id))
@@ -381,21 +393,11 @@ class ProcedureRunner:
         return [*started, *self._tick(conversation_id, step)] if started else []
 
     def _settle(self, conversation_id: str) -> list[str]:
-        """converse mode: tick, take the abort edge if one was set, and step the
-        parent once after a pop so it leaves its synthesize state."""
+        """converse mode: tick, then step the parent once after a pop (an ended or an
+        aborted child) so it leaves its synthesize state."""
         api = self.api
         depth = api.get_stack_depth(conversation_id)
         replies = self._tick(conversation_id, None)
-        runs = self._runs_of(conversation_id)
-        if (
-            runs
-            and runs[-1].aborting
-            and not api.has_conversation_ended(conversation_id)
-        ):
-            replies.append(
-                api.advance(conversation_id).response or ""
-            )  # the abort edge
-            replies += self._tick(conversation_id, None)  # pops the aborted child
         if api.get_stack_depth(
             conversation_id
         ) < depth and not api.has_conversation_ended(conversation_id):
@@ -533,6 +535,7 @@ class ProcedureRunner:
                 definition.model_copy(update={"persona": self._definition.persona}),
                 inherit_context=False,
                 context_to_pass={key: data[key] for key in config.inputs},
+                max_steps=self.synthesizer.policy.max_turns,
             )
         except (FSMError, ValueError):
             return REASON_PUSH_FAILED, ""
@@ -547,15 +550,20 @@ class ProcedureRunner:
         except Exception:
             return 0
 
-    def _finish(self, conversation_id: str, run: _Run, step: int | None) -> None:
-        """Pop the ended child on top, merge its return keys on success only,
-        write the final result, count the run."""
+    def _finish(
+        self,
+        conversation_id: str,
+        run: _Run,
+        step: int | None,
+        *,
+        aborted: bool = False,
+    ) -> None:
+        """Pop the child on top (ended, or ``aborted`` for a spent budget), merge its
+        return keys on success only, write the final result, count the run."""
         api, config, procedure = self.api, run.config, run.procedure
         # read the child's data before the pop: afterwards the top is the parent
         child = api.get_data(conversation_id)
-        aborted = (
-            run.aborting or api.get_current_state(conversation_id) == ABORT_STATE_ID
-        )
+        aborted = aborted or api.get_current_state(conversation_id) == ABORT_STATE_ID
         ok = not aborted and not any(is_missing(child, k) for k in config.return_keys)
         api.pop_fsm(
             conversation_id,

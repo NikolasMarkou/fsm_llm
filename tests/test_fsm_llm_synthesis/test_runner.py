@@ -343,10 +343,11 @@ class TestAbort:
         }
         assert "answer" not in rig.data
         # the greeting and three child steps of work reply as "ask"; every child
-        # step extracts twice (one retry), the abort step included (Pass 1 runs
-        # before the edge is chosen)
+        # step extracts twice (one retry). The engine stops the child at its third
+        # turn: no fourth turn runs to reach an abort edge (it used to, so this
+        # count was (3 + 1) * 2)
         assert rig.cheap.count("generate_response", "ask") == 1 + 3
-        assert rig.extractions() == (3 + 1) * 2
+        assert rig.extractions() == 3 * 2
         assert rig.names == ["obtained", "pushed", "aborted", "popped"]
         assert rig.events[2][1]["step"] == 5
         assert rig.library is not None
@@ -415,6 +416,84 @@ class TestAbort:
         assert rig.runner._runs[rig.conv] == []
         assert len(rig.strong.requests) == 1
         assert rig.result["status"] == "running"
+
+
+class TestTheEngineBoundsTheChild:
+    """The child frame is pushed with ``max_steps=policy.max_turns`` and the engine's
+    lifetime count decides the abort (D-012 of plan 5a6a1f80). The runner keeps no
+    count: a turn run by hand counts, and a spent budget of the HOST is never taken
+    for the child's."""
+
+    def test_the_child_frame_carries_the_policy_budget_and_the_host_none(
+        self, valid_fsm
+    ):
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
+        rig.to_solve()
+        rig.runner.hook(rig.conv)(2)
+        manager, child = rig.api.fsm_manager, rig.api.get_sub_conversation_id(rig.conv)
+        assert child != rig.conv
+        assert (manager.turn_budget_steps(child), manager.turn_budget_spent(child)) == (
+            0,
+            None,
+        )
+        assert manager.turn_budget_steps(rig.conv) is None  # the host has no limit
+
+        rig.api.advance(rig.conv)
+        rig.api.advance(rig.conv)
+
+        assert manager.turn_budget_steps(child) == 2
+        assert manager.turn_budget_spent(child) == "steps"
+        with pytest.raises(RunBudgetExceededError) as refused:
+            rig.api.advance(rig.conv)  # the engine itself refuses a third turn
+        assert (refused.value.budget, refused.value.limit) == ("steps", 2)
+
+    def test_a_turn_run_by_hand_counts_and_the_next_hook_call_aborts(self, valid_fsm):
+        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
+        rig.to_solve()
+        hook = rig.runner.hook(rig.conv)
+        hook(2)
+        rig.api.advance(rig.conv)
+        rig.api.advance(rig.conv)  # two turns the hook never saw
+
+        hook(3)
+
+        assert (rig.state, rig.depth) == ("solve", 1)
+        assert rig.result["status"] == "aborted"
+        assert rig.result["reason"] == "budget_spent"
+        assert rig.names == ["obtained", "pushed", "aborted", "popped"]
+        assert [f["step"] for f in rig.steps] == [2]  # the engine's count, one event
+        assert "answer" not in rig.data and "procedure_abort" not in rig.data
+
+    def test_an_ended_child_is_never_aborted_even_on_its_last_budgeted_turn(
+        self, valid_fsm
+    ):
+        rig = _rig(valid_fsm, policy=SynthesisPolicy(max_turns=1))
+
+        rig.runner.converse(rig.conv, "hello")
+        rig.runner.converse(rig.conv, "forty-two")  # the one turn the budget allows
+
+        assert [f["step"] for f in rig.steps] == [1]  # counted, and not over
+        assert rig.result["status"] == "ok" and rig.data["answer"] == "42"
+        assert "aborted" not in rig.names
+
+    def test_a_spent_host_budget_still_raises_and_is_not_the_childs(self, valid_fsm):
+        host = _host()
+        cheap = ScriptedRunnerLLM({"answer": "42"}, dict(REPLIES))
+        # the API default reaches the host's own frame; the child's explicit limit wins
+        api = API.from_definition(definition=host, llm_interface=cheap, max_steps=1)
+        runner = ProcedureRunner(
+            api, host, FSMSynthesizer(ScriptedLLM([json.dumps(valid_fsm)]))
+        )
+        conv, _ = api.start_conversation(CONTEXT)
+        runner.converse(conv, "hello")  # the host's one turn; the child is pushed
+
+        with pytest.raises(RunBudgetExceededError) as spent:
+            runner.converse(conv, "forty-two")  # the child ends, the host's second turn
+
+        assert (spent.value.budget, spent.value.limit) == ("steps", 1)
+        assert api.get_stack_depth(conv) == 1
+        assert api.get_data(conv)["synthesis_result"]["status"] == "ok"
+        assert api.get_data(conv)["answer"] == "42"
 
 
 class TestAnOutageIsNoFault:
@@ -1192,13 +1271,15 @@ def _tied(valid_fsm: dict[str, Any]) -> dict[str, Any]:
 
 
 def _abort_at_once(rig: _Rig, monkeypatch: pytest.MonkeyPatch, fsm: dict[str, Any]):
-    """Push ``fsm`` and return a ``step -> None`` hook; ``max_turns`` is 1, so
-    the second hook call counts the child's first step and sets the abort."""
+    """Push ``fsm``, run the child's first turn by hand (the engine counts it) and
+    return a ``step -> None`` hook: the next call traces that turn and, with a
+    ``max_turns`` of 1, finds the child's budget spent and aborts it."""
     _serve(rig, monkeypatch, _procedure(fsm))
     rig.to_solve()
     hook = rig.runner.hook(rig.conv)
     hook(2)
     assert rig.depth == 2
+    rig.api.advance(rig.conv)
     return hook
 
 
@@ -1428,8 +1509,10 @@ class TestTraceEvents:
         (aborted,) = [f for n, f in rig.events if n == "aborted"]
         assert aborted["state"] == "ask" and aborted["outcome"] == outcome
         assert aborted["conv"] == rig.conv and aborted["step"] == 3
-        # the abort key was written after the outcome was read, not before
-        assert rig.api.get_data(rig.conv).get("procedure_abort") is True
+        # the outcome was read from the child before it was popped, and no abort
+        # key is written any more: the engine's budget ended the child
+        assert rig.depth == 1 and "procedure_abort" not in rig.data
+        assert rig.result["status"] == "aborted"
 
     def test_an_event_that_cannot_be_read_never_changes_the_run(
         self, valid_fsm, monkeypatch
