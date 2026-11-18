@@ -487,3 +487,101 @@ class TestEngineFallback:
         assert [e["type"] for e in events] == ["llm/request", "llm/response"]
         assert events[0]["source"] == "engine" and calls == [None]
         assert wrapper.inner.usage().calls == 1
+
+
+def _read_stream(llm: Any, request: Any, *, abandon_after: int | None = None) -> str:
+    """One streamed call as ``engine/turn/pass2.py`` makes it, through ``call.stream``."""
+    chunks: list[str] = []
+    with llm_call(llm, "response_stream", request, stream=True) as call:
+        try:
+            for index, chunk in enumerate(
+                call.stream(llm.generate_response_stream(request))
+            ):
+                chunks.append(chunk)
+                if abandon_after is not None and index + 1 == abandon_after:
+                    break
+        finally:
+            call.stream_done("".join(chunks))
+    return "".join(chunks)
+
+
+class _ClosingStream(_Wrapper):
+    """A wrapper that keeps a second reference to the provider generator it hands out."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.held: list[Any] = []
+        self.closed = 0
+
+    def generate_response_stream(self, request: Any) -> Any:
+        def provider() -> Any:
+            try:
+                yield from ("a", "b", "c")
+            finally:
+                self.closed += 1
+
+        stream = provider()
+        self.held.append(stream)  # another reference keeps the generator alive
+        return stream
+
+
+class TestAStreamLinksItsOwnRequestOnly:
+    """D3 (plan 52ce5464, runtime audit 1.1 and 1.3): what a stream's outcome event points at,
+    and what happens to the provider stream when the reader stops."""
+
+    def _earlier_call(self, log: Any, llm: LiteLLMInterface) -> None:
+        with patch(COMPLETION, lambda **kw: _reply()):
+            llm.generate_response(
+                _request()
+            )  # seq 1 and 2: an answered call of this scope
+
+    def test_a_stream_that_fails_before_its_request_is_logged_links_no_request(
+        self, log: Any
+    ) -> None:
+        llm = _llm()
+        with bind(log, ROOT):
+            self._earlier_call(log, llm)
+            with patch.object(
+                LiteLLMInterface, "_build_call_params", side_effect=RuntimeError("boom")
+            ):
+                with pytest.raises(LLMResponseError):
+                    _read_stream(llm, _request())
+        (error,) = _events(log, "provider/error")
+        assert error["stream"] is True and error["request_seq"] is None
+        assert [e["seq"] for e in _events(log, "llm/request")] == [1]  # never a second
+
+    def test_a_stream_that_ends_before_its_request_links_no_request(
+        self, log: Any
+    ) -> None:
+        class Empty(LiteLLMInterface):
+            def generate_response_stream(self, request: Any) -> Any:
+                return iter(())
+
+        llm = Empty(model="gpt-4o")
+        with bind(log, ROOT):
+            self._earlier_call(log, llm)
+            assert _read_stream(llm, _request()) == ""
+        (response,) = [e for e in _events(log, "llm/response") if e.get("stream")]
+        assert response["request_seq"] is None
+
+    def test_a_stream_that_reaches_the_provider_still_links_its_own_request(
+        self, log: Any
+    ) -> None:
+        """The negative control: the reset must not unlink a stream that did send."""
+        llm = _llm()
+        with bind(log, ROOT):
+            self._earlier_call(log, llm)
+            with patch(COMPLETION, lambda **kw: iter([_chunk("hi")])):
+                assert _read_stream(llm, _request()) == "hi"
+        requests = _events(log, "llm/request")
+        (response,) = [e for e in _events(log, "llm/response") if e.get("stream")]
+        assert response["request_seq"] == requests[-1]["seq"] == 3
+
+    def test_the_provider_stream_is_closed_when_the_reader_stops_early(
+        self, log: Any
+    ) -> None:
+        wrapper = _ClosingStream()
+        with bind(log, ROOT):
+            assert _read_stream(wrapper, _request(), abandon_after=1) == "a"
+            assert wrapper.closed == 1  # while the held reference is still alive
+        assert wrapper.held and _events(log, "llm/response")[-1]["abandoned"] is True

@@ -33,8 +33,9 @@ from fsm_llm.runtime import (
     current_scope,
 )
 from fsm_llm.runtime.stores import jsonl
+from fsm_llm.runtime.usage import usage_from_events
 from fsm_llm.testing import ScriptedLLM
-from tests.test_fsm_llm.event_log_support import tree_bytes
+from tests.test_fsm_llm.event_log_support import _chunk, _reply, _Wrapper, tree_bytes
 from tests.test_fsm_llm.test_fsm_lock_order import (
     _PINNED,
     _short,
@@ -555,3 +556,55 @@ class TestAHugeInt:
         assert run(None) == run(log) == ("ok", True, True)
         stored = tree_bytes(log.root)
         assert f"<int:{big.bit_length()} bits>".encode() in stored
+
+
+class _RaisesBeforeItsIterator(ScriptedLLM):
+    """A plain ``def``: it opens the connection eagerly and fails before any iterator exists."""
+
+    def generate_response_stream(self, request: Any) -> Any:
+        raise ConnectionError("connect failed before the first chunk")
+
+
+class _EagerWrapper(_Wrapper):
+    """A custom interface around a real one that reads the whole provider stream up front."""
+
+    def generate_response_stream(self, request: Any) -> Any:
+        return iter(list(self.inner.generate_response_stream(request)))
+
+
+def _streamed_provider(**kwargs: Any) -> Any:
+    return iter([_chunk("o"), _chunk("k")]) if kwargs.get("stream") else _reply("ok")
+
+
+class TestAStreamThroughTheEngine:
+    """D3 and D5 (plan 52ce5464, runtime audit 1.2, M1 and 2.4): what a streamed Pass 2 writes."""
+
+    def test_an_eager_wrapper_around_a_real_interface_logs_one_request(
+        self, log: EventLog
+    ) -> None:
+        api = _api(log, _EagerWrapper())
+        with patch("fsm_llm.llm.providers.litellm.completion", _streamed_provider):
+            cid, _ = api.start_conversation()
+            assert "".join(api.converse_stream("hi", cid)) == "ok"
+        streamed = [e for e in _of(log, cid, "llm/request") if e["stream"]]
+        assert [e["source"] for e in streamed] == ["engine"]  # never also "provider"
+        (response,) = [e for e in _of(log, cid, "llm/response") if e.get("stream")]
+        assert response["abandoned"] is False
+        assert response["request_seq"] == streamed[0]["seq"]
+
+    def test_a_plain_def_stream_that_raises_is_a_provider_error_not_an_abandon(
+        self, log: EventLog
+    ) -> None:
+        api = _api(log, _RaisesBeforeItsIterator(responses={"chat": "ok"}))
+        cid, _ = api.start_conversation()
+        with pytest.raises(
+            FSMError
+        ):  # the manager wraps it, chained from the ConnectionError
+            "".join(api.converse_stream("hi", cid))
+        (request,) = [e for e in _of(log, cid, "llm/request") if e["stream"]]
+        (error,) = _of(log, cid, "provider/error")
+        assert error["error_type"] == "ConnectionError" and error["stream"] is True
+        assert error["request_seq"] == request["seq"]
+        assert not [e for e in _of(log, cid, "llm/response") if e.get("stream")]
+        assert usage_from_events(log.read(cid)).errors == 1  # the outage is counted
+        assert _of(log, cid, END)[-1]["outcome"] == "rolled_back"

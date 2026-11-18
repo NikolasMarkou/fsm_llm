@@ -25,7 +25,8 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
     - ``llm_call(interface, call_type, request, *, stream=False)``: wraps one model call of the
       engine, ``with llm_call(llm, "completion", request) as call: reply = ...;
       call.response(reply)``. A stream (``stream=True``) reads its chunks through
-      ``call.stream(chunks)`` and calls ``call.stream_done(joined_text)`` in its ``finally``
+      ``call.stream(chunks)`` (or ``call.stream_from(make)``, which also guards the call that
+      opens the stream) and calls ``call.stream_done(joined_text)`` in its ``finally``
       (``abandoned`` is read from how the chunks ended, or given). An observed interface
       (``is_observed``) is logged by the observer, so the call only adds the joined reply of a
       stream (and a mid-stream error). Any other interface (a double, a mock, a custom class, a
@@ -396,23 +397,47 @@ class LlmCall:
             return chunks
         return self._produce(chunks)
 
+    def stream_from(self, make: Callable[[], Iterable[str]]) -> Iterable[str]:
+        """Like ``stream``, but *make* (the call that opens the provider stream) runs on the
+        FIRST chunk, inside the guarded read.
+
+        Interface contract: *make* takes no argument and returns the chunk iterable (a
+        generator, or a plain ``def`` that returns one). The pass reads ``call.stream_from(lambda:
+        llm.generate_response_stream(request))`` and never calls the interface itself: a plain
+        ``def`` that raises before it returns its iterator is then ``provider/error`` (not an
+        abandoned reply), and one that reads the provider stream eagerly runs with the inner
+        observer off, so a wrapper around a ``LiteLLMInterface`` logs ONE request.
+        """
+
+        def lazy() -> Iterator[str]:
+            yield from make()
+
+        return self.stream(lazy())
+
     def _produce(self, chunks: Iterable[str]) -> Iterator[str]:
         suppress = self._source == SOURCE_ENGINE
         inner = iter(chunks)
-        while True:
-            token = install_observer(None) if suppress else None
-            try:
-                chunk = next(inner)
-            except StopIteration:
-                self._exhausted = True
-                return
-            except Exception:
-                self._errored = True
-                raise
-            finally:
-                if token is not None:
-                    reset_observer(token)
-            yield chunk
+        try:
+            while True:
+                token = install_observer(None) if suppress else None
+                try:
+                    chunk = next(inner)
+                except StopIteration:
+                    self._exhausted = True
+                    return
+                except Exception:
+                    self._errored = True
+                    raise
+                finally:
+                    if token is not None:
+                        reset_observer(token)
+                yield chunk
+        finally:
+            # a reader that stops early closes the provider stream now, not when the last
+            # reference to it goes (a wrapper may keep one), as `scoped_iter` does
+            close = getattr(inner, "close", None)
+            if close is not None:
+                close()
 
     def stream_done(self, text: str, *, abandoned: bool | None = None) -> None:
         """Record the joined reply of a streamed call (once), and whether the reader gave up.
@@ -467,6 +492,8 @@ def llm_call(
         yield _NO_CALL
         return
     if is_observed(interface):
+        # an earlier call of this scope must not be the link of a stream that never sends
+        scope.observer.last_request_seq = None
         observed = LlmCall(
             scope, None, call_type, SOURCE_PROVIDER, logs_reply=False, stream=stream
         )

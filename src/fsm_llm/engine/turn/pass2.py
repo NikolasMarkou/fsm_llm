@@ -108,8 +108,8 @@ class Pass2Mixin(_PipelineSurface):
             self.llm_interface, "response_stream", request, stream=True
         ) as call:
             try:
-                for chunk in call.stream(
-                    self.llm_interface.generate_response_stream(request)
+                for chunk in call.stream_from(
+                    lambda: self.llm_interface.generate_response_stream(request)
                 ):
                     chunks.append(chunk)
                     yield chunk
