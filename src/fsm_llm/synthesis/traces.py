@@ -143,7 +143,10 @@ class RunTrace:
 
 class TraceRecorder:
     """The runner's ``trace_sink``: groups events by ``(conv, digest)`` and
-    hands each finished run (``popped`` or ``failed``) to ``on_trace``.
+    hands each finished run (``popped`` or ``failed``) to ``on_trace``. A key
+    holds a stack of open runs: an ``obtained`` event after a ``pushed`` one
+    opens a nested run (a procedure that synthesizes itself), and ``stepped``,
+    ``aborted``, ``popped`` and ``failed`` act on the innermost.
 
     Interface contract: ``TraceRecorder(on_trace)`` (``TypeError`` if not
     callable), called as ``recorder(event, fields)``. It keeps no finished
@@ -160,7 +163,9 @@ class TraceRecorder:
         if not callable(on_trace):
             raise TypeError("on_trace must be callable")
         self._on_trace = on_trace
-        self._open: dict[tuple[str, str], dict[str, Any]] = {}
+        # per (conv, digest) a stack of open runs: a procedure that synthesizes
+        # itself nests two runs of one digest, the inner one ends first
+        self._open: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._lock = threading.Lock()
 
     # DECISION plan-2026-11-10T194139-2cefeb61/D-064
@@ -183,9 +188,12 @@ class TraceRecorder:
             or not isinstance(digest, str)
         ):
             return None
-        run = self._open.setdefault((conv, digest), {"states": []})
+        stack = self._open.setdefault((conv, digest), [])
         if len(self._open) > _MAX_OPEN:
             self._open.pop(next(iter(self._open)))
+        if not stack or (event == "obtained" and "mode" in stack[-1]):
+            stack.append({"states": []})  # a new run, or one nested in a pushed run
+        run = stack[-1]
         step, state = fields.get("step"), fields.get("state")
         if event in ("stepped", "aborted"):  # both carry the child's view
             if isinstance(fields.get("keys"), str):
@@ -209,7 +217,9 @@ class TraceRecorder:
         elif event == "aborted":
             run["stuck"], run["outcome"] = state, fields.get("outcome")
         elif event in ("popped", "failed"):
-            del self._open[(conv, digest)]
+            stack.pop()
+            if not stack:
+                del self._open[(conv, digest)]
             return RunTrace(
                 digest=digest,
                 version=run.get("version"),

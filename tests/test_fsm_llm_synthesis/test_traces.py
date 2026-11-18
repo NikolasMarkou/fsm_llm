@@ -376,6 +376,64 @@ class _Guarded(dict):
         super().__delitem__(key)
 
 
+class TestNestedRunsOfOneProcedure:
+    """A procedure that synthesizes itself (``max_synthesis_depth`` above 1)
+    nests two runs under one ``(conv, digest)``: each run keeps its own states
+    (the engine's stack order: the inner run ends first)."""
+
+    @staticmethod
+    def _step(step: int, state: str) -> tuple[str, dict[str, Any]]:
+        return (
+            "stepped",
+            {"digest": D1, "step": step, "state": state, "keys": "", "kinds": ""},
+        )
+
+    def test_two_nested_runs_with_one_digest_are_two_traces(self):
+        got: list[RunTrace] = []
+        rec = TraceRecorder(got.append)
+        _events(
+            rec,
+            ("obtained", {"digest": D1, "version": "1.0", "source": "compiled"}),
+            ("pushed", {"digest": D1, "step": 1}),
+            self._step(1, "work"),
+            ("obtained", {"digest": D1, "version": "1.1", "source": "library"}),
+            ("pushed", {"digest": D1, "step": 2}),
+            self._step(1, "inner"),
+            ("popped", {"digest": D1, "status": "ok", "reason": None, "step": 2}),
+            self._step(2, "fallback"),
+            ("popped", {"digest": D1, "status": "ok", "reason": None, "step": 3}),
+        )
+        inner, outer = got
+        assert (inner.version, inner.states, inner.steps) == ("1.1", ("inner",), 1)
+        assert (outer.version, outer.states, outer.steps) == (
+            "1.0",
+            ("work", "fallback"),
+            2,
+        )
+        assert rec._open == {}
+
+    def test_a_nested_run_that_fails_before_its_push_ends_only_itself(self):
+        got: list[RunTrace] = []
+        rec = TraceRecorder(got.append)
+        _events(
+            rec,
+            ("obtained", {"digest": D1, "version": "1.0", "source": "compiled"}),
+            ("pushed", {"digest": D1, "step": 1}),
+            self._step(1, "work"),
+            ("obtained", {"digest": D1, "version": "1.0", "source": "library"}),
+            ("failed", {"digest": D1, "reason": "lifecycle_too_low", "step": 2}),
+            self._step(2, "fallback"),
+            ("popped", {"digest": D1, "status": "ok", "reason": None, "step": 3}),
+        )
+        failed, outer = got
+        assert (failed.status, failed.reason, failed.states) == (
+            "failed",
+            "lifecycle_too_low",
+            (),
+        )
+        assert outer.states == ("work", "fallback") and outer.status == "ok"
+
+
 class TestRecorderThreads:
     """One runner serves many conversations, one thread each (D-064)."""
 
