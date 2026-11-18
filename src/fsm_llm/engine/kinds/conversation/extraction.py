@@ -195,14 +195,16 @@ class ConversationExtractionMixin(_ConversationSurface):
             for retry_num in range(1, max_retries + 1):
                 existing_context = instance.context.data
 
-                # Find missing required field configs
+                # Find missing required field configs. A key seeded as None is
+                # unset, as in the first filter above; the agent `[]`/`{}` rule
+                # (D-046 of plan 21cd7f8e) is NOT widened to this retry.
                 missing_field_configs = (
                     [
                         cfg
                         for cfg in all_configs
                         if cfg.required
                         and cfg.field_name not in extracted_data
-                        and cfg.field_name not in existing_context
+                        and existing_context.get(cfg.field_name) is None
                     ]
                     if has_field_configs
                     else []

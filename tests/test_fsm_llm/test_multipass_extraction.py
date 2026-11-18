@@ -359,6 +359,33 @@ class TestMultiPassExtraction:
         assert llm.extract_field.call_count == 1
         assert result.extracted_data["name"] == "Alice"
 
+    def test_retry_asks_again_for_a_key_present_as_none(self):
+        """A key seeded as None is unset for Pass 1 (`.get() is None`), so the
+        retry loop must ask for it again, not read the key's presence as "set"."""
+        llm = _make_mock_llm()
+        answers = iter([None, "Alice"])
+
+        def _ask(request):
+            value = next(answers)
+            return FieldExtractionResponse(
+                field_name=request.field_name,
+                value=value,
+                confidence=1.0 if value else 0.0,
+                reasoning="flaky",
+                is_valid=value is not None,
+            )
+
+        llm.extract_field.side_effect = _ask
+        fsm_def = _make_fsm_definition(
+            {"start": _make_state("start", required_context_keys=["name"])}
+        )
+        instance = _make_instance(context_data={"name": None})
+
+        pass1 = ConversationPass1(_make_pipeline(fsm_def=fsm_def, llm=llm))
+        result = pass1._execute_data_extraction(instance, "I'm Alice", "conv1")
+        assert llm.extract_field.call_count == 2
+        assert result.extracted_data == {"name": "Alice"}
+
     def test_merge_preserves_existing_keys(self):
         """Retry should add new keys without removing pass-1 data."""
         llm = _make_mock_llm()
