@@ -18,7 +18,7 @@ Terms used below:
 
 ## Architecture
 
-Three corpora with distinct, non-mergeable roles:
+The corpora have distinct, non-mergeable roles:
 
 ```mermaid
 flowchart TD
@@ -33,56 +33,56 @@ flowchart TD
 
 - `context_key_corpus.py` keeps every past leak and over-strip so they cannot silently reopen, and guarantees each value shape the filter carves out has at least one credential and one safe instance. It is NOT an independence statistic.
 - `holdout_key_corpus.py` was authored before the filter source was opened, measured once, and is now regression-only. A new independence number needs a freshly authored corpus.
-- `census_key_corpus.py` is the current independence corpus. Labels come from a blind 50-shape (S01..S50) value-shape census and from name semantics, never from filter output. The module docstring cites a plan findings file for that census; the file is not present in this repo, so the docstring is the only surviving record of the derivation. It imports `arm_of` from the holdout, nothing else.
+- `census_key_corpus.py` is the current independence corpus. Labels come from a blind value-shape census (shapes S01..S50) and from name semantics, never from filter output. The module docstring cites a plan findings file for that census; the file is not present in this repo, so the docstring is the only surviving record of the derivation. It imports `arm_of` from the holdout, nothing else.
 
 ## Key files
 
 | File | Role | Notes |
 | --- | --- | --- |
 | `__init__.py` | Package marker | One-line docstring |
-| `context_key_corpus.py` | Regression + shape coverage | Name tuples, value maps, carve-out triples, 5 pinned sets |
-| `holdout_key_corpus.py` | Burned holdout | 181 rows, `arm_of()`, 2 pinned sets |
+| `context_key_corpus.py` | Regression + shape coverage | Name tuples, value maps, carve-out triples, pinned sets |
+| `holdout_key_corpus.py` | Burned holdout | 181 rows, `arm_of()`, pinned sets |
 | `census_key_corpus.py` | Independence corpus | 341 rows, explicit `__all__`, contested-row tuples |
 | `kind_equality_baseline.json` | Generated record, not a corpus | The code's answers before the state-kind refactor; written only by `python -m tests.test_fsm_llm.kind_corpus --write`, read by `test_kind_equality.py` |
 
 ## Public interface
 
-`context_key_corpus.py` (sizes measured):
+`context_key_corpus.py`:
 
-| Name | Type | Size | Meaning |
-| --- | --- | --- | --- |
-| `SECRET_KEYS` | `tuple[str, ...]` | 82 | password and other credential names, must strip |
-| `SAFE_KEYS` | `tuple[str, ...]` | 80 | policy/status/UI names and near misses (`secretary`, `passenger`), should keep |
-| `KNOWN_OVER_STRIPPED` | `frozenset[str]` | 11 | subset of `SAFE_KEYS` stripped anyway |
-| `CRYPTO_KEY_SECRET_KEYS` | `tuple[str, ...]` | 88 | crypto key material names |
-| `CRYPTO_KEY_SAFE_KEYS` | `tuple[str, ...]` | 104 | ordinary `*_key` names (DB, cache, i18n, `monkey_species`) |
-| `CRYPTO_KEY_KNOWN_OVER_STRIPPED` | `frozenset[str]` | 1 | `metric_key` |
-| `TOKEN_SECRET_KEYS` | `tuple[str, ...]` | 60 | bearer-style token names |
-| `TOKEN_SAFE_KEYS` | `tuple[str, ...]` | 90 | metering, tokenizer, pagination names |
-| `TOKEN_KNOWN_OVER_STRIPPED` | `frozenset[str]` | 5 | `bookmark_token`, `seek_token`, `max_output_tokens_str`, `trace_token`, `correlation_token` |
-| `TOKEN_SECRET_VALUES` | `dict[str, object]` | 60 | one value per secret token name, rotated over 5 shapes |
-| `TOKEN_SECRET_SHORT_VALUE_ENTRIES` | `tuple[tuple[str, object], ...]` | 7 | short/low-entropy bearer values only the name layer can catch |
-| `TOKEN_SAFE_VALUES` | `dict[str, object]` | 90 | explicit values, else default `1200 + index` |
-| `CRYPTO_KEY_SECRET_VALUES` | `dict[str, object]` | 88 | one value per `CRYPTO_KEY_SECRET_KEYS` name |
-| `CRYPTO_KEY_SAFE_VALUES` | `dict[str, object]` | 104 | one value per `CRYPTO_KEY_SAFE_KEYS` name |
-| `CARVE_OUT_CREDENTIAL_ENTRIES` | `tuple[tuple[str, str, object], ...]` | 29 | `(entry_id, name, value)`, must strip |
-| `CARVE_OUT_SAFE_ENTRIES` | same | 24 | must keep |
-| `CARVE_OUT_KNOWN_FAIL_OPEN` | `frozenset[str]` of entry ids | 18 | credential carve-out entries that leak |
-| `CARVE_OUT_KNOWN_OVER_STRIPPED` | `frozenset[str]` of entry ids | 13 | safe carve-out entries that strip |
+| Name | Type | Meaning |
+| --- | --- | --- |
+| `SECRET_KEYS` | `tuple[str, ...]` | password and other credential names, must strip |
+| `SAFE_KEYS` | `tuple[str, ...]` | policy/status/UI names and near misses (`secretary`, `passenger`), should keep |
+| `KNOWN_OVER_STRIPPED` | `frozenset[str]` | subset of `SAFE_KEYS` stripped anyway |
+| `CRYPTO_KEY_SECRET_KEYS` | `tuple[str, ...]` | crypto key material names |
+| `CRYPTO_KEY_SAFE_KEYS` | `tuple[str, ...]` | ordinary `*_key` names (DB, cache, i18n, `monkey_species`) |
+| `CRYPTO_KEY_KNOWN_OVER_STRIPPED` | `frozenset[str]` | `metric_key` |
+| `TOKEN_SECRET_KEYS` | `tuple[str, ...]` | bearer-style token names |
+| `TOKEN_SAFE_KEYS` | `tuple[str, ...]` | metering, tokenizer, pagination names |
+| `TOKEN_KNOWN_OVER_STRIPPED` | `frozenset[str]` | `bookmark_token`, `seek_token`, `max_output_tokens_str`, `trace_token`, `correlation_token` |
+| `TOKEN_SECRET_VALUES` | `dict[str, object]` | one value per secret token name, rotated over the value shapes |
+| `TOKEN_SECRET_SHORT_VALUE_ENTRIES` | `tuple[tuple[str, object], ...]` | short/low-entropy bearer values only the name layer can catch |
+| `TOKEN_SAFE_VALUES` | `dict[str, object]` | explicit values, else default `1200 + index` |
+| `CRYPTO_KEY_SECRET_VALUES` | `dict[str, object]` | one value per `CRYPTO_KEY_SECRET_KEYS` name |
+| `CRYPTO_KEY_SAFE_VALUES` | `dict[str, object]` | one value per `CRYPTO_KEY_SAFE_KEYS` name |
+| `CARVE_OUT_CREDENTIAL_ENTRIES` | `tuple[tuple[str, str, object], ...]` | `(entry_id, name, value)`, must strip |
+| `CARVE_OUT_SAFE_ENTRIES` | same | must keep |
+| `CARVE_OUT_KNOWN_FAIL_OPEN` | `frozenset[str]` of entry ids | credential carve-out entries that leak |
+| `CARVE_OUT_KNOWN_OVER_STRIPPED` | `frozenset[str]` of entry ids | safe carve-out entries that strip |
 
-Note: inside `TOKEN_SAFE_KEYS`, the comment heading the D-021 metering/tokenizer slice says "Three of them over-strip" (`max_output_tokens_str`, `bookmark_token`, `seek_token`). `trace_token` and `correlation_token` were added later at step 9 under their own comment (accepted gap G8), so `TOKEN_KNOWN_OVER_STRIPPED` holds 5.
+Note: inside `TOKEN_SAFE_KEYS`, the comment heading the D-021 metering/tokenizer slice names `max_output_tokens_str`, `bookmark_token` and `seek_token` as over-stripping. `trace_token` and `correlation_token` were added later at step 9 under their own comment (accepted gap G8), so `TOKEN_KNOWN_OVER_STRIPPED` lists them too.
 
 `holdout_key_corpus.py`:
-- `KEY_ARM_CREDENTIAL` (41), `KEY_ARM_SAFE` (50), `TOKEN_ARM_CREDENTIAL` (40), `TOKEN_ARM_SAFE` (50); `HOLDOUT` is their concatenation (181).
+- `KEY_ARM_CREDENTIAL`, `KEY_ARM_SAFE`, `TOKEN_ARM_CREDENTIAL`, `TOKEN_ARM_SAFE`; `HOLDOUT` is their concatenation (181 rows).
 - `arm_of(name: str) -> str`: returns `"token"` if `"token"` is in the name, else `"key"`.
 - `HOLDOUT_KNOWN_FAIL_OPEN: frozenset[str]` = `digitalocean_spaces_key`, `harbor_robot_token`, `asana_pat_token`.
 - `HOLDOUT_KNOWN_OVER_STRIPPED: frozenset[str]` = `span_link_key`, `focus_ring_token`.
 
 `census_key_corpus.py` (`__all__` is explicit):
-- `KEY_ARM_CREDENTIAL` (82), `KEY_ARM_SAFE` (87), `TOKEN_ARM_CREDENTIAL` (81), `TOKEN_ARM_SAFE` (91); `CENSUS` concatenation (341).
+- `KEY_ARM_CREDENTIAL`, `KEY_ARM_SAFE`, `TOKEN_ARM_CREDENTIAL`, `TOKEN_ARM_SAFE`; `CENSUS` is their concatenation (341 rows).
 - `GROUND_TRUTH_VALUES = frozenset({"credential", "safe"})`.
-- `CONTESTED_RESOURCE_NOUN_ROWS: tuple[str, ...]` (11 names, all `credential` rows a reader could call identifiers).
-- `CONTESTED_RESOURCE_NOUN_SAFE_ROWS: tuple[str, ...]` (4 names, all `safe` rows a reader could call credentials).
+- `CONTESTED_RESOURCE_NOUN_ROWS: tuple[str, ...]` (the `credential` rows a reader could call identifiers).
+- `CONTESTED_RESOURCE_NOUN_SAFE_ROWS: tuple[str, ...]` (the `safe` rows a reader could call credentials).
 - `arm_of` re-exported from the holdout.
 - Private shape constants (`_UUID_LOWER`, `_ULID`, `_HEX32`, `_JWT3`, `_PEM_PRIVATE`, `_PEM_PUBLIC`, `_LONG_OPAQUE_BLOB`, ...) are reused across both arms.
 
@@ -122,7 +122,7 @@ Enforced by tests in `test_context_unit.py`:
 - Add names from real application vocabulary without reading `constants.py` first. Never generate entries from the filter's word lists.
 - Do not delete, relabel or re-derive rows to improve a rate. Do not add a word to a filter list to catch a specific leaking corpus entry; the files record these as refused on purpose.
 - Credential values must be synthetic. Census uses only invented prefixes (`xk_live_`, `zc_test_`).
-- Keep the three files separate; do not merge corpora or move rows between them.
+- Keep the files separate; do not merge corpora or move rows between them.
 - After any edit run:
 
 ```bash

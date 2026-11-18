@@ -1,6 +1,6 @@
 # fixtures
 
-Hand-written test data for the core `fsm_llm` test suite, at `tests/test_fsm_llm/fixtures/`. It holds three corpora of context key names and values that the tests use to measure the secret filter in `src/fsm_llm/constants.py`.
+Hand-written test data for the core `fsm_llm` test suite, at `tests/test_fsm_llm/fixtures/`. It holds corpora of context key names and values that the tests use to measure the secret filter in `src/fsm_llm/constants.py`.
 
 ## What it is for
 
@@ -26,7 +26,7 @@ flowchart LR
     t --> f[fsm_llm.constants filter]
 ```
 
-The three corpora have different jobs and must not be merged:
+The corpora have different jobs and must not be merged:
 
 - The regression corpus keeps every name and value that leaked or was over-stripped in the past, so an old bug cannot come back unnoticed. It also makes sure each special value shape the filter handles has at least one credential example and one safe example.
 - The holdout was written without looking at the filter, then measured once. After that one measurement it no longer counts as independent and is only used for regression.
@@ -38,7 +38,7 @@ Where the filter is known to be wrong on an entry and the fix was refused, the e
 
 - `__init__.py` - one-line package docstring, so the corpora import as `tests.test_fsm_llm.fixtures.<module>`.
 - `context_key_corpus.py` - regression and shape-coverage corpus: name lists for passwords, crypto keys and auth tokens, value maps for the key and token names, carve-out shape entries, and the pinned known-wrong sets.
-- `holdout_key_corpus.py` - the burned holdout: 181 `(name, value, ground_truth)` rows for the `*_key` and `*_token` arms, `arm_of()`, and two pinned known-wrong sets.
+- `holdout_key_corpus.py` - the burned holdout: 181 `(name, value, ground_truth)` rows for the `*_key` and `*_token` arms, `arm_of()`, and pinned known-wrong sets.
 - `census_key_corpus.py` - the independence corpus: 341 `(name, value, ground_truth)` rows, plus the lists of contested rows.
 - `kind_equality_baseline.json` - generated, not hand-written: the recorded answers of the code before the state-kind refactor, read by `test_kind_equality.py` and written only by `python -m tests.test_fsm_llm.kind_corpus --write`.
 
