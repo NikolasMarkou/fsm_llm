@@ -131,7 +131,7 @@ def _int_field(event: Mapping[str, Any], key: str) -> int:
 
 
 def _apply_state(frame: _Frame, event: Mapping[str, Any]) -> None:
-    """Rule (a) for one state-carrying event of the frame (the body of ``fold_session``)."""
+    """Rule (a) for one state-carrying event of the frame (the stack fold's own rule; ``fold_session`` keeps a separate copy, a carried known duplicate)."""
     kind = event.get("type")
     state_ref = _ref(event, "state_ref")
     if kind == EventType.TURN_START.value and state_ref:

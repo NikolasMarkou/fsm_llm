@@ -9,9 +9,9 @@ call resolves to a ``Mock`` under the ``Mock(spec=API)`` unbound-self tests, so 
 with ``getattr`` and a double without it counts as "no default").
 
 Interface contract:
-    - ``budget_defaults(max_steps, max_seconds) -> (max_steps, max_seconds)``: validates the
-      ``API`` constructor's limits (``ValueError``, as ``FSMManager.start_conversation``) and
-      returns them; ``API.__init__`` keeps the pair as ``self._turn_budget``.
+    - The ``API`` default pair is not built here: ``API.__init__`` calls ``check_turn_limits``
+      (``ValueError``, as ``FSMManager.start_conversation``) and keeps the pair as
+      ``self._turn_budget``, which ``budget_kwargs`` reads.
     - ``budget_kwargs(api, max_steps=None, max_seconds=None) -> dict``: the keyword arguments for
       ``FSMManager.start_conversation`` of a new conversation or pushed frame: an explicit
       limit wins, otherwise the ``API`` default; a limit that is ``None`` is left OUT, so with no
@@ -35,14 +35,6 @@ from typing import Any
 from fsm_llm.engine.fsm.budget import check_turn_limits
 
 from .surface import _ApiSurface
-
-
-def budget_defaults(
-    max_steps: int | None, max_seconds: float | None
-) -> tuple[int | None, float | None]:
-    """Validate the ``API`` constructor's lifetime limits and return them (see the module docstring)."""
-    check_turn_limits(max_steps, max_seconds)
-    return max_steps, max_seconds
 
 
 def budget_kwargs(

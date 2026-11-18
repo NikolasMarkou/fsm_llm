@@ -117,6 +117,7 @@ from fsm_llm.core.transition_evaluator import (
     TransitionEvaluator,
     TransitionEvaluatorConfig,
 )
+from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import StateExecutor
 from fsm_llm.engine.session import SessionStore
@@ -135,7 +136,7 @@ from fsm_llm.llm import (
 from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog
 
-from .budget import budget_defaults, budget_kwargs
+from .budget import budget_kwargs
 from .events import (
     close_event_log,
     event_scope,
@@ -404,7 +405,8 @@ class API(
         self._MAX_ENDED_CACHE: int = MAX_ENDED_CONVERSATIONS_CACHE
 
         # Default lifetime turn budget (``engine/api/budget.py``)
-        self._turn_budget = budget_defaults(max_steps, max_seconds)
+        check_turn_limits(max_steps, max_seconds)
+        self._turn_budget = (max_steps, max_seconds)
 
         # Session persistence
         self._session_store = session_store
