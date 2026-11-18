@@ -18,8 +18,10 @@ Determinism contract for the threaded tests in this file:
 
 from __future__ import annotations
 
+import os
 import threading
 import time as _real_time
+import typing
 
 import pytest
 
@@ -325,6 +327,24 @@ class TestPushAndPopRecordTheDepthOfTheirOwnHold:
         assert [depth for _, depth in events] == [
             1
         ]  # the stack right after ITS removal
+
+
+class TestPushFsmAcceptsAPath:
+    """A6 (engine audit 4.3): ``push_fsm`` hands its definition to ``process_fsm_definition``,
+    which takes a path; the annotation must say so, as ``API.__init__`` and the builders do."""
+
+    def test_the_annotation_is_the_one_of_the_loader_it_calls(self):
+        pushed = typing.get_type_hints(API.push_fsm)["new_fsm_definition"]
+        loaded = typing.get_type_hints(API.process_fsm_definition)["fsm_definition"]
+        assert pushed == loaded
+        assert os.PathLike[str] in typing.get_args(pushed)
+
+    def test_a_path_object_pushes_a_frame(self, api, tmp_path):
+        path = tmp_path / "sub.json"
+        path.write_text(_make_fsm("sub").model_dump_json(), encoding="utf-8")
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, path)
+        assert api.get_stack_depth(conv_id) == 2
 
 
 class TestSingleThreadedStackNonRegression:

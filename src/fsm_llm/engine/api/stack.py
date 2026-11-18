@@ -8,6 +8,7 @@ call (the anchors below).
 
 from __future__ import annotations
 
+import os
 import time
 from enum import Enum
 from typing import Any
@@ -84,7 +85,7 @@ class StackMixin(_ApiSurface):
     def push_fsm(
         self,
         conversation_id: str,
-        new_fsm_definition: FSMDefinition | dict[str, Any] | str,
+        new_fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str],
         context_to_pass: dict[str, Any] | None = None,
         return_context: dict[str, Any] | None = None,
         shared_context_keys: list[str] | None = None,

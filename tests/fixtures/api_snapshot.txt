@@ -24,7 +24,7 @@ fsm_llm.API class
   def load_session(self, session_id: str) -> SessionState | None
   def pop_fsm(self, conversation_id: str, context_to_return: dict[str, Any] | None = None, merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE) -> str
   classmethod def process_fsm_definition(cls, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str]) -> tuple[FSMDefinition, str]
-  def push_fsm(self, conversation_id: str, new_fsm_definition: FSMDefinition | dict[str, Any] | str, context_to_pass: dict[str, Any] | None = None, return_context: dict[str, Any] | None = None, shared_context_keys: list[str] | None = None, preserve_history: bool = False, inherit_context: bool = True, *, max_steps: int | None = None, max_seconds: float | None = None) -> str
+  def push_fsm(self, conversation_id: str, new_fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], context_to_pass: dict[str, Any] | None = None, return_context: dict[str, Any] | None = None, shared_context_keys: list[str] | None = None, preserve_history: bool = False, inherit_context: bool = True, *, max_steps: int | None = None, max_seconds: float | None = None) -> str
   def register_handler(self, handler: FSMHandler) -> None
   def register_handlers(self, handlers: list[FSMHandler]) -> None
   def restore_session(self, session_id: str) -> tuple[str, SessionState] | None
