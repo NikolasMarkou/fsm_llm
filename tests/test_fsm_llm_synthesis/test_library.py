@@ -326,6 +326,32 @@ class TestSafety:
         assert (lib.root / "records" / f"{rec.digest}.json").read_bytes() == before
         assert not [f for f in _files(lib) if f.endswith(".tmp")]
 
+    @pytest.mark.parametrize(
+        "key", sorted(library._PROVENANCE_KEYS), ids=lambda k: f"minus-{k}"
+    )
+    def test_a_record_missing_a_provenance_key_is_corrupt_not_a_later_keyerror(
+        self, lib, key
+    ):
+        """``obtain`` reads ``approved_by`` and ``gates_passed`` by key: a record
+        without one used to load and fail later with a bare ``KeyError``."""
+        rec = _put(lib, lifecycle="verified")
+        path = lib.root / "records" / f"{rec.digest}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        del data["provenance"][key]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        with pytest.raises(LibraryError, match="corrupt record"):
+            lib.get_record(rec.digest)
+        assert json.loads(path.read_text(encoding="utf-8")) == data  # not rewritten
+
+    def test_a_record_with_an_extra_provenance_key_is_still_corrupt(self, lib):
+        rec = _put(lib, lifecycle="verified")
+        path = lib.root / "records" / f"{rec.digest}.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["provenance"]["extra"] = "x"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        with pytest.raises(LibraryError, match="corrupt record"):
+            lib.get_record(rec.digest)
+
     def test_a_corrupt_record_is_never_overwritten(self, lib: FSMLibrary):
         rec = _put(lib)
         path = lib.root / "records" / f"{rec.digest}.json"

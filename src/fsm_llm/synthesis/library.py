@@ -97,8 +97,8 @@ class LibraryRecord(BaseModel):
     """What the library knows about one stored definition.
 
     ``signature`` is ``{inputs_required, return_keys, tools_used}`` (lists of
-    names); ``stats`` is ``{runs, successes}``; ``provenance`` holds only the
-    keys in ``_PROVENANCE_KEYS``; ``version`` is ``major.minor`` per lineage.
+    names); ``stats`` is ``{runs, successes}``; ``provenance`` holds exactly the
+    keys in ``_PROVENANCE_KEYS`` (a reader indexes them, so none may be missing); ``version`` is ``major.minor`` per lineage.
     A file with any other shape fails validation (``extra="forbid"``).
     """
 
@@ -119,7 +119,7 @@ class LibraryRecord(BaseModel):
             "version" if not _VERSION_RE.fullmatch(self.version) else "",
             "lifecycle" if self.lifecycle not in LIFECYCLES else "",
             "signature" if set(self.signature) != _SIGNATURE_KEYS else "",
-            "provenance" if not set(self.provenance) <= _PROVENANCE_KEYS else "",
+            "provenance" if set(self.provenance) != _PROVENANCE_KEYS else "",
             "stats"
             if set(self.stats) != {"runs", "successes"} or min(self.stats.values()) < 0
             else "",
