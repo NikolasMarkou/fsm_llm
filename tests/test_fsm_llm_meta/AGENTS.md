@@ -1,7 +1,7 @@
 # test_fsm_llm_meta
 
 Path: `tests/test_fsm_llm_meta`
-Purpose: Pytest suite (558 tests) for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
+Purpose: Pytest suite for the meta-builder in `fsm_llm.agents`: builders, builder tools, prompts, definitions, output helpers, the meta FSM (`build_meta_builder_fsm`) and `MetaBuilderAgent`, which drives that FSM through core.
 
 ## Scope
 
@@ -38,22 +38,22 @@ LLM isolation methods used:
 
 ## Key files
 
-| File | Role | Notes |
-| --- | --- | --- |
-| `conftest.py` | Fixtures | `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
-| `test_agent.py` | `MetaBuilderAgent` behavior | 85 tests; carries DECISION references |
-| `test_builders.py` | Builder core behavior | 121 tests |
-| `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators | 76 tests |
-| `test_tools.py` | Tool registries | 35 tests; `_make_call(tool_name, **kwargs)` helper at file bottom |
-| `test_integration.py` | Cross-piece checks | 11 tests |
-| `test_definitions.py` | Pydantic models and enum | 26 tests |
-| `test_prompts.py` | Prompt text builders | 4 tests |
-| `test_meta_output.py` | `save_artifact`: atomic write, failed replace keeps the old file | 2 tests |
-| `test_meta_cli.py` | `fsm-llm-meta` script on an unencodable stdout, domain error as one stderr line | 3 tests |
-| `test_meta_fsm.py` | `build_meta_builder_fsm` structure, gates, build request, run through core | 52 tests |
-| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt, reply parsing, retryable start, malformed build reply, no session state beside the FSM, reclassification, `start` never builds, prompt never doubled, keyword hints, negation | 141 tests |
-| `test_handlers.py`, `test_handlers_elaborate.py` | Import smoke test | 1 test each; handlers module was removed, only the `fsm_llm.agents.meta_builder` import is checked |
-| `__init__.py` | Package marker | empty |
+| File | Role |
+| --- | --- |
+| `conftest.py` | Fixtures: `fsm_builder`, `workflow_builder`, `agent_builder`, `populated_fsm_builder`, `meta_config`, `offline_llm` |
+| `test_agent.py` | `MetaBuilderAgent` behavior; carries DECISION references |
+| `test_builders.py` | Builder core behavior |
+| `test_builders_elaborate.py` | Builder edge cases, exceptions, config validators |
+| `test_tools.py` | Tool registries; the `_make_call(tool_name, **kwargs)` helper is at the file bottom |
+| `test_integration.py` | Cross-piece checks |
+| `test_definitions.py` | Pydantic models and enum |
+| `test_prompts.py` | Prompt text builders |
+| `test_meta_output.py` | `save_artifact`: atomic write, failed replace keeps the old file |
+| `test_meta_cli.py` | `fsm-llm-meta` script on an unencodable stdout, domain error as one stderr line |
+| `test_meta_fsm.py` | `build_meta_builder_fsm` structure, gates, build request, run through core |
+| `test_meta_conversation.py` | Conversations by behaviour with `ScriptedMetaLLM`: each artifact kind, type switch, build retry, outages, lifecycle, monitor state, collect-reply build prompt, reply parsing, retryable start, malformed build reply, no session state beside the FSM, reclassification, `start` never builds, prompt never doubled, keyword hints, negation |
+| `test_handlers.py`, `test_handlers_elaborate.py` | Import smoke test, one per file; the handlers module was removed, only the `fsm_llm.agents.meta_builder` import is checked |
+| `__init__.py` | Package marker, empty |
 
 ## Public interface
 
@@ -66,7 +66,7 @@ Fixtures in `conftest.py` (all function-scoped):
 | `fsm_builder` | `FSMArtifactBuilder()` (empty) |
 | `workflow_builder` | `WorkflowArtifactBuilder()` (empty) |
 | `agent_builder` | `AgentArtifactBuilder()` (empty) |
-| `populated_fsm_builder` | `FSMArtifactBuilder` with 3 states and 2 transitions (shape below) |
+| `populated_fsm_builder` | `FSMArtifactBuilder` with the states and transitions of the shape below |
 | `meta_config` | `MetaBuilderConfig` with test values (shape below) |
 | `offline_llm` | `None`; monkeypatches `fsm_llm.llm.providers.litellm.completion` (core's send binding, which every meta-builder call goes through) to raise at once. Apply with `@pytest.mark.usefixtures("offline_llm")` |
 
@@ -95,7 +95,7 @@ Builders:
 - `FSMArtifactBuilder.to_dict()` sets `version == "4.2"` (the default, `SCHEMA_VERSION_DEFAULT`) and must load as `FSMDefinition(**d)`.
 - `validate_complete()` reports missing name, unreachable (orphan) states, and transitions to nonexistent states.
 - `get_summary(level)` levels: `minimal` < `standard` <= `full`; default equals `full`; only `full` includes `extraction:`; `minimal` on an empty FSM builder contains "none yet". Headers: "FSM Builder Status", "Workflow Builder Status", "Agent Builder Status".
-- `WorkflowArtifactBuilder.VALID_STEP_TYPES` is a class-level set of exactly 8: `auto_transition`, `api_call`, `condition`, `llm_processing`, `wait_for_event`, `timer`, `parallel`, `conversation`. Unknown type warns on `add_step` ("Unknown step type") and is an error in `validate_complete()`.
+- `WorkflowArtifactBuilder.VALID_STEP_TYPES` is a class-level set of the step types `auto_transition`, `api_call`, `condition`, `llm_processing`, `wait_for_event`, `timer`, `parallel`, `conversation`. Unknown type warns on `add_step` ("Unknown step type") and is an error in `validate_complete()`.
 - `AgentArtifactBuilder.set_agent_type` normalizes (`"  REACT  "` -> `"react"`), raises "Unknown agent type" and leaves `agent_type` as `None` on failure. `set_config` rejects wrong types for `max_iterations`/`temperature` with warnings, accepts int temperature, warns on unknown fields. Defaults come from `MetaDefaults.AGENT_*`. Duplicate `add_tool` replaces the tool with a warning.
 
 Tools:
@@ -105,7 +105,7 @@ Tools:
 Definitions and exceptions:
 - `MetaBuilderConfig` defaults: `temperature 0.7`, `max_tokens 4096`, `max_turns 50`; `max_iterations` is the inherited `AgentConfig` field (default 10, accepted, unread); `build_max_iterations`, `build_timeout_seconds`, `build_temperature` and `output_path` raise `ValidationError` (`extra="forbid"`). `max_turns=0` raises "max_turns must be at least 1". Temperature must be in 0.0-2.0, `max_tokens >= 1`.
 - `BuildProgress.is_complete` is false when `total_required == 0`.
-- `BuilderError.action`, `MetaValidationError.errors` (default `[]`), `OutputError.path`; all three subclass `MetaBuilderError`.
+- `BuilderError.action`, `MetaValidationError.errors` (default `[]`), `OutputError.path`; each subclasses `MetaBuilderError`.
 
 Agent:
 - `send` before `start` raises "not been started"; second `start` raises "already been started"; `send` after completion raises "already completed"; reaching `max_turns` raises "Maximum turns"; `get_result` before completion raises "not complete".
@@ -119,7 +119,7 @@ Agent:
 - `_result_from(data)` with no build gives `success is False`, `is_valid is False`; with a valid build, `final_context` has `artifact_json` and `artifact_type` ("fsm").
 - `get_internal_state()` keys the monitor reads (`phase`, `turn_count`, `is_complete`, `started`, `message_count`, `artifact_type`, `builder_progress`, `builder_summary`, `artifact_preview`, `validation_errors`, `is_valid`) come from the conversation context.
 - `save_artifact` writes to the resolved path (`..` segments collapsed); it does not confine the path.
-- `fsm_llm.agents` exports `MetaBuilderAgent`, the three builders, `ArtifactType`, `MetaBuilderConfig`, `MetaBuilderResult`, `MetaBuilderError`, `create_builder_tools`, `create_fsm_tools`, `__version__`.
+- `fsm_llm.agents` exports `MetaBuilderAgent`, the builders, `ArtifactType`, `MetaBuilderConfig`, `MetaBuilderResult`, `MetaBuilderError`, `create_builder_tools`, `create_fsm_tools`, `__version__`.
 
 ## Dependencies
 
@@ -139,4 +139,4 @@ Agent:
 - Use the conftest fixtures instead of building builders inline; for new tool tests use `_make_call` in `test_tools.py`.
 - Inject `ScriptedMetaLLM` with `llm_interface=` (or patch `fsm_llm.llm.providers.litellm.completion`); do not add tests that need a live provider.
 - Read the DECISION notes in `TestSchemaEchoRejection`, `TestLlmCallProviderFailure`, `TestWorkflowStepTypeEnum` and the D-0xx references of plan 944e2692 in `test_meta_fsm.py`, `test_meta_conversation.py` before changing the behavior they pin.
-- Adding or removing tests changes the suite count (558) stated in this file and the README here. Re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_meta --collect-only -q | tail -1`.
+- No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_meta --collect-only -q | tail -1`.

@@ -1,7 +1,7 @@
 # test_fsm_llm_monitor
 
 Path: `tests/test_fsm_llm_monitor`
-Purpose: pytest suite (538 collected tests) for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
+Purpose: pytest suite for `fsm_llm.monitor`, the FastAPI dashboard package in `src/fsm_llm/monitor/`.
 
 ## Scope
 
@@ -28,16 +28,16 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 
 | File | Role | Notes |
 | --- | --- | --- |
-| `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes about 22 `test_app.py` tests 401 |
+| `conftest.py` | autouse `_clear_monitor_api_key_env` | `monkeypatch.delenv("FSM_LLM_MONITOR_API_KEY", raising=False)`; without it an exported key makes `test_app.py` tests answer 401 |
 | `support.py` | `_manager(**config)` (an `InstanceManager` with a cleaned global collector; keyword arguments go to `MonitorConfig`), shared by the feature files; `server_modules()` (the source text of every module of the `fsm_llm.monitor.server` package by module name) and `server_package_modules()` (the module objects), for a test that reads or inspects "the server" as a whole | not collected (no `test_` prefix) |
-| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | 132 tests; asserts `"0.13.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
-| `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | 47 tests; autouse `_reset_key` reconfigures with env key `""` after each test |
-| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools, failed launch, terminal send, OTEL re-enable (real SDK), instance event feed, `close()` teardown | 130 tests; contains unmarked `async def` tests |
-| `test_collector.py` | `EventCollector` | 50 tests |
-| `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | 60 tests |
-| `test_otel.py` | `OTELExporter` | 20 tests; autouse `_mock_otel` fixture |
-| `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | 60 tests; autouse `_reset_key` |
-| `test_server_package.py` | the old `monitor/server.py` became the package `monitor/server/` (plan d454fd62 step 94): the static and template directories the server itself uses (the mount, the Jinja search path, the served bytes, `flows.json`), the registration order of routes and middleware (a pinned list of the 53 entries of `app.routes`, the OpenAPI path order), one home for each global that `configure()` rebinds and `configure()` seen through every router module and the WebSocket, the package layout (facade `__all__`, sibling imports, log record names) | 39 tests; autouse `_reset_key` |
+| `test_app.py` | routes, static assets, exports, version, API-key gate, WS redaction, UI limits vs server constants | asserts `"0.13.0"` for `/api/info` `monitor_version` and `fsm_llm.monitor.__version__` |
+| `test_server_security.py` | Origin/Host, body limit, headers, gated reads, WebSocket auth, error mapping, bounds, dashboard config, builder busy guard, `validate_preset_id` | autouse `_reset_key` reconfigures with env key `""` after each test |
+| `test_instance_manager.py` | `Managed*` classes, `InstanceManager`, handlers, snapshots, workflow presets, agent types, stub tools, failed launch, terminal send, OTEL re-enable (real SDK), instance event feed, `close()` teardown | contains unmarked `async def` tests |
+| `test_collector.py` | `EventCollector` | - |
+| `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | - |
+| `test_otel.py` | `OTELExporter` | autouse `_mock_otel` fixture |
+| `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | autouse `_reset_key` |
+| `test_server_package.py` | the old `monitor/server.py` became the package `monitor/server/` (plan d454fd62 step 94): the static and template directories the server itself uses (the mount, the Jinja search path, the served bytes, `flows.json`), the registration order of routes and middleware (a pinned list of the entries of `app.routes`, the OpenAPI path order), one home for each global that `configure()` rebinds and `configure()` seen through every router module and the WebSocket, the package layout (facade `__all__`, sibling imports, log record names) | autouse `_reset_key` |
 
 ## Public interface
 
@@ -54,7 +54,7 @@ Suite entry points (what a new test uses):
 Monitor surface the tests pin:
 
 HTTP routes and statuses (`test_app.py`, `test_server_security.py`):
-- `GET /` 200 containing "FSM-LLM Monitor"; `/static/style.css`, `/static/app.js`, `/static/flows.json` and 15 JS modules under `services/`, `utils/`, `pages/` serve 200. Files must exist in `src/fsm_llm/monitor/static/` and `templates/index.html`.
+- `GET /` 200 containing "FSM-LLM Monitor"; `/static/style.css`, `/static/app.js`, `/static/flows.json` and the JS modules under `services/`, `utils/`, `pages/` serve 200. Files must exist in `src/fsm_llm/monitor/static/` and `templates/index.html`.
 - `GET /health` returns `{"status": "ok"}`.
 - `POST /api/fsm/load` and `POST /api/fsm/visualize` with non-JSON body: 400. Unknown conversation, instance, agent, builder session: 404. `GET /api/workflow/{id}/status` without the `workflow_instance_id` query parameter: 400. `DELETE /api/builder/{id}` for an unknown id: 200 with `deleted: false`.
 - Preset traversal (`/api/preset/fsm/../../etc/passwd`): 400 or 404. `validate_preset_id` raises `ValueError` for `../`, absolute and escaping ids, `FileNotFoundError` for a missing file.
@@ -83,12 +83,12 @@ Collector (`test_collector.py`):
 - Metrics: `total_errors`, `total_transitions`, `states_visited`, `active_conversations`, `total_agent_iterations`, `total_tool_calls`, `total_workflow_steps`; `clear()` resets all; timestamps are UTC.
 - `get_logs(level=...)` is case-insensitive, `SUCCESS` ranks above INFO, unknown level returns all.
 - `events_after(cursor, limit)` / `logs_after(cursor, limit)` return `(items, cursor)` oldest first, skip dropped items and restart after `clear()`.
-- `create_handler_callbacks()` returns 7 callbacks (no `POST_TRANSITION`), all returning `{}`.
+- `create_handler_callbacks()` returns one callback per handler timing but `POST_TRANSITION`, all returning `{}`.
 - The loguru sink records `LogRecord`s only (no `"log"` events), with tz-aware timestamps. `cleanup()` is idempotent and sets `_log_sink_id` to `None`.
 - `snapshot_context` and `redact_context(data, drop_internal=True)` drop secret-looking keys (including nested) and replace objects with `"<redacted:ClassName>"` without calling `__str__`.
 
 Instance manager:
-- `register_monitor_handlers(api, collector)` registers 7 handlers (no POST_TRANSITION), is idempotent; `unregister_monitor_handlers` returns 7. `_MonitorHandler.execute` returns `{}`.
+- `register_monitor_handlers(api, collector)` registers one handler per timing but POST_TRANSITION, is idempotent; `unregister_monitor_handlers` returns the number it removed, the same as were registered. `_MonitorHandler.execute` returns `{}`.
 - Transition events carry the core's `current`/`target` states; END event `data["state"]` is the final state.
 - `snapshot_from_api(api, conv_id, show_internal_keys=...)`: internal prefixes `_`, `system_`, `internal_`, `__` (case-insensitive) hidden when False; secret-looking keys hidden either way; `last_extraction` is redacted.
 - `attach_api(api)` (`TestAttachApi`) registers the monitor handlers; nothing attached shows nothing; the attached API's conversations are listed and snapshotted; its listing or snapshot failures yield `[]` or `None`; snapshots honour `config.show_internal_keys`.
@@ -96,7 +96,7 @@ Instance manager:
 - `_get_fsm`/`_get_workflow`/`_get_agent`: `KeyError` if missing, `TypeError` on wrong type. `launch_fsm()` without data: `ValueError` "Must provide".
 - `get_agent_status`: dead thread in `cancelling` -> `cancelled`; dead `running` without result -> `failed`. `cancel_agent` returns False on finished agents and emits `agent_cancelled` once.
 - `_AGENT_CLASSES` excludes `EvaluatorOptimizerAgent` and `MakerCheckerAgent`; includes `ReactAgent`, `DebateAgent`.
-- Workflow presets include `demo_linear` (3 steps) and `demo_branching` (`amount: 5000` -> `tier == "high"`). Completed instances leave `active_instance_ids`; advancing them is `KeyError`. `definition_json` -> `ValueError` "not supported". Status context hides secret and internal keys. Event delivery is not a step.
+- Workflow presets include `demo_linear` and `demo_branching` (`amount: 5000` -> `tier == "high"`). Completed instances leave `active_instance_ids`; advancing them is `KeyError`. `definition_json` -> `ValueError` "not supported". Status context hides secret and internal keys. Event delivery is not a step.
 - FSM lifecycle: terminal reply ends the conversation and marks `completed`; `start_conversation` reopens to `running`; unknown conversation end is `KeyError`. `_make_room()` evicts oldest finished instance or raises `MonitorCapacityError` when `max_instances` are all active.
 - Setting `mgr.config` resizes global buffers. `dashboard_config` assignment increments `dashboard_config_version`.
 - `find_examples_dir()` must equal the repo `examples/` directory.
@@ -138,7 +138,7 @@ Payloads and records pinned elsewhere in the suite:
 ## Failure modes
 
 - 401s across `test_app.py`: an API key leaked in (env var or a test that did not reset `configure`).
-- Version assertion failures in `test_app.py` after a release: update the two `"0.13.0"` literals.
+- Version assertion failures in `test_app.py` after a release: update the `"0.13.0"` literals.
 - Static file tests fail if a JS module under `src/fsm_llm/monitor/static/` is renamed or removed.
 - `TestFindExamplesDir` (`test_instance_manager.py`) fails if the module that reads the `examples/` directory (`instance_manager/examples.py`) moves to another depth; it also loads a copy of the module at a scratch depth so the test cannot pass vacuously.
 - Preset tests only assert when `/api/presets` finds FSM presets; they pass vacuously if none exist.
@@ -148,5 +148,5 @@ Payloads and records pinned elsewhere in the suite:
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_monitor/`.
 - Put tests for a source module in the matching `test_<module>.py`; a regression goes in the feature file that owns the behaviour (`test_server_consistency.py` for server and SPA findings), one class per finding, never in a file named for an audit or a date.
 - Use the local `_minimal_fsm_dict()` helpers (defined in `test_app.py`) for FSM payloads.
-- After adding or removing tests, re-measure with `.venv/bin/python -m pytest tests/test_fsm_llm_monitor --collect-only -q | tail -1` and update the monitor per-suite count in the repo-root `AGENTS.md` Testing block and the totals there and in `README.md`; `tests/test_packaging.py` checks them against `--collect-only`.
+- No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_monitor --collect-only -q | tail -1`.
 - Do not change files under `examples/`; preset tests read them.

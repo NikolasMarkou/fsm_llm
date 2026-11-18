@@ -1,10 +1,10 @@
 # test_fsm_llm_eval
 
-The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/` and holds 438 tests in 10 files.
+The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repository, and for its command line `fsm-llm-eval`. It lives at `tests/test_fsm_llm_eval/`.
 
 ## What it is for
 
-`fsm_llm.eval` measures how well a model drives FSM-LLM. It has two modes. `fsm-llm-eval examples` runs every example script under `examples/` in a subprocess and gives each a score from 0 (CRASH) to 4 (PASS). `fsm-llm-eval run <dataset>` plays scripted conversations ("cases") against an FSM several times ("trials") and reports a pass rate with a confidence interval. These tests check both modes, the settings system, the statistics, the result files, and the command line exit codes. No test calls a real LLM.
+`fsm_llm.eval` measures how well a model drives FSM-LLM. It has an `examples` mode and a `run` mode. `fsm-llm-eval examples` runs every example script under `examples/` in a subprocess and gives each a score from 0 (CRASH) to 4 (PASS). `fsm-llm-eval run <dataset>` plays scripted conversations ("cases") against an FSM several times ("trials") and reports a pass rate with a confidence interval. These tests check both modes, the settings system, the statistics, the result files, and the command line exit codes. No test calls a real LLM.
 
 ## How it works
 
@@ -42,4 +42,4 @@ Run from the repository root with the project virtualenv:
 - Git tests compare against `git rev-parse HEAD`, so the checkout must be a git repository.
 - Do not regenerate the golden table in `test_scoring.py` from the current code. It pins the original rubric for every input the 2026-11-06 change (`Error:` and `Success: False` lines, extraction at most 50%) does not touch; `TestReportedFailure` pins the change.
 - `test_examples.py` starts real subprocesses and one of them waits for a 1 second timeout. One slow-marked test starts a real `fsm-llm-eval examples` process, sends it SIGTERM and checks the partial report and exit 130. `TestSigtermEndsRunningExamples` runs an example that starts its own subprocess, sends SIGTERM and checks, by pid through `/proc`, that both are gone at once (in-process and with a real CLI process, which must exit promptly), and that a timeout ends the example's subprocess too.
-- The repository root `AGENTS.md` states this suite's test count (420). `tests/test_packaging.py` checks that number against `pytest --collect-only`, so update it when adding or removing tests.
+- No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1`.

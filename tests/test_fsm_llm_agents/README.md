@@ -8,7 +8,7 @@ FSM-LLM builds each agent pattern (ReAct, Reflexion, Plan-Execute, Debate, and o
 
 ## How it works
 
-There are three kinds of test:
+The tests come in these kinds:
 
 - Unit tests call one class or function directly: models in `fsm_llm.agents.definitions` (the tool models and `ToolRegistry` are in `fsm_llm.tools`), `ToolRegistry`, the `build_*_fsm` builders, handler methods such as `_track_revisions` or `_execute_all_plans`.
 - Structure tests build an FSM dict and check its states, transitions and priorities, or evaluate a transition's JsonLogic condition with `fsm_llm.core.expressions.evaluate_logic`.
@@ -31,8 +31,8 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `__init__.py` - empty; makes the folder a package so `test_forced_stop_flag.py` can import from `test_maker_checker.py`.
 - `conftest.py` - autouse fixture `_offline_network`, which calls `block_network` from `tests/conftest.py`: for every test it patches `socket.socket.connect` and `connect_ex` (loopback included, because a model such as a local Ollama is on loopback) so any IPv4/IPv6 connection raises `ConnectionRefusedError` at once, naming the address. Unix sockets (MCP stdio, asyncio self-pipes) stay open, and tests marked `real_llm` or `integration` are exempt. The patch is undone at teardown.
 - `fixtures/native_fc_golden_requests.json` - recorded requests that `test_native_fc_golden.py` compares against.
-- `test_foundation_dedup.py`, `test_fsm_definitions_golden.py` - one class per finding fixed by the 2026-11-05 source pass (plan 5980fbb7 step 10; the pass's pattern and integration findings now sit in the feature files below), and the golden file that pins the sha256 and `fsm_id` of 53 builder cases.
-- `support.py` - helpers shared by several test files (`SequenceMockLLM`, `_Out`, `_all_builder_fsms`, two registry builders); never collected.
+- `test_foundation_dedup.py`, `test_fsm_definitions_golden.py` - one class per finding fixed by the 2026-11-05 source pass (plan 5980fbb7 step 10; the pass's pattern and integration findings now sit in the feature files below), and the golden file that pins the sha256 and `fsm_id` of every builder case.
+- `support.py` - helpers shared by several test files (`SequenceMockLLM`, `_Out`, `_all_builder_fsms`, the registry builders); never collected.
 - `mcp_fixture_server.py` - a real stdio MCP server used by `test_mcp_stdio.py` (not a test). Tools `add`, `slow`, `fail`; flag `--hang`.
 - `test_advance_driver.py` - agents run on core's bounded loops (`run_until_terminal`) with no synthetic turn: loop hook, core budgets (and the budget error of a pattern's own `max_iterations`), HITL approval through `before_step`, `refused_actions` records true in every order, `final_answer` never read, a run ended from outside, a speaking initial state's greeting, VerifiedReact reflection and AutoMemory on the loop.
 - `test_adapt.py` - ADaPTAgent, its FSM, `DecompositionResult`, JSON-envelope leak fix, assess/decompose fallback edges, `output_schema` and lifecycle handlers, `operator` as a run output, subtask execution.
@@ -77,7 +77,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_prompt_chain.py` - PromptChainAgent, `ChainStep`, its FSM, gate checker.
 - `test_prompts.py` - prompt builder functions.
 - `test_public_api.py` - `create_agent` (pattern first, `system_prompt=` keyword fills `instructions`), `AgentConfig` strict fields, `LLM_MODEL`, static `__all__`, core owning typed fields and key clearing, and `TestConfiguredAgentBuilder` (`ConfiguredAgentBuilder`: mutators return the same builder, a default build equals `create_agent`, config isolation and independent builds, shared callables, named-option refusal, tool registration).
-- `test_removed_timeout_keyword.py` - the removed `timeout_s` spelling raises on `ToolDefinition` (any unknown keyword does), `PythonToolDefinition` and `@tool`, and a tool file still using it lands in `PythonToolLoadReport.errors`. 6 tests.
+- `test_removed_timeout_keyword.py` - the removed `timeout_s` spelling raises on `ToolDefinition` (any unknown keyword does), `PythonToolDefinition` and `@tool`, and a tool file still using it lands in `PythonToolLoadReport.errors`.
 - `test_removed_legacy.py` - absence pins for removed agents names: a positional system prompt now raises listing the patterns, shim helpers and unraised exceptions are gone, native_fc has no private loop, terminal agent states extract nothing, the meta builders are artifact builders.
 - `test_react.py` - ReactAgent creation, HITL gating, concurrent runs, single-use approval, the ReAct family's shared run skeleton.
 - `test_reasoning_react.py` - ReasoningReactAgent export, `reason` tool (interception), per-run handlers.
@@ -97,7 +97,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
 - `test_python_tools.py` - `PythonToolLoader`: the `load_directory` report (`PythonToolLoadReport` with `tools` and `errors`), `from_directory` returning the list and warning once per failed file, dedupe, removed names.
 - `test_okf.py` - the OKF tools, memory backend and exporters in `fsm_llm.agents`.
-- `test_agent_skills.py` - `create_skill_tools`: the three read-only tools, reply budget against the 2,000-character observation cap, injection containment, parameter clamping, end-to-end runs (scripted `native_fc` and `ReactAgent`) and the no-execution pin.
+- `test_agent_skills.py` - `create_skill_tools`: the read-only tools, reply budget against the 2,000-character observation cap, injection containment, parameter clamping, end-to-end runs (scripted `native_fc` and `ReactAgent`) and the no-execution pin.
 - `test_structured_output.py` - `output_schema` parsing into `structured_output` (the model's answer outranks context hints).
 - `test_summarization.py` - `make_observation_summarizer` and its handler wiring (a summary is not wrapped twice).
 - `test_think_fallback.py` - `think` never BLOCKs; unknown tool names are not evidence.
@@ -105,7 +105,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_trust_boundary.py` - caller context cannot forge approval or a finished run (also through `AgentServer`, graph edges and swarm hand-offs), constructor kwargs checks, gated tools refused where there is no approval step, flagged tools with no approver fail closed.
 - `test_tools.py` - `ToolRegistry`, `@tool`, thread safety, `normalize_tool_input`, list and dict parameters, `register_function` shapes.
 - `test_tools_layer.py` - the tool layer `fsm_llm.tools`: the agents constants keep every attribute and share the tool-layer objects, `fsm_llm.agents` re-exports them, the old modules define none of the moved names, `AgentError` lives in core, importing the layer loads no subpackage.
-- `test_constants_mirror.py` - a shared constant has one value for every reader whichever class it is set on (review gate 2 concern 1, D-045): 16 names across the tool, policy and agents `ContextKeys`, `Defaults`, `ErrorMessages` and `LogMessages`; a probe per name over every reader, set one class versus all, undo restores, delete, the registry pinned against the AST of `agents/constants`, and concurrent overrides serialised by one lock (D-053: deterministic interleaving tests, an unlocked mutant, a stress test).
+- `test_constants_mirror.py` - a shared constant has one value for every reader whichever class it is set on (review gate 2 concern 1, D-045): the names across the tool, policy and agents `ContextKeys`, `Defaults`, `ErrorMessages` and `LogMessages`; a probe per name over every reader, set one class versus all, undo restores, delete, the registry pinned against the AST of `agents/constants`, and concurrent overrides serialised by one lock (D-053: deterministic interleaving tests, an unlocked mutant, a stress test).
 - `test_policy_layer.py` - the policy layer `fsm_llm.policy`: the agents constants share the policy-layer objects, `fsm_llm.agents` re-exports the approval names, the old modules define none of them, importing the layer loads no agents module, the manager logs under `fsm_llm.policy.hitl`, and the `make_hitl_checker` gate handler is pinned.
 - `test_otel_exporter.py` - `OTELExporter` (monitor code, tested from this suite): thread-safe span handling and the exporter lifecycle.
 - `test_dependency_resolver.py` - `DependencyResolver` of `fsm_llm.workflows` (kept here to keep the pinned ids).
@@ -123,11 +123,11 @@ From the repo root, with the project virtualenv:
 .venv/bin/python -m pytest tests/test_fsm_llm_agents/ --collect-only -q | tail -1
 ```
 
-The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run (about 20 seconds) collects 3,428 tests. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
+The whole suite needs no network or API key; the `conftest.py` network block makes sure of it. A default run takes about 20 seconds. If a new test must open a real connection, mark it `real_llm` or `integration`; otherwise it fails with `ConnectionRefusedError`.
 
 ## Things to know
 
-- Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`, which is a module-level skip), `fastapi` and `httpx` (`test_remote.py` and the `AgentServer` tests in other files), the opentelemetry SDK (OTEL tests), `fsm_llm.reasoning` and `fsm_llm.workflows` (a few tests that use them). In a venv without `mcp` a default run shows 1 skipped.
+- Some tests skip when an optional package is missing: `mcp` (all of `test_mcp_stdio.py`, which is a module-level skip), `fastapi` and `httpx` (`test_remote.py` and the `AgentServer` tests in other files), the opentelemetry SDK (OTEL tests), `fsm_llm.reasoning` and `fsm_llm.workflows` (a few tests that use them). In a venv without `mcp` a default run shows that module skipped.
 - The async tests in `test_mcp_provider.py` need `asyncio_mode = "auto"`, which `pyproject.toml` sets.
 - Library logging is off by default. Tests that check a warning call `logger.enable("fsm_llm")`, add a sink, and disable logging again afterwards.
 - Many docstrings cite `DECISION plan-.../D-NNN` ids. They record why a behaviour exists; do not weaken those assertions.
