@@ -87,6 +87,7 @@ The command line also takes `--context '{"audience": "child"}'` (extra context a
 ## Things to know
 
 - One engine solves one problem at a time. Calls to `solve_problem` on the same engine wait for each other.
+- An interrupt (`KeyboardInterrupt`, `SystemExit`) during a solve ends its conversations and reaches you unchanged. `engine.close()` ends whatever is still open (safe to call twice), and `with ReasoningEngine(...) as engine:` does it on exit.
 - Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps is popped and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`. Any failed solve raises that error, and its `details["partial_context"]` holds what the solve had collected (for example a validated `proposed_solution`).
 - The model cannot mark its own answer as valid or change the retry counters: those keys are written only by the engine's handlers. An attempt that produces no answer counts as a failed attempt.
 - `ReasoningEngine(llm_interface=my_interface)` sends every call to your interface (its `model` argument is then not used).

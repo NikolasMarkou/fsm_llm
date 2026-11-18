@@ -418,6 +418,17 @@ class ReasoningEngine:
 
         return {**verdict, ContextKeys.MAX_RETRIES_REACHED: max_reached}
 
+    def close(self) -> None:
+        """End every open conversation of both APIs; safe to call twice."""
+        for api in (self.orchestrator, self.classifier):
+            api.close()
+
+    def __enter__(self) -> ReasoningEngine:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
     def solve_problem(
         self, problem: str, initial_context: dict[str, Any] | None = None
     ) -> tuple[str, dict[str, Any]]:
@@ -481,6 +492,10 @@ class ReasoningEngine:
             raise self._failed_solve(
                 conversation_id, stack, f"Reasoning execution failed: {e}"
             ) from e
+        except (KeyboardInterrupt, SystemExit):
+            # The caller's signal reaches it unwrapped, but ends what it opened.
+            _end_quietly(self.orchestrator, conversation_id)
+            raise
         responses = _ordered_responses(initial_response, stack.responses, results)
 
         # Get final context BEFORE ending the conversation (end_conversation

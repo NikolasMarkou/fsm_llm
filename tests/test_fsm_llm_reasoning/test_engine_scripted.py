@@ -959,3 +959,152 @@ class TestNonStrReasoningStrategy:
             context[ContextKeys.REASONING_TYPE_SELECTED]
             == ReasoningType.ANALYTICAL.value
         )
+
+
+class _InterruptingLLM(_ScriptedLLM):
+    """Raises ``exc`` when asked for ``field`` (an interrupt inside a pushed FSM).
+
+    ``frames_at_raise`` records how many instances the orchestrator manager held
+    at that moment (the orchestrator and the pushed strategy frame: 2).
+    """
+
+    def __init__(self, script: dict[str, Any], field: str, exc: BaseException) -> None:
+        super().__init__(script)
+        self.field = field
+        self.exc = exc
+        self.frames_at_raise: int | None = None
+        self.api: Any = None
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        if request.field_name == self.field:
+            self.frames_at_raise = len(self.api.fsm_manager.instances)
+            raise self.exc
+        return super().extract_field(request)
+
+
+_INTERRUPTS = [KeyboardInterrupt, SystemExit]
+
+
+class TestAnInterruptEndsTheSolve:
+    """F1 (reasoning audit 1.2): a KeyboardInterrupt or SystemExit is the
+    caller's signal and reaches it unwrapped, but the orchestrator conversation
+    (and a pushed strategy frame) is ended, not left in the manager."""
+
+    @pytest.mark.parametrize("interrupt", _INTERRUPTS)
+    def test_an_interrupt_in_the_run_leaves_no_conversation(
+        self, monkeypatch, interrupt
+    ):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+
+        def interrupted(*args: Any, **kwargs: Any) -> Any:
+            raise interrupt()
+
+        monkeypatch.setattr(engine.orchestrator, "run_until_terminal", interrupted)
+
+        with pytest.raises(interrupt):
+            engine.solve_problem(_PROBLEM)
+
+        assert engine.orchestrator.list_active_conversations() == []
+        assert dict(engine.orchestrator.fsm_manager.instances) == {}
+        assert not engine._solve_lock.locked()
+
+    @pytest.mark.parametrize("interrupt", _INTERRUPTS)
+    def test_an_interrupt_inside_a_pushed_strategy_frame_ends_both(self, interrupt):
+        llm = _InterruptingLLM(_VALID_SCRIPT, "conclusion", interrupt())
+        engine = _engine(llm)
+        llm.api = engine.orchestrator
+
+        with pytest.raises(interrupt):
+            engine.solve_problem(_PROBLEM)
+
+        assert llm.frames_at_raise == 2  # the strategy frame was pushed and live
+        assert engine.orchestrator.list_active_conversations() == []
+        assert dict(engine.orchestrator.fsm_manager.instances) == {}
+
+    def test_an_ordinary_error_is_still_wrapped(self, monkeypatch):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        monkeypatch.setattr(
+            engine.orchestrator,
+            "run_until_terminal",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        with pytest.raises(ReasoningExecutionError, match="boom"):
+            engine.solve_problem(_PROBLEM)
+
+        assert engine.orchestrator.list_active_conversations() == []
+
+    def test_the_event_log_writer_is_released_after_an_interrupt(
+        self, monkeypatch, tmp_path
+    ):
+        from fsm_llm.runtime import EventLog
+
+        log = EventLog(tmp_path / "log")
+        engine = ReasoningEngine(
+            model="mock", llm_interface=_ScriptedLLM(_VALID_SCRIPT), event_log=log
+        )
+        seen: list[str] = []
+
+        def interrupted(conversation_id: str, **kwargs: Any) -> Any:
+            seen.append(conversation_id)
+            assert log.has_writer(conversation_id)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(engine.orchestrator, "run_until_terminal", interrupted)
+
+        with pytest.raises(KeyboardInterrupt):
+            engine.solve_problem(_PROBLEM)
+        engine.close()
+
+        assert seen and not log.has_writer(seen[0])
+        log.close()
+
+
+class TestEngineClose:
+    """F1: ``close()`` ends what is open on both APIs and is idempotent; the
+    engine is a context manager."""
+
+    def test_close_ends_every_open_conversation_on_both_apis(self):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        orchestrator_id, _ = engine.orchestrator.start_conversation({})
+        classifier_id, _ = engine.classifier.start_conversation({})
+
+        engine.close()
+
+        assert engine.orchestrator.list_active_conversations() == []
+        assert engine.classifier.list_active_conversations() == []
+        assert orchestrator_id and classifier_id
+
+    def test_close_twice_is_harmless(self, tmp_path):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+
+        engine.close()
+        engine.close()
+
+        # APIs that own their event log (a path) close it once, then again
+        owning = ReasoningEngine(
+            model="mock",
+            llm_interface=_ScriptedLLM(_VALID_SCRIPT),
+            event_log=tmp_path / "owned",
+        )
+        owning.orchestrator.start_conversation({})
+        owning.close()
+        owning.close()
+        assert owning.orchestrator.list_active_conversations() == []
+
+    def test_the_context_manager_closes_on_exit_and_on_error(self):
+        with _engine(_ScriptedLLM(_VALID_SCRIPT)) as engine:
+            engine.orchestrator.start_conversation({})
+            assert engine.orchestrator.list_active_conversations()
+        assert engine.orchestrator.list_active_conversations() == []
+
+        with pytest.raises(RuntimeError, match="body failed"):
+            with _engine(_ScriptedLLM(_VALID_SCRIPT)) as failing:
+                failing.classifier.start_conversation({})
+                raise RuntimeError("body failed")
+        assert failing.classifier.list_active_conversations() == []
+
+    def test_enter_returns_the_engine(self):
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        with engine as entered:
+            assert entered is engine
