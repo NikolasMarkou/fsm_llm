@@ -2056,6 +2056,11 @@ _BAD_RULES = [
     {"allowed_values": "abc"},
     {"pattern": "["},
     {"pattern": 5},
+    # B6: inverted bounds reject every value (no length or number is both)
+    {"min_length": 5, "max_length": 3},
+    {"max_length": -1},
+    {"min_value": 5, "max_value": 1},
+    {"min_value": "10", "max_value": 9.5},
 ]
 
 
@@ -2067,6 +2072,10 @@ _GOOD_RULES = [
     {"allowed_values": ("a", "b")},
     {"pattern": r"^[a-z]+$"},
     {"min_value": 0, "max_value": "100"},
+    # equal bounds accept exactly one value; a negative minimum bounds nothing
+    {"min_length": 3, "max_length": 3},
+    {"min_length": -1},
+    {"min_value": 2, "max_value": 2.0},
 ]
 
 

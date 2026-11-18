@@ -128,6 +128,24 @@ class FieldExtractionConfig(BaseModel):
             v = rules.get(key)
             if key in rules and (not isinstance(v, int) or isinstance(v, bool)):
                 raise ValueError(f"validation_rules {key!r} must be an int, got {v!r}")
+        # Inverted bounds (B6 of plan 52ce5464) would reject every value, and the
+        # extractor then retries a field that can never pass. Equal bounds accept
+        # one value and a negative `min_length` bounds nothing: both stay legal.
+        # The values of the keys present are checked above (ints, finite numbers).
+        low, high = rules.get("min_length"), rules.get("max_length")
+        if high is not None and high < 0:
+            raise ValueError(f"validation_rules 'max_length' is negative: {high}")
+        if low is not None and high is not None and low > high:
+            raise ValueError(
+                f"validation_rules 'min_length' ({low}) is above 'max_length' "
+                f"({high}): no value can pass"
+            )
+        low, high = rules.get("min_value"), rules.get("max_value")
+        if low is not None and high is not None and float(low) > float(high):
+            raise ValueError(
+                f"validation_rules 'min_value' ({low}) is above 'max_value' "
+                f"({high}): no value can pass"
+            )
         allowed = rules.get("allowed_values")
         if "allowed_values" in rules and not isinstance(allowed, (list, tuple, set)):
             raise ValueError(
