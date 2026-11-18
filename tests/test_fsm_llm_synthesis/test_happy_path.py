@@ -14,7 +14,13 @@ from typing import Any
 import pytest
 
 from fsm_llm.core.definitions import FieldExtractionResponse, FSMDefinition
-from fsm_llm.synthesis import Simulator, SynthesisPolicy, run_gates, simulation
+from fsm_llm.synthesis import (
+    Simulator,
+    SynthesisPolicy,
+    inject_abort,
+    run_gates,
+    simulation,
+)
 from fsm_llm.synthesis.dryrun import edge_witnesses
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM
@@ -468,3 +474,64 @@ class TestTheCallBoundHoldsInsideATrial:
         per_turn = 6 * 4 + 1
         assert report.calls <= 30 + per_turn
         assert {f.code for f in report.findings} == {"simulation-incomplete"}
+
+
+class TestKeysAStateMintsWithoutAFieldExtraction:
+    """A state may extract through ``required_context_keys`` or an edge's
+    ``requires_context_keys`` alone: the pipeline mints those keys, so the happy
+    path must say them (it used to read only the declared extractions)."""
+
+    @staticmethod
+    def _fsm(shape: str) -> dict[str, Any]:
+        logic = {"==": [{"var": "answer"}, "yes"]} if shape == "gate" else None
+        extra = {} if shape == "edge" else {"required_context_keys": ["answer"]}
+        return _fsm(
+            "ask",
+            ask=_step("ask", (), [_go("done", ["answer"], logic)], **extra),
+            done=_step("done"),
+        )
+
+    @pytest.mark.parametrize(
+        ("shape", "said"),
+        [
+            ("required", "answer is sample"),
+            ("gate", "answer is yes"),
+            ("edge", "answer is sample"),
+        ],
+    )
+    def test_the_happy_path_says_the_minted_key(self, shape, said):
+        definition = _compiled(self._fsm(shape), ("answer",))
+        turns, given = simulation.happy_path(definition, 12)
+        assert turns == [said] and given == {}
+
+    @pytest.mark.parametrize("shape", ["required", "gate", "edge"])
+    def test_the_simulation_passes_with_an_honest_extractor(self, shape):
+        report, _ = _simulate(self._fsm(shape), ("answer",))
+        assert report.passed, report.repair_text()
+        assert report.happy["k"] == 2
+
+    def test_a_stuck_procedure_says_the_minted_key_but_never_an_input_or_the_abort_key(
+        self,
+    ):
+        """No edge can fire, so there is no route: the fallback text says every
+        declared key. The abort edge requires ``procedure_abort`` and an input is
+        given by the caller: neither is something a user can say."""
+        never = {
+            "and": [
+                {"==": [{"var": "answer"}, "a"]},
+                {"==": [{"var": "answer"}, "b"]},
+            ]
+        }
+        fsm = _fsm(
+            "ask",
+            ask=_step(
+                "ask",
+                (),
+                [_go("done", ["answer"], never)],
+                required_context_keys=["answer", "seats"],
+            ),
+            done=_step("done"),
+        )
+        definition = FSMDefinition(**inject_abort(fsm))
+        turns, given = simulation.happy_path(definition, 12, ("seats",))
+        assert given == {} and set(turns) == {"answer is sample"}

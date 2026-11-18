@@ -32,8 +32,10 @@ from fsm_llm.core.definitions import (
     FSMDefinition,
     LLMResponseError,
     State,
+    handler_only_names,
 )
 from fsm_llm.core.expressions import is_missing
+from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.eval.cases import (
     ConversationCase,
     Expectations,
@@ -130,12 +132,21 @@ def _route(
     return None
 
 
-def _declared(state: State) -> dict[str, str]:
+def _declared(state: State, outside: frozenset[str] = frozenset()) -> dict[str, str]:
     """The keys ``state`` extracts, each with the fixed sample of its type (a
-    classification key says its first intent)."""
+    classification key says its first intent).
+
+    The keys the pipeline mints for the state (``required_context_keys`` and
+    what its edges require, the one rule of ``KindSpec.minted_keys``) count
+    too, with the filler sample, except those ``outside`` (the inputs and the
+    handler-only names: nobody can say them).
+    """
     names = {
         c.field_name: c.intents[0].name for c in state.classification_extractions or []
     }
+    for key in kind_of(state).minted_keys(state):
+        if key not in outside:
+            names.setdefault(key, FILLER)
     for f in state.field_extractions or []:
         names[f.field_name] = _SAMPLES.get(f.field_type, FILLER)
     return names
@@ -189,9 +200,12 @@ def happy_path(
     """
     fire = edge_witnesses(definition, inputs=inputs)
     route = _route(definition, fire)
+    outside = frozenset(inputs) | handler_only_names(definition)
     if route is None:
         names = {
-            k: v for s in definition.states.values() for k, v in _declared(s).items()
+            k: v
+            for s in definition.states.values()
+            for k, v in _declared(s, outside).items()
         }
         text = "; ".join(f"{k} is {v}" for k, v in names.items()) or "Please go ahead"
         open_states = sum(1 for s in definition.states.values() if s.transitions)
@@ -202,7 +216,7 @@ def happy_path(
     for sid, i in route:
         edge = fire[sid][i]
         if edge is None:  # outside the fragment: say the state's samples
-            edge = {k: FILLER for k in _declared(definition.states[sid])}
+            edge = {k: FILLER for k in _declared(definition.states[sid], outside)}
         for key, value in edge.items():
             values.setdefault(key, value)
     turns: list[str] = []
@@ -210,10 +224,10 @@ def happy_path(
     for sid, i in route:
         state = definition.states[sid]
         reads = set(fire[sid][i] or {})
-        mine = [k for k in _declared(state) if k in values and k not in said]
+        mine = [k for k in _declared(state, outside) if k in values and k not in said]
         mine.sort(key=lambda k: k in reads)  # what the edge reads comes last
         said.update(mine)
-        samples = _declared(state)
+        samples = _declared(state, outside)
         facts = [f"{k} is {_say(values[k], samples[k])}" for k in mine]
         turns += _pack(facts) or ["Please go ahead"]
     given = {k: v for k, v in values.items() if k in inputs}
