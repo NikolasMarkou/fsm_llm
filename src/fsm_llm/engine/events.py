@@ -45,9 +45,15 @@ Interface contract:
       ``keys`` (the written key names, sorted) and ``delta_ref`` (the ``delta_blob`` of the
       definition that conversation runs). Reads ``manager.instances`` here, not in the ``API``
       modules (a source scan keeps the ``API`` off the manager's tables).
-    - ``record_state(manager, log, conversation_id, *, source, frame=0, **fields) -> int``: append
-      one ``context/record`` with the state of the conversation read under ONE ``conv_lock`` hold
-      (out of any turn: ``start_conversation``).
+    - ``record_state(manager, log, conversation_id, *, source, frame=0, root_id=None, **fields)
+      -> int``: append one ``context/record`` with the state of the conversation read under ONE
+      ``conv_lock`` hold (out of any turn: ``start_conversation``). *conversation_id* is the id
+      the MANAGER knows; the event goes to the log of *root_id* (default: the same id) at
+      *frame*, so a pushed frame (its own manager id, the tree's root id) can be recorded.
+    - ``state_ref_of(manager, log, conversation_id) -> str``: the ``state_blob`` of the
+      conversation, read under ONE ``conv_lock`` hold, stored as a blob; the reference. The
+      ``stack/push`` (the child's post-greeting state) and ``stack/pop`` (the parent's
+      post-merge state) producers use it.
 
 Imports ``core``, ``runtime`` and ``engine.fsm.snapshots`` only; never the pipeline or the API.
 """
@@ -250,6 +256,23 @@ def end_turn(handle: TurnHandle | None, error: type[BaseException] | None) -> No
         )
 
 
+def _read_state_blob(manager: FSMManager, conversation_id: str) -> dict[str, Any]:
+    """The ``state_blob`` of *conversation_id*, read under ONE ``conv_lock`` hold.
+
+    The definition is resolved BEFORE the hold (``_read_under_lock`` forbids resolving inside
+    it), as the anchors of ``engine/fsm/`` require.
+    """
+    definition = manager.get_fsm_definition(manager.instances[conversation_id].fsm_id)
+    return manager._read_under_lock(
+        conversation_id, lambda inst: state_blob(inst, definition)
+    )
+
+
+def state_ref_of(manager: FSMManager, log: EventLog, conversation_id: str) -> str:
+    """Store the current state of *conversation_id* as a blob and return its reference."""
+    return log.put_json(_read_state_blob(manager, conversation_id))
+
+
 def record_state(
     manager: FSMManager,
     log: EventLog,
@@ -257,20 +280,19 @@ def record_state(
     *,
     source: str,
     frame: int = 0,
+    root_id: str | None = None,
     **fields: Any,
 ) -> int:
     """Append a ``context/record`` with the current state of *conversation_id*; return its ``seq``.
 
-    The state is read under ONE ``conv_lock`` hold (``_read_under_lock``, the one read path of
-    the manager) and the definition is resolved BEFORE it, as the anchors of ``engine/fsm/``
-    require. *source* names the writer (``"start"``); *fields* are extra event fields.
+    The state is read through ``_read_state_blob`` (one ``conv_lock`` hold). *source* names the
+    writer (``"start"``); *fields* are extra event fields. The event is written to the log of
+    *root_id* (the tree's root conversation id, default *conversation_id* itself, which is right
+    for a root) at *frame*: a pushed frame has its own manager id and the root's log id.
     """
-    definition = manager.get_fsm_definition(manager.instances[conversation_id].fsm_id)
-    blob = manager._read_under_lock(
-        conversation_id, lambda inst: state_blob(inst, definition)
-    )
+    blob = _read_state_blob(manager, conversation_id)
     return log.append(
-        conversation_id,
+        conversation_id if root_id is None else root_id,
         EventType.CONTEXT_RECORD,
         frame=frame,
         source=source,

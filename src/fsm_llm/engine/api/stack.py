@@ -164,6 +164,9 @@ class StackMixin(_ApiSurface):
                 processed_fsm_id,
                 processed_fsm_def,
                 stack_depth,
+                return_context=new_frame.return_context,
+                shared_context_keys=new_frame.shared_context_keys,
+                preserve_history=new_frame.preserve_history,
             )
             logger.info(
                 f"Pushed new FSM onto conversation {conversation_id}, "
@@ -390,6 +393,7 @@ class StackMixin(_ApiSurface):
                 merge_strategy_enum.value,
                 len(context_to_merge or {}),
                 stack_depth,
+                parent_id=previous_frame.conversation_id,
             )
             logger.info(
                 f"Popped FSM from conversation {conversation_id}, "

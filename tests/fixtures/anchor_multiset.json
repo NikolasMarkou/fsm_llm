@@ -549,6 +549,11 @@
       "delta": 1,
       "reason": "step 15.1 of plan 21e6f00d (review of batch 1, concern 8): a reference comment at the write-time filter (runtime/log.py, filter_context): internal keys leave a payload at every depth except the caller's top-level allow-list, never by prefix or deny-list; no other token was added or lost",
       "token": "plan-2026-11-17T100529-21e6f00d/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "step 2 of plan 5a6a1f80: new anchor at fold_stack (runtime/stores/stack.py): the stack fold is depth-indexed, a push is the only commit of a frame, a missing pop is inferred, a duplicate record is a no-op; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-004"
     }
   ]
 }

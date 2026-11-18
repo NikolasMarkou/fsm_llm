@@ -119,7 +119,7 @@ def _migrate_1_to_2(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The one adjacent migration: an old ``SessionState`` dict to the v2 field names."""
     # DECISION plan-2026-11-17T100529-21e6f00d/D-009
     # An old file is NOT trusted to hold only public keys: `context_data` is filtered by
-    # `_public` here, exactly as `_build` filters the fold, so a forged `_approval_granted` (or
+    # `_public` here, exactly as `build_projection` filters the fold, so a forged `_approval_granted` (or
     # any internal key) in a legacy file never reaches a restore. Do NOT copy `context_data`
     # through unfiltered, and do NOT carry internal keys by prefix or deny-list: the only
     # internal keys a restore takes are a definition's own transcript keys (`completion_context`,
@@ -237,7 +237,7 @@ def fold_session(
                 deltas.append(event["delta_ref"])
     if ref is None:
         return None
-    return _build(ref, deltas, load_blob, conversation_id, last_seq, tools)
+    return build_projection(ref, deltas, load_blob, conversation_id, last_seq, tools)
 
 
 def _mapping(blob: Mapping[str, Any], key: str) -> dict[str, Any]:
@@ -249,7 +249,7 @@ def _mapping(blob: Mapping[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
-def _build(
+def build_projection(
     ref: str,
     deltas: list[str],
     load_blob: Callable[[str], Any],
@@ -257,7 +257,11 @@ def _build(
     last_seq: int,
     tools: list[Mapping[str, Any]],
 ) -> SessionProjection:
-    """Read the winning state blob, apply the deltas after it and validate the result."""
+    """Read the winning state blob, apply the deltas after it and validate the result.
+
+    The one builder of a state projection: ``fold_session`` calls it for the root and
+    ``stores.stack.fold_stack`` for every frame (*conversation_id* is then the frame's own id).
+    """
     # DECISION plan-2026-11-17T100529-21e6f00d/D-009
     # The fold drops internal-prefixed keys of `context_data` WHATEVER a blob says (`_public`),
     # and a delta writes internal keys only into `completion_context`, never into the context.

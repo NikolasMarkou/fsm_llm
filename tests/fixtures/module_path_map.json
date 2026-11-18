@@ -1147,6 +1147,7 @@
     "fsm_llm.runtime.stores",
     "fsm_llm.runtime.stores.jsonl",
     "fsm_llm.runtime.stores.session",
+    "fsm_llm.runtime.stores.stack",
     "fsm_llm.skills",
     "fsm_llm.synthesis",
     "fsm_llm.synthesis.__version__",

@@ -28,13 +28,20 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
     - ``child_event_scope(api, conversation_id)``: the scope of the frame ``push_fsm`` is about to
       add (frame = the current depth), so the pushed FSM's greeting is logged under its own
       frame; the shared no-op context with the log off.
-    - ``record_push(api, conversation_id, child_id, fsm_id, definition, depth)`` and
-      ``record_pop(api, conversation_id, child_id, fsm_id, merge_strategy, merged_keys, depth)``:
-      append ``stack/push`` (``child_conversation_id``, ``fsm_id``, ``depth``, ``definition_ref``
-      to the full definition blob) and ``stack/pop`` (``child_conversation_id``, ``fsm_id``,
-      ``merge_strategy``, ``merged_key_count``, ``depth``) under the PARENT frame, after the stack
-      changed and outside ``_stack_lock``. A failed write is a WARNING, not an error: the stack
-      already changed and cannot be undone, and the poisoned writer refuses the next checkpoint.
+    - ``record_push(api, conversation_id, child_id, fsm_id, definition, depth, *, return_context,
+      shared_context_keys, preserve_history)`` and ``record_pop(api, conversation_id, child_id,
+      fsm_id, merge_strategy, merged_keys, depth, *, parent_id)``: append ``stack/push``
+      (``child_conversation_id``, ``fsm_id``, ``depth``, ``definition_ref`` to the full definition
+      blob, ``state_ref`` of the child's post-greeting state, ``return_context_ref`` (through
+      ``filter_context``), ``shared_context_keys``, ``preserve_history``) and ``stack/pop``
+      (``child_conversation_id``, ``fsm_id``, ``merge_strategy``, ``merged_key_count``, ``depth``,
+      ``state_ref`` of the parent *parent_id* after the merge) under the PARENT frame, after the
+      stack changed and outside ``_stack_lock``: ``runtime.stores.stack.fold_stack`` rebuilds the
+      stack from them. A failed write is a WARNING, not an error: the stack already changed and
+      cannot be undone, and the poisoned writer refuses the next checkpoint. An optional field
+      that cannot be built (a blob or a state read that fails) is left out with a WARNING and the
+      event is still written; the fold refuses a frame it cannot restore from what is missing
+      (D-005 of plan 5a6a1f80: the writes stay best effort, the fold detects the gap).
     - ``record_context_update(api, conversation_id, child_id, delta)``: appends ``context/record``
       (``source: "update_context"``, ``delta_ref`` to ``engine.events.delta_blob``, ``keys`` the
       written key names; ``engine.events.record_delta`` does the write) after ``API.update_context`` wrote the delta. A failed write RAISES
@@ -52,18 +59,19 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext, suppress
 from typing import Any
 
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.engine.events import record_delta, record_state
+from fsm_llm.engine.events import record_delta, record_state, state_ref_of
 from fsm_llm.logging import logger
 from fsm_llm.runtime import (
     EventLog,
     EventType,
     TurnScope,
     activate,
+    filter_context,
     scoped_iter,
     warn_on_failure,
 )
@@ -140,6 +148,18 @@ def _record_stack_event(
         log.append(conversation_id, kind, frame=max(parent, 0), depth=depth, **fields)
 
 
+def _optional_field(
+    fields: dict[str, Any], name: str, build: Callable[[], Any]
+) -> None:
+    """Set ``fields[name]`` to ``build()``; a failure leaves it out with a WARNING (type name only)."""
+    try:
+        fields[name] = build()
+    except Exception as exc:
+        logger.warning(
+            f"event log: stack field {name} not recorded ({type(exc).__name__})"
+        )
+
+
 def record_push(
     api: _ApiSurface,
     conversation_id: str,
@@ -147,17 +167,34 @@ def record_push(
     fsm_id: str,
     definition: FSMDefinition,
     depth: int,
+    *,
+    return_context: Mapping[str, Any],
+    shared_context_keys: Sequence[str],
+    preserve_history: bool,
 ) -> None:
     """Append ``stack/push`` for a frame that was just added (a no-op with the log off)."""
     log = getattr(api, "_event_log", None)
     if log is None:
         return
-    fields: dict[str, Any] = {"child_conversation_id": child_id, "fsm_id": fsm_id}
+    fields: dict[str, Any] = {
+        "child_conversation_id": child_id,
+        "fsm_id": fsm_id,
+        "shared_context_keys": list(shared_context_keys),
+        "preserve_history": bool(preserve_history),
+    }
     try:
         fields["definition_ref"] = log.put_json(definition.model_dump(mode="json"))
     except Exception as exc:
         logger.warning(f"event log: definition not recorded ({type(exc).__name__})")
         fields["definition_unrecorded"] = True
+    _optional_field(
+        fields,
+        "return_context_ref",
+        lambda: log.put_json(filter_context(return_context)),
+    )
+    _optional_field(
+        fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, child_id)
+    )
     _record_stack_event(api, EventType.STACK_PUSH, conversation_id, depth, **fields)
 
 
@@ -169,18 +206,23 @@ def record_pop(
     merge_strategy: str,
     merged_keys: int,
     depth: int,
+    *,
+    parent_id: str,
 ) -> None:
     """Append ``stack/pop`` for a frame that was just removed (a no-op with the log off)."""
-    _record_stack_event(
-        api,
-        EventType.STACK_POP,
-        conversation_id,
-        depth,
-        child_conversation_id=child_id,
-        fsm_id=fsm_id,
-        merge_strategy=merge_strategy,
-        merged_key_count=merged_keys,
+    log = getattr(api, "_event_log", None)
+    if log is None:
+        return
+    fields: dict[str, Any] = {
+        "child_conversation_id": child_id,
+        "fsm_id": fsm_id,
+        "merge_strategy": merge_strategy,
+        "merged_key_count": merged_keys,
+    }
+    _optional_field(
+        fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, parent_id)
     )
+    _record_stack_event(api, EventType.STACK_POP, conversation_id, depth, **fields)
 
 
 def record_context_update(
