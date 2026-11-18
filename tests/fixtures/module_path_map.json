@@ -1079,6 +1079,7 @@
     "fsm_llm.engine",
     "fsm_llm.engine.api",
     "fsm_llm.engine.api.events",
+    "fsm_llm.engine.api.registration",
     "fsm_llm.engine.api.sessions",
     "fsm_llm.engine.api.surface",
     "fsm_llm.engine.events",

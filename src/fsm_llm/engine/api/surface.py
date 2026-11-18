@@ -73,6 +73,7 @@ class _ApiSurface:
             initial_context: dict[str, Any] | None = None,
             *,
             _suppress_start: bool = False,
+            _conversation_id: str | None = None,
         ) -> tuple[str, str]: ...
 
         def advance(self, conversation_id: str) -> AdvanceResult: ...

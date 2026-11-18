@@ -53,6 +53,7 @@ from fsm_llm.engine.turn import MessagePipeline
 from fsm_llm.handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
+from fsm_llm.runtime.stores import check_conversation_id
 
 from .helpers import _conversation_entry, with_conversation_context
 from .snapshots import SnapshotsMixin
@@ -299,6 +300,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         initial_context: dict[str, Any] | None = None,
         *,
         suppress_start: bool = False,
+        conversation_id: str | None = None,
     ) -> tuple[str, str]:
         """Start new conversation.
 
@@ -312,12 +314,21 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
                 restore so resuming does not re-fire start-of-conversation side
                 effects or burn an LLM greeting. Default False keeps the normal
                 start path byte-for-byte unchanged.
+            conversation_id: Keep this id instead of minting a ``uuid4`` (the seam
+                ``API.resume`` uses, plan 5a6a1f80 D-008). It must pass
+                ``check_conversation_id`` (``EventPayloadError``, an ``FSMError``,
+                otherwise) and not be live in ``instances`` (``FSMError``): nothing is
+                registered when it is refused. Default ``None`` mints the id as always.
 
         Returns:
             Tuple of (conversation_id, initial_response)
         """
         instance = self._create_instance(fsm_id)
-        conversation_id = str(uuid.uuid4())
+        explicit_id = conversation_id is not None
+        if conversation_id is None:
+            conversation_id = str(uuid.uuid4())
+        else:
+            check_conversation_id(conversation_id)
         log = logger.bind(conversation_id=conversation_id, package="fsm_llm")
 
         if initial_context is not None and not isinstance(initial_context, dict):
@@ -338,6 +349,8 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         )
 
         with self._lock:
+            if explicit_id and conversation_id in self.instances:
+                raise FSMError(f"conversation id '{conversation_id}' is already live")
             self.instances[conversation_id] = instance
             self._conversation_locks[conversation_id] = threading.RLock()
 

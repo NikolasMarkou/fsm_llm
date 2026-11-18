@@ -8,6 +8,7 @@ that does).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm.core.definitions import FSMError
@@ -181,11 +182,41 @@ class SessionsMixin(_ApiSurface):
                 "the intended FSM definition."
             )
 
+        conv_id = self._restore_conversation(
+            state,
+            lambda new_id: record_restored(
+                self, new_id, session_id, state.metadata.get(METADATA_LAST_SEQ)
+            ),
+        )
+
+        return conv_id, state
+
+    def _restore_conversation(
+        self,
+        state: SessionState,
+        record: Callable[[str], None],
+        *,
+        conversation_id: str | None = None,
+    ) -> str:
+        """Start a conversation seeded from *state* and return its id: the ONE restore body.
+
+        Interface contract (callers: ``restore_session`` now, ``fork`` and ``resume``
+        next, plan 5a6a1f80): *state* is the saved or folded root session; *record*
+        takes the new conversation id and writes the lineage record (it runs inside the
+        teardown guard, so a raise ends the half-built conversation); *conversation_id*
+        keeps an id (``resume``) and is forwarded as ``_conversation_id`` only when
+        given. Returns the new id. Any exception after the start ends the conversation
+        (END handlers fire on purpose) and re-raises the original; a failed start raises
+        as ``start_conversation`` does and leaves nothing behind.
+        """
         # Start conversation with saved context. H9: _suppress_start=True skips
         # the START_CONVERSATION handlers and the Pass-2 greeting so a resume
         # does not re-fire start-of-conversation side effects.
+        kept_id = (
+            {} if conversation_id is None else {"_conversation_id": conversation_id}
+        )
         conv_id, _ = self.start_conversation(
-            initial_context=state.context_data, _suppress_start=True
+            initial_context=state.context_data, _suppress_start=True, **kept_id
         )
 
         current_fsm_id = self._get_current_fsm_conversation_id(conv_id)
@@ -239,9 +270,7 @@ class SessionsMixin(_ApiSurface):
             # Event log on: the restored state is the first record of the new log (lineage
             # names the old id and the last event the fold read). A write failure raises
             # here, so the teardown below ends the conversation.
-            record_restored(
-                self, conv_id, session_id, state.metadata.get(METADATA_LAST_SEQ)
-            )
+            record(conv_id)
         except Exception:
             # Best-effort teardown of the just-created conversation. end_conversation
             # removes conv_id from conversation_stacks and
@@ -256,7 +285,7 @@ class SessionsMixin(_ApiSurface):
                 )
             raise
 
-        return conv_id, state
+        return conv_id
 
     def _restorable_internal(self, state: SessionState) -> dict[str, Any] | None:
         """The internal context entries a restore may seed: only the keys the RUNNING

@@ -29,7 +29,7 @@ fsm_llm.API class
   def run_until_terminal(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], None] | None = None, seconds_exempt_states: Collection[str] = ()) -> tuple[AdvanceResult, ...]
   def run_until_terminal_stream(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], None] | None = None, seconds_exempt_states: Collection[str] = ()) -> Iterator[str]
   def save_session(self, conversation_id: str) -> None
-  def start_conversation(self, initial_context: dict[str, Any] | None = None, *, _suppress_start: bool = False) -> tuple[str, str]
+  def start_conversation(self, initial_context: dict[str, Any] | None = None, *, _suppress_start: bool = False, _conversation_id: str | None = None) -> tuple[str, str]
   def update_context(self, conversation_id: str, context_update: dict[str, Any]) -> None
 fsm_llm.APIBuilder class
   def __init__(self) -> None
@@ -228,7 +228,7 @@ fsm_llm.FSMManager class
   def resolve_state_definition(self, instance: FSMInstance, conversation_id: str | None = None) -> State
   def seed_restored_conversation(self, conversation_id: str, *, summary: str | None, history: list[dict[str, str]], provenance: dict[str, Any] | None, working_memory: Any, internal_context: Mapping[str, Any] | None = None) -> None
   def set_conversation_state(self, conversation_id: str, state_name: str) -> None
-  def start_conversation(self, fsm_id: str, initial_context: dict[str, Any] | None = None, *, suppress_start: bool = False) -> tuple[str, str]
+  def start_conversation(self, fsm_id: str, initial_context: dict[str, Any] | None = None, *, suppress_start: bool = False, conversation_id: str | None = None) -> tuple[str, str]
   def update_conversation_context(self, conversation_id: str, context_update: dict[str, Any], log: Any = None) -> None
 fsm_llm.FSMManagerBuilder class
   def __init__(self) -> None

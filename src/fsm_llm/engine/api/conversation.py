@@ -85,9 +85,10 @@ Custom handler integration:
 
 Layer ``engine`` (plan d454fd62, step 81): this module is the shell of the old ``fsm_llm.api``:
 ``API`` (the constructor, the factories, ``start_conversation``, the turn entries ``converse`` and
-``advance`` with their streams, the handler registration, ``close``), composed of four mixins:
-``RunMixin`` (``run.py``), ``StackMixin`` (``stack.py``), ``LifecycleMixin`` (``lifecycle.py``) and
-``SessionsMixin`` (``sessions.py``). The method bodies are unchanged.
+``advance`` with their streams, ``close``), composed of five mixins: ``RunMixin`` (``run.py``),
+``StackMixin`` (``stack.py``), ``LifecycleMixin`` (``lifecycle.py``), ``SessionsMixin``
+(``sessions.py``) and ``HandlerRegistrationMixin`` (``registration.py``, moved out at plan
+5a6a1f80 step 3). The method bodies are unchanged.
 """
 
 from __future__ import annotations
@@ -100,7 +101,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from fsm_llm.constants import (
     DEFAULT_MAX_FSM_CACHE_SIZE,
@@ -119,13 +120,9 @@ from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import StateExecutor
 from fsm_llm.engine.session import SessionStore
 from fsm_llm.handlers import (
-    BaseHandler,
     FSMHandler,
-    HandlerBuilder,
     HandlerErrorMode,
     HandlerSystem,
-    HandlerTiming,
-    create_handler,
 )
 from fsm_llm.llm import (
     DEFAULT_MAX_TOKENS,
@@ -146,6 +143,7 @@ from .events import (
 )
 from .helpers import _require_classifier_interface, _unexpected_error
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin
+from .registration import HandlerRegistrationMixin
 from .run import RunMixin
 from .sessions import SessionsMixin
 from .stack import FSMStackFrame, StackMixin
@@ -200,7 +198,9 @@ def _auto_save_session(api: API, conversation_id: str) -> None:
         logger.warning(f"Auto-save session failed: {e!s}")
 
 
-class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
+class API(
+    RunMixin, StackMixin, LifecycleMixin, SessionsMixin, HandlerRegistrationMixin
+):
     """
     Enhanced API for Improved 2-Pass FSM-LLM Architecture.
 
@@ -508,6 +508,7 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         initial_context: dict[str, Any] | None = None,
         *,
         _suppress_start: bool = False,
+        _conversation_id: str | None = None,
     ) -> tuple[str, str]:
         """
         Start new conversation with the 2-pass architecture.
@@ -519,6 +520,10 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
                 the START_CONVERSATION handlers and the Pass-2 greeting are
                 skipped (used by ``restore_session``). Not part of the public
                 API; default False preserves normal start behavior.
+            _conversation_id: Internal, beside ``_suppress_start``: keep this id
+                instead of a minted one (``FSMManager.start_conversation(conversation_id=)``;
+                ``resume``). Sent to the manager only when given, so the default
+                call is unchanged. Not part of the public API.
 
         Returns:
             Tuple of (conversation_id, initial_response). The response is
@@ -533,10 +538,16 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
         """
         try:
             # Start conversation using enhanced FSM manager
+            kept_id = (
+                {}
+                if _conversation_id is None
+                else {"conversation_id": _conversation_id}
+            )
             conversation_id, response = self.fsm_manager.start_conversation(
                 self.fsm_id,
                 initial_context=initial_context,
                 suppress_start=_suppress_start,
+                **kept_id,
             )
 
             # Track conversation and initialize stack
@@ -716,50 +727,6 @@ class API(RunMixin, StackMixin, LifecycleMixin, SessionsMixin):
                     _auto_save_session(self, conversation_id)
 
         return _stream()
-
-    # ==========================================
-    # HANDLER MANAGEMENT METHODS
-    # ==========================================
-
-    def register_handler(self, handler: FSMHandler) -> None:
-        """Register handler with the system."""
-        self.handler_system.register_handler(handler)
-
-    def register_handlers(self, handlers: list[FSMHandler]) -> None:
-        """Register multiple handlers."""
-        for handler in handlers:
-            self.register_handler(handler)
-
-    def create_handler(
-        self,
-        name: str = "CustomHandler",
-        timing: HandlerTiming | None = None,
-        action: Any | None = None,
-    ) -> HandlerBuilder:
-        """Create new handler using fluent builder.
-
-        When *timing* and *action* are both provided the handler is built
-        and registered automatically, providing a convenient shorthand::
-
-            fsm.create_handler(
-                name="on_start",
-                timing=HandlerTiming.START_CONVERSATION,
-                action=lambda ctx: print("started"),
-            )
-        """
-        # mypy: `do()` returns a built BaseHandler (not the builder), so the local
-        # is annotated as the union. register_handler receives a BaseHandler at
-        # runtime (only reachable after `.do()` ran); cast narrows for the Protocol.
-        # The declared `-> HandlerBuilder` return is pre-existing and unchanged;
-        # cast preserves the exact runtime object returned. Annotation-only.
-        builder: HandlerBuilder | BaseHandler = create_handler(name)
-        if timing is not None:
-            builder = cast(HandlerBuilder, builder).at(timing)
-        if action is not None:
-            builder = cast(HandlerBuilder, builder).do(action)
-        if timing is not None and action is not None:
-            self.register_handler(cast(FSMHandler, builder))
-        return cast(HandlerBuilder, builder)
 
     def get_llm_interface(self) -> LLMInterface:
         """Get current LLM interface."""
