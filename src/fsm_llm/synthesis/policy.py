@@ -354,16 +354,23 @@ def _setting_problems(state: dict[str, Any]) -> Iterator[tuple[str, str]]:
 def _text_problems(value: object, limit: int) -> set[str]:
     """Codes for any string under ``value``: over ``limit`` characters, or
     holding a control or format character (a line break and a tab are fine) or
-    a lone surrogate. Iterative: a 20,000-deep document must not recurse."""
+    a lone surrogate. Iterative: a 20,000-deep document must not recurse. Each
+    container is read once (``seen``, by identity): a hand-built cyclic object
+    (JSON cannot make one) ends the walk instead of looping for good."""
     found: set[str] = set()
     todo = [value]
+    seen: set[int] = set()
     while todo:
         node = todo.pop()
-        if isinstance(node, dict):
-            todo.extend(node.keys())
-            todo.extend(node.values())
-        elif isinstance(node, (list, tuple)):
-            todo.extend(node)
+        if isinstance(node, (dict, list, tuple)):
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+            if isinstance(node, dict):
+                todo.extend(node.keys())
+                todo.extend(node.values())
+            else:
+                todo.extend(node)
         elif isinstance(node, str):
             if len(node) > limit:
                 found.add("text-too-long")

@@ -166,6 +166,8 @@ def apply_patch(
     ``move``, ``copy`` and extra keys are refused. A path is an RFC 6901
     pointer of at most 12 tokens that must resolve under
     ``/states/<s>/...`` for an ``s`` in ``scope_states`` (never ``abort``).
+    ``scope_states`` is an iterable of names (a bare string, a non-iterable or an
+    unhashable item is ``bad-scope``).
     ``add`` needs an existing parent, an index up to the length or ``-``;
     the others need an existing target; ``test`` is strict JSON equality.
     The whole patch is at most ``policy.max_patch_chars`` characters and its
@@ -177,7 +179,10 @@ def apply_patch(
         raise PatchError("bad-document")
     if isinstance(scope_states, str):
         raise PatchError("bad-scope")
-    scope = frozenset(scope_states) - {ABORT_STATE_ID}
+    try:
+        scope = frozenset(scope_states) - {ABORT_STATE_ID}
+    except TypeError:  # not an iterable of hashable names
+        raise PatchError("bad-scope") from None
     if type(ops) is not list:
         raise PatchError("op-shape")
     if len(ops) > policy.max_patch_ops:

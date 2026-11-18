@@ -312,6 +312,17 @@ class TestScope:
         op = {"op": "replace", "path": "/states/a/purpose", "value": "x"}
         assert _code(_doc(), [op], scope="a") == "bad-scope"
 
+    @pytest.mark.parametrize(
+        "scope",
+        [None, 3, 1.5, [["a"]], object()],
+        ids=["none", "int", "float", "unhashable-item", "object"],
+    )
+    def test_a_scope_that_is_not_an_iterable_of_names_is_bad_scope(self, scope):
+        """The scope is a caller argument but the docstring promises only
+        ``PatchError``: a ``TypeError`` from ``frozenset`` must not escape."""
+        op = {"op": "replace", "path": "/states/a/purpose", "value": "x"}
+        assert _code(_doc(), [op], scope=scope) == "bad-scope"
+
 
 class TestShapeAndPointers:
     @pytest.mark.parametrize("name", ["move", "copy", "MOVE", "", None, 1, ["add"], {}])

@@ -573,6 +573,53 @@ class TestCheckPolicyNeverRaises:
         d["states"]["ask"]["transitions"][0]["conditions"][0]["logic"] = node
         check_policy(d, SynthesisPolicy())
 
+    @pytest.mark.parametrize("shape", ["dict", "list", "state", "top"])
+    def test_a_self_containing_structure_is_read_once_not_forever(self, shape):
+        """A hand-built cyclic Python object (JSON cannot make one) reached
+        ``check_policy`` and looped for good. The containers count their own
+        reads, so a regression fails fast instead of hanging the run."""
+        reads = 0
+
+        def read() -> None:
+            nonlocal reads
+            reads += 1
+            if reads > 1000:
+                raise AssertionError("the walk does not end")
+
+        class Ring(dict):  # type: ignore[type-arg]
+            def values(self) -> Any:
+                read()
+                return super().values()
+
+        class Loop(list):  # type: ignore[type-arg]
+            def __iter__(self) -> Any:
+                read()
+                return super().__iter__()
+
+        d: dict[str, Any] = _good()
+        ring = Ring(k="text")
+        ring["self"] = ring
+        loop = Loop(["x"])
+        loop.append(loop)
+        if shape == "dict":
+            d["states"]["ask"]["extra"] = ring
+        elif shape == "list":
+            d["states"]["ask"]["extra"] = loop
+        elif shape == "state":
+            d["states"]["ask"] = ring
+        else:
+            d = Ring(d)
+            d["self"] = d
+        assert "unknown-key" in _codes(d)
+        assert 0 < reads <= 1000
+
+    def test_a_shared_subtree_is_judged_and_a_hostile_string_in_it_is_found(self):
+        shared = ["ok", "bad\x00text"]
+        d = _good()
+        d["states"]["ask"]["description"] = "fine"
+        d["states"]["ask"]["extra"] = [shared, shared]
+        assert "control-text" in _codes(d)
+
     def test_a_finding_is_frozen_plain_data(self):
         d = _good()
         d["persona"] = "x" * 5000
