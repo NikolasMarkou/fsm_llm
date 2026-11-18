@@ -717,6 +717,78 @@ class TestCriticalEndHandlerDuringFailedStart:
         assert manager._conversation_locks == {}
 
 
+class _StartHandler(_ExplodingHandler):
+    """Raises ``failure`` at START_CONVERSATION."""
+
+    def __init__(self, failure):
+        super().__init__("failing_start", HandlerTiming.START_CONVERSATION)
+        self._failure = failure
+
+    def execute(self, context):
+        raise self._failure
+
+
+class _EndRecorder(_ExplodingHandler):
+    """Counts its END_CONVERSATION runs in ``calls``."""
+
+    def __init__(self, calls):
+        super().__init__("end_recorder", HandlerTiming.END_CONVERSATION)
+        self._calls = calls
+
+    def execute(self, context):
+        self._calls.append(1)
+        return {}
+
+
+class TestAnInterruptDuringStartLeavesNothingRegistered:
+    """A4 (engine audit 2.5): ``start_conversation`` registers the instance, its lock and its
+    lifetime budget before the handler pass and the greeting. Both of its failure arms catch
+    ``Exception`` only, so a ``KeyboardInterrupt`` or ``SystemExit`` left all three registered
+    for an id nobody holds (the ``API`` registers its stack only after the manager returns).
+    The interrupt itself still propagates bare, and no END handler runs on it."""
+
+    @staticmethod
+    def _api(site, failure, end_calls):
+        llm = MockLLM2Interface()
+        handlers = [_EndRecorder(end_calls)]
+        if site == "start_handler":
+            handlers.append(_StartHandler(failure))
+        else:
+
+            def fail(_request):
+                raise failure
+
+            llm.generate_response = fail
+        return API.from_definition(
+            _fsm_definition(), llm_interface=llm, handlers=handlers, max_steps=3
+        )
+
+    @pytest.mark.parametrize("site", ["start_handler", "greeting"])
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    def test_the_instance_the_lock_and_the_budget_are_released(self, site, interrupt):
+        end_calls = []
+        api = self._api(site, interrupt("stop"), end_calls)
+        manager = api.fsm_manager
+        with pytest.raises(interrupt):
+            api.start_conversation()
+        assert manager.instances == {}
+        assert manager._conversation_locks == {}
+        assert manager._turn_budgets == {}
+        assert api.list_active_conversations() == []
+        assert (
+            end_calls == []
+        )  # no END handler on an interrupt (the operator wants out)
+
+    def test_an_ordinary_failure_still_fires_the_end_handlers(self):
+        """The negative control: the new arm is for the two interrupts only."""
+        end_calls = []
+        api = self._api("greeting", RuntimeError("kaput"), end_calls)
+        with pytest.raises(FSMError):
+            api.start_conversation()
+        assert end_calls == [1]
+        assert api.fsm_manager.instances == {}
+
+
 # ══════════════════════════════════════════════════════════════
 # C1 — read accessors must snapshot under conv_lock, not race the
 #      locked write path's in-place mutation of context.data

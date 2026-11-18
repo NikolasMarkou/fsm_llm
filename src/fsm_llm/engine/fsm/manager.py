@@ -397,6 +397,11 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         except FSMError:
             self._cleanup_conversation_resources(conversation_id)
             raise
+        except (KeyboardInterrupt, SystemExit):
+            # An interrupt is the caller's signal, never wrapped and no END handler runs on it
+            # (as in `turns.py`), but nothing may stay registered for an id nobody holds.
+            self._cleanup_conversation_resources(conversation_id)
+            raise
         except Exception as e:
             self._cleanup_conversation_resources(conversation_id)
             log.error(f"START_CONVERSATION handler failed: {e!s}")
@@ -413,6 +418,9 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
 
         except FSMError as e:
             self._cleanup_after_failed_start(conversation_id, instance, e, log)
+            raise
+        except (KeyboardInterrupt, SystemExit):
+            self._cleanup_conversation_resources(conversation_id)
             raise
         except Exception as e:
             self._cleanup_after_failed_start(conversation_id, instance, e, log)
