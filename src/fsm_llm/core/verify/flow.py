@@ -407,7 +407,13 @@ def analyze_liveness(
                 )
             elif sure or _gate_reads(t)[0] <= have:
                 effective[sid].append(t.target_state)
-        lowest = min((t.priority for t in edges), default=None)
+        # The lowest priority among edges that CAN pass: an edge whose gate reads a
+        # key declared nowhere on the way here never wins, so it must not hide the
+        # tie of the unconditional edges ranked below it (a classifier call per turn).
+        lowest = min(
+            (t.priority for t, sure in flagged if sure or _gate_reads(t)[0] <= have),
+            default=None,
+        )
         tied = {t.target_state for t in unconditional if t.priority == lowest}
         if len(tied) > 1:
             add(

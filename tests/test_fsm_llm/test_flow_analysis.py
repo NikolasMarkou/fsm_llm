@@ -951,6 +951,23 @@ _LIVE_CASES = {
         [],
         {},
     ),
+    # A lower-ranked edge whose gate reads a key declared nowhere can never win, so
+    # it does not hide the tie of the two unconditional edges below it.
+    "an_unsatisfiable_lower_ranked_edge_does_not_hide_the_tie": (
+        {
+            "a": {
+                "transitions": [
+                    _edge("x", logic=_gate("ghost"), priority=1),
+                    _edge("x"),
+                    _edge("end"),
+                ]
+            },
+            "x": {"transitions": [_edge("end")]},
+            "end": {},
+        },
+        [(_TIE, "a")],
+        {},
+    ),
     "chain_one_over_the_budget": (_chain(6), [(_BUDGET, "s0")], {"max_turns": 4}),
     "chain_exactly_at_the_budget": (_chain(6), [], {"max_turns": 5}),
     "a_loop_weighs_its_state_count": (
@@ -1190,7 +1207,10 @@ def _liveness_oracle(states, available, max_turns, inputs):
                 expected[(_SHADOW, s)] += 1
             elif sure or reads <= available[s]:
                 live[s].append(target)
-        lowest = min((p for _, p, _, _ in edges(s)), default=None)
+        lowest = min(
+            (p for _, p, u, reads in edges(s) if u or reads <= available[s]),
+            default=None,
+        )
         if len({t for t, p, u, _ in edges(s) if u and p == lowest}) > 1:
             expected[(_TIE, s)] += 1
     g_reach, e_reach = closure({s: full[s] for s in reach}), closure(live)
