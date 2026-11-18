@@ -51,6 +51,12 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
       class name) and an integer ``status_code`` when the error has one, never message text,
       plus ``stream: true`` when the call was a stream.
 
+At level ``shape`` (``EventLog(privacy="shape")``, ``runtime.privacy``) a request and a reply
+build and store no blob: ``llm/request`` and ``llm/response`` carry no ``prompt_ref`` and no
+``response_ref`` (the log would drop them anyway), only the codes, flags and integers above;
+at ``values`` with a redaction hook the blobs are the hook's output (``prompt`` and
+``response`` kinds).
+
 Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, never ``engine``.
 """
 
@@ -71,6 +77,7 @@ from fsm_llm.logging import logger
 from fsm_llm.runtime.constants import MAX_PAYLOAD_DEPTH, USAGE_TOKEN_FIELDS
 from fsm_llm.runtime.events import EventType, LogWriteError, to_jsonable
 from fsm_llm.runtime.log import EventLog, warn_on_failure
+from fsm_llm.runtime.privacy import RedactionKind
 
 _SCOPE: ContextVar[TurnScope | None] = ContextVar("fsm_llm_turn_scope", default=None)
 
@@ -198,14 +205,20 @@ def _response_fields(
     *wrap* names the reply type for an engine reply (stored as ``{source, response_type,
     response}``); ``None`` stores the provider reply as its own JSON.
     """
-    try:
-        body = _dump(response)
-        if wrap is not None:
-            body = {"source": SOURCE_ENGINE, "response_type": wrap, "response": body}
-        fields: dict[str, Any] = {"response_ref": log.put_json(body)}
-    except Exception as exc:
-        logger.warning(f"event log: reply not recorded ({type(exc).__name__})")
-        return {"unrecorded": True}
+    fields: dict[str, Any] = {}
+    if log.stores_values:
+        try:
+            body = _dump(response)
+            if wrap is not None:
+                body = {
+                    "source": SOURCE_ENGINE,
+                    "response_type": wrap,
+                    "response": body,
+                }
+            fields["response_ref"] = log.put_json(body, kind=RedactionKind.RESPONSE)
+        except Exception as exc:
+            logger.warning(f"event log: reply not recorded ({type(exc).__name__})")
+            return {"unrecorded": True}
     reason = (
         _finish_reason(response)
         if wrap is None
@@ -248,13 +261,12 @@ def _log_request(scope: TurnScope, build: Callable[[], Any], **fields: Any) -> i
     purpose, never a raw serialization error for the call site to swallow.
     """
     try:
-        ref = scope.log.put_json(build())
+        if scope.log.stores_values:  # a shape log builds no request blob at all
+            fields["prompt_ref"] = scope.log.put_json(
+                build(), kind=RedactionKind.PROMPT
+            )
         return scope.log.append(
-            scope.root_id,
-            EventType.LLM_REQUEST,
-            frame=scope.frame,
-            prompt_ref=ref,
-            **fields,
+            scope.root_id, EventType.LLM_REQUEST, frame=scope.frame, **fields
         )
     except Exception as exc:
         raise LogWriteError(

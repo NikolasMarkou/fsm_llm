@@ -139,6 +139,11 @@ class LogWriteError(EventLogError):
     checkpoint that did not reach the disk never lets the model call it protects run."""
 
 
+class LogPrivacyError(EventLogError):
+    """A log written at a privacy level without values (``shape``) was folded, forked, resumed
+    or restored: it holds no state to give back, and saying "unknown id" would lie."""
+
+
 class EventPayloadError(EventLogError):
     """A payload cannot be written: too deep, too large, not JSON, or a bad envelope."""
 

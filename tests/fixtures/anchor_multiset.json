@@ -584,6 +584,11 @@
       "delta": 1,
       "reason": "step 9 of plan 5a6a1f80: new anchor at ProcedureRunner._watch_errors (synthesis/runner.py): the provider outage is a position taken at the push (log, then ledger, then the interface's own count, then 0), never a before and after of usage().errors, never the ledger added to the log; the D-061 anchor of plan 2cefeb61 is kept; no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-015"
+    },
+    {
+      "delta": 1,
+      "reason": "step 10 of plan 5a6a1f80: new anchor at EventLog._envelope (runtime/log.py): the privacy level is applied where every event passes (the shape allow-list and the lvl marker), never in the producers, never by dropping only large fields or keeping a ref, never inferred from a missing state_ref; the default stays values; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-016"
     }
   ]
 }

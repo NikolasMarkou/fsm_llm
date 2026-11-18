@@ -34,6 +34,8 @@ Interface contract:
       become ``unknown_tool_calls``; nothing is executed or retried. Returns None when no event
       carries a state. A bad event stream (a corrupt middle line) raises from *events*; a state
       or delta blob that is missing, tampered or of the wrong shape raises ``LogCorruptError``.
+      ``LogPrivacyError`` as soon as ANY event of any frame carries the ``lvl`` marker (a log
+      written at level ``shape``, or a ``values`` log a ``shape`` writer continued).
       Internal-prefixed keys of ``context_data`` are dropped here, whatever a blob says.
 """
 
@@ -56,6 +58,7 @@ from fsm_llm.runtime.events import (
     TurnOutcome,
     check_depth,
 )
+from fsm_llm.runtime.privacy import refuse_shape
 
 #: The version this module writes and the one a reader accepts.
 SESSION_PROJECTION_VERSION = 2
@@ -212,6 +215,7 @@ def fold_session(
     conversation_id: Any = None
     last_seq = 0
     for event in events:
+        refuse_shape(event)  # a log without values holds no state: never "unknown id"
         last_seq = event["seq"]
         kind = event.get("type")
         if kind in (EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value):

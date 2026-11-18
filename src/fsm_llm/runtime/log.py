@@ -12,6 +12,9 @@ Privacy (D-003 of plan 21e6f00d): structured state and context payloads go throu
 except a caller's allow-list, then ``to_jsonable``); free text (a prompt, a reply, a user
 message) is stored as the model saw it, because the repository already keeps secret-looking
 context entries out of prompts. Keep the log directory as private as a session directory.
+``EventLog(root, privacy=, redact=)`` adds the ``shape`` level and the user's redaction hook
+(``runtime.privacy``, plan 5a6a1f80: read its limits, a free-text secret reaches disk at level
+``values`` unless the hook handles it).
 
 The leaf lock ``_guard`` protects the table of writers. It is never held across an append or
 a call into another component, so the log adds no edge to the lock order of ``FSMManager``;
@@ -37,10 +40,11 @@ from typing import Any
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.logging import logger
-from fsm_llm.runtime.blobs import BlobStore
+from fsm_llm.runtime.blobs import BlobStore, blob_ref
 from fsm_llm.runtime.checkpoint import is_checkpoint, unresolved_tool_calls
 from fsm_llm.runtime.constants import (
     ENVELOPE_KEYS,
+    LEVEL_KEY,
     LOG_DIR,
     MAX_INLINE_BYTES,
     MAX_PAYLOAD_DEPTH,
@@ -55,6 +59,13 @@ from fsm_llm.runtime.events import (
     check_depth,
     to_jsonable,
 )
+from fsm_llm.runtime.privacy import (
+    PrivacyLevel,
+    RedactionHook,
+    RedactionKind,
+    run_redaction,
+    shape_only,
+)
 from fsm_llm.runtime.stores.jsonl import (
     LOG_SUFFIX,
     JsonlWriter,
@@ -62,8 +73,9 @@ from fsm_llm.runtime.stores.jsonl import (
     read_events,
 )
 
-#: Envelope keys the caller never supplies as a field: the log assigns them.
-_RESERVED_FIELDS = frozenset(ENVELOPE_KEYS)
+#: Envelope keys the caller never supplies as a field: the log assigns them (the level marker
+#: too: a producer cannot say its own event is a ``values`` one).
+_RESERVED_FIELDS = frozenset(ENVELOPE_KEYS) | {LEVEL_KEY}
 
 
 @contextmanager
@@ -212,8 +224,18 @@ class EventLog:
         - ``read(conversation_id, *, since_seq=0) -> Iterator[dict]`` and ``query(...)``: see
           their docstrings. An id with no log reads as empty. ``LogCorruptError`` for a damaged
           log; never repairs, never writes.
-        - ``put_blob(bytes) -> ref``, ``put_json(value) -> ref``, ``get_blob(ref) -> bytes``,
-          ``get_json(ref)``: ``BlobStore`` through the log root (blobs are shared by every tree).
+        - ``put_blob(bytes) -> ref``, ``put_json(value, *, kind=None) -> ref``,
+          ``get_blob(ref) -> bytes``, ``get_json(ref)``: ``BlobStore`` through the log root (blobs
+          are shared by every tree). *kind* (a ``RedactionKind``) is required while a hook is set.
+        - ``EventLog(root, *, privacy=PrivacyLevel.VALUES, redact=None)``: ``privacy`` ``"shape"``
+          writes a per-type field allow-list (``privacy.SHAPE_FIELDS``), no blob and no ``*_ref``,
+          and marks every event ``lvl: "shape"``: ``put_json`` and ``put_blob`` refuse
+          (``EventPayloadError``), the producers read ``stores_values`` and build no blob, and a
+          fold of such a log raises ``LogPrivacyError``. *redact* is the hook ``(kind, value) ->
+          value`` of ``privacy.run_redaction``: it runs inside ``put_json`` and on the inline
+          arguments of a tool call, after the built-in filters; ``put_blob`` is refused while it
+          is set; any failure is ``EventPayloadError`` and the checkpoint it guards fails.
+          ``digest_json(value) -> ref`` is the reference ``put_json`` would give, storing nothing.
         - ``tool_call(conversation_id, *, name, call_id, arguments, ...)``: the checkpoint API
           of a tool call, see its docstring. ``unknown_tool_calls(conversation_id)`` reports the
           unresolved ones.
@@ -233,13 +255,35 @@ class EventLog:
           ``close``.
     """
 
-    def __init__(self, root: str | os.PathLike[str]) -> None:
+    def __init__(
+        self,
+        root: str | os.PathLike[str],
+        *,
+        privacy: PrivacyLevel | str = PrivacyLevel.VALUES,
+        redact: RedactionHook | None = None,
+    ) -> None:
+        self._privacy = PrivacyLevel.from_string(privacy)
+        if redact is not None and not callable(redact):
+            raise TypeError(
+                f"redact is a callable or None, got {type(redact).__name__}"
+            )
+        self._redact = redact
         self.root = Path(root)
         self._logs = self.root / LOG_DIR
         self._blobs = BlobStore(self.root)
         self._guard = threading.Lock()  # leaf lock: the table of writers only
         self._writers: dict[str, JsonlWriter] = {}
         self._closed = False
+
+    @property
+    def privacy(self) -> PrivacyLevel:
+        """The level this log writes at."""
+        return self._privacy
+
+    @property
+    def stores_values(self) -> bool:
+        """True at level ``values``; a producer builds no blob when this is False."""
+        return self._privacy is PrivacyLevel.VALUES
 
     def _writer(self, conversation_id: str) -> JsonlWriter:
         check_conversation_id(conversation_id)
@@ -293,13 +337,27 @@ class EventLog:
         reserved = sorted(_RESERVED_FIELDS.intersection(fields))
         if reserved:
             raise EventPayloadError(f"the log assigns {reserved}; they are not fields")
-        return {
-            **to_jsonable(dict(fields)),
+        # DECISION plan-2026-11-18T071726-5a6a1f80/D-016
+        # EVERY event of every append path passes here, so the privacy level is applied HERE:
+        # at `shape` the payload is cut to the per-type allow-list (`privacy.SHAPE_FIELDS`) and
+        # the event is marked `lvl: "shape"`. Do NOT filter in the producers instead (a new
+        # field would leak until someone remembers), do NOT drop only the large fields or keep
+        # a `*_ref` (a short user message hashes to a recoverable ref), and do NOT infer the
+        # level from "no state_ref" (it cannot tell a values log a shape writer continued).
+        # The marker is what makes a fold refuse a shape log loudly instead of returning None
+        # ("unknown id"). The default stays `values` (a shape log cannot restore anything).
+        # See decisions.md D-016.
+        payload = dict(fields) if self.stores_values else shape_only(event_type, fields)
+        envelope = {
+            **to_jsonable(payload),
             "ts": _timestamp(),
             "conversation_id": conversation_id,
             "frame": frame,
             "type": event_type.value,
         }
+        if not self.stores_values:
+            envelope[LEVEL_KEY] = self._privacy.value
+        return envelope
 
     def append(
         self,
@@ -404,13 +462,49 @@ class EventLog:
         stems = (n[: -len(LOG_SUFFIX)] for n in names if n.endswith(LOG_SUFFIX))
         return sorted(s for s in stems if _is_valid_id(s))
 
+    def _refuse_values(self, what: str) -> None:
+        if not self.stores_values:
+            raise EventPayloadError(f"this log is at level shape and stores no {what}")
+
+    def _redacted(self, kind: RedactionKind | str | None, value: Any) -> Any:
+        """*value* through the hook when one is set (``kind`` is then required), else as it is."""
+        if self._redact is None:
+            return value
+        if kind is None:
+            raise EventPayloadError(
+                "a redaction hook is set: name the kind of the value"
+            )
+        return run_redaction(self._redact, kind, value)
+
     def put_blob(self, data: bytes) -> str:
-        """Store *data* in the blob store and return its ``sha256:`` reference."""
+        """Store *data* in the blob store and return its ``sha256:`` reference.
+
+        Refused (``EventPayloadError``) at level ``shape`` and while a redaction hook is set:
+        bytes cannot be redacted, and a producer must reach blobs through ``put_json``.
+        """
+        self._refuse_values("blob")
+        if self._redact is not None:
+            raise EventPayloadError(
+                "a redaction hook is set: store JSON, not raw bytes"
+            )
         return self._blobs.put(data)
 
-    def put_json(self, value: Any) -> str:
-        """Store the canonical JSON of *value* (``EventPayloadError`` when too deep or not JSON)."""
-        return self._blobs.put_json(value)
+    def put_json(self, value: Any, *, kind: RedactionKind | str | None = None) -> str:
+        """Store the canonical JSON of *value* (``EventPayloadError`` when too deep or not JSON).
+
+        With a hook the stored value is what the hook returned for *kind* (see the class
+        contract); at level ``shape`` it refuses.
+        """
+        self._refuse_values("blob")
+        return self._blobs.put_json(self._redacted(kind, value))
+
+    def digest_json(self, value: Any) -> str:
+        """Return the reference ``put_json`` gives *value* with no hook, storing nothing.
+
+        What a ``shape`` log uses to tell a rolled-back turn from an abandoned one (equal
+        digests): the digest is compared in memory and never written.
+        """
+        return blob_ref(canonical_json(value, what="blob payload"))
 
     def get_blob(self, ref: str) -> bytes:
         """Return the bytes of *ref*, re-hashed (``LogCorruptError`` when missing or altered)."""
@@ -463,6 +557,9 @@ class EventLog:
         ``SystemExit``), no result is written: the call stays unresolved and a reader reports it
         as ``unknown``, because the log cannot tell whether the tool ran. Nothing retries it.
         *side_effecting* defaults to True: a tool is side-effecting unless it says it only reads.
+        With a redaction hook the arguments pass through it (kind ``arguments``) after
+        ``redact_context``, and a failing hook raises before the event and the body. At level
+        ``shape`` the event carries ``argument_keys`` (the sorted names) and no value.
         """
         if (
             not isinstance(name, str)
@@ -475,10 +572,14 @@ class EventLog:
             raise EventPayloadError("tool call arguments are a mapping")
         safe = to_jsonable(redact_context(dict(arguments)))
         where: dict[str, Any]
-        if len(canonical_json(safe, what="tool arguments")) <= MAX_INLINE_BYTES:
-            where = {"arguments": safe}
+        if not self.stores_values:
+            where = {"argument_keys": sorted(str(name) for name in arguments)}
         else:
-            where = {"arguments_ref": self.put_json(safe)}
+            safe = self._redacted(RedactionKind.ARGUMENTS, safe)
+            if len(canonical_json(safe, what="tool arguments")) <= MAX_INLINE_BYTES:
+                where = {"arguments": safe}
+            else:  # the hook already ran: store the blob as it is
+                where = {"arguments_ref": self._blobs.put_json(safe)}
         self.append(
             conversation_id,
             EventType.TOOL_CALL,

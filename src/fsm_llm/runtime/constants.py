@@ -35,6 +35,11 @@ BLOB_DIR = "blobs"
 #: The keys every event carries, in the roadmap's order. The rest is per event type.
 ENVELOPE_KEYS = ("v", "seq", "ts", "conversation_id", "frame", "type")
 
+#: The reserved event field of a log written at a privacy level other than ``values``: its value
+#: is the level name (``"shape"``), ABSENT on a ``values`` event. Producers cannot set it (the log
+#: assigns it) and every fold refuses an event that carries it (``runtime.privacy``).
+LEVEL_KEY = "lvl"
+
 #: A conversation id usable as a file name on every platform: lowercase only, so two ids never
 #: differ only by case on a case-folding file system. A uuid4 passes.
 CONVERSATION_ID_RE = re.compile(r"[a-z0-9_-]{1,64}")

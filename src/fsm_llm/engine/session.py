@@ -335,7 +335,9 @@ class EventLogSessionStore(SessionStore):
           ``unknown_tool_calls`` (tool calls the log cannot resolve, never retried) and
           ``last_seq`` (the last event the fold read); a key is absent when it is empty.
           ``None`` when neither the log nor the legacy directory knows *id*. A corrupt log raises
-          ``LogCorruptError``; it is never skipped past. An id outside the log's id rule raises
+          ``LogCorruptError``; it is never skipped past. A log written at privacy level
+          ``shape`` (or a ``values`` log continued as ``shape``) raises ``LogPrivacyError`` (an
+          ``FSMError``): it holds no state, and "unknown id" would lie. An id outside the log's id rule raises
           ``EventPayloadError`` unless a legacy directory can hold it.
         - ``exists``, ``list_sessions`` (the log ids and the legacy ids, sorted): reads.
         - ``save``: a documented no-op (the engine writes the log itself, ``API`` auto-save

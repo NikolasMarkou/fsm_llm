@@ -29,7 +29,9 @@ Interface contract:
       turn N and turn N+1 is not in it. ``ValueError`` for a bool, a non-int or a negative
       *at_turn*, for one past the last finished turn and for a turn that has not finished.
 
-Failure: ``LogCorruptError`` for a frame the log cannot give back, see the recovery rule. Reads
+Failure: ``LogPrivacyError`` for an event that carries the ``lvl`` marker (a ``shape`` log, or a
+``values`` log a ``shape`` writer continued; ``turn_cut`` reads no state and does not refuse);
+``LogCorruptError`` for a frame the log cannot give back, see the recovery rule. Reads
 only what survives to the final stack: the blobs of a frame that was popped are never read.
 """
 
@@ -43,6 +45,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.runtime.events import EventType, LogCorruptError, TurnOutcome
+from fsm_llm.runtime.privacy import refuse_shape
 from fsm_llm.runtime.stores.session import SessionProjection, build_projection
 
 _TOOL_TYPES = (EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value)
@@ -274,6 +277,7 @@ def fold_stack(
     conversation_id: Any = None
     last_seq = 0
     for event in events:
+        refuse_shape(event)  # a log without values holds no stack: never None
         last_seq = event["seq"]
         conversation_id = conversation_id or event.get("conversation_id")
         kind = event.get("type")

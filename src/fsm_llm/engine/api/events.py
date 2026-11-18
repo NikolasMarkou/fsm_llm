@@ -69,6 +69,10 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       could not resolve, also at the top frame, so the next fold reports none. Results come after
       the record, so a resume that fails leaves the calls unresolved to be reported again. A failed
       write RAISES and the restore's own teardown ends the half-resumed conversation.
+    - Level ``shape`` (``log.stores_values`` False, plan 5a6a1f80): ``record_push``, ``record_pop``
+      and ``record_restored_frame`` build no definition, return context or state blob and write
+      the names, ids, counts and flags only; a ``definition`` blob is stored with its
+      ``RedactionKind`` for the user's hook at level ``values``.
     - ``release_event_writer(api, conversation_id)``: closes the writer of a finished root
       conversation (no file descriptor or lock stays with it). ``close_event_log(api)``: closes an
       owned log only.
@@ -87,6 +91,7 @@ from fsm_llm.logging import logger
 from fsm_llm.runtime import (
     EventLog,
     EventType,
+    RedactionKind,
     TurnScope,
     activate,
     filter_context,
@@ -200,19 +205,24 @@ def record_push(
         "shared_context_keys": list(shared_context_keys),
         "preserve_history": bool(preserve_history),
     }
-    try:
-        fields["definition_ref"] = log.put_json(definition.model_dump(mode="json"))
-    except Exception as exc:
-        logger.warning(f"event log: definition not recorded ({type(exc).__name__})")
-        fields["definition_unrecorded"] = True
-    _optional_field(
-        fields,
-        "return_context_ref",
-        lambda: log.put_json(filter_context(return_context)),
-    )
-    _optional_field(
-        fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, child_id)
-    )
+    if log.stores_values:
+        try:
+            fields["definition_ref"] = log.put_json(
+                definition.model_dump(mode="json"), kind=RedactionKind.DEFINITION
+            )
+        except Exception as exc:
+            logger.warning(f"event log: definition not recorded ({type(exc).__name__})")
+            fields["definition_unrecorded"] = True
+        _optional_field(
+            fields,
+            "return_context_ref",
+            lambda: log.put_json(
+                filter_context(return_context), kind=RedactionKind.DELTA
+            ),
+        )
+        _optional_field(
+            fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, child_id)
+        )
     _record_stack_event(api, EventType.STACK_PUSH, conversation_id, depth, **fields)
 
 
@@ -237,9 +247,10 @@ def record_pop(
         "merge_strategy": merge_strategy,
         "merged_key_count": merged_keys,
     }
-    _optional_field(
-        fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, parent_id)
-    )
+    if log.stores_values:
+        _optional_field(
+            fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, parent_id)
+        )
     _record_stack_event(api, EventType.STACK_POP, conversation_id, depth, **fields)
 
 
@@ -315,6 +326,17 @@ def record_restored_frame(
     log = getattr(api, "_event_log", None)
     if log is None:
         return
+    refs: dict[str, Any] = {}
+    if log.stores_values:
+        refs = {
+            "definition_ref": log.put_json(
+                definition.model_dump(mode="json"), kind=RedactionKind.DEFINITION
+            ),
+            "return_context_ref": log.put_json(
+                filter_context(return_context), kind=RedactionKind.DELTA
+            ),
+            "state_ref": state_ref_of(api.fsm_manager, log, child_id),
+        }
     log.append(
         conversation_id,
         EventType.STACK_PUSH,
@@ -325,9 +347,7 @@ def record_restored_frame(
         fsm_id=fsm_id,
         shared_context_keys=list(shared_context_keys),
         preserve_history=bool(preserve_history),
-        definition_ref=log.put_json(definition.model_dump(mode="json")),
-        return_context_ref=log.put_json(filter_context(return_context)),
-        state_ref=state_ref_of(api.fsm_manager, log, child_id),
+        **refs,
     )
 
 

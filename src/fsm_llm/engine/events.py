@@ -59,6 +59,12 @@ Interface contract:
       ``stack/push`` (the child's post-greeting state) and ``stack/pop`` (the parent's
       post-merge state) producers use it.
 
+Privacy (plan 5a6a1f80, row 1.11a): at level ``shape`` (``log.stores_values`` is False) no
+producer here builds a blob. A turn keeps the DIGEST of its start and end state (``_ref``) so
+``rolled_back`` and ``abandoned`` stay distinct, and the digest is never written (the log drops
+every ``*_ref``); ``begin_turn`` stores no user message, ``record_delta`` no delta. At level
+``values`` every blob is stored with its ``RedactionKind`` for the user's hook.
+
 Imports ``core``, ``runtime`` and ``engine.fsm.snapshots`` only; never the pipeline or the API.
 """
 
@@ -71,6 +77,7 @@ from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.runtime import (
     EventLog,
     EventType,
+    RedactionKind,
     TurnOutcome,
     TurnScope,
     current_scope,
@@ -205,14 +212,26 @@ def record_delta(
 ) -> int:
     """Append the ``context/record`` of a context write (see the module docstring)."""
     definition = manager.get_fsm_definition(manager.instances[child_id].fsm_id)
+    fields: dict[str, Any] = {}
+    if scope.log.stores_values:
+        fields["delta_ref"] = scope.log.put_json(
+            delta_blob(delta, definition), kind=RedactionKind.DELTA
+        )
     return scope.log.append(
         scope.root_id,
         EventType.CONTEXT_RECORD,
         frame=scope.frame,
         source=source,
         keys=sorted(str(name) for name in delta),
-        delta_ref=scope.log.put_json(delta_blob(delta, definition)),
+        **fields,
     )
+
+
+def _ref(log: EventLog, blob: Mapping[str, Any]) -> str:
+    """The reference of a state blob: stored at level ``values``, only its digest at ``shape``."""
+    if log.stores_values:
+        return log.put_json(blob, kind=RedactionKind.STATE)
+    return log.digest_json(blob)
 
 
 def begin_turn(
@@ -224,14 +243,16 @@ def begin_turn(
         return None
     instance = manager.instances[conversation_id]
     definition = manager.get_fsm_definition(instance.fsm_id)
-    start_ref = scope.log.put_json(state_blob(instance, definition))
+    start_ref = _ref(scope.log, state_blob(instance, definition))
     fields: dict[str, Any] = {
-        "state_ref": start_ref,
+        "state_ref": start_ref,  # at shape the digest: the log drops every *_ref
         "state": instance.current_state,
         "has_user_message": message is not None,
     }
-    if message is not None:
-        fields["user_message_ref"] = scope.log.put_json(message)
+    if message is not None and scope.log.stores_values:
+        fields["user_message_ref"] = scope.log.put_json(
+            message, kind=RedactionKind.USER_MESSAGE
+        )
     scope.log.append(scope.root_id, EventType.TURN_START, frame=scope.frame, **fields)
     return TurnHandle(scope, instance, definition, start_ref)
 
@@ -253,7 +274,7 @@ def end_turn(handle: TurnHandle | None, error: type[BaseException] | None) -> No
         return
     scope = handle.scope
     with warn_on_failure(EventType.TURN_END):
-        end_ref = scope.log.put_json(state_blob(handle.instance, handle.definition))
+        end_ref = _ref(scope.log, state_blob(handle.instance, handle.definition))
         outcome = _outcome(error, end_ref == handle.start_ref)
         scope.log.append(
             scope.root_id,
@@ -301,7 +322,9 @@ def _read_state_blob(manager: FSMManager, conversation_id: str) -> dict[str, Any
 
 def state_ref_of(manager: FSMManager, log: EventLog, conversation_id: str) -> str:
     """Store the current state of *conversation_id* as a blob and return its reference."""
-    return log.put_json(_read_state_blob(manager, conversation_id))
+    return log.put_json(
+        _read_state_blob(manager, conversation_id), kind=RedactionKind.STATE
+    )
 
 
 def record_state(
@@ -322,12 +345,15 @@ def record_state(
     for a root) at *frame*: a pushed frame has its own manager id and the root's log id.
     """
     blob = _read_state_blob(manager, conversation_id)
+    refs: dict[str, Any] = {}
+    if log.stores_values:
+        refs["state_ref"] = log.put_json(blob, kind=RedactionKind.STATE)
     return log.append(
         conversation_id if root_id is None else root_id,
         EventType.CONTEXT_RECORD,
         frame=frame,
         source=source,
         state=blob["current_state"],
-        state_ref=log.put_json(blob),
+        **refs,
         **fields,
     )
