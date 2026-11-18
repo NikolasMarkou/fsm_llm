@@ -330,13 +330,18 @@ class TestPopFsmStackOrder:
             "end_conversation failed"
         )
         api.fsm_manager.get_conversation_data.return_value = {}
+        # The failed end tore the child down (it is no longer an instance): only
+        # a refused end that leaves the child alive keeps its frame (step 2.3 of
+        # plan 52ce5464, `TestPopKeepsTheFrameWhenTheEndIsRefused`).
+        api.fsm_manager.has_instance.return_value = False
 
         # pop_fsm should raise FSMError (end_conversation failure propagates)
         with pytest.raises(FSMError):
             api.pop_fsm("conv1")
 
-        # The stack is always popped (via try-finally) even when end_conversation
-        # fails, to avoid leaving a stale frame with an inconsistent conversation_id.
+        # The stack is popped (via try-finally) even when end_conversation fails
+        # and the child is gone, to avoid leaving a stale frame with an
+        # inconsistent conversation_id.
         assert len(api.conversation_stacks["conv1"]) == 1, (
             f"Expected 1 frame (stale frame popped despite failure), got {len(api.conversation_stacks['conv1'])}"
         )
