@@ -47,6 +47,7 @@ class _ApiSurface:
         _session_store: SessionStore | None
         _event_log: EventLog | None
         _owns_event_log: bool
+        _turn_budget: tuple[int | None, float | None]
 
         def _get_current_fsm_conversation_id(self, conversation_id: str) -> str: ...
 
@@ -87,6 +88,8 @@ class _ApiSurface:
             self,
             initial_context: dict[str, Any] | None = None,
             *,
+            max_steps: int | None = None,
+            max_seconds: float | None = None,
             _suppress_start: bool = False,
             _conversation_id: str | None = None,
         ) -> tuple[str, str]: ...

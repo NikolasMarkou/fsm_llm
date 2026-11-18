@@ -56,6 +56,7 @@ from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog, LogCorruptError
 from fsm_llm.runtime.stores import FrameProjection, fold_stack, turn_cut
 
+from .budget import budget_kwargs
 from .events import record_forked, record_restored_frame, record_resumed
 from .helpers import _require_classifier_interface
 from .stack import FSMStackFrame
@@ -267,7 +268,7 @@ class ForkMixin(_ApiSurface):
             with self._stack_lock:
                 self._temp_fsm_definitions[fsm_id] = prepared.definition
                 self._pending_push_ids.add(fsm_id)
-            kept = (
+            kept: dict[str, Any] = (
                 {"conversation_id": prepared.frame.child_conversation_id}
                 if keep_id
                 else {}
@@ -277,6 +278,7 @@ class ForkMixin(_ApiSurface):
                 initial_context=state.context_data,
                 suppress_start=True,
                 **kept,
+                **budget_kwargs(self),
             )
             manager.seed_restored_conversation(
                 child_id,

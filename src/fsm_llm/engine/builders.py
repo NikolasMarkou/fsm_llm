@@ -174,6 +174,14 @@ class APIBuilder:
         """Turn the event log on: an ``EventLog`` (shared) or a directory path (the API owns it)."""
         return self._put("event_log", event_log)
 
+    def set_max_steps(self, max_steps: int | None) -> APIBuilder:
+        """Default lifetime turn budget of the root and every pushed frame (``None``: no limit)."""
+        return self._put("max_steps", max_steps)
+
+    def set_max_seconds(self, seconds: float | None) -> APIBuilder:
+        """Default lifetime wall-clock budget of the root and every pushed frame (``None``: none)."""
+        return self._put("max_seconds", seconds)
+
     def build(self) -> API:
         refuse_named_options(API, self._llm_options, _API_HINTS, owner=APIBuilder)
         if self._definition is None:

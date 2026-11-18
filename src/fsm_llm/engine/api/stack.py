@@ -19,6 +19,7 @@ from fsm_llm.core.definitions import FSMDefinition, FSMError
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.logging import logger
 
+from .budget import budget_kwargs
 from .events import (
     child_event_scope,
     record_context_update,
@@ -89,8 +90,18 @@ class StackMixin(_ApiSurface):
         shared_context_keys: list[str] | None = None,
         preserve_history: bool = False,
         inherit_context: bool = True,
+        *,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
     ) -> str:
-        """Push new FSM onto conversation stack with enhanced context management."""
+        """Push new FSM onto conversation stack with enhanced context management.
+
+        ``max_steps`` and ``max_seconds`` are the lifetime turn budget of the NEW frame (its
+        own manager conversation, never shared with the parent), instead of the ``API``
+        default (``None``: the default, itself no limit); ``ValueError`` before anything is
+        registered when invalid. The push greeting is not a turn and is not counted.
+        """
+        budget = budget_kwargs(self, max_steps, max_seconds)
         with self._stack_lock:
             if conversation_id not in self.conversation_stacks:
                 raise FSMError(f"Conversation not found: {conversation_id}")
@@ -124,7 +135,7 @@ class StackMixin(_ApiSurface):
 
             with child_event_scope(self, conversation_id):
                 new_conversation_id, response = self.fsm_manager.start_conversation(
-                    processed_fsm_id, initial_context=initial_context
+                    processed_fsm_id, initial_context=initial_context, **budget
                 )
             with self._stack_lock:
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-011

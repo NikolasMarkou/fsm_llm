@@ -99,7 +99,8 @@ class TurnOutcome(str, Enum):
 #: Every type the format declares (21).
 DECLARED_TYPES: frozenset[EventType] = frozenset(EventType)
 
-#: The types something writes today (13, D-004); the other 8 are declared for later rows.
+#: The types something writes today (14: ``decision`` joined at plan 5a6a1f80 step 7, the budget
+#: stop); the other 7 are declared for later rows.
 PRODUCED_TYPES: frozenset[EventType] = frozenset(
     {
         EventType.TURN_START,
@@ -115,6 +116,7 @@ PRODUCED_TYPES: frozenset[EventType] = frozenset(
         EventType.EXECUTOR_START,
         EventType.EXECUTOR_RESULT,
         EventType.TRANSITION,
+        EventType.DECISION,
     }
 )
 

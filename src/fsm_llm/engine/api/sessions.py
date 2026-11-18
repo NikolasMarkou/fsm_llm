@@ -212,7 +212,7 @@ class SessionsMixin(_ApiSurface):
         # Start conversation with saved context. H9: _suppress_start=True skips
         # the START_CONVERSATION handlers and the Pass-2 greeting so a resume
         # does not re-fire start-of-conversation side effects.
-        kept_id = (
+        kept_id: dict[str, Any] = (
             {} if conversation_id is None else {"_conversation_id": conversation_id}
         )
         conv_id, _ = self.start_conversation(

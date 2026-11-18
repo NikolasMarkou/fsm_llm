@@ -123,8 +123,8 @@ class TestVocabulary:
         assert DECLARED_TYPES == frozenset(EventType)
         assert len(DECLARED_TYPES) == 21
 
-    def test_the_produced_set_is_13_and_a_subset_of_the_declared_set(self) -> None:
-        assert len(PRODUCED_TYPES) == 13
+    def test_the_produced_set_is_14_and_a_subset_of_the_declared_set(self) -> None:
+        assert len(PRODUCED_TYPES) == 14
         assert PRODUCED_TYPES < DECLARED_TYPES
         assert {t.value for t in PRODUCED_TYPES} == {
             "turn/start",
@@ -140,14 +140,14 @@ class TestVocabulary:
             "executor/start",
             "executor/result",
             "transition",
+            "decision",
         }
 
-    def test_the_eight_declared_but_not_produced_types(self) -> None:
+    def test_the_seven_declared_but_not_produced_types(self) -> None:
         assert {t.value for t in DECLARED_TYPES - PRODUCED_TYPES} == {
             "extraction",
             "extraction/miss",
             "intent/out_of_scope",
-            "decision",
             "handler",
             "approval/request",
             "approval/outcome",

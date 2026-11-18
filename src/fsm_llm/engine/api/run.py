@@ -19,27 +19,9 @@ from fsm_llm.core.definitions import (
     RunBudgetExceededError,
     checked_key_names,
 )
+from fsm_llm.engine.fsm.budget import _check_run_budgets
 
 from .surface import _ApiSurface
-
-
-def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:
-    """Validate the budgets of a bounded run; raise ``ValueError`` if invalid.
-
-    Contract: ``max_steps`` must be an ``int`` (not a ``bool``) of at least 1;
-    ``max_seconds`` must be ``None`` or an ``int`` or ``float`` (not a
-    ``bool``) above 0 (NaN is refused).
-    """
-    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
-        raise ValueError(f"max_steps must be an integer >= 1, got {max_steps!r}")
-    if max_seconds is not None and (
-        isinstance(max_seconds, bool)
-        or not isinstance(max_seconds, (int, float))
-        or not max_seconds > 0
-    ):
-        raise ValueError(
-            f"max_seconds must be a number > 0 or None, got {max_seconds!r}"
-        )
 
 
 def _seconds_exempt_set(states: Collection[str]) -> frozenset[str]:

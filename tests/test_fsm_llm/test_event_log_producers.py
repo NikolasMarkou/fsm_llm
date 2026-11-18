@@ -9,8 +9,9 @@ seam writes them). Bytes, counts and sequences, never timing. Unverified until t
 nothing here opens a file itself (the files are ``stores.jsonl``'s and ``blobs``').
 
 Not produced here on purpose (declared in ``DECLARED_TYPES``, no producer in slice 1):
-``extraction``, ``extraction/miss``, ``handler``, ``intent/out_of_scope``, ``decision``,
-``approval/*``, ``compaction/epoch``.
+``extraction``, ``extraction/miss``, ``handler``, ``intent/out_of_scope``,
+``approval/*``, ``compaction/epoch``. ``decision`` (the budget stop, plan 5a6a1f80 step 7)
+is produced; its tests are in ``test_turn_budgets.py`` and the scenario below includes one.
 """
 
 from __future__ import annotations
@@ -521,6 +522,17 @@ class TestTheProducers:
         with log.tool_call("tools-1", name="add", call_id="c1", arguments={"a": 1}):
             pass
         seen |= {e["type"] for e in log.read("tools-1")}
+        capped = API(
+            copy.deepcopy(_CHAT),
+            llm_interface=ScriptedLLM(responses={"chat": "hi"}),
+            event_log=log,
+            max_steps=1,
+        )
+        cid3, _ = capped.start_conversation()
+        capped.converse("one", cid3)
+        with pytest.raises(FSMError):
+            capped.converse("two", cid3)
+        seen |= {e["type"] for e in log.read(cid3)}
         assert seen == {t.value for t in PRODUCED_TYPES}
         assert seen <= {t.value for t in DECLARED_TYPES}
         assert {

@@ -35,6 +35,10 @@ Interface contract:
       included, so a failed turn whose only surviving change is in the history (the trim of old
       exchanges into the summary is deferred to the reply, so this needs a reply added before
       a later failure; not reproduced) would read ``abandoned``: the label is state-faithful.
+    - ``record_budget_spent(error)``: append one ``decision`` event (``kind: "budget_spent"``,
+      ``budget``, ``limit``, ``steps_done`` and nothing else) for a turn the lifetime budget
+      refused (``fsm.budget.TurnBudget``); no-op with no scope bound, a WARNING when the write
+      fails, called by the turn path after the manager lock is released.
     - ``delta_blob(delta, definition) -> dict``: the log-safe form of an out-of-turn context write
       (``API.update_context``): ``{"context": ..., "internal": ...}``. ``context`` holds the
       public keys through ``filter_context``; ``internal`` only the keys the definition's
@@ -78,7 +82,11 @@ from fsm_llm.runtime import (
 from .fsm.snapshots import snapshot_from_instance
 
 if TYPE_CHECKING:
-    from fsm_llm.core.definitions import FSMDefinition, FSMInstance
+    from fsm_llm.core.definitions import (
+        FSMDefinition,
+        FSMInstance,
+        RunBudgetExceededError,
+    )
 
     from .fsm.manager import FSMManager
 
@@ -253,6 +261,29 @@ def end_turn(handle: TurnHandle | None, error: type[BaseException] | None) -> No
             frame=scope.frame,
             outcome=outcome.value,
             state_ref=end_ref,
+        )
+
+
+def record_budget_spent(error: RunBudgetExceededError) -> None:
+    """Append the ``decision`` of a turn the lifetime budget refused; a no-op with no scope bound.
+
+    The event is ``kind: "budget_spent"`` with ``budget``, ``limit`` and ``steps_done`` of
+    *error* and nothing else (no user text: the refused message is never read). It runs AFTER
+    the refusal is decided and outside every manager lock, so it never raises an ``Exception``:
+    a write that fails is a WARNING and the caller raises the budget error as it would have.
+    """
+    scope = current_scope()
+    if scope is None:
+        return
+    with warn_on_failure(EventType.DECISION):
+        scope.log.append(
+            scope.root_id,
+            EventType.DECISION,
+            frame=scope.frame,
+            kind="budget_spent",
+            budget=error.budget,
+            limit=error.limit,
+            steps_done=error.steps_done,
         )
 
 

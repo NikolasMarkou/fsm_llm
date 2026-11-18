@@ -135,6 +135,7 @@ from fsm_llm.llm import (
 from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog
 
+from .budget import budget_defaults, budget_kwargs
 from .events import (
     close_event_log,
     event_scope,
@@ -235,6 +236,8 @@ class API(
         *,
         executors: Mapping[str, StateExecutor] | None = None,
         event_log: EventLog | str | os.PathLike[str] | None = None,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
         **llm_kwargs,
     ):
         """
@@ -272,6 +275,12 @@ class API(
                 open by ``close``) or a directory path (the API owns the log and
                 closes it). Off by default, and then nothing changes. See
                 ``engine/api/events.py``.
+            max_steps: Default lifetime turn budget of the root conversation and of
+                every frame pushed on it (``FSMManager.start_conversation`` says what
+                counts); ``None`` (default) is no limit. A snapshot restore, a fork and
+                a resume start a fresh budget from it. An int of at least 1.
+            max_seconds: Default lifetime wall-clock budget, as ``max_steps``; a
+                number above 0.
             **llm_kwargs: Additional LLM parameters
         """
         # Handle LLM interface initialization
@@ -394,6 +403,9 @@ class API(
         self._ended_conversations: dict[str, dict[str, Any]] = {}
         self._MAX_ENDED_CACHE: int = MAX_ENDED_CONVERSATIONS_CACHE
 
+        # Default lifetime turn budget (``engine/api/budget.py``)
+        self._turn_budget = budget_defaults(max_steps, max_seconds)
+
         # Session persistence
         self._session_store = session_store
         self._event_log, self._owns_event_log = open_event_log(event_log)
@@ -514,6 +526,8 @@ class API(
         self,
         initial_context: dict[str, Any] | None = None,
         *,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
         _suppress_start: bool = False,
         _conversation_id: str | None = None,
     ) -> tuple[str, str]:
@@ -522,6 +536,9 @@ class API(
 
         Args:
             initial_context: Optional initial context data
+            max_steps: Lifetime turn budget of this conversation, instead of the
+                ``API`` default (``None``: the default, itself no limit).
+            max_seconds: Lifetime wall-clock budget, as ``max_steps``.
             _suppress_start: Internal resume flag forwarded to
                 ``FSMManager.start_conversation(suppress_start=...)``. When True
                 the START_CONVERSATION handlers and the Pass-2 greeting are
@@ -540,12 +557,12 @@ class API(
         Raises:
             FSMError: ``initial_context`` is neither ``None`` nor a dict, or the
                 start failed (any other unexpected error is wrapped in it).
-            ValueError: passes through unchanged, as at ``push_fsm`` and
-                ``pop_fsm``.
+            ValueError: an invalid ``max_steps`` or ``max_seconds``; passes through
+                unchanged, as at ``push_fsm`` and ``pop_fsm``.
         """
         try:
             # Start conversation using enhanced FSM manager
-            kept_id = (
+            kept_id: dict[str, Any] = (
                 {}
                 if _conversation_id is None
                 else {"conversation_id": _conversation_id}
@@ -555,6 +572,7 @@ class API(
                 initial_context=initial_context,
                 suppress_start=_suppress_start,
                 **kept_id,
+                **budget_kwargs(self, max_steps, max_seconds),
             )
 
             # Track conversation and initialize stack

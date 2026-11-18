@@ -13,8 +13,13 @@ import traceback
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from fsm_llm.core.definitions import AdvanceResult, FSMError, FSMInstance
-from fsm_llm.engine.events import begin_turn, end_turn
+from fsm_llm.core.definitions import (
+    AdvanceResult,
+    FSMError,
+    FSMInstance,
+    RunBudgetExceededError,
+)
+from fsm_llm.engine.events import begin_turn, end_turn, record_budget_spent
 from fsm_llm.handlers import HandlerTiming
 
 from .helpers import (
@@ -27,9 +32,33 @@ if TYPE_CHECKING:
     from fsm_llm.core.definitions import FSMDefinition, State
     from fsm_llm.engine.turn import MessagePipeline
 
+    from .budget import TurnBudget
+
 
 # Return type of one sync turn: ``str`` for a message, ``AdvanceResult`` for a step.
 _TurnT = TypeVar("_TurnT")
+
+
+def _claim_turn(manager: TurnsMixin, conversation_id: str) -> threading.RLock:
+    """Claim ``conversation_id`` for one turn under ``manager._lock`` and return its ``conv_lock``.
+
+    Contract: the one claim of a sync turn and of a stream's first ``next()``; it holds
+    ``_lock`` for the claim only (``_enter_turn``) and lets go of it BEFORE anything else runs.
+    A turn the lifetime budget refuses leaves nothing claimed (``_enter_turn`` undid it), writes
+    one ``decision`` event outside every manager lock (``record_budget_spent``, a no-op with the
+    event log off) and raises the ``RunBudgetExceededError``. Any other error is ``_enter_turn``'s.
+    A module function, not a method, so the nested stream closure takes no ``self`` dispatch.
+    """
+    try:
+        with manager._lock:
+            _, conv_lock = _conversation_entry(
+                manager, conversation_id, missing_lock="keyerror"
+            )
+            manager._enter_turn(conversation_id, conv_lock)
+    except RunBudgetExceededError as refused:
+        record_budget_spent(refused)
+        raise
+    return conv_lock
 
 
 class TurnsMixin:
@@ -44,6 +73,7 @@ class TurnsMixin:
         _lock: threading.Lock
         _conversation_locks: dict[str, threading.RLock]
         _active_turns: set[str]
+        _turn_budgets: dict[str, TurnBudget]
         instances: dict[str, FSMInstance]
         _pipeline: MessagePipeline
 
@@ -61,7 +91,10 @@ class TurnsMixin:
         alone would let through) or when ``conv_lock`` is held elsewhere. On
         success ``conv_lock`` is held and the id is in ``_active_turns``; the
         caller MUST release both in a ``finally`` (``_active_turns.discard`` first,
-        taking no lock, then ``conv_lock.release()``).
+        taking no lock, then ``conv_lock.release()``). A conversation with a lifetime
+        budget is charged here, after the claim and before any model call: a spent
+        budget raises ``RunBudgetExceededError`` with the claim UNDONE (the caller's
+        ``finally`` is not armed yet), so nothing is held after the raise.
         """
         # DECISION plan-2026-09-19T175721-21cd7f8e/D-018
         # Turn-level guard, not an ERROR-handler flag: a handler at ANY timing that
@@ -78,6 +111,24 @@ class TurnsMixin:
                 f"Conversation {conversation_id} is already being processed by another thread"
             )
         self._active_turns.add(conversation_id)
+        # DECISION plan-2026-11-18T071726-5a6a1f80/D-010
+        # The lifetime turn budget is charged HERE: one seam for converse, advance and both
+        # streams, after the claim and before the first model call, so a turn that later
+        # rolls back, fails Pass 2 or is refused as terminal still counts (the record is
+        # the manager's own, never in `_TurnSnapshot`). A spent budget undoes the claim
+        # (discard, then release; no lock taken) BEFORE raising, because the caller's
+        # `finally` does not exist yet: do NOT raise first and leave the id in
+        # `_active_turns` or `conv_lock` held (the next end_conversation would refuse).
+        # Do NOT write the event log here (this runs under `_lock`; `_claim_turn` writes
+        # it after the lock is released) and do NOT pop a spent frame.
+        budget = self._turn_budgets.get(conversation_id)
+        if budget is not None:
+            try:
+                budget.charge()
+            except BaseException:
+                self._active_turns.discard(conversation_id)
+                conv_lock.release()
+                raise
 
     @with_conversation_context
     def process_message(
@@ -143,11 +194,7 @@ class TurnsMixin:
         # this block or `_process_message_locked` for the no-message case: the
         # turn guard (21cd7f8e/D-018) and the error-clause order (21cd7f8e/D-009,
         # a02151fe/D-014) would then have to hold in two places.
-        with self._lock:
-            _, conv_lock = _conversation_entry(
-                self, conversation_id, missing_lock="keyerror"
-            )
-            self._enter_turn(conversation_id, conv_lock)
+        conv_lock = _claim_turn(self, conversation_id)
         # DECISION plan-2026-11-17T100529-21e6f00d/D-008
         # The event log's turn boundary lives HERE, not in the pipeline: `begin_turn` runs
         # before the user message is added, `end_turn` after the except arms of
@@ -274,11 +321,7 @@ class TurnsMixin:
             # ``self._conversation_locks[conversation_id]`` under ``self._lock`` —
             # cheap, and it correctly handles a conversation that vanished
             # between call and first iteration.
-            with self._lock:
-                _, conv_lock = _conversation_entry(
-                    self, conversation_id, missing_lock="keyerror"
-                )
-                self._enter_turn(conversation_id, conv_lock)
+            conv_lock = _claim_turn(self, conversation_id)
             # The event log's turn boundary, as in `_run_locked_turn` (D-008 anchor there).
             turn = None
             error: type[BaseException] | None = None

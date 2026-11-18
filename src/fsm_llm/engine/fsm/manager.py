@@ -55,6 +55,7 @@ from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.runtime.stores import check_conversation_id
 
+from .budget import TurnBudget, check_turn_limits, open_budget
 from .helpers import _conversation_entry, with_conversation_context
 from .snapshots import SnapshotsMixin
 from .turns import TurnsMixin
@@ -133,6 +134,11 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         # under ``_lock`` after ``conv_lock`` is acquired; discarded WITHOUT any
         # lock in the ``finally`` (a lone ``set.discard`` is atomic under the GIL).
         self._active_turns: set[str] = set()
+        # Lifetime turn budgets (plan 5a6a1f80 D-010, ``budget.py``): one record per manager
+        # conversation id that was given a limit. Written under ``_lock`` with the instance,
+        # charged in ``_enter_turn``, dropped with the instance; a conversation with no limit
+        # has no entry.
+        self._turn_budgets: dict[str, TurnBudget] = {}
 
         # Cache and instance management
         self.fsm_cache: OrderedDict[str, FSMDefinition] = OrderedDict()
@@ -301,6 +307,8 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         *,
         suppress_start: bool = False,
         conversation_id: str | None = None,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
     ) -> tuple[str, str]:
         """Start new conversation.
 
@@ -319,10 +327,20 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
                 ``check_conversation_id`` (``EventPayloadError``, an ``FSMError``,
                 otherwise) and not be live in ``instances`` (``FSMError``): nothing is
                 registered when it is refused. Default ``None`` mints the id as always.
+            max_steps: Lifetime turn budget of THIS conversation id (``converse``,
+                ``advance`` and both streams each count one, a rolled-back or refused-as-
+                terminal turn included, the greeting not): turn ``max_steps + 1`` raises
+                ``RunBudgetExceededError("steps", max_steps, max_steps)``. ``None`` (default)
+                is no limit. An int of at least 1, else ``ValueError`` before anything starts.
+            max_seconds: Lifetime wall-clock budget from the start of this conversation,
+                checked at the start of each turn (never mid-turn): a turn that starts
+                after it is spent raises ``RunBudgetExceededError("seconds", ...)``. ``None``
+                is no limit; a number above 0, else ``ValueError``.
 
         Returns:
             Tuple of (conversation_id, initial_response)
         """
+        check_turn_limits(max_steps, max_seconds)
         instance = self._create_instance(fsm_id)
         explicit_id = conversation_id is not None
         if conversation_id is None:
@@ -353,6 +371,9 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
                 raise FSMError(f"conversation id '{conversation_id}' is already live")
             self.instances[conversation_id] = instance
             self._conversation_locks[conversation_id] = threading.RLock()
+            budget = open_budget(max_steps, max_seconds)
+            if budget is not None:
+                self._turn_budgets[conversation_id] = budget
 
         if suppress_start:
             # Resume path: skip the START_CONVERSATION handler pass and the
@@ -526,6 +547,19 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         with self._lock:
             self.instances.pop(conversation_id, None)
             self._conversation_locks.pop(conversation_id, None)
+            self._turn_budgets.pop(conversation_id, None)
+
+    def turn_budget_spent(self, conversation_id: str) -> str | None:
+        """Name the lifetime budget that forbids the next turn of ``conversation_id``.
+
+        Contract: ``"seconds"`` or ``"steps"`` (seconds first when both are spent), or ``None``
+        for a conversation with no limit, an unknown or ended id, or a budget with room left.
+        Reads one record and takes no lock; the answer is a fact of the record, not of the
+        text of any ``RunBudgetExceededError``, so a driver can tell its own frame's budget from
+        another one's.
+        """
+        budget = self._turn_budgets.get(conversation_id)
+        return None if budget is None else budget.spent()
 
     @with_conversation_context
     def end_conversation(self, conversation_id: str, log: Any = None) -> None:
