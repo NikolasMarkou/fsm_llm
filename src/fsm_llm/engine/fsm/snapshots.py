@@ -408,7 +408,14 @@ class SnapshotsMixin:
         """A shallow copy of the UNFILTERED ``context.data`` (internal keys
         included), taken under ``_lock`` only; ``None`` for an unknown
         conversation. For explicit key requests that bypass the internal-key
-        filter (``API`` pop-context merge); never returned to a caller as-is."""
+        filter (``API`` pop-context merge); never returned to a caller as-is.
+
+        An unlocked point-in-time copy, on purpose: ``dict(data)`` of one dict is a
+        single C call (no resize error, no torn dict), but a copy can land between two
+        writes of a running turn. It is NOT taken through ``_read_under_lock``: a timed
+        handler thread runs while the turn thread holds ``conv_lock`` and joins it, so
+        a handler reading through this API with a blocking ``conv_lock`` would deadlock
+        until its timeout."""
         with self._lock:
             instance = self.instances.get(conversation_id)
             return None if instance is None else dict(instance.context.data)

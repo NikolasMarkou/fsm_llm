@@ -60,9 +60,11 @@ Interface contract:
       post-merge state) producers use it.
 
 Privacy (plan 5a6a1f80, row 1.11a): at level ``shape`` (``log.stores_values`` is False) no
-producer here builds a blob. A turn keeps the DIGEST of its start and end state (``_ref``) so
+producer here STORES a blob. A turn keeps the DIGEST of its start and end state (``_ref``) so
 ``rolled_back`` and ``abandoned`` stay distinct, and the digest is never written (the log drops
-every ``*_ref``); ``begin_turn`` stores no user message, ``record_delta`` no delta. At level
+every ``*_ref``); ``begin_turn`` stores no user message, ``record_delta`` no delta. ``record_state``
+still BUILDS the state blob at ``shape`` (``_read_state_blob`` always runs ``state_blob``, once per
+start, restore, fork or resume) to read ``current_state`` from it, and then drops it. At level
 ``values`` every blob is stored with its ``RedactionKind`` for the user's hook.
 
 Imports ``core``, ``runtime`` and ``engine.fsm.snapshots`` only; never the pipeline or the API.
@@ -73,6 +75,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
+from fsm_llm.core.definitions import FSMError
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.runtime import (
     EventLog,
@@ -163,6 +166,20 @@ def _working_memory(memory: Mapping[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def _instance_of(manager: _TurnManager, conversation_id: str) -> FSMInstance:
+    """The instance of *conversation_id*, or ``FSMError`` when it is gone.
+
+    ``end_conversation`` ends a frame at the manager before the ``API`` drops its stack entry, so
+    a producer can name a frame that has just ended. Read through ``dict.get`` (atomic), never
+    through ``manager._lock``: ``begin_turn`` runs under a ``conv_lock`` and ``_lock`` taken under
+    one breaks the lock order (``test_fsm_lock_order.py``).
+    """
+    instance = manager.instances.get(conversation_id)
+    if instance is None:
+        raise FSMError(f"Conversation not found: {conversation_id}")
+    return instance
+
+
 def state_blob(instance: FSMInstance, definition: FSMDefinition) -> dict[str, Any]:
     """Return the log-safe state of *instance* (see the module docstring)."""
     snapshot = snapshot_from_instance(instance)
@@ -211,7 +228,7 @@ def record_delta(
     source: str,
 ) -> int:
     """Append the ``context/record`` of a context write (see the module docstring)."""
-    definition = manager.get_fsm_definition(manager.instances[child_id].fsm_id)
+    definition = manager.get_fsm_definition(_instance_of(manager, child_id).fsm_id)
     fields: dict[str, Any] = {}
     if scope.log.stores_values:
         fields["delta_ref"] = scope.log.put_json(
@@ -314,7 +331,9 @@ def _read_state_blob(manager: FSMManager, conversation_id: str) -> dict[str, Any
     The definition is resolved BEFORE the hold (``_read_under_lock`` forbids resolving inside
     it), as the anchors of ``engine/fsm/`` require.
     """
-    definition = manager.get_fsm_definition(manager.instances[conversation_id].fsm_id)
+    definition = manager.get_fsm_definition(
+        _instance_of(manager, conversation_id).fsm_id
+    )
     return manager._read_under_lock(
         conversation_id, lambda inst: state_blob(inst, definition)
     )

@@ -613,6 +613,38 @@ class TestFailClosedAtTheSites:
         )  # the memory changed; the caller is told
 
 
+class TestAFrameEndedBeforeItsRecordIsAnFsmError:
+    """A5 (engine audit 2.4): ``end_conversation`` ends a frame at the manager before it drops
+    the stack entry, so ``update_context`` can resolve a frame that is gone by the time its
+    record is built. The producers read ``manager.instances`` without the manager lock (taking
+    ``_lock`` there would break the lock order: ``begin_turn`` runs under a ``conv_lock``), and a
+    missing frame must read as the ``FSMError`` the rest of the API raises, not a ``KeyError``."""
+
+    def test_update_context_on_a_frame_that_just_ended_raises_fsm_error(
+        self, log: EventLog, monkeypatch: pytest.MonkeyPatch
+    ):
+        api = API(copy.deepcopy(_FSM), llm_interface=_script(), event_log=log)
+        cid, _ = api.start_conversation()
+        api.push_fsm(cid, copy.deepcopy(_CHILD))
+        child = api.get_sub_conversation_id(cid)
+        real = api.fsm_manager.update_conversation_context
+
+        def write_then_end(conversation_id: str, update: Any, *args: Any) -> None:
+            real(conversation_id, update, *args)
+            api.fsm_manager.end_conversation(child)  # the end that races the record
+
+        monkeypatch.setattr(
+            api.fsm_manager, "update_conversation_context", write_then_end
+        )
+        with pytest.raises(FSMError, match="Conversation not found"):
+            api.update_context(cid, {"note": "x"})
+
+    def test_the_state_blob_of_a_missing_frame_raises_fsm_error(self, log: EventLog):
+        api = API(copy.deepcopy(_FSM), llm_interface=_script(), event_log=log)
+        with pytest.raises(FSMError, match="Conversation not found"):
+            fsm_llm.engine.events.state_ref_of(api.fsm_manager, log, "no-such-frame")
+
+
 class TestTheProviderPath:
     """A real ``LiteLLMInterface`` with a patched ``completion``: the seam writes the calls."""
 
