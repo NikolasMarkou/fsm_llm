@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The synthesis runner decides `provider_error` from a position it takes when it pushes the child (the event log of the API through `API.event_log`, else the interface ledger, else the interface's own count, else 0; a source that raises is skipped) and no longer from `usage().errors` before and after, so `reset_usage()` during a run and an interface with no meter (with the log on) no longer hide an outage. `fsm_llm.synthesis.runner` now imports `fsm_llm.runtime.usage`, an edge the layers contract already allowed.
 - `reset_usage()` of the interface meter moves a marker instead of clearing history: the cumulative per-kind counters only grow and `usage()` reports the counters since the marker, so every `usage()` and `reset_usage()` value is byte-identical to before (checked on a recorded scenario), while a position taken earlier (`mark()`, `since(mark)`) stays valid across a reset. No public signature changed and `LLMInterface` gets no default `usage()`; the `_usage_of` helper of `fsm_llm.llm.usage` is now the public `usage_counts`.
 
+### Removed
+
+- `make counts`, `scripts/doc_counts.py` and the documented-count tests of `tests/test_packaging.py` (the three count classes `TestTheMakeTestPinLivesInContributing`, `TestDocumentedTestCountsMatchCollection` and `TestEveryDocumentedCountMatchesCollection`, with the unit tests of the script) are gone, and so is the README test that looked for a test count line. Documents state no count of tests, test files, modules or lines: a reader measures one with `make test` or `pytest --collect-only -q`, and `tests/test_fsm_llm_regression/test_doc_count_ratchet.py` fails when a tracked `.md` file gains one. The rule that a tests README row names a real test file, and that every test file has a row, went with the script.
+
 ## [0.13.0] - 2026-11-16
 
 **Highlights**

@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit counts api-snapshot decision-index decision-check changelog-check docs docs-serve docs-clean
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit api-snapshot decision-index decision-check changelog-check docs docs-serve docs-clean
 
 # Default target
 help: ## Show this help message
@@ -45,9 +45,6 @@ install-dev: ## Install package in development mode with all extras
 
 audit: ## Audit site-packages for suspicious .pth files
 	python scripts/audit_pth.py
-
-counts: ## Fail when a documented test count differs from a collection
-	python scripts/doc_counts.py
 
 api-snapshot: ## Regenerate tests/fixtures/api_snapshot.txt, the public API snapshot
 	python scripts/api_snapshot.py --write tests/fixtures/api_snapshot.txt

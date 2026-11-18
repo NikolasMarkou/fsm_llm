@@ -188,13 +188,9 @@ class TestTheRealReadme:
         assert "make install-dev" not in readme
         assert "Good Places to Help" not in headings
 
-    def test_the_readme_has_no_test_count_line(self, readme):
-        # The count pin moved to CONTRIBUTING.md; a count here would drift with no pin.
-        assert not re.search(r"\d[\d,]* tests\b", readme)
-
 
 class TestTheReadmeNumbersAreTrue:
-    """Every count the showcase README states is read from the code, not copied."""
+    """Every name the showcase README gives is checked against the code; no number is asserted."""
 
     def test_the_agent_patterns_are_the_ones_create_agent_accepts(self, readme):
         from fsm_llm.agents import _PATTERNS
@@ -203,40 +199,39 @@ class TestTheReadmeNumbersAreTrue:
         named = set(re.findall(r"`([a-z_]+)`", line.split("agent patterns", 1)[1]))
         named -= {"AgentGraph"}
         assert named == set(_PATTERNS)
-        assert len(_PATTERNS) == 18
-        assert "18 agent patterns" in readme
 
-    def test_nine_reasoning_strategies(self, readme):
-        from fsm_llm.reasoning import ReasoningType
+    def test_the_readme_names_the_reasoning_engine_and_its_strategies(self, readme):
+        from fsm_llm.reasoning import ReasoningEngine, ReasoningType
 
-        assert len(ReasoningType) == 9
-        assert "9 reasoning strategies" in readme
+        assert "reasoning strategies" in readme
+        assert "ReasoningEngine.solve_problem" in readme
+        assert hasattr(ReasoningEngine, "solve_problem")
+        assert list(ReasoningType)
 
-    def test_eleven_workflow_step_types(self, readme):
+    def test_every_workflow_step_factory_the_readme_names_exists(self, readme):
         import fsm_llm.workflows as workflows
 
-        factories = [n for n in dir(workflows) if n.endswith("_step")]
-        assert len(factories) == 11
-        assert "11 step types" in readme
+        named = set(re.findall(r"`([a-z_]+_step)`", readme))
+        assert named, "the README names no step factory"
+        for name in named:
+            assert callable(getattr(workflows, name, None)), name
 
-    def test_the_example_counts_match_the_folders(self, readme):
-        counts = {}
-        for category in sorted((ROOT / "examples").iterdir()):
-            if category.is_dir():
-                counts[category.name] = sum(
-                    1 for d in category.iterdir() if (d / "run.py").is_file()
-                )
-        assert sum(counts.values()) == 100 and len(counts) == 8, counts
-        assert "100 runnable examples in 8 categories" in readme
-        for name, n in counts.items():
-            row = re.search(rf"^\| {name.title()} \| (\d+) \|", readme, re.MULTILINE)
-            assert row and int(row.group(1)) == n, name
+    def test_every_example_category_is_in_the_readme_table(self, readme):
+        categories = [
+            category.name
+            for category in sorted((ROOT / "examples").iterdir())
+            if category.is_dir()
+            and any((d / "run.py").is_file() for d in category.iterdir())
+        ]
+        assert categories
+        for name in categories:
+            row = re.search(rf"^\| {name.title()} \|", readme, re.MULTILINE)
+            assert row, name
 
     def test_every_console_script_is_named(self, readme):
         scripts = tomllib.loads((ROOT / "pyproject.toml").read_text("utf-8"))[
             "project"
         ]["scripts"]
-        assert len(scripts) == 8
         for name in scripts:
             assert f"`{name}" in readme, name
 
@@ -410,7 +405,7 @@ class TestWhatTheReadmePointsToIsThere:
             "Tests, lint and types",
         ):
             assert f"## {heading}\n" in text, heading
-        assert "make test           # Run full test suite (" in text
+        assert "make test           # Run full test suite" in text
         # The clone-upgrade note moved to CONTRIBUTING.md in an earlier step and stays there.
         assert "Upgrading a clone from before the 2026-09-29 restructure" in text
 
