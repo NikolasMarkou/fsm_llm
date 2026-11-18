@@ -175,7 +175,7 @@ class ReasoningEngine:
             .at(HandlerTiming.CONTEXT_UPDATE)
             .when_keys_updated(ContextKeys.PROPOSED_SOLUTION)
             .critical()
-            .do(self.handlers.validate_solution)
+            .do(self.handlers.validate_when_insights_ready)
         )
 
         # Context pruner

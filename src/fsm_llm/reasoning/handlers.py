@@ -246,6 +246,25 @@ class ReasoningHandlers:
         }
 
     @staticmethod
+    def validate_when_insights_ready(context: dict[str, Any]) -> dict[str, Any]:
+        """The registered validator: ``validate_solution``, but only once the
+        attempt has its insights.
+
+        The validator fires when ``proposed_solution`` is committed; when
+        ``key_insights`` arrive in a later commit that early verdict is a stale
+        False. It returns ``{}`` then, so no retry is spent and the attempt is
+        judged at ``validate_refine`` entry (``ReasoningEngine._check_retry_limit``).
+        Every other verdict is ``validate_solution``'s, unchanged.
+        """
+        # The engine's fallback (D-054 of plan 944e2692) judges an attempt
+        # with no verdict. Do NOT re-validate on a key_insights update
+        # instead: an invalid attempt would count twice.
+        verdict = ReasoningHandlers.validate_solution(context)
+        if not verdict[ContextKeys.VALIDATION_CHECKS]["has_insights"]:
+            return {}
+        return verdict
+
+    @staticmethod
     def count_hybrid_loop(context: dict[str, Any]) -> dict[str, Any]:
         """Count one exit of the hybrid strategy's critical_evaluation state.
 

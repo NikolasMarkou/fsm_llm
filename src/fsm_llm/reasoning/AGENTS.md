@@ -51,7 +51,7 @@ Handlers registered in `ReasoningEngine._register_handlers`:
 | `OrchestratorStrategyExecutor` | state entry | `execute_reasoning` | `_prepare_reasoning_execution`: sets `reasoning_push_pending` (True), `reasoning_type_selected`, `classification_justification` |
 | `RetryKeyClearer` | state entry | `execute_reasoning` | core `clear_keys_on_entry`: clears `proposed_solution`, `key_insights`, `validation_result` |
 | `HybridKeyClearer` | state entry | `identify_components` (only the hybrid FSM has it; the `critical_evaluation` back edge re-enters it) | core `clear_keys_on_entry`: clears `HYBRID_CLEARED_KEYS` (the body keys plus `needs_refinement`, not `hybrid_loop_count`) so each refinement pass re-extracts |
-| `OrchestratorSolutionValidator` | CONTEXT_UPDATE | `proposed_solution` updated | `ReasoningHandlers.validate_solution` |
+| `OrchestratorSolutionValidator` | CONTEXT_UPDATE | `proposed_solution` updated | `ReasoningHandlers.validate_when_insights_ready`: `validate_solution`, but `{}` (no verdict, no retry spent) while `key_insights` are still missing, so an attempt whose insights arrive in a later commit is judged at `validate_refine` entry by `RetryLimiter` instead of costing a stale False and a whole strategy pass |
 | `ContextPruner` | PRE_TRANSITION | always | `ReasoningHandlers.prune_context` |
 | `ReasoningTracer` | POST_TRANSITION | always; orchestrator API only (the classifier's own trace was never read) | `ReasoningHandlers.update_reasoning_trace` |
 | `RetryLimiter` | state entry | `validate_refine` | `_check_retry_limit`: when the attempt has no `validation_result` (no solution was proposed) it runs `validate_solution` first, so that attempt counts as failed; then `max_retries_reached = retry_count >= 3` |

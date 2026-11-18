@@ -1108,3 +1108,66 @@ class TestEngineClose:
         engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
         with engine as entered:
             assert entered is engine
+
+
+class _InsightsLateLLM(_ScriptedLLM):
+    """Answers ``key_insights`` with null on its FIRST ask and a value after."""
+
+    def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
+        if request.field_name == ContextKeys.KEY_INSIGHTS:
+            asked = len(self.field_requests(ContextKeys.KEY_INSIGHTS))
+            self.requests.append(request)
+            value = None if asked == 0 else self.script[ContextKeys.KEY_INSIGHTS]
+            return FieldExtractionResponse(
+                field_name=request.field_name,
+                value=value,
+                confidence=0.9 if value is not None else 0.0,
+            )
+        return super().extract_field(request)
+
+
+class TestAnEarlyVerdictWaitsForTheInsights:
+    """F2 (reasoning audit 1.1): the validator fires when the proposed solution
+    is committed. When key_insights arrive in a LATER commit, that early verdict
+    is a stale False; it must not cost a whole strategy pass and a retry slot.
+    The attempt is judged at validate_refine entry instead (D-054)."""
+
+    def test_late_insights_do_not_cost_a_retry(self):
+        llm = _InsightsLateLLM(_VALID_SCRIPT)
+        _solution, trace_info = _engine(llm).solve_problem(_PROBLEM)
+        context = trace_info["final_context"]
+
+        assert len(llm.field_requests(ContextKeys.KEY_INSIGHTS)) >= 2  # was late
+        assert _visited(trace_info).count(OrchestratorStates.EXECUTE_REASONING) == 1
+        assert context[ContextKeys.RETRY_COUNT] == 0
+        assert context[ContextKeys.VALIDATION_RESULT] is True
+
+    def test_insights_that_never_arrive_still_count_one_failed_attempt(self):
+        script = {**_VALID_SCRIPT, ContextKeys.KEY_INSIGHTS: None}
+        llm = _ScriptedLLM(script)
+        _solution, trace_info = _engine(llm).solve_problem(_PROBLEM)
+        context = trace_info["final_context"]
+
+        assert context[ContextKeys.RETRY_COUNT] == Defaults.MAX_RETRIES
+        assert context[ContextKeys.MAX_RETRIES_REACHED] is True
+
+    def test_the_wrapper_defers_only_on_missing_insights(self):
+        ready = {
+            ContextKeys.PROPOSED_SOLUTION: _VALID_SCRIPT["proposed_solution"],
+            ContextKeys.PROBLEM_STATEMENT: _PROBLEM,
+            ContextKeys.KEY_INSIGHTS: ["x"],
+        }
+        late = {k: v for k, v in ready.items() if k != ContextKeys.KEY_INSIGHTS}
+
+        assert ReasoningHandlers.validate_when_insights_ready(
+            ready
+        ) == ReasoningHandlers.validate_solution(ready)
+        assert ReasoningHandlers.validate_when_insights_ready(late) == {}
+        # a simple problem needs no insights, so its verdict is given at once
+        simple = {**late, ContextKeys.REASONING_STRATEGY: "simple_calculator"}
+        assert (
+            ReasoningHandlers.validate_when_insights_ready(simple)[
+                ContextKeys.VALIDATION_RESULT
+            ]
+            is True
+        )
