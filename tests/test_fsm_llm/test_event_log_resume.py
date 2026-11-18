@@ -842,6 +842,70 @@ class TestAFailureAfterTheLockFreesIt:
         assert _lock_is_free(log.root, cid)
 
 
+class TestAFailedRestoreLeavesTheEndedCacheAsItWas:
+    """A2 (engine audit 2.3): the teardown of a half-built restore ends the conversation, and
+    ending caches it. A failed ``restore_session``, ``fork`` or ``resume`` must not leave an
+    "ended" entry that answers for an id that was never restored, and must not overwrite an
+    entry the id legitimately had."""
+
+    @staticmethod
+    def _fail(target: str) -> Any:
+        return patch(target, side_effect=FSMError("injected"))
+
+    def test_a_failed_resume_does_not_make_the_id_look_ended(
+        self, log: EventLog
+    ) -> None:
+        first = _logged_api(log)
+        cid = _stacked(first)
+        first.end_conversation(
+            cid
+        )  # frees the writer; the id is NOT cached in `second`
+        second = _logged_api(log)
+        with self._fail("fsm_llm.engine.api.forks.record_resumed"):
+            with pytest.raises(FSMError, match="injected"):
+                second.resume(cid)
+        assert not second.has_conversation_ended(cid)
+        with pytest.raises(ValueError, match="Unknown conversation ID"):
+            second.get_data(cid)
+        _nothing_left(second, log, writers=frozenset({cid}))
+
+    def test_a_failed_resume_keeps_the_entry_the_id_already_had(
+        self, log: EventLog
+    ) -> None:
+        api = _logged_api(log)
+        cid = _stacked(api)
+        data = api.get_data(cid)
+        api.end_conversation(cid)
+        prior = api._ended_conversations[cid]
+        with self._fail("fsm_llm.engine.api.forks.record_resumed"):
+            with pytest.raises(FSMError, match="injected"):
+                api.resume(cid)
+        assert api._ended_conversations[cid] is prior
+        assert api.has_conversation_ended(cid) and api.get_data(cid) == data
+
+    @pytest.mark.parametrize("route", ["fork", "restore_session"])
+    def test_a_failed_fork_or_restore_caches_no_unreturned_id(
+        self, log: EventLog, tmp_path: Any, route: str
+    ) -> None:
+        api = _logged_api(log, session_store=FileSessionStore(tmp_path))
+        cid = _stacked(api)
+        api.save_session(cid)
+        before = dict(api._ended_conversations)
+        if route == "fork":
+            target, attempt = (
+                "fsm_llm.engine.api.forks.record_forked",
+                lambda: api.fork(cid, at_turn=1),
+            )
+        else:
+            target, attempt = (
+                "fsm_llm.engine.api.sessions.record_restored",
+                lambda: api.restore_session(cid),
+            )
+        with self._fail(target), pytest.raises(FSMError, match="injected"):
+            attempt()
+        assert api._ended_conversations == before
+
+
 class TestForgedRoutesThroughResume:
     """The routes of ``API.fork`` (step 4, D-009), through ``resume``: ONE trust rule."""
 

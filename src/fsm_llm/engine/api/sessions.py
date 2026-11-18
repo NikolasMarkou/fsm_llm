@@ -216,6 +216,14 @@ class SessionsMixin(_ApiSurface):
         kept_id: dict[str, Any] = (
             {} if conversation_id is None else {"_conversation_id": conversation_id}
         )
+        # What the ended-conversation cache held for a KEPT id (`resume`) before this restore:
+        # the teardown below caches the half-built conversation under that id and must not
+        # leave it there (a minted id had no entry, so it is dropped).
+        prior = (
+            None
+            if conversation_id is None
+            else self._ended_cache_entry(conversation_id)
+        )
         # A snapshot is a file: only its public keys seed the context (`public_context`, the
         # one rule of the fold), never an internal one such as a forged `_approval_granted`
         # (the declared transcript keys come through `_restorable_internal` below). The filter
@@ -291,6 +299,11 @@ class SessionsMixin(_ApiSurface):
                     "restore_session teardown of half-restored conversation "
                     f"'{conv_id}' failed: {teardown_error!s}"
                 )
+            with self._stack_lock:
+                if prior is None:
+                    self._ended_conversations.pop(conv_id, None)
+                else:
+                    self._ended_conversations[conv_id] = prior
             raise
 
         return conv_id
