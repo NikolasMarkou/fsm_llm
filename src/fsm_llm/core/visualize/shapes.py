@@ -16,8 +16,11 @@ _DEFAULT_NAME = "Unnamed FSM"
 
 def _transitions_of(state: dict[str, Any]) -> list[dict[str, Any]]:
     """A state's transitions, with an explicit ``"transitions": null`` read as
-    none (C9: ``.get(k, [])`` returns that ``None`` and every style crashed)."""
-    return state.get("transitions") or []
+    none (C9: ``.get(k, [])`` returns that ``None`` and every style crashed).
+    Any other value is returned as is, so a falsy non-list (``{}``, ``""``) reaches
+    ``_require_definition_shapes`` and is refused, not read as terminal."""
+    transitions = state.get("transitions")
+    return [] if transitions is None else transitions
 
 
 def _one_line(value: Any, default: str) -> str:
@@ -56,7 +59,8 @@ def _require_definition_shapes(states: Any) -> None:
     Raises:
         ValueError: ``states`` is not a dict, a state is not a dict, a
             state's ``transitions`` is not a list, or a transition is not a
-            dict. The message names the state.
+            dict, a transition's ``conditions`` is not a list, or a condition
+            is not a dict. The message names the state.
     """
     if not isinstance(states, dict):
         raise ValueError(f"'states' must be a mapping, got {type(states).__name__}")
@@ -77,6 +81,18 @@ def _require_definition_shapes(states: Any) -> None:
                     f"A transition of state {state_id!r} must be a mapping, "
                     f"got {type(transition).__name__}"
                 )
+            conditions = transition.get("conditions")
+            if conditions is not None and not isinstance(conditions, list):
+                raise ValueError(
+                    f"'conditions' of a transition of state {state_id!r} must be "
+                    f"a list, got {type(conditions).__name__}"
+                )
+            for condition in conditions or []:
+                if not isinstance(condition, dict):
+                    raise ValueError(
+                        f"A condition of state {state_id!r} must be a mapping, "
+                        f"got {type(condition).__name__}"
+                    )
 
 
 def _require_initial_state(states: dict[str, Any], initial_state: str) -> None:

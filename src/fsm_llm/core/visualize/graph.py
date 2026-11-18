@@ -89,7 +89,7 @@ def build_fsm_graph(fsm: FSMDefinition | dict[str, Any]) -> FSMGraph:
     # ASCII renderers and their tests. Layout and label length are the
     # consumer's business, so nothing is truncated here.
     data = fsm.model_dump() if isinstance(fsm, FSMDefinition) else fsm
-    states: dict[str, Any] = data.get("states") or {}
+    states: dict[str, Any] = data.get("states", {})
     initial_state = data.get("initial_state", "")
     _require_definition_shapes(states)
     _require_initial_state(states, initial_state)

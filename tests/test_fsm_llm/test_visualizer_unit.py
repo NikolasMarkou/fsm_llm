@@ -2076,6 +2076,38 @@ class TestBuildFsmGraphRefusesMalformedShapes:
         with pytest.raises(ValueError, match=message):
             build_fsm_graph(definition)
 
+    @pytest.mark.parametrize(
+        ("states", "message"),
+        [
+            ([], "'states' must be a mapping"),
+            (None, "'states' must be a mapping"),
+            ({"a": {"transitions": {}}}, "'transitions' of state 'a' must be a list"),
+            ({"a": {"transitions": ""}}, "'transitions' of state 'a' must be a list"),
+            (
+                {"a": {"transitions": [{"target_state": "a", "conditions": "x"}]}},
+                "'conditions' of a transition of state 'a' must be a list",
+            ),
+            (
+                {"a": {"transitions": [{"target_state": "a", "conditions": {"k": 1}}]}},
+                "'conditions' of a transition of state 'a' must be a list",
+            ),
+            (
+                {"a": {"transitions": [{"target_state": "a", "conditions": [1]}]}},
+                "A condition of state 'a' must be a mapping",
+            ),
+        ],
+    )
+    def test_falsy_or_non_list_shapes_are_refused_by_both_entry_points(
+        self, states, message
+    ):
+        """C3: ``or []`` and ``or {}`` let a falsy non-list shape through (and a
+        non-list ``conditions`` was an ``AttributeError`` in the ASCII layout)."""
+        definition = {"name": "n", "initial_state": "a", "states": states}
+        with pytest.raises(ValueError, match=message):
+            build_fsm_graph(definition)
+        with pytest.raises(ValueError, match=message):
+            visualize_fsm_ascii(definition)
+
     def test_explicit_null_transitions_still_mean_terminal(self):
         graph = build_fsm_graph(
             {"name": "n", "initial_state": "a", "states": {"a": {"transitions": None}}}
