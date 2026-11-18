@@ -66,7 +66,7 @@ from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.providers.embedder import _embedding_vectors
 from fsm_llm.logging import logger
 from fsm_llm.testing import MockLLM2Interface
-from tests.test_fsm_llm.support import _TWO_STATE
+from tests.test_fsm_llm.support import _TWO_STATE, _c_log_capture
 
 # ── Helpers ───────────────────────────────────────────────────
 
@@ -1203,6 +1203,28 @@ class TestApplyContextScope:
         assert "visible_key" in request.system_prompt
         assert "hidden_key" not in request.system_prompt
         assert "hide" not in request.system_prompt
+
+    @staticmethod
+    def _scope_notes(read_keys: list[str]) -> list[str]:
+        """The DEBUG lines a scoped Pass 2 writes about keys it could not find (D6)."""
+        state = _make_state("start")
+        state.context_scope = ContextScope(read_keys=read_keys)
+        pipeline = _make_pipeline(
+            llm=_make_mock_llm(), fsm_def=_make_fsm_definition({"start": state})
+        )
+        instance = _make_instance(context_data={"visible_key": "show"})
+        with _c_log_capture() as messages:
+            pipeline.process(instance, "test", "conv-1")
+        return [m for m in messages if "requested keys" in m]
+
+    def test_a_scope_whose_keys_are_all_present_logs_no_missing_key_line(self):
+        """The refused-corrections channel is scoped only when it holds something: an empty
+        one used to log every read key as missing on every turn of such a state."""
+        assert self._scope_notes(["visible_key"]) == []
+
+    def test_a_key_that_is_really_missing_is_still_logged_once(self):
+        (note,) = self._scope_notes(["visible_key", "absent_key"])
+        assert "['absent_key']" in note
 
 
 class TestContextScopeInFSMDefinition:

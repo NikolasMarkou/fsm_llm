@@ -64,9 +64,7 @@ class Pass1Mixin(_PipelineSurface):
             # tool argument such as `{"_id": 1}` or `{"x": None}` would be
             # silently removed from the calls the consumer runs. Every other
             # state's model-extracted data is still cleaned. See D-021.
-            if executor_for(
-                self.get_state(instance, conversation_id), self._executors
-            ).cleans_extracted:
+            if executor.cleans_extracted:
                 extraction_response.extracted_data = clean_context_keys(
                     extraction_response.extracted_data, conversation_id
                 )
