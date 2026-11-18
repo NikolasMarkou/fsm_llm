@@ -383,8 +383,9 @@ class Conversation(BaseModel):
         """Search conversation history for exchanges matching a query.
 
         Performs case-insensitive substring matching on all exchange
-        messages (both user and system). Also searches the summary if
-        one exists.
+        messages (both user and system). It searches ``exchanges`` only: the
+        ``summary`` (the digest of the exchanges trimmed from history) is not
+        searched, so text that was trimmed away is not found.
 
         Args:
             query: Search string.
