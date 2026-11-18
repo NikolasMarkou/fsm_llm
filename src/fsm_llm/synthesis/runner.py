@@ -245,6 +245,9 @@ class ProcedureRunner:
         self._definition = api.process_fsm_definition(definition)[0]
         self._sink = trace_sink
         self._runs: dict[str, list[_Run]] = {}
+        # converse mode: conversations whose last tick ended a start in `_fail`
+        # before any push (no depth change for `_settle` to see)
+        self._refused: set[str] = set()
 
     # --- driving ----------------------------------------------------------
 
@@ -278,6 +281,7 @@ class ProcedureRunner:
         """End ``conversation_id`` (every frame) and drop the runner's entry for it."""
         self.api.end_conversation(conversation_id)
         self._runs.pop(conversation_id, None)
+        self._refused.discard(conversation_id)
 
     # --- one tick: the whole of the hook's work ---------------------------
 
@@ -400,13 +404,17 @@ class ProcedureRunner:
 
     def _settle(self, conversation_id: str) -> list[str]:
         """converse mode: tick, then step the parent once after a pop (an ended or an
-        aborted child) so it leaves its synthesize state."""
+        aborted child) or a start refused before any push (the failed result is
+        written and the depth is unchanged) so it leaves its synthesize state, as
+        ``run`` does; a bare turn there would only be eaten by that state."""
         api = self.api
         depth = api.get_stack_depth(conversation_id)
         replies = self._tick(conversation_id, None)
-        if api.get_stack_depth(
-            conversation_id
-        ) < depth and not api.has_conversation_ended(conversation_id):
+        refused = conversation_id in self._refused
+        self._refused.discard(conversation_id)
+        if (
+            refused or api.get_stack_depth(conversation_id) < depth
+        ) and not api.has_conversation_ended(conversation_id):
             replies.append(api.advance(conversation_id).response or "")
         return replies
 
@@ -474,6 +482,8 @@ class ProcedureRunner:
             raise
         if reason:
             self._fail(conversation_id, config, reason, procedure, step, error)
+            if step is None:  # converse mode: `_settle` steps the parent on
+                self._refused.add(conversation_id)
             return []
         return [reply]
 

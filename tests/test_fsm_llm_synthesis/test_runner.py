@@ -825,9 +825,11 @@ class TestFailuresAreFixedReasons:
     def test_the_failure_is_final_a_second_run_obtains_nothing_more(self, valid_fsm):
         """The r7 shape: the real strong double raises a client timeout."""
         rig = _rig(valid_fsm, replies=[TimeoutError(SECRET)])
-        rig.runner.converse(rig.conv, "hello")
-        assert (rig.state, rig.result["reason"]) == ("solve", "unexpected_error")
-        rig.runner.converse(rig.conv, "again")
+        # the parent leaves the silent synthesize state on this very turn
+        assert rig.runner.converse(rig.conv, "hello") == "Sorry"
+        assert (rig.state, rig.result["reason"]) == ("apology", "unexpected_error")
+        with pytest.raises(FSMError, match="ended"):
+            rig.runner.converse(rig.conv, "again")
 
         assert (rig.state, rig.depth) == ("apology", 1)
         assert len(rig.strong.requests) == 1
@@ -1190,6 +1192,68 @@ def _nesting() -> dict[str, Any]:
             },
         },
     }
+
+
+class TestConverseLeavesTheStateAfterARefusedStart:
+    """A start refused before any push writes ``failed`` and changes no depth, so
+    the parent used to stay on its silent synthesize state and eat the NEXT user
+    message. ``run`` steps on at once; ``converse`` must too (plan 52ce5464 E4)."""
+
+    @staticmethod
+    def _refuse(
+        kind: str, valid_fsm: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> _Rig:
+        policy = None
+        kw: dict[str, Any] = {}
+        if kind == "inputs_missing":
+            kw["context"] = {"unrelated": 1}
+        elif kind == "compile_failed":
+            kw["replies"] = ["no json here"]
+            policy = SynthesisPolicy(max_repair_rounds=0)
+        elif kind == "approval_denied":
+            policy = SynthesisPolicy(require_approval=True)
+        rig = _rig(valid_fsm, policy=policy, **kw)
+        if kind == "approval_denied":
+            rig.synth.reviewer = lambda request: False
+        if kind == "push_failed":
+
+            def refuse(*args: Any, **kwargs: Any) -> Any:
+                raise FSMError(SECRET)
+
+            monkeypatch.setattr(rig.api, "push_fsm", refuse)
+        return rig
+
+    @pytest.mark.parametrize(
+        "kind", ["inputs_missing", "compile_failed", "approval_denied", "push_failed"]
+    )
+    def test_the_first_turn_returns_the_apology_and_matches_run(
+        self, valid_fsm, monkeypatch, kind
+    ):
+        rig = self._refuse(kind, valid_fsm, monkeypatch)
+        reply = rig.runner.converse(rig.conv, "hello")
+
+        control = self._refuse(kind, valid_fsm, monkeypatch)
+        control.runner.run(control.conv, max_steps=10)
+
+        assert reply == "Sorry"
+        assert (rig.state, rig.depth) == (control.state, control.depth)
+        assert (rig.state, rig.depth) == ("apology", 1)
+        assert rig.result == control.result and rig.result["reason"] == kind
+        assert rig.names == control.names
+        with pytest.raises(FSMError, match="ended"):
+            rig.runner.converse(rig.conv, "again")
+
+    def test_a_marker_set_by_a_run_never_steps_a_later_converse_turn(self, valid_fsm):
+        rig = _rig(valid_fsm, context={"unrelated": 1})
+        rig.runner.run(rig.conv, max_steps=10)
+        assert (rig.state, rig.result["reason"]) == ("apology", "inputs_missing")
+        assert rig.runner._refused == set()
+
+    def test_ending_the_conversation_drops_the_marker(self, valid_fsm):
+        rig = _rig(valid_fsm)
+        rig.runner._refused.add(rig.conv)
+        rig.runner.end_conversation(rig.conv)
+        assert rig.runner._refused == set()
 
 
 class TestNesting:
