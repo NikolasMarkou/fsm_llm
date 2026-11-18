@@ -1503,6 +1503,46 @@ class TestValidatorIsNeverStricterThanTheLoader:
             )
 
 
+class TestExtractionFieldNamesCanBeExtracted:
+    """B5: like a `required_context_keys` entry (D-016 of plan 8a03483a), a
+    `field_name` that is blank or internal-prefixed can never be extracted (the
+    key is stripped, or committed as `"   "`), so the loader refuses it and the
+    validator agrees."""
+
+    @staticmethod
+    def _data(channel: str, name: str) -> dict:
+        data = _valid_fsm_data()
+        entry = {"field_name": name}
+        if channel == "field_extractions":
+            entry.update(field_type="str", extraction_instructions="x")
+        else:
+            entry.update(
+                intents=[{"name": n, "description": n} for n in ("buy", "browse")],
+                fallback_intent="browse",
+            )
+        data["states"]["start"][channel] = [entry]
+        return data
+
+    @pytest.mark.parametrize("name", ["_secret", "system_x", "   "])
+    @pytest.mark.parametrize(
+        "channel", ["field_extractions", "classification_extractions"]
+    )
+    def test_a_blank_or_internal_name_is_refused_at_load(self, channel, name):
+        data = self._data(channel, name)
+        with pytest.raises(
+            ValueError, match=f"{channel} .* empty or internal-prefixed"
+        ):
+            FSMDefinition(**data)
+        assert FSMValidator(data).validate().is_valid is False
+
+    @pytest.mark.parametrize(
+        "channel", ["field_extractions", "classification_extractions"]
+    )
+    def test_an_ordinary_and_a_padded_name_still_load(self, channel):
+        for name in ("owner", " owner "):
+            FSMDefinition(**self._data(channel, name))
+
+
 class TestUnknownKeyWarnings:
     """H7: a misspelled OPTIONAL FSM-JSON key surfaces as a `fsm-llm-validate`
     WARNING naming the key, WITHOUT flipping `is_valid` (the loader ignores

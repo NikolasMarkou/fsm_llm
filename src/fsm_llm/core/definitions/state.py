@@ -242,16 +242,26 @@ class State(BaseModel):
                     f"State '{self.id}': field_name(s) {duplicates} are declared "
                     f"more than once in {channel}"
                 )
-        bad_keys = [
-            key
-            for key in self.required_context_keys or []
-            if not key.strip() or has_internal_prefix(key)
-        ]
-        if bad_keys:
-            raise ValueError(
-                f"State '{self.id}': required_context_keys {bad_keys} are empty or "
-                "internal-prefixed and can never be extracted"
-            )
+        # The same rule for the names of both extraction channels (B5 of plan
+        # 52ce5464): an internal-prefixed key is stripped from an extraction after
+        # a wasted call, and a blank one would be committed as a context key.
+        # A padded name is not refused (only emptiness after `strip()` is).
+        for channel, names in (
+            ("required_context_keys", self.required_context_keys or []),
+            ("field_extractions", [c.field_name for c in self.field_extractions or []]),
+            (
+                "classification_extractions",
+                [c.field_name for c in self.classification_extractions or []],
+            ),
+        ):
+            bad_keys = [
+                key for key in names if not key.strip() or has_internal_prefix(key)
+            ]
+            if bad_keys:
+                raise ValueError(
+                    f"State '{self.id}': {channel} {bad_keys} are empty or "
+                    "internal-prefixed and can never be extracted"
+                )
         # The completion and synthesize rules (forbidden declarations, needs a
         # transition, on_failure must be a target) live with their kind: see
         # `state_kinds.state_problem`.
