@@ -103,7 +103,7 @@ def _validated(data: Mapping[str, Any]) -> SessionProjection:
         ) from None
 
 
-def _public(context_data: Any) -> Any:
+def public_context(context_data: Any) -> Any:
     """*context_data* without its internal-prefixed top-level keys (``has_internal_prefix``).
 
     The one rule of the projection layer, shared by the fold and both versions of the
@@ -122,7 +122,7 @@ def _migrate_1_to_2(payload: Mapping[str, Any]) -> dict[str, Any]:
     """The one adjacent migration: an old ``SessionState`` dict to the v2 field names."""
     # DECISION plan-2026-11-17T100529-21e6f00d/D-009
     # An old file is NOT trusted to hold only public keys: `context_data` is filtered by
-    # `_public` here, exactly as `build_projection` filters the fold, so a forged `_approval_granted` (or
+    # `public_context` here, exactly as `build_projection` filters the fold, so a forged `_approval_granted` (or
     # any internal key) in a legacy file never reaches a restore. Do NOT copy `context_data`
     # through unfiltered, and do NOT carry internal keys by prefix or deny-list: the only
     # internal keys a restore takes are a definition's own transcript keys (`completion_context`,
@@ -136,7 +136,7 @@ def _migrate_1_to_2(payload: Mapping[str, Any]) -> dict[str, Any]:
         "conversation_id": payload.get("conversation_id"),
         "fsm_id": payload.get("fsm_id"),
         "current_state": payload.get("current_state"),
-        "context_data": _public(payload.get("context_data", {})),
+        "context_data": public_context(payload.get("context_data", {})),
         "conversation_history": payload.get("conversation_history", []),
         "conversation_summary": payload.get("conversation_summary"),
         "working_memory": payload.get("working_memory"),
@@ -162,7 +162,7 @@ def migrate_session(payload: Mapping[str, Any]) -> SessionProjection:
         return _validated(_migrate_1_to_2(payload))
     if version == SESSION_PROJECTION_VERSION:
         return _validated(
-            {**payload, "context_data": _public(payload.get("context_data", {}))}
+            {**payload, "context_data": public_context(payload.get("context_data", {}))}
         )
     raise LogCorruptError(f"session payload has an unknown version {version}")
 
@@ -267,7 +267,7 @@ def build_projection(
     ``stores.stack.fold_stack`` for every frame (*conversation_id* is then the frame's own id).
     """
     # DECISION plan-2026-11-17T100529-21e6f00d/D-009
-    # The fold drops internal-prefixed keys of `context_data` WHATEVER a blob says (`_public`),
+    # The fold drops internal-prefixed keys of `context_data` WHATEVER a blob says (`public_context`),
     # and a delta writes internal keys only into `completion_context`, never into the context.
     # Do NOT "simplify" this to trust the blob: a log is a file, and a forged blob or delta
     # carrying `_approval_granted` would otherwise be a forgery path into the HITL gate at
@@ -275,7 +275,7 @@ def build_projection(
     blob = load_blob(ref)
     if not isinstance(blob, dict):
         raise LogCorruptError("a state blob is not a JSON object")
-    context = _public(_mapping(blob, "context_data"))
+    context = public_context(_mapping(blob, "context_data"))
     internal = dict(_mapping(blob, "internal"))
     for delta_ref in deltas:
         _apply_delta(context, internal, load_blob(delta_ref))

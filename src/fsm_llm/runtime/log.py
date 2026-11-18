@@ -316,6 +316,14 @@ class EventLog:
         ``EventPayloadError`` for a bad id, ``LogWriteError`` for a closed log or an OS failure.
         """
         check_conversation_id(conversation_id)
+        # DECISION plan-2026-11-18T071726-5a6a1f80/D-007
+        # The writer lock is taken HERE, before the caller reads a byte of the log: what it then
+        # folds is exactly what it will continue. Do NOT fold first and lock after (another
+        # resumer would fold the same log and both would continue it: a TOCTOU on a file with
+        # one writer), do NOT take the lock in the caller after a check of "no live writer" (the
+        # check and the lock are one step or none), and do NOT create the file, the `.lock` or
+        # the directory for an unknown id (it must raise and leave nothing). A log that is a
+        # link is refused inside `JsonlWriter`, also before the lock. See decisions.md D-007.
         with self._guard:
             if self._closed:
                 raise LogWriteError("the event log is closed")
@@ -631,8 +639,13 @@ class EventLog:
         Explicit only (``runtime.retention``, plan 5a6a1f80): a log is a candidate when its file
         mtime (never ``ts``) is *max_age_seconds* old or more than *max_logs* newer logs exist,
         and one whose writer lock is held is skipped (``logs_busy``). Then blobs no remaining
-        log or live blob names and older than *blob_grace_seconds* go. *dry_run* changes
-        nothing. ``ValueError`` for a negative limit.
+        log or live blob names and older than *blob_grace_seconds* go. *dry_run* deletes
+        nothing but still takes and gives back the non-blocking writer lock of each candidate
+        that has a ``.lock`` (a writer that opens at that instant can see ``LogLockedError``).
+        Meant for a root with NO active writer on the same blobs: a re-put in the microseconds
+        between the last check and the delete can still lose the blob (the reader then raises
+        ``LogCorruptError``). An empty ``.lock`` stays for every pruned log and the mark phase
+        reads every live blob in full. ``ValueError`` for a negative limit.
         """
         return prune_root(
             self.root,

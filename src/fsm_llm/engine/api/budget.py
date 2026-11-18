@@ -18,11 +18,18 @@ Interface contract:
       default and no argument the manager is called exactly as before. Validates the explicit
       values (``ValueError``) so a refusal happens before anything is registered. Fork, resume and
       a snapshot restore call it with no argument: they start a FRESH budget from the API defaults
-      (a spent count is never carried, D-011 of the plan).
+      (a spent count is never carried, D-011 of the plan). A frame that a log restore rebuilds
+      passes the limits its push logged, so an explicit limit comes back (with a fresh count) and
+      the API default fills in only for a limit the frame never had.
+    - ``logged_limits(limits) -> dict``: the ``max_steps`` and ``max_seconds`` of a
+      ``budget_kwargs`` result as the ``stack/push`` event carries them: a limit that is set and
+      finite, nothing else (``None``, an absent key and ``inf`` mean no limit).
 """
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from typing import Any
 
 from fsm_llm.engine.fsm.budget import check_turn_limits
@@ -54,3 +61,12 @@ def budget_kwargs(
         "max_seconds": default_seconds if max_seconds is None else max_seconds,
     }
     return {name: value for name, value in chosen.items() if value is not None}
+
+
+def logged_limits(limits: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return the limits of *limits* that a ``stack/push`` event records (see the module docstring)."""
+    return {
+        name: value
+        for name in ("max_steps", "max_seconds")
+        if (value := (limits or {}).get(name)) is not None and value != math.inf
+    }

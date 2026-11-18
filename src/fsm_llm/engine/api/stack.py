@@ -178,6 +178,7 @@ class StackMixin(_ApiSurface):
                 return_context=new_frame.return_context,
                 shared_context_keys=new_frame.shared_context_keys,
                 preserve_history=new_frame.preserve_history,
+                limits=budget,
             )
             logger.info(
                 f"Pushed new FSM onto conversation {conversation_id}, "

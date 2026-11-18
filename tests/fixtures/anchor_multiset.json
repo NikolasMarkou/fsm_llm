@@ -594,6 +594,16 @@
       "delta": 1,
       "reason": "step 11 of plan 5a6a1f80: new anchor at prune_root (runtime/retention.py): retention is an explicit call whose default deletes nothing, a log goes only under its non-blocking writer lock, a .lock file is never unlinked or read, blobs are swept by mark (logs and live blobs, transitive) and sweep with a grace, never by a thread, a sidecar count or an age from ts; no other token was added or lost",
       "token": "plan-2026-11-18T071726-5a6a1f80/D-018"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.1 of plan 5a6a1f80 (review fix W4): D-007 is now also anchored at EventLog.open_existing (runtime/log.py), the lock-before-read rule of resume, with the three things not to do (fold first, check-then-lock in the caller, create anything for an unknown id); no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.1 of plan 5a6a1f80 (review fix C1): D-009 is now also anchored at the frame builder of fold_stack (runtime/stores/stack.py): the return context and the shared key names of a restored frame lose every internal-prefixed key at the one reader that fork and resume share, never at the callers; no other token was added or lost",
+      "token": "plan-2026-11-18T071726-5a6a1f80/D-009"
     }
   ]
 }

@@ -155,6 +155,8 @@ SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
                 "shared_context_keys",
                 "preserve_history",
                 "restored",
+                "max_steps",
+                "max_seconds",
             }
         ),
         EventType.STACK_POP: frozenset(

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import errno
 import os
+import stat
 import sys
 import threading
 from collections.abc import Iterator, Mapping, Sequence
@@ -265,7 +266,9 @@ class JsonlWriter:
           half line once the next writer cut the tail). An empty list writes nothing.
         - ``JsonlWriter(path, create=False)`` (``EventLog.open_existing``, plan 5a6a1f80): the log must
           already exist. A missing log raises ``FileNotFoundError`` BEFORE anything is created (no
-          directory, no ``.lock``, no log); the lock is taken before the log is scanned, and the
+          directory, no ``.lock``, no log) and so does a log that is not a regular file (a symbolic
+          link, ``LogCorruptError``: the appends would land outside the log root); the lock is
+          taken before the log is scanned, and the
           torn-tail repair and the ``seq`` continuation are the same code as for a new writer.
         - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays. A
           writer that is dropped without ``close`` is closed by its finalizer, so a forgotten
@@ -311,8 +314,12 @@ class JsonlWriter:
         if self._create:
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         else:
-            # an unknown id raises FileNotFoundError here, before any file is made
-            os.stat(self.path)
+            # an unknown id raises FileNotFoundError here, before any file is made. A log is a
+            # regular file under the log root: a symbolic link would send the appends elsewhere.
+            if not stat.S_ISREG(os.lstat(self.path).st_mode):
+                raise LogCorruptError(
+                    f"log {self.path.name} is not a regular file (a link or a directory)"
+                )
         lock_path = self.path.with_name(self.conversation_id + LOCK_SUFFIX)
         self._lock_fd = os.open(
             lock_path, os.O_RDWR | os.O_CREAT | _binary_flag(), 0o600

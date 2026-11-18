@@ -18,8 +18,12 @@ Interface contract:
       JSON object, NOT yet loaded as a definition: the restore parses it and compares the
       ``fsm_id``), ``state`` (a ``SessionProjection``; ``completion_context`` is what the log
       carried and is NOT checked against a definition here), ``return_context`` (public keys,
-      values already redacted when written), ``shared_context_keys`` and ``preserve_history``.
-      Internal-prefixed keys of ``context_data`` are dropped in every frame, whatever a blob says.
+      values already redacted when written), ``shared_context_keys``, ``preserve_history`` and
+      ``max_steps`` and ``max_seconds`` (the frame's own lifetime turn limits as pushed, ``None``
+      for none; a bool, NaN, negative or non-number is ``LogCorruptError``).
+      Internal-prefixed keys of ``context_data`` are dropped in every frame, whatever a blob says,
+      and so are internal-prefixed keys of ``return_context`` and internal-prefixed NAMES of
+      ``shared_context_keys`` (the writer never logs one, so a log that has one is forged).
     - ``turn_cut(events, at_turn) -> int``: the ``seq`` after which a fork of turn *at_turn* cuts
       the log (``EventLog.query(until_seq=...)``). A turn is one ``turn/start`` .. ``turn/end``
       pair at ANY frame (one ``converse`` or ``advance`` call), a rolled-back turn counts, the
@@ -37,16 +41,21 @@ only what survives to the final stack: the blobs of a frame that was popped are 
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
-from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
+from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH, has_internal_prefix
 from fsm_llm.runtime.events import EventType, LogCorruptError, TurnOutcome
 from fsm_llm.runtime.privacy import refuse_shape
-from fsm_llm.runtime.stores.session import SessionProjection, build_projection
+from fsm_llm.runtime.stores.session import (
+    SessionProjection,
+    build_projection,
+    public_context,
+)
 
 _TOOL_TYPES = (EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value)
 
@@ -64,6 +73,8 @@ class FrameProjection(BaseModel):
     return_context: dict[str, Any]
     shared_context_keys: list[str]
     preserve_history: StrictBool
+    max_steps: int | None = None
+    max_seconds: float | None = None
 
 
 class StackProjection(BaseModel):
@@ -212,6 +223,23 @@ def _pop(frames: list[_Frame], event: Mapping[str, Any]) -> None:
         frames[-1].ref, frames[-1].deltas = state_ref, []
 
 
+def _lifetime_limit(push: Mapping[str, Any], key: str, where: str) -> Any:
+    """The ``max_steps`` or ``max_seconds`` a push logged: absent or null is no limit."""
+    value = push.get(key)
+    if value is None:
+        return None
+    # `type(...) is int` is False for a bool; an int of any size compares as an int
+    if type(value) is int:
+        ok = value >= 1
+    else:
+        ok = key == "max_seconds" and type(value) is float and 0 < value < math.inf
+    if not ok:
+        raise LogCorruptError(
+            f"{where} has a bad {key} (a number above 0, or null, is required)"
+        )
+    return value
+
+
 def _frame_projection(
     index: int, frame: _Frame, load_blob: Callable[[str], Any], last_seq: int
 ) -> FrameProjection:
@@ -231,7 +259,20 @@ def _frame_projection(
     return_ref = _ref(push, "return_context_ref")
     if return_ref is None:
         raise LogCorruptError(f"{where} has no recorded return context")
-    return_context = load_blob(return_ref)
+    # DECISION plan-2026-11-18T071726-5a6a1f80/D-009
+    # The return context and the shared key NAMES of a frame come out of the log, which is a
+    # file, and `pop_fsm` merges them into the parent through a writer that DOES write internal
+    # keys. The writer filters them at push time (`filter_context`), so a log that has one is
+    # forged: drop every internal-prefixed key here, at the one reader both `fork` and `resume`
+    # use, and never merge a log-sourced `_approval_granted` or `_run_output_keys` into a parent.
+    # Do NOT move this to the two callers (a third would forget), and do NOT test only the
+    # context blob (the shared key names are the second route). See decisions.md D-009.
+    return_context = public_context(load_blob(return_ref))
+    shared = push.get("shared_context_keys")
+    if isinstance(shared, list):
+        shared = [
+            k for k in shared if not (isinstance(k, str) and has_internal_prefix(k))
+        ]
     child_id = push.get("child_conversation_id")
     state = build_projection(frame.ref, frame.deltas, load_blob, child_id, last_seq, [])
     try:
@@ -243,8 +284,10 @@ def _frame_projection(
                 "definition_ref": definition_ref,
                 "state": state,
                 "return_context": return_context,
-                "shared_context_keys": push.get("shared_context_keys"),
+                "shared_context_keys": shared,
                 "preserve_history": push.get("preserve_history"),
+                "max_steps": _lifetime_limit(push, "max_steps", where),
+                "max_seconds": _lifetime_limit(push, "max_seconds", where),
             }
         )
     except ValidationError as exc:

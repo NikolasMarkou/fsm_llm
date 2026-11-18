@@ -25,8 +25,10 @@ from fsm_llm.runtime.stores.jsonl import (
     exclusive_lock,
 )
 
-# Indirection a test patches to simulate a refused unlink, read at call time.
+# Indirections a test patches to simulate a refused unlink or a writer that re-puts a blob
+# between the two stats of the sweep, read at call time.
 _unlink = os.unlink
+_stat = os.stat
 
 _REF_BYTES = re.compile(BLOB_REF_RE.pattern.encode("ascii"))
 _SCAN_CHUNK_BYTES = 1 << 20
@@ -55,6 +57,10 @@ class PruneReport:
 # marks only the logs and not the live blobs (a blob may name blobs), ignores the grace (a
 # writer puts a blob BEFORE the event naming it) or ignores a file it cannot read (fail
 # closed). Empty ``<aa>`` directories stay (a writer may sit between mkdir and temp file).
+# The sweep stats a candidate TWICE, the second time right before the unlink, and keeps it when a
+# re-put moved its mtime into the grace in between. A window of microseconds stays between that
+# re-stat and the unlink: prune is for a root with NO active writer on the same blobs, and it is
+# not made safe under a racing one. Do NOT loop or retry to close it (D-011 of plan 21e6f00d).
 def prune_root(
     root: str | os.PathLike[str],
     *,
@@ -229,7 +235,7 @@ def _sweep(
                 continue
             path = blobs_dir / prefix / name
             try:
-                info = path.stat()
+                info = _stat(path)
             except OSError:
                 continue
             if now - info.st_mtime < grace:  # also a future mtime: kept
@@ -237,6 +243,10 @@ def _sweep(
                 continue
             if not dry_run:
                 try:
+                    again = _stat(path)  # a re-put since the first stat moved it
+                    if now - again.st_mtime < grace:
+                        young += 1
+                        continue
                     _unlink(path)
                 except FileNotFoundError:
                     continue

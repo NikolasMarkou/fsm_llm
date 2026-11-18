@@ -33,7 +33,9 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       fsm_id, merge_strategy, merged_keys, depth, *, parent_id)``: append ``stack/push``
       (``child_conversation_id``, ``fsm_id``, ``depth``, ``definition_ref`` to the full definition
       blob, ``state_ref`` of the child's post-greeting state, ``return_context_ref`` (through
-      ``filter_context``), ``shared_context_keys``, ``preserve_history``) and ``stack/pop``
+      ``filter_context``), ``shared_context_keys``, ``preserve_history`` and the frame's lifetime
+      limits ``max_steps`` and ``max_seconds`` when it has them, from ``api.budget.logged_limits``;
+      a restore rebuilds the frame with the same limits and a fresh count) and ``stack/pop``
       (``child_conversation_id``, ``fsm_id``, ``merge_strategy``, ``merged_key_count``, ``depth``,
       ``state_ref`` of the parent *parent_id* after the merge) under the PARENT frame, after the
       stack changed and outside ``_stack_lock``: ``runtime.stores.stack.fold_stack`` rebuilds the
@@ -99,6 +101,7 @@ from fsm_llm.runtime import (
     warn_on_failure,
 )
 
+from .budget import logged_limits
 from .surface import _ApiSurface
 
 #: One shared, reusable no-op context for the log-off path.
@@ -194,6 +197,7 @@ def record_push(
     return_context: Mapping[str, Any],
     shared_context_keys: Sequence[str],
     preserve_history: bool,
+    limits: Mapping[str, Any] | None = None,
 ) -> None:
     """Append ``stack/push`` for a frame that was just added (a no-op with the log off)."""
     log = getattr(api, "_event_log", None)
@@ -204,6 +208,7 @@ def record_push(
         "fsm_id": fsm_id,
         "shared_context_keys": list(shared_context_keys),
         "preserve_history": bool(preserve_history),
+        **logged_limits(limits),
     }
     if log.stores_values:
         try:
@@ -321,6 +326,7 @@ def record_restored_frame(
     return_context: Mapping[str, Any],
     shared_context_keys: Sequence[str],
     preserve_history: bool,
+    limits: Mapping[str, Any] | None = None,
 ) -> None:
     """Append the strict, ``restored`` ``stack/push`` of a frame ``fork`` rebuilt."""
     log = getattr(api, "_event_log", None)
@@ -347,6 +353,7 @@ def record_restored_frame(
         fsm_id=fsm_id,
         shared_context_keys=list(shared_context_keys),
         preserve_history=bool(preserve_history),
+        **logged_limits(limits),
         **refs,
     )
 

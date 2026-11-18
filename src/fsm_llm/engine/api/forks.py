@@ -38,7 +38,8 @@ Interface contract:
       (``has_conversation_ended``); an ended-conversation cache entry of the id is dropped. Needs
       an event log. Failure: ``FSMError`` (no log, no state, live id), ``LogLockedError``,
       ``LogCorruptError`` as ``fork``; any failure after the lock releases the writer and ends
-      what was built. A budget is not persisted: the resumed tree starts with a fresh one (D-011).
+      what was built. A spent budget is not persisted (D-011): a rebuilt frame keeps the lifetime
+      limits its push logged with a FRESH count, and the ``API`` default fills a limit it never had.
     - ``event_log`` (property): the ``EventLog`` of this ``API`` or ``None``, read-only (row 1.13).
 """
 
@@ -113,7 +114,12 @@ def _prepare(api: _ApiSurface, log: EventLog, frame: FrameProjection) -> _Prepar
             f"{where} has a definition whose id is not the recorded one (the log or its "
             "blob was altered)"
         )
-    _require_classifier_interface(definition, api.llm_interface)
+    try:
+        _require_classifier_interface(definition, api.llm_interface)
+    except ValueError:  # a log fact: say so, echo nothing of the definition
+        raise LogCorruptError(
+            f"{where} classifies through an interface this API does not have"
+        ) from None
     kept = {k: v for k, v in frame.return_context.items() if v != REDACTED}
     if len(kept) != len(frame.return_context):
         logger.warning(
@@ -272,6 +278,10 @@ class ForkMixin(_ApiSurface):
         """
         state, fsm_id = prepared.frame.state, prepared.fsm_id
         manager = self.fsm_manager
+        # the frame's own logged limits, a FRESH count; the API default only fills a missing one
+        budget = budget_kwargs(
+            self, prepared.frame.max_steps, prepared.frame.max_seconds
+        )
         child_id: str | None = None
         added = False
         try:
@@ -288,7 +298,7 @@ class ForkMixin(_ApiSurface):
                 initial_context=state.context_data,
                 suppress_start=True,
                 **kept,
-                **budget_kwargs(self),
+                **budget,
             )
             manager.seed_restored_conversation(
                 child_id,
@@ -331,4 +341,5 @@ class ForkMixin(_ApiSurface):
             return_context=prepared.return_context,
             shared_context_keys=prepared.frame.shared_context_keys,
             preserve_history=prepared.frame.preserve_history,
+            limits=budget,
         )
