@@ -11,7 +11,7 @@ Purpose: Markdown documentation for FSM-LLM v0.13.0 (landing page, quickstart, c
 
 ## Architecture
 
-Three groups of files:
+The files by kind:
 
 | Group | Files | Header | Status |
 | --- | --- | --- | --- |
@@ -27,9 +27,9 @@ Every page is in the `nav` of `mkdocs.yml` or in its `exclude_docs` (`AGENTS.md`
 | --- | --- | --- |
 | `index.md` | Landing page | What it is, install, the one runnable no-model example (a `ScriptedLLM`; `test_docs_content.py` runs it), where to go next, the subpackage table linking the READMEs by absolute GitHub URL |
 | `quickstart.md` | First-run tutorial | Env var table (`LLM_MODEL`, `LLM_TEMPERATURE` default `0.5`, `LLM_MAX_TOKENS` default `1000`, `FSM_PATH`). Full FSM `friendly_greeter` in a Python block. Handler at `CONTEXT_UPDATE`, `converse_stream`, `FileSessionStore`. Section 6 "More Ways to Build": builders, an agent, a workflow, the reasoning engine; fences are plain `python` |
-| `concepts.md` | Why, how it works, features, status, references | Two mermaid diagrams, the subpackage table linking the READMEs on GitHub. No count token of the shapes `scripts/doc_counts.py` pins (`N tests`, `N test files`) |
+| `concepts.md` | Why, how it works, features, status, references | The mermaid diagrams, the subpackage table linking the READMEs on GitHub |
 | `fsm_design.md` | Design guide | Only state-level JSON fragments, no full FSM. The priority rule, `evaluation_priority` (default 100, range 0-1000), `llm_description` (max 300 chars), `context_scope`, `handler_only_keys`, stacking merge strategies |
-| `handlers.md` | Handler guide | 8 timings, `HandlerBuilder` table including `.critical()`, `handler_error_mode`, ERROR-handler rules (return dict not merged, re-entry raises `FSMError`) |
+| `handlers.md` | Handler guide | The handler timings, `HandlerBuilder` table including `.critical()`, `handler_error_mode`, ERROR-handler rules (return dict not merged, re-entry raises `FSMError`) |
 | `synthesis.md` | Guide | Runtime FSM synthesis. Holds the one full JSON FSM of the guides (loaded by the snippet test) and the live results of the bench blocks s0 to s2 (all INCONCLUSIVE, one model); update it together with `src/fsm_llm/synthesis/*.md` and `scripts/bench_data/README.md` when the bench runs |
 | `testing.md` | Guide | `fsm_llm.testing` for users. Every `python` block is executed in order, in one namespace, offline, by `tests/test_fsm_llm_testing/test_guide.py`; a block that must not run is fenced `python notest` |
 | `api_reference.md` | Reference | Hand written: the public surface of the core and of every subpackage, exceptions, constants. A signature, default or name changes here in the same commit as the code |
@@ -66,7 +66,7 @@ Facts the pages state that must stay in step with the code:
 - `required_context_keys` never blocks a transition. Every page gates with a condition. New examples must do the same.
 - Among passing transitions, the single lowest `priority` wins. Only a tie at the lowest priority is AMBIGUOUS and goes to the LLM classifier.
 - Keep the `> Covers FSM-LLM v<version>` header on every current page and update it on release (`test_release_version.py` compares it with `pyproject.toml`).
-- No plan id and no step number in a page, no emoji, no em dash (a ratchet test counts them), no stale path, no count token that `scripts/doc_counts.py` would pin unless it is maintained.
+- No plan id and no step number in a page, no emoji, no em dash (a ratchet test counts them), no stale path, no count of tests, files, modules, lines, contracts or examples (`tests/test_fsm_llm_regression/test_doc_count_ratchet.py` fails when a page gains one).
 - A page has a title, a one-line purpose, the `Covers` line, sections and a `Next steps` section. No topic is written twice: link instead.
 - `2026_roadmap.md` is the maintainer's: never edit it or move it.
 
@@ -80,7 +80,7 @@ No known mismatches between these pages and the code. When one is found, list it
 
 ## Working here
 
-- Before stating a count, signature or default, check it against `src/fsm_llm/` (for example `.venv/bin/python -c "import fsm_llm.eval as e; print(len(e.__all__))"`).
+- State no count of tests, files, modules, lines, contracts or examples: measure it when it is needed. Before stating a signature or default, check it against `src/fsm_llm/`.
 - After any edit, run `.venv/bin/python -m pytest tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm/test_docs_site.py tests/test_fsm_llm/test_docs_content.py tests/test_fsm_llm/test_docs_links.py tests/test_fsm_llm_regression/test_regression_cli_and_exports.py`, and a strict build with `make docs` when the docs tools are installed.
 - A new full FSM example must include `description` on the FSM and on every state, `id` and `purpose` on every state, and a reachable terminal state.
 - Renaming or deleting a page means updating `mkdocs.yml`, the tests above and the pointers in `src/fsm_llm/engine/fsm/manager.py`.

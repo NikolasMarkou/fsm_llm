@@ -6,7 +6,7 @@ Stateful conversational AI: you describe a conversation as a finite state machin
 
 A language model call starts from nothing. A multi-turn conversation that must collect data, follow a set flow and decide the same way every time needs structure around the model. FSM-LLM splits the work three ways: the model understands the user, pulls out facts and writes replies; the state machine decides where the conversation goes next by rules, not by mood; the framework keeps the state, the history, your hooks and the saved sessions.
 
-It is one package, `fsm_llm`, with a small core and seven subpackages on top: reasoning strategies, a workflow engine, 18 agent patterns, a monitoring dashboard, an evaluation harness, runtime FSM synthesis and public test doubles. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model.
+It is one package, `fsm_llm`, with a small core and subpackages on top: reasoning strategies, a workflow engine, agent patterns, a monitoring dashboard, an evaluation harness, runtime FSM synthesis and public test doubles. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model.
 
 ## Install
 
@@ -79,7 +79,7 @@ The conversation starts in `ask_name`, the extraction fills `name`, the transiti
 | Run a first conversation against a model | [Quick Start](quickstart.md) |
 | Understand the idea, the two passes and what each subpackage adds | [Concepts](concepts.md) |
 | Design states, transitions, priorities, context and classification | [FSM Design Guide](fsm_design.md) |
-| Run your own code at the eight points of a turn | [Handler Development](handlers.md) |
+| Run your own code at the points of a turn | [Handler Development](handlers.md) |
 | Let a model write a sub-conversation at run time | [Runtime FSM synthesis](synthesis.md) |
 | Test a bot, an agent or a workflow without a model | [Testing](testing.md) |
 | Look up a class, a function or an exception | [API Reference](api_reference.md) |
@@ -94,9 +94,9 @@ Each subpackage is imported by name (`from fsm_llm.agents import create_agent`);
 
 | Subpackage | What it adds | README |
 |---|---|---|
-| `fsm_llm.reasoning` | 9 reasoning strategies as stacked FSMs | [reasoning](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) |
-| `fsm_llm.workflows` | An async in-memory workflow engine with 11 step types | [workflows](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) |
-| `fsm_llm.agents` | 18 agent patterns, tools, human approval, memory, MCP, A2A | [agents](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) |
+| `fsm_llm.reasoning` | Reasoning strategies as stacked FSMs | [reasoning](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) |
+| `fsm_llm.workflows` | An async in-memory workflow engine with its step types | [workflows](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) |
+| `fsm_llm.agents` | Agent patterns, tools, human approval, memory, MCP, A2A | [agents](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) |
 | `fsm_llm.monitor` | A FastAPI dashboard and OpenTelemetry export | [monitor](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md) |
 | `fsm_llm.eval` | An examples scorer and scripted conversation evals | [eval](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/eval/README.md) |
 | `fsm_llm.synthesis` | A model compiles a goal into an FSM that gates judge | [synthesis](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/synthesis/README.md) |

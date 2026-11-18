@@ -52,7 +52,7 @@ Pass 2: POST_PROCESSING handlers → LLM generate response → Return
 
 ### Prompt Builders (`context/layout/`)
 
-Two builders produce structured XML-like prompts, plus the Pass-1 builder slot:
+The prompt builders produce structured XML-like prompts, plus the Pass-1 builder slot:
 - `DataExtractionPromptBuilder` -- the Pass-1 slot of `FSMManager`/`MessagePipeline`; the pipeline builds the bulk extraction prompt inline and uses this builder only for the shared sanitizer
 - `ResponseGenerationPromptBuilder` -- Pass 2: user-facing response generation
 - `FieldExtractionPromptBuilder` -- Targeted single-field extraction
@@ -61,7 +61,7 @@ Security: XML tag sanitization, CDATA wrapping for JSON, token budget management
 
 ### Handler System (`handlers/`)
 
-Plugin architecture with 8 timing points. Handlers self-determine execution via state/context conditions, execute in priority order, with configurable error isolation (`"continue"` or `"raise"`). Critical handlers always raise on error.
+Plugin architecture with a timing point for each stage of a turn. Handlers self-determine execution via state/context conditions, execute in priority order, with configurable error isolation (`"continue"` or `"raise"`). Critical handlers always raise on error.
 
 ### LLM Interface (`llm/`)
 
@@ -72,7 +72,7 @@ Plugin architecture with 8 timing points. Handlers self-determine execution via 
 - `extract_bulk_data(request)` -- Bulk extraction for states with `extraction_instructions`
 - `complete(request: CompletionRequest) -> CompletionResponse` -- The one primitive for tool calling, plain and structured completion (classifier, completion states, the agents' LLM judge). Not abstract: the base method raises `NotImplementedError`
 
-`LiteLLMInterface` provides the built-in implementation supporting 100+ providers. It is the one place a provider request is built (`_build_call_params`) and sent (one send path that counts every call on the instance: `usage()`), for every call kind; `LiteLLMEmbedder` is the one embedding path. `litellm` is imported in exactly one module, `llm/providers/litellm.py`; nothing else in the package (agents, reasoning, meta-builder) calls a provider by itself. The classifier of a conversation sends its `complete` requests through the conversation's own `llm_interface`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
+`LiteLLMInterface` provides the built-in implementation supporting every provider litellm supports. It is the one place a provider request is built (`_build_call_params`) and sent (one send path that counts every call on the instance: `usage()`), for every call kind; `LiteLLMEmbedder` is the one embedding path. `litellm` is imported in exactly one module, `llm/providers/litellm.py`; nothing else in the package (agents, reasoning, meta-builder) calls a provider by itself. The classifier of a conversation sends its `complete` requests through the conversation's own `llm_interface`. Request models carry `user_message: str | None`; the request builder sends `None` (no user message) as the fixed `NEUTRAL_USER_TURN` and an empty or whitespace message as `EMPTY_USER_MESSAGE_TURN`, so the provider never sees an empty user turn and never reads an empty message as an instruction.
 
 ### TransitionEvaluator (`core/transition_evaluator.py`)
 
@@ -200,7 +200,7 @@ class FSMContext:
     working_memory: WorkingMemory  # Named buffers (core, scratch, environment, reasoning)
 ```
 
-`get_user_visible_data()` (which merges the non-hidden buffers into `data`, minus internal keys and secret-looking entries; the one key policy lives in `security/`, so a key named exactly `system` is an ordinary visible key, unlike `system_*`) enters the Pass-1 per-field extraction prompt (`_execute_field_extractions`, when a field's `context_keys` is left at its default) and both classifier call sites. The three Pass-2 sites (`_execute_response_generation_pass`, `_stream_response_generation_pass`, and `generate_initial_response` when a greeting is generated) build the `<current_context>` block from `get_merged_data()`, scoped by `read_keys`; the prompt is the only context channel, since `ResponseGenerationRequest` carries no context field. `update_context`/handlers write `data` only; a value that must reach the shipped response prompt belongs in `data`. `working_memory` is also `exclude=True`, so `FSMContext.model_dump()` omits it (sessions persist it through `WorkingMemory.to_dict()`).
+`get_user_visible_data()` (which merges the non-hidden buffers into `data`, minus internal keys and secret-looking entries; the one key policy lives in `security/`, so a key named exactly `system` is an ordinary visible key, unlike `system_*`) enters the Pass-1 per-field extraction prompt (`_execute_field_extractions`, when a field's `context_keys` is left at its default) and both classifier call sites. The Pass-2 sites (`_execute_response_generation_pass`, `_stream_response_generation_pass`, and `generate_initial_response` when a greeting is generated) build the `<current_context>` block from `get_merged_data()`, scoped by `read_keys`; the prompt is the only context channel, since `ResponseGenerationRequest` carries no context field. `update_context`/handlers write `data` only; a value that must reach the shipped response prompt belongs in `data`. `working_memory` is also `exclude=True`, so `FSMContext.model_dump()` omits it (sessions persist it through `WorkingMemory.to_dict()`).
 
 Special keys (prefixed with `_`): `_conversation_id`, `_conversation_start`, `_fsm_id`, `_timestamp`, and, once a transition has happened, `_current_state`, `_previous_state`, `_transition_timestamp`. ERROR handlers additionally see `_error` and `_traceback`. Formats: `_conversation_start` is naive local-time ISO text (`datetime.now().isoformat()`), `_timestamp` and `_transition_timestamp` are epoch seconds (floats), and none of the three is persisted by `save_session` (UTC-aware values are carried, not built). The raw user message is not in the context, so handlers see extracted keys only.
 
@@ -238,7 +238,7 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 
 ## Package Layout
 
-The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the seven extension subpackages sit layer packages that ship with every install, and a layer imports only the layers below it. The rule is enforced by `.importlinter` (`make lint-imports`, and the test `tests/test_fsm_llm_regression/test_import_contract.py`), and no module is over 800 lines.
+The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the extension subpackages sit layer packages that ship with every install, and a layer imports only the layers below it. The rule is enforced by `.importlinter` (`make lint-imports`, and the test `tests/test_fsm_llm_regression/test_import_contract.py`), and no module is over 800 lines.
 
 | Layer (top to bottom) | Packages | What it holds |
 |---|---|---|
@@ -252,7 +252,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the sev
 | `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses), `core.visualize` |
 | Kernel | `constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`, `cli_support` | Small modules any layer may import; they import no layer |
 
-`import fsm_llm` loads the `core`, `engine`, `handlers`, `context`, `llm`, `runtime` and `security` packages and a few kernel modules, and nothing else: no subpackage and none of `okf`, `skills`, `tools` or `policy` (pinned by `tests/test_fsm_llm_regression/test_import_laziness.py`). Three edges break the order on purpose and are named in `.importlinter`: `agents` imports `reasoning` (for `ReasoningReactAgent`), and `synthesis` imports `agents.semantic_tools` and `eval` (the simulator reuses the scripted-trial code).
+`import fsm_llm` loads the `core`, `engine`, `handlers`, `context`, `llm`, `runtime` and `security` packages and a few kernel modules, and nothing else: no subpackage and none of `okf`, `skills`, `tools` or `policy` (pinned by `tests/test_fsm_llm_regression/test_import_laziness.py`). A few edges break the order on purpose and are named in `.importlinter`: `agents` imports `reasoning` (for `ReasoningReactAgent`), and `synthesis` imports `agents.semantic_tools` and `eval` (the simulator reuses the scripted-trial code).
 
 ## Extension Integration
 
@@ -272,7 +272,7 @@ fsm_llm (core, includes classification)
 └── fsm_llm.testing    -- Public test doubles, scripted user and assertions; imports core only
 ```
 
-The seven extensions are subpackages of `fsm_llm`. Core never imports them at package
+The extensions are subpackages of `fsm_llm`. Core never imports them at package
 import time; each one imports core (`from fsm_llm import API`). Their place among the
 layers is in Package Layout above.
 

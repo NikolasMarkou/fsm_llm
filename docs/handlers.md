@@ -2,7 +2,7 @@
 
 > Covers FSM-LLM v0.13.0
 
-Handlers extend FSM behavior with custom logic at 8 lifecycle points. They can validate data, call external APIs, log interactions, implement business rules, and trigger side effects.
+Handlers extend FSM behavior with custom logic at the lifecycle points of a turn. They can validate data, call external APIs, log interactions, implement business rules, and trigger side effects.
 
 ## Basic Structure
 
@@ -221,11 +221,11 @@ def test_handler_execution_order():
 
 - **Agents**: POST_TRANSITION executes tools, PRE_TRANSITION enforces budgets, CONTEXT_UPDATE checks HITL approval
 - **Reasoning**: Validation, tracing, context pruning, retry limiting handlers
-- **Monitor**: Registers at all 8 timing points (priority 9999) as pure observers -- returns `{}`, never modifies state
+- **Monitor**: Registers at every timing point (priority 9999) as pure observers -- returns `{}`, never modifies state
 - **Workflows**: Manages step execution directly via async pipeline; ConversationStep has its own handler system
 
 ## Next steps
 
 - [Testing](testing.md) shows how to test a handler with a scripted model.
 - The [API Reference](api_reference.md) lists `HandlerBuilder`, `HandlerTiming` and `HandlerErrorMode`.
-- [Architecture](architecture.md) shows where the eight points sit in a turn.
+- [Architecture](architecture.md) shows where the handler points sit in a turn.

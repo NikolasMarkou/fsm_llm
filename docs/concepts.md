@@ -69,9 +69,9 @@ flowchart TD
 
 | Subpackage | What it adds | Maturity |
 |------------|--------------|----------|
-| [`fsm_llm.reasoning`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) | 9 reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
-| [`fsm_llm.workflows`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) | Async in-memory workflow engine, 11 step types, a Python DSL | Runs without an LLM unless you add LLM steps |
-| [`fsm_llm.agents`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) | 18 agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits in the agents README; open work is in the [2026 roadmap](2026_roadmap.md) |
+| [`fsm_llm.reasoning`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) | Reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
+| [`fsm_llm.workflows`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) | Async in-memory workflow engine, its step types, a Python DSL | Runs without an LLM unless you add LLM steps |
+| [`fsm_llm.agents`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) | Agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits in the agents README; open work is in the [2026 roadmap](2026_roadmap.md) |
 | [`fsm_llm.monitor`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
 | [`fsm_llm.eval`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/eval/README.md) | Examples scorer (0 to 4), conversation cases with Wilson intervals | Scores are a heuristic that overstates quality; read the logs too |
 | [`fsm_llm.synthesis`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/synthesis/README.md) | A model compiles a goal into an FSM, gates judge it, a library stores it, a runner executes it; agent tools | Tested offline with scripted models. Bench status: three blocks run on one model, all INCONCLUSIVE; no result favours synthesis. |
@@ -84,7 +84,7 @@ comparable. The method and the run log are on the [Evaluate](evaluate.md) page. 
 
 ## Key features
 
-The library is organized into five pillars.
+The library is organized into these groups of features.
 
 ### The core: finite state machines driven by an LLM
 
@@ -92,7 +92,7 @@ The library is organized into five pillars.
   reply from the state you ended up in). Transition rules are JsonLogic evaluated in plain
   Python, so they are predictable and unit-testable. The LLM is asked to choose only when two
   rules tie at the lowest priority.
-* **Handlers**: your functions run at 8 points (start, before and after processing, before and
+* **Handlers**: your functions run at the handler timings (start, before and after processing, before and
   after a transition, context update, end, error), built with `create_handler`. See
   [Handler Development](handlers.md).
 * **Intent classification**: `classification_extractions` on a state, plus `Classifier`,
@@ -113,13 +113,13 @@ The library is organized into five pillars.
 
 ### Reasoning, workflows and agents
 
-* **`fsm_llm.reasoning`**: a solver that picks one of 9 reasoning strategies, runs it as
+* **`fsm_llm.reasoning`**: a solver that picks one of the reasoning strategies, runs it as
   stacked FSMs inside one message-free core run, validates the answer and retries up to 3
   times. `ReasoningEngine.solve_problem(problem)` returns the solution and a trace.
-* **`fsm_llm.workflows`**: an async in-memory engine with 11 step types and a Python DSL
+* **`fsm_llm.workflows`**: an async in-memory engine with its step types and a Python DSL
   (`create_workflow`, `auto_step`, `condition_step`). It runs without an LLM unless you add LLM
   steps.
-* **`fsm_llm.agents`**: 18 agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`,
+* **`fsm_llm.agents`**: the agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`,
   `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`,
   `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`,
   `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
@@ -148,7 +148,7 @@ The library is organized into five pillars.
   commit ad30107, pre-1.0 and mutable).
 * **Agent Skills**: `fsm_llm.skills` reads folders with a `SKILL.md` from the paths you name
   (the open standard at agentskills.io as read on 2026-10-23, unversioned and mutable).
-  `fsm_llm.agents.create_skill_tools` gives an agent three read-only tools (`skill_list`,
+  `fsm_llm.agents.create_skill_tools` gives an agent read-only tools (`skill_list`,
   `skill_load`, `skill_read`), and `fsm-llm-skills` validates, lists and shows them.
 * **Untrusted by design**: bundle and skill text reaches a model only as capped,
   control-stripped tool output (or labelled summaries), never as a tool description,

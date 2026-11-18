@@ -117,7 +117,7 @@ Run it: `python hello_bot.py`
 
 ## 4. Add a Handler
 
-Handlers add custom logic at 8 lifecycle points:
+Handlers add custom logic at the lifecycle points of a turn:
 
 ```python
 from fsm_llm import API, HandlerTiming
@@ -322,7 +322,7 @@ python examples/intermediate/book_recommendation/run.py  # Multi-branch conversa
 1. **States** -- Each conversation step with a single purpose
 2. **Transitions** -- Rules for moving between states (JsonLogic conditions)
 3. **Context** -- Data collected and remembered across turns
-4. **Handlers** -- Custom logic at 8 lifecycle points
+4. **Handlers** -- Custom logic at the lifecycle points of a turn
 5. **FSM Stacking** -- Nested sub-conversations via `push_fsm`/`pop_fsm`
 
 ### Useful Commands
@@ -354,6 +354,6 @@ fsm-llm-monitor                       # Launch monitoring dashboard
 
 - [Concepts](concepts.md) explains the two passes and what each subpackage adds.
 - The [FSM Design Guide](fsm_design.md) covers states, transitions, priorities and context.
-- [Handler Development](handlers.md) covers code that runs at the eight points of a turn.
+- [Handler Development](handlers.md) covers code that runs at the points of a turn.
 - The [Command line](cli.md) page lists every tool and its options.
 - [Testing](testing.md) shows how to test a bot offline.

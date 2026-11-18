@@ -4,7 +4,7 @@ The `docs/` folder at the root of the FSM-LLM repository holds the documentation
 
 ## What is here
 
-Eleven pages are current guides for version 0.13.0, and each starts with the line `> Covers FSM-LLM v0.13.0`. They match the code and every Python block in them is checked by a test.
+The pages in the table below are current guides for version 0.13.0, and each starts with the line `> Covers FSM-LLM v0.13.0`. They match the code and every Python block in them is checked by a test.
 
 | Page | What it covers |
 | --- | --- |
@@ -12,7 +12,7 @@ Eleven pages are current guides for version 0.13.0, and each starts with the lin
 | `quickstart.md` | Install, the model setting, a first bot, a handler, streaming, sessions, the builders, an agent, a workflow, the reasoning engine |
 | `concepts.md` | Why and where it fits, how a turn works, what each subpackage adds, status, references |
 | `fsm_design.md` | How to design states, transitions, priorities, context, classification, `completion` and `synthesize` states |
-| `handlers.md` | The eight handler timings, `HandlerBuilder`, error modes, patterns |
+| `handlers.md` | The handler timings, `HandlerBuilder`, error modes, patterns |
 | `synthesis.md` | Runtime FSM synthesis: a model writes a procedure, gates judge it, a runner executes it |
 | `testing.md` | `fsm_llm.testing`: test doubles, the scripted user and the assertions, with runnable examples |
 | `api_reference.md` | The public API of the core and of every subpackage, hand written |
