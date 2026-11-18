@@ -771,3 +771,81 @@ class TestTheTestsNeverReadALockFile:
         )
         assert _reads_every_file('[p for p in root.rglob("*") if p.is_file()]') == []
         assert _reads_every_file("tree_bytes(root)") == []
+
+
+def _nest(depth: int) -> dict[str, Any]:
+    value: Any = 1
+    for _ in range(depth):
+        value = {"a": value}
+    return value  # type: ignore[no-any-return]
+
+
+def _depth_and_leaf(value: Any) -> tuple[int, Any]:
+    depth = 0
+    while isinstance(value, dict):
+        depth, value = depth + 1, value["a"]
+    return depth, value
+
+
+class TestAHookThatDeepensToolArguments:
+    """D4 (runtime audit 2.1): a hook output of depth 31 or 32 was cut to ``<truncated:depth>``
+    when it fit inline, and kept whole when it was big enough for a blob. The inline form is
+    only for what an event field can hold whole; the rest takes the blob path, intact."""
+
+    @staticmethod
+    def _call(tmp_path: Path, depth: int) -> tuple[EventLog, dict[str, Any]]:
+        log = EventLog(tmp_path / "deep", redact=lambda kind, value: _nest(depth))
+        with log.tool_call("c1", name="t", call_id="k1", arguments={"q": 1}):
+            pass
+        (event,) = [e for e in log.read("c1") if e["type"] == "tool/call"]
+        return log, event
+
+    def test_depth_30_stays_inline_and_intact(self, tmp_path: Path) -> None:
+        log, event = self._call(tmp_path, 30)
+        with log:
+            assert _depth_and_leaf(event["arguments"]) == (30, 1)
+
+    @pytest.mark.parametrize("depth", [31, 32])
+    def test_depth_31_and_32_are_stored_whole_through_the_blob_path(
+        self, tmp_path: Path, depth: int
+    ) -> None:
+        log, event = self._call(tmp_path, depth)
+        with log:
+            assert "arguments" not in event
+            assert _depth_and_leaf(log.get_json(event["arguments_ref"])) == (depth, 1)
+
+    def test_depth_33_is_refused_and_the_body_never_runs(self, tmp_path: Path) -> None:
+        with EventLog(tmp_path / "deep", redact=lambda kind, value: _nest(33)) as log:
+            with pytest.raises(EventPayloadError):
+                with log.tool_call("c1", name="t", call_id="k1", arguments={"q": 1}):
+                    pytest.fail("the body must not run")
+
+
+class TestAnEmptyBatchCreatesNothing:
+    """D4 (runtime audit 1.5): ``nothing is created until something is written``."""
+
+    def test_an_empty_batch_makes_no_file_and_no_writer(self, log: EventLog) -> None:
+        assert log.append_batch("c1", []) == []
+        assert not log.has_writer("c1")
+        assert not (log.root / "logs").exists()
+        assert log.conversation_ids() == []
+
+    def test_an_empty_batch_does_not_take_the_lock_of_a_second_log(
+        self, log: EventLog, tmp_path: Path
+    ) -> None:
+        log.append_batch("c1", [])
+        with EventLog(
+            log.root
+        ) as second:  # would be LogLockedError if the first took it
+            assert second.append("c1", "turn/start") == 1
+
+    def test_an_empty_batch_still_refuses_a_bad_id_and_checks_it_once(
+        self, log: EventLog
+    ) -> None:
+        with pytest.raises(EventPayloadError):
+            log.append_batch("Bad Id", [])
+        with patch.object(
+            log_module, "check_conversation_id", wraps=log_module.check_conversation_id
+        ) as check:
+            log.append_batch("c1", [])
+        assert check.call_count == 1

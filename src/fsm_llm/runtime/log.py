@@ -393,6 +393,10 @@ class EventLog:
         checkpoint: bool | None = None,
     ) -> list[int]:
         """Append *events* in one write and return their ``seq`` numbers (see the class contract)."""
+        # nothing is created until something is written; a bad id still raises
+        if not events:
+            check_conversation_id(conversation_id)
+            return []
         envelopes = []
         for item in events:
             if "type" not in item:
@@ -585,7 +589,13 @@ class EventLog:
             where = {"argument_keys": sorted(str(name) for name in arguments)}
         else:
             safe = self._redacted(RedactionKind.ARGUMENTS, safe)
-            if len(canonical_json(safe, what="tool arguments")) <= MAX_INLINE_BYTES:
+            # inline only what the event field can hold whole: the envelope is one level and
+            # `to_jsonable` cuts at MAX_PAYLOAD_DEPTH - 1, so a hook output of depth 31 or 32
+            # (which a blob keeps) would be cut inline
+            if (
+                check_depth(safe, MAX_PAYLOAD_DEPTH - 2)
+                and len(canonical_json(safe, what="tool arguments")) <= MAX_INLINE_BYTES
+            ):
                 where = {"arguments": safe}
             else:  # the hook already ran: store the blob as it is
                 where = {"arguments_ref": self._blobs.put_json(safe)}
