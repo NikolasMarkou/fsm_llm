@@ -7,6 +7,7 @@ method and function bodies are unchanged.
 
 from __future__ import annotations
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.context import clean_context_keys, commit_with_key_rollback
 from fsm_llm.core.definitions import DataExtractionResponse, FSMInstance
 from fsm_llm.engine.kinds import executor_for
@@ -34,6 +35,21 @@ class Pass1Mixin(_PipelineSurface):
         *,
         turn: _TurnRecord | None = None,
     ) -> tuple[DataExtractionResponse, bool, str | None]:
+        """``run_sync`` over ``_aexecute_extraction_and_transition_pass``, the one body."""
+        return run_sync(
+            self._aexecute_extraction_and_transition_pass(
+                instance, user_message, conversation_id, turn=turn
+            )
+        )
+
+    async def _aexecute_extraction_and_transition_pass(
+        self,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        *,
+        turn: _TurnRecord | None = None,
+    ) -> tuple[DataExtractionResponse, bool, str | None]:
         """Execute Pass 1: Data Extraction + Transition Evaluation + Execution.
 
         ``turn``, when given, receives the transition evaluation outcome.
@@ -49,8 +65,14 @@ class Pass1Mixin(_PipelineSurface):
         source_state = self.get_state(instance, conversation_id)
         executor = executor_for(source_state, self._executors)
         record_executor_start(source_state)
-        extraction_response = executor.extract(
-            self, instance, user_message, conversation_id, source_state
+        extraction_response: DataExtractionResponse = await acall(
+            executor,
+            "extract",
+            self,
+            instance,
+            user_message,
+            conversation_id,
+            source_state,
         )
         record_executor_result(source_state, extraction_response)
 
@@ -112,10 +134,13 @@ class Pass1Mixin(_PipelineSurface):
                 _record_provenance(instance, committed)
 
         # Step 3: Transition Evaluation and Execution
-        transition_occurred, previous_state = (
-            self._execute_transition_evaluation_and_execution(
-                instance, user_message, conversation_id, turn=turn
-            )
+        transition_occurred, previous_state = await acall(
+            self,
+            "_execute_transition_evaluation_and_execution",
+            instance,
+            user_message,
+            conversation_id,
+            turn=turn,
         )
 
         # Step 4: Post-transition extraction — re-extract in the new state
@@ -127,7 +152,9 @@ class Pass1Mixin(_PipelineSurface):
         is_agent_fsm = _is_agent_managed(instance.context.data)
         if transition_occurred and not is_agent_fsm:
             new_state = self.get_state(instance, conversation_id)
-            executor_for(new_state, self._executors).after_transition(
+            await acall(
+                executor_for(new_state, self._executors),
+                "after_transition",
                 self,
                 instance,
                 user_message,

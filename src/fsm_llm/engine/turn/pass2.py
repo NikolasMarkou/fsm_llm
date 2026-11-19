@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
 from fsm_llm.context import record_cut_off, was_cut_off
 from fsm_llm.core.definitions import (
@@ -17,6 +18,7 @@ from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FSMInstance,
     ResponseGenerationRequest,
+    ResponseGenerationResponse,
     State,
 )
 from fsm_llm.logging import logger
@@ -146,6 +148,12 @@ class Pass2Mixin(_PipelineSurface):
     def generate_initial_response(
         self, instance: FSMInstance, conversation_id: str
     ) -> str:
+        """``run_sync`` over ``agenerate_initial_response``, the one body."""
+        return run_sync(self.agenerate_initial_response(instance, conversation_id))
+
+    async def agenerate_initial_response(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> str:
         """Generate initial response for conversation start (no extraction/transition).
 
         Returns the empty string, with no LLM call and nothing appended to the
@@ -172,7 +180,9 @@ class Pass2Mixin(_PipelineSurface):
         )
 
         with llm_call(self.llm_interface, "greeting", request) as call:
-            response = self.llm_interface.generate_response(request)
+            response: ResponseGenerationResponse = await acall(
+                self.llm_interface, "generate_response", request
+            )
             call.response(response)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)

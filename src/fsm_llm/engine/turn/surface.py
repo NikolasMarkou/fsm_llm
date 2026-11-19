@@ -78,6 +78,15 @@ class _PipelineSurface:
             turn: _TurnRecord | None = None,
         ) -> tuple[DataExtractionResponse, bool, str | None]: ...
 
+        async def _aexecute_extraction_and_transition_pass(
+            self,
+            instance: FSMInstance,
+            user_message: str | None,
+            conversation_id: str,
+            *,
+            turn: _TurnRecord | None = None,
+        ) -> tuple[DataExtractionResponse, bool, str | None]: ...
+
         def _execute_response_generation_pass(
             self,
             instance: FSMInstance,
@@ -87,15 +96,6 @@ class _PipelineSurface:
             previous_state: str | None,
             conversation_id: str,
         ) -> str | None: ...
-
-        def _execute_transition_evaluation_and_execution(
-            self,
-            instance: FSMInstance,
-            user_message: str | None,
-            conversation_id: str,
-            *,
-            turn: _TurnRecord | None = None,
-        ) -> tuple[bool, str | None]: ...
 
         def _get_classifier(
             self,

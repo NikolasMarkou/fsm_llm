@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import (
     CLASSIFIER_HISTORY_EXCHANGES,
     DEFAULT_TRANSITION_CLASSIFICATION_CONFIDENCE,
@@ -68,6 +69,21 @@ class TransitionsMixin(_PipelineSurface):
         *,
         turn: _TurnRecord | None = None,
     ) -> tuple[bool, str | None]:
+        """``run_sync`` over ``_aexecute_transition_evaluation_and_execution``, the one body."""
+        return run_sync(
+            self._aexecute_transition_evaluation_and_execution(
+                instance, user_message, conversation_id, turn=turn
+            )
+        )
+
+    async def _aexecute_transition_evaluation_and_execution(
+        self,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        *,
+        turn: _TurnRecord | None = None,
+    ) -> tuple[bool, str | None]:
         """Evaluate transitions and execute if one is selected.
 
         ``turn``, when given, receives ``evaluation.result_type``.
@@ -113,7 +129,7 @@ class TransitionsMixin(_PipelineSurface):
             log.info(f"Deterministic transition selected: {target_state}")
 
         elif evaluation.result_type == TransitionEvaluationResult.AMBIGUOUS:
-            target_state = self._resolve_ambiguous_transition(
+            target_state = await self._aresolve_ambiguous_transition(
                 evaluation, user_message, instance, conversation_id
             )
             log.info(
@@ -253,6 +269,20 @@ class TransitionsMixin(_PipelineSurface):
         instance: FSMInstance,
         conversation_id: str,
     ) -> str | None:
+        """``run_sync`` over ``_aresolve_ambiguous_transition``, the one body."""
+        return run_sync(
+            self._aresolve_ambiguous_transition(
+                evaluation, user_message, instance, conversation_id
+            )
+        )
+
+    async def _aresolve_ambiguous_transition(
+        self,
+        evaluation: TransitionEvaluation,
+        user_message: str | None,
+        instance: FSMInstance,
+        conversation_id: str,
+    ) -> str | None:
         """Resolve ambiguous transition using classification.
 
         Classification is always-on for ambiguous transitions. Builds a
@@ -284,7 +314,9 @@ class TransitionsMixin(_PipelineSurface):
                 evaluation.available_options,
             )
             classifier = self._get_classifier(schema, None)
-            result: ClassificationResult = classifier.classify(
+            result: ClassificationResult = await acall(
+                classifier,
+                "classify",
                 user_message,
                 context=self._build_classifier_context(
                     instance,
