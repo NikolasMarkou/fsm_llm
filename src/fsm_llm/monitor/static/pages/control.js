@@ -4,8 +4,9 @@ import { state, scheduleRefresh, cancelRefresh } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
 import {
     $, esc, statusBadge, hashInstances, showToast, renderResultBanner,
-    levelClass, openDialog, closeDialog, renderPagination, showDrawerDetailView,
+    levelClass, openDialog, closeDialog, renderPagination, showDrawerDetailView, jsonViewHtml,
 } from '../utils/dom.js';
+import { highlightJsonIn } from '../utils/json_highlight.js';
 import { formatTime } from '../utils/format.js';
 import { showConversationInDrawer } from './conversations.js';
 import { refreshInstances } from './dashboard.js';
@@ -350,6 +351,7 @@ function _paintDetail(contentEl, html) {
     const form = _captureFormState(contentEl);
 
     contentEl.innerHTML = html;
+    highlightJsonIn(contentEl);
 
     // Live logs stick to the bottom only when the user was already there.
     contentEl.querySelectorAll('.chat-container').forEach((el, i) => {
@@ -568,7 +570,7 @@ async function _buildWorkflowDetail(instanceId, inst) {
                         if (step.data && typeof step.data === 'object') {
                             const dataStr = JSON.stringify(step.data, null, 1);
                             if (dataStr.length > 2) {
-                                html += `<div style="margin-top:0.25rem;font-size:0.8rem;" class="text-dim">${esc(dataStr.substring(0, 300))}</div>`;
+                                html += `<div style="margin-top:0.25rem;font-size:0.8rem;" class="text-dim">${jsonViewHtml(dataStr.substring(0, 300))}</div>`;
                             }
                         }
                         if (hasError) html += `<div class="error-message" style="margin-top:0.25rem;">${esc(step.error)}</div>`;
@@ -586,7 +588,7 @@ async function _buildWorkflowDetail(instanceId, inst) {
                     html += '<div class="kv">';
                     for (const k of ctxKeys) {
                         const v = wf.context[k];
-                        html += `<span class="key">${esc(k)}:</span><span class="val">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`;
+                        html += `<span class="key">${esc(k)}:</span><span class="val">${typeof v === 'object' ? jsonViewHtml(JSON.stringify(v)) : esc(String(v))}</span>`;
                     }
                     html += '</div></details>';
                 }
@@ -753,13 +755,18 @@ const _KEY_LABELS = [
 ];
 
 // Format a context value for display: object/array values are JSON-stringified
-// instead of rendering as "[object Object]" (frontend finding F-03). esc() is
-// still applied by callers, so this stays XSS-safe.
+// instead of rendering as "[object Object]" (frontend finding F-03). Callers
+// escape it (`_valHtml`), so this stays XSS-safe.
 function _fmtVal(val) {
     if (val !== null && typeof val === 'object') {
         try { return JSON.stringify(val, null, 2); } catch { return String(val); }
     }
     return val;
+}
+
+/** HTML of a context value: an object or array as colourable JSON, anything else as escaped text. */
+function _valHtml(val) {
+    return val !== null && typeof val === 'object' ? jsonViewHtml(_fmtVal(val)) : esc(_fmtVal(val));
 }
 
 function _renderContextData(d) {
@@ -773,18 +780,18 @@ function _renderContextData(d) {
         const val = d[key];
         if (key === 'tool_name') {
             html += '<div><span class="text-dim">' + label + ':</span> <b>' + esc(val) + '</b>';
-            if (d.tool_input) { html += ' \u2014 ' + esc(_fmtVal(d.tool_input)); rendered.add('tool_input'); }
+            if (d.tool_input) { html += ' \u2014 ' + _valHtml(d.tool_input); rendered.add('tool_input'); }
             html += '</div>';
         } else {
             html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + label + ':</span></div>';
-            html += '<div style="white-space:pre-wrap;margin-left:0.5rem;">' + esc(_fmtVal(val)) + '</div>';
+            html += '<div style="white-space:pre-wrap;margin-left:0.5rem;">' + _valHtml(val) + '</div>';
         }
     }
 
     // Render remaining keys
     for (const [key, val] of Object.entries(d)) {
         if (rendered.has(key)) continue;
-        html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + esc(key) + ':</span> ' + esc(_fmtVal(val)) + '</div>';
+        html += '<div style="margin-top:0.25rem;"><span class="text-dim">' + esc(key) + ':</span> ' + _valHtml(val) + '</div>';
     }
     return html;
 }
@@ -921,7 +928,7 @@ function _renderToolCalls(toolsUsed) {
     for (const tc of toolsUsed) {
         html += '<div class="trace-step step-act">';
         html += `<div class="step-header"><span class="step-label">${esc(tc.tool_name)}</span></div>`;
-        html += `<div class="step-body d-block">${esc(JSON.stringify(tc.parameters || {}, null, 1))}</div>`;
+        html += `<div class="step-body d-block">${jsonViewHtml(JSON.stringify(tc.parameters || {}, null, 1))}</div>`;
         html += '</div>';
     }
     return html;
@@ -968,8 +975,8 @@ async function _buildAgentTrace(instanceId, statusData) {
                 html += '</span></div>';
                 html += '<div class="step-body">';
                 if (step.reasoning) html += `<div><b>Reasoning:</b> ${esc(step.reasoning)}</div>`;
-                if (step.tool_input) html += `<div><b>Input:</b> ${esc(_fmtVal(step.tool_input))}</div>`;
-                if (step.tool_result) html += `<div><b>Result:</b> ${esc(_fmtVal(step.tool_result))}</div>`;
+                if (step.tool_input) html += `<div><b>Input:</b> ${_valHtml(step.tool_input)}</div>`;
+                if (step.tool_result) html += `<div><b>Result:</b> ${_valHtml(step.tool_result)}</div>`;
                 html += '</div></div>';
             }
         } else if (statusData.tools_used?.length) {

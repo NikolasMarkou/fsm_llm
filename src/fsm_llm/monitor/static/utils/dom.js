@@ -1,5 +1,6 @@
 // FSM-LLM Monitor — DOM Utilities
 // Escaping, toast, status messages, and helpers.
+import { JSON_VIEW_CLASS } from './json_highlight.js';
 
 /** HTML-entity escape for safe insertion. */
 export function esc(s) {
@@ -10,6 +11,11 @@ export function esc(s) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+/** Markup for JSON text in a `tag` (the text escaped); `highlightJsonIn(root)` colours it after `root.innerHTML = html`. */
+export function jsonViewHtml(text, tag = 'span') {
+    return `<${tag} class="${JSON_VIEW_CLASS}">${esc(text)}</${tag}>`;
 }
 
 /** Shorthand for getElementById. */
@@ -121,7 +127,7 @@ export function renderLLMData(obj) {
         const v = obj[k];
         if (v == null) continue;
         const display = typeof v === 'object'
-            ? `<pre>${esc(JSON.stringify(v, null, 2))}</pre>`
+            ? jsonViewHtml(JSON.stringify(v, null, 2), 'pre')
             : esc(String(v));
         html += `<div class="llm-kv"><span class="llm-key">${esc(k)}:</span> ${display}</div>`;
     }

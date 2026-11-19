@@ -30,6 +30,7 @@ const nullShown = shown(null).el.textContent;
 
 const one = '{"s": "x", "n": -1.5e+10, "t": true, "f": false, "z": null, "arr": [1, "k"]}';
 const keyed = '{"k":"v","s":["k"],"sp" \n : "x", "c": "b:c", "n": 1}';
+const oneTokens = types(one), keyedTokens = types(keyed);
 const nums = types('[-1, 0, 1.5, -2.5e-3, 1E+10, 10, -0, 0.25e2]').filter(t => t.startsWith('number'));
 const esc = types('["a\\"b", "\\\\", "C:\\\\", "\\u00e9é😀"]').filter(t => t.startsWith('string'));
 
@@ -61,4 +62,18 @@ highlightJsonIn({ querySelectorAll: sel => { asked = sel; return [a, b]; } });
 highlightJsonIn(null);
 const into = { asked, a: [a.textContent, (a.children ?? []).length], b: [b.textContent, (b.children ?? []).length] };
 
-out({ flat, fallback, nonString, nullShown, one: types(one), keyed: types(keyed), nums, esc, capRow, deepRow, deepFast, xss, classes, into, writes: writes.length, max: JSON_HIGHLIGHT_MAX_CHARS });
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const keyedOk = ['key:"k"', 'key:"sp"', 'string:"b:c"'].every(t => keyedTokens.includes(t)) && keyedTokens.filter(t => t === 'string:"k"').length === 1 && !keyedTokens.includes('key:"b:c"');
+const checks = {
+    everyByteKept: flat.every(r => r.every(Boolean)),
+    types: same(oneTokens.filter(t => /^(bool|null)/.test(t)), ['bool:true', 'bool:false', 'null:null']) && oneTokens[1] === 'key:"s"' && oneTokens[3] === 'string:"x"' && oneTokens[7] === 'number:-1.5e+10',
+    keyVersusString: keyedOk,
+    numbers: same(nums, ['-1', '0', '1.5', '-2.5e-3', '1E+10', '10', '-0', '0.25e2'].map(n => `number:${n}`)),
+    stringEscapes: same(esc.slice(0, 3), ['string:"a\\"b"', 'string:"\\\\"', 'string:"C:\\\\"']),
+    invalidStaysPlain: fallback.every(r => same(r, [true, true, false, 0])) && nonString.every(Boolean) && nullShown === '',
+    sizeCap: JSON_HIGHLIGHT_MAX_CHARS === 200000 && same(capRow, [true, true, true, false]),
+    deepNesting: same(deepRow, [[true, 1, true], [true, 60003, true]]) && deepFast,
+    htmlStaysText: xss.text && xss.spansOnly && xss.innerHTMLWrites === 0 && writes.length === 0,
+    highlightIn: into.asked === '.json-view' && same(into.a, ['{"a": 1}', 5]) && same(into.b, ['not json', 0]),
+};
+out(checks);

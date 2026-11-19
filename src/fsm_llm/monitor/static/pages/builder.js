@@ -2,7 +2,8 @@
 
 import { fetchJson, postJson } from '../services/api.js';
 import { TOOL_BASED_AGENTS } from '../services/state.js';
-import { $, esc, intVal, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
+import { $, esc, intVal, jsonViewHtml, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
+import { highlightJsonIn, renderJson } from '../utils/json_highlight.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
 import { addTypingIndicator, removeTypingIndicator, showConversationInDrawer } from './conversations.js';
@@ -234,7 +235,7 @@ function _onComplete(data) {
     $('builder-result-panel').style.display = 'block';
 
     if (data.error && (!data.artifact_json || data.artifact_json === '{}')) {
-        $('builder-result-json').textContent = '{}';
+        renderJson($('builder-result-json'), '{}');
         $('builder-result-summary').innerHTML = '';
         $('builder-result-graph').style.display = 'none';
         _setEditing(false);
@@ -280,7 +281,7 @@ function _onComplete(data) {
         graphContainer.style.display = 'none';
     }
 
-    $('builder-result-json').textContent = _artifact || '{}';
+    renderJson($('builder-result-json'), _artifact || '{}');
     showStatus('builder-status', 'Build complete!', 'success');
 }
 
@@ -469,7 +470,7 @@ function _renderInternalState(state) {
     if (state.artifact_preview && Object.keys(state.artifact_preview).length > 0) {
         html += '<div class="builder-state-section builder-state-artifact">';
         html += '<h4>Artifact Preview</h4>';
-        html += `<pre>${esc(JSON.stringify(state.artifact_preview, null, 2))}</pre>`;
+        html += jsonViewHtml(JSON.stringify(state.artifact_preview, null, 2), 'pre');
         html += '</div>';
     }
 
@@ -477,11 +478,12 @@ function _renderInternalState(state) {
     if (!state.builder_progress && !state.builder_summary && !reqData) {
         html += '<div class="builder-state-section builder-state-context">';
         html += '<h4>Raw</h4>';
-        html += `<pre>${esc(JSON.stringify(state, null, 2))}</pre>`;
+        html += jsonViewHtml(JSON.stringify(state, null, 2), 'pre');
         html += '</div>';
     }
 
     container.innerHTML = html;
+    highlightJsonIn(container);
 }
 
 /** Show the JSON as read-only text (`false`) or as an editable textarea (`true`). */
@@ -512,7 +514,7 @@ export function editBuilderResult() {
         return;
     }
     _artifact = JSON.stringify(edited, null, 2);
-    $('builder-result-json').textContent = _artifact;
+    renderJson($('builder-result-json'), _artifact);
     _setEditing(false);
     $('builder-result-summary').innerHTML = _buildResultSummary(edited, _artifactType);
     _syncLaunch(edited, _artifactType);

@@ -428,38 +428,11 @@ class TestEventLogView:
 
 
 class TestJsonColouring:
-    """Plan 51fde95b step 14 (D-040): the shared JSON colouring of `utils/json_highlight.js`."""
+    """Plan 51fde95b step 14 (D-040): `utils/json_highlight.js` and every page that shows JSON."""
 
-    def test_tokens_keep_every_byte_and_tell_a_key_from_a_string(self, probe):
-        out = probe("json_highlight")
-        assert out["flat"] == [[True, True, True]] * 15
-        assert out["one"][1:4] == ['key:"s"', "punct:: ", 'string:"x"']
-        assert [t for t in out["one"] if t[:4] in ("bool", "null")] == [
-            "bool:true",
-            "bool:false",
-            "null:null",
-        ]
-        keyed = out["keyed"]
-        assert 'key:"k"' in keyed and 'key:"sp"' in keyed and 'string:"b:c"' in keyed
-        assert keyed.count('string:"k"') == 1 and 'key:"b:c"' not in keyed
-        assert out["nums"] == [
-            f"number:{n}" for n in "-1 0 1.5 -2.5e-3 1E+10 10 -0 0.25e2".split()
-        ]
-        assert out["esc"][:3] == [r'string:"a\"b"', r'string:"\\"', r'string:"C:\\"']
-
-    def test_invalid_text_and_a_text_over_the_cap_stay_plain(self, probe):
-        out = probe("json_highlight")
-        assert out["fallback"] == [[True, True, False, 0]] * 9
-        assert out["nonString"] == [True] * 4 and out["nullShown"] == ""
-        assert out["max"] == 200000 and out["capRow"] == [True, True, True, False]
-
-    def test_html_in_a_string_stays_text_and_deep_nesting_is_one_scan(self, probe):
-        out = probe("json_highlight")
-        assert out["xss"] == {"text": True, "spansOnly": True, "innerHTMLWrites": 0}
-        assert out["writes"] == 0 and out["deepFast"]
-        assert out["deepRow"] == [[True, 1, True], [True, 60003, True]]
-        assert out["into"] == {
-            "asked": ".json-view",
-            "a": ['{"a": 1}', 5],
-            "b": ["not json", 0],
-        }
+    @pytest.mark.parametrize("name", ["json_highlight", "json_surfaces"])
+    def test_every_check_of_the_probe_holds(self, probe, name):
+        # json_highlight: bytes kept, token types, key vs string, numbers, escapes, invalid text plain,
+        # the size cap, deep nesting, HTML stays text. json_surfaces: the event log, the conversation
+        # drawer, the Builder result and state, the workflow and agent drawers.
+        assert [k for k, v in probe(name).items() if v is not True] == []

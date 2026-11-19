@@ -2,8 +2,9 @@
 
 import { state } from '../services/state.js';
 import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, renderLLMData, copyToClipboard, showToast, openDialog, showDrawerDetailView } from '../utils/dom.js';
+import { $, esc, jsonViewHtml, renderLLMData, copyToClipboard, showToast, openDialog, showDrawerDetailView } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { highlightJsonIn } from '../utils/json_highlight.js';
 
 // Forward references (set by app.js)
 let _showPage, _refreshActivityTable, _refreshDetailPanel, _openDrawer, _refreshInstances;
@@ -105,7 +106,7 @@ export async function showConversationDetail(convId) {
             html += '<div class="kv" id="conv-context-kv">';
             for (const k in data.context_data) {
                 const v = data.context_data[k];
-                html += `<span class="key">${esc(k)}:</span><span class="val">${esc(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`;
+                html += `<span class="key">${esc(k)}:</span><span class="val">${typeof v === 'object' ? jsonViewHtml(JSON.stringify(v)) : esc(String(v))}</span>`;
             }
             html += '</div>';
             state._lastContextData = data.context_data;
@@ -155,6 +156,7 @@ export async function showConversationDetail(convId) {
         if (data.is_terminal) html += '<div class="ended-indicator">Conversation ended</div>';
 
         detail.innerHTML = html;
+        highlightJsonIn(detail);
 
         const chatLogEl = $('conv-chat-log');
         if (chatLogEl) chatLogEl.scrollTop = chatLogEl.scrollHeight;
