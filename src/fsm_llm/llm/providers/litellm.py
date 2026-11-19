@@ -92,7 +92,7 @@ from fsm_llm.llm.text import resolve_reasoning_trace, strip_think_and_fences
 from fsm_llm.llm.usage import _meter_of, _Metered, _UsageMeter, usage_kind
 from fsm_llm.logging import logger
 
-from .call import CallMixin
+from .call import CallMixin, warn_bypassed_twins
 from .request import RequestMixin, _checked_model, _warn_reserved_kwargs
 
 # DECISION plan-2026-09-22T080837-8b258a25/D-035: guards apology_retry_count.
@@ -135,6 +135,10 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
     # Every request goes through ``_send`` or ``_asend`` (one send family), so the request
     # observer sees it.
     observes_requests = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        warn_bypassed_twins(cls)
 
     def __init__(
         self,

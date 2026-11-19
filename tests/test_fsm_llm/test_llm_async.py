@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -18,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
+from fsm_llm.aio import async_name
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -570,3 +572,62 @@ class TestTheStream:
                     assert closed == []
                     await agen.aclose()
             assert closed == ["closed"], transport
+
+
+# --- the subclass guard (D-009): it warns, it never changes dispatch -------------------
+
+_TWINS = (
+    "generate_response",
+    "generate_response_stream",
+    "extract_field",
+    "extract_bulk_data",
+    "complete",
+    "_send",
+    "_make_llm_call",
+)
+
+
+def _define(**members: Any) -> tuple[type, list[warnings.WarningMessage]]:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cls = type("Sub", (LiteLLMInterface,), members)
+    return cls, caught
+
+
+async def _a(self: Any, *args: Any, **kwargs: Any) -> None:
+    return None
+
+
+class TestTheSubclassGuard:
+    @pytest.mark.parametrize("name", _TWINS)
+    def test_a_sync_override_without_its_twin_warns_once_at_the_class_statement(
+        self, name: str
+    ) -> None:
+        _, caught = _define(**{name: lambda self, *a, **k: None})
+        assert [w.category for w in caught] == [RuntimeWarning]
+        message = str(caught[0].message)
+        assert f"overrides {name} but not {async_name(name)}" in message
+        assert caught[0].filename == __file__
+
+    @pytest.mark.parametrize("name", _TWINS)
+    def test_nothing_warns_when_the_twin_is_overridden_too_or_alone(
+        self, name: str
+    ) -> None:
+        _, both = _define(**{name: lambda self, *a, **k: None, async_name(name): _a})
+        _, only_async = _define(**{async_name(name): _a})
+        _, nothing = _define()
+        assert both == only_async == nothing == []
+
+    async def test_it_warns_and_changes_no_dispatch(self) -> None:
+        sub, _ = _define(generate_response=lambda self, request: "override")
+        llm = sub(model="gpt-4o", api_base="http://127.0.0.1:9")
+        request = _METHODS["generate_response"][0]()
+        with _providers(lambda **_: _reply()) as (sync, async_):
+            assert llm.generate_response(request) == "override"
+            result = await llm.agenerate_response(request)
+        # the async name reaches the inherited native twin: the override is bypassed
+        assert (
+            result.message == "Hello"
+            and async_.call_count == 1
+            and sync.call_count == 0
+        )

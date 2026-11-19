@@ -619,6 +619,11 @@
       "delta": 1,
       "reason": "step 4.2 of plan 51fde95b: D-008 is anchored once at the cancel arm of LiteLLMInterface._asend (a cancelled request is reported to the observer and the meter and the cancel is raised again, never narrowed to Exception); no other token was added or lost",
       "token": "plan-2026-11-19T025425-51fde95b/D-008"
+    },
+    {
+      "delta": 1,
+      "reason": "step 4.7 of plan 51fde95b: D-009 is anchored once at the subclass guard of the LLM layer (providers/call.py warn_bypassed_twins: a sync override without its async twin only warns and changes no dispatch, the MRO-aware acall is rejected); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-009"
     }
   ]
 }

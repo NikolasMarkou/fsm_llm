@@ -3,20 +3,57 @@ one body ``_amake_llm_call``) and the reasoning-trace readers it uses.
 
 Layer ``llm`` (plan 51fde95b, step 3): split out of ``providers/litellm.py`` to keep that
 module under the size guard; the bodies moved unchanged and step 4.4 made ``_make_llm_call`` the
-``run_sync`` wrapper of the async body. Nothing here looks up a provider binding
+``run_sync`` wrapper of the async body, and step 4.7 added ``warn_bypassed_twins``, the subclass
+guard of D-009. Nothing here looks up a provider binding
 (``completion`` and the like stay in ``litellm.py``, where a test patches them), so this module
 imports neither litellm nor ``providers/litellm.py``.
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any
 
-from fsm_llm.aio import acall, run_sync
+from fsm_llm.aio import acall, async_name, run_sync
 from fsm_llm.core.definitions import LLMResponseError
 from fsm_llm.llm.parsing import ParseMixin
 from fsm_llm.llm.text import resolve_reasoning_trace
 from fsm_llm.logging import logger
+
+# The sync names of ``LiteLLMInterface`` whose async twin a subclass must override with them.
+_SYNC_TWINS = (
+    "generate_response",
+    "generate_response_stream",
+    "extract_field",
+    "extract_bulk_data",
+    "complete",
+    "_send",
+    "_make_llm_call",
+)
+
+
+def warn_bypassed_twins(cls: type) -> None:
+    """Warn once per sync twin that ``cls`` defines without its async twin.
+
+    Interface contract: ``cls`` is a ``LiteLLMInterface`` subclass being created (call it
+    from ``__init_subclass__``: the stack level counts that frame and ``ABCMeta.__new__``).
+    A name of ``_SYNC_TWINS`` defined in the body of ``cls`` and not its ``async_name`` gets
+    one ``RuntimeWarning``; nothing else is read or changed.
+    """
+    # DECISION plan-2026-11-19T025425-51fde95b/D-009: this only WARNS and changes no dispatch.
+    # An async caller reaches the inherited native twin, so an override of the sync name alone
+    # is bypassed; do NOT make `acall` MRO-aware to fix that here (a second rule inside the
+    # hot helper that the engine part of the async core would have to carry and test).
+    # See decisions.md D-009.
+    for name in _SYNC_TWINS:
+        twin = async_name(name)
+        if name in vars(cls) and twin not in vars(cls):
+            warnings.warn(
+                f"{cls.__name__} overrides {name} but not {twin}: async callers reach the "
+                "inherited native twin and bypass the override",
+                RuntimeWarning,
+                stacklevel=4,  # this, __init_subclass__, ABCMeta.__new__, the class statement
+            )
 
 
 class CallMixin:

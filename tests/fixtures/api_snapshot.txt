@@ -392,6 +392,11 @@ fsm_llm.LiteLLMEmbedder class
   def usage(self) -> LLMUsage
 fsm_llm.LiteLLMInterface class(LLMInterface)
   def __init__(self, model: str, api_key: str | None = None, temperature: float = 0.5, max_tokens: int = 1000, timeout: float | None = 120.0, retries: int = 0, **kwargs)
+  def acomplete(self, request: CompletionRequest) -> CompletionResponse
+  def aextract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
+  def aextract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def agenerate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+  def agenerate_response_stream(self, request: ResponseGenerationRequest) -> AsyncGenerator[str, None]
   def complete(self, request: CompletionRequest) -> CompletionResponse
   def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
