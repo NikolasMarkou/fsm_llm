@@ -1637,6 +1637,7 @@ fsm_llm.synthesis.FSMLibrary class
   def ensure_verified(self, digest: str) -> LibraryRecord
   def get_definition(self, digest: str) -> FSMDefinition
   def get_record(self, digest: str) -> LibraryRecord
+  def near_misses(self, goal: str, *, inputs_available: Collection[str], return_keys: Collection[str], tools_allowed: Collection[str], min_lifecycle: str, embed: EmbedTextsFn | None = None, top_k: int = 1) -> list[LibraryMatch]
   def put(self, definition: FSMDefinition, *, goal: str, inputs_required: Sequence[str], return_keys: Sequence[str], synthesizing_model: str = '', gates_passed: Sequence[str] = (), approved_by: str | None = None, lifecycle: str = 'draft', parent: str | None = None, parent_run: str | None = None, repair: str | None = None, replay: str | None = None) -> LibraryRecord
   def read_scenarios(self, digest: str) -> list[dict[str, Any]]
   def read_traces(self, digest: str, limit: int | None = None) -> tuple[tuple[RunTrace, ...], int]

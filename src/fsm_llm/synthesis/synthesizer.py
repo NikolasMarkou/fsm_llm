@@ -80,7 +80,7 @@ from .gates import (
     verify_stored,
 )
 from .library import FSMLibrary, LibraryRecord, digest_of
-from .policy import SynthesisPolicy, needs_approval
+from .policy import SynthesisPolicy, needs_approval, strip_abort
 from .prompts import KEY_NAMING, REPLY_FAILURES, compile_messages, repair_message
 from .simulation import SimulationReport, Simulator
 
@@ -331,13 +331,24 @@ class FSMSynthesizer:
         public names. At most ``1 + policy.max_repair_rounds`` calls.
         """
         ins, keys = _checked(goal, inputs, return_keys)
+        return self._compile(goal, ins, keys, None)
+
+    def _compile(
+        self,
+        goal: str,
+        ins: tuple[str, ...],
+        keys: tuple[str, ...],
+        reference: str | None,
+    ) -> CompileResult:
+        """``compile`` after the argument checks; ``reference`` is the JSON text
+        of a stored near miss for ``compile_messages`` (or ``None``)."""
         policy = self.policy
         if policy.require_simulation and self.simulator is None:
             raise SynthesisError(
                 "a simulation is required and no simulator is set",
                 {"rounds": [(CODE_SIMULATION_INCOMPLETE,)]},
             )
-        messages = compile_messages(goal, ins, keys, policy)
+        messages = compile_messages(goal, ins, keys, policy, reference)
         deadline = self._clock() + policy.max_synthesis_seconds
         failed: list[tuple[str, ...]] = []
         runs = 0
@@ -475,7 +486,8 @@ class FSMSynthesizer:
                         "library",
                         seconds=self._since(started),
                     )
-        result = self.compile(goal, inputs=ins, return_keys=keys)
+        reference = self._reference(goal, ins, keys, min_lifecycle)
+        result = self._compile(goal, ins, keys, reference)
         digest = digest_of(result.definition)
         if library is not None:
             # a deprecated digest is refused BEFORE the reviewer is asked and
@@ -517,6 +529,34 @@ class FSMSynthesizer:
             self._since(started),
             _spent(result.usage, before),
         )
+
+    def _reference(
+        self, goal: str, ins: Sequence[str], keys: Sequence[str], min_lifecycle: str
+    ) -> str | None:
+        """The stored near miss for the compile prompt: the JSON of the best
+        record ``near_misses`` finds that scores as a reuse would (the same
+        threshold per scale, D-033), abort path stripped; else ``None``. A hint
+        only: a failure to read it is no failure of the compile."""
+        library, policy = self.library, self.policy
+        if library is None:
+            return None
+        try:
+            for match in library.near_misses(
+                goal,
+                inputs_available=ins,
+                return_keys=keys,
+                tools_allowed=policy.allowed_tools,
+                min_lifecycle=min_lifecycle,
+                embed=self._embed,
+            ):
+                if match.score >= (policy.reuse_min_score if match.embedded else 1.0):
+                    data = library.get_definition(match.record.digest)
+                    stored = strip_abort(data.model_dump(exclude_defaults=True))
+                    if stored is not None:
+                        return json.dumps(stored, sort_keys=True, separators=(",", ":"))
+        except LibraryError:
+            logger.warning("the library could not give a near miss; compiling without")
+        return None
 
     def approval(
         self, goal: str, return_keys: tuple[str, ...], result: CompileResult

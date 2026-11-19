@@ -39,6 +39,8 @@ The library is a directory keyed by the sha256 of the canonical definition. Each
 
 Reuse: the search first filters on the signature (every required input available, return keys covered, tools allowed, lifecycle high enough), then scores the survivors against the stored goal. With no embedder the score is 1.0 only for the same goal after lowercasing and whitespace normalising (punctuation counts), and at most 0.5 otherwise, so only an exact match is reused. With an embedder (a function from texts to vectors) the score is a cosine, reused at or above `policy.reuse_min_score` (default 0.8). A hit is re-verified (G1 to G6a on the stored form) before it runs.
 
+A compile after a miss may carry one near miss in its request: the stored procedure that only its key names refuse, scored as a reuse would be, as a fenced block of untrusted data (`FSMLibrary.near_misses`). It is never reused or remapped; the new compile passes every gate.
+
 ## Files
 
 - `synthesizer.py` - `FSMSynthesizer` (`compile`, `obtain`, `approval`), `Procedure`, `CompileResult`, `ProcedureApprovalRequest`, `reviewer_from_hitl`.

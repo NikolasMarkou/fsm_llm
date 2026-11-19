@@ -198,6 +198,8 @@ A record has a lifecycle: `draft`, `verified`, `trusted`, `deprecated`. A compil
 
 A hit is re-verified (G1 to G6a on the stored form) before it runs. A hit that fails is skipped with a warning and a compile follows.
 
+A compile after a miss may be shown a near miss: a stored procedure with the same lifecycle and tools filter and the same goal score (the reuse threshold of the same scale), refused only because its input or return key names differ. Its definition, without the abort path, goes into the compile request as one fenced block under the untrusted procedure label, as data; it is never reused or remapped, and the new compile goes through every gate and approval as any other. A library that cannot give one does not fail the compile.
+
 ## Running a procedure
 
 `ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)` serves a host definition. Per conversation it settles these as the host runs: it pops an ended child, aborts a child whose frame spent `policy.max_turns` turns (the engine's lifetime count: the runner keeps none, writes `{status: aborted, reason: budget_spent}` and ends the child without a merge), and starts a pending synthesize state (write `running`, `obtain`, check that the procedure may run, push it as a child with no inherited context). `run_stream` and `converse_stream` are the streaming forms of `run` and `converse`, thin wrappers over core's streams (closing `run_stream` early pops a child that has ended and starts nothing).

@@ -199,6 +199,13 @@ def _scores(
     return [_lexical(want, _words(t)) for t in texts], False
 
 
+def _check_search(min_lifecycle: str, top_k: int) -> None:
+    """The argument checks of ``search`` and ``near_misses`` (``SynthesisError``)."""
+    if min_lifecycle not in _RANK:
+        raise SynthesisError(f"min_lifecycle must be one of {sorted(_RANK)}")
+    require_int_limit("top_k", top_k, minimum=1, error=SynthesisError)
+
+
 class FSMLibrary:
     """A directory of compiled procedures keyed by content digest.
 
@@ -711,9 +718,7 @@ class FSMLibrary:
         goal text, so a high score can never admit a procedure the signature
         refuses. A corrupt record raises ``LibraryError`` for the whole search.
         """
-        if min_lifecycle not in _RANK:
-            raise SynthesisError(f"min_lifecycle must be one of {sorted(_RANK)}")
-        require_int_limit("top_k", top_k, minimum=1, error=SynthesisError)
+        _check_search(min_lifecycle, top_k)
         have, want, tools = set(inputs_available), set(return_keys), set(tools_allowed)
         kept = []
         for record in self._records():
@@ -726,6 +731,16 @@ class FSMLibrary:
                 and set(sig["tools_used"]) <= tools
             ):
                 kept.append(record)
+        return self._rank(goal, kept, embed, top_k)
+
+    def _rank(
+        self,
+        goal: str,
+        kept: list[LibraryRecord],
+        embed: EmbedTextsFn | None,
+        top_k: int,
+    ) -> list[LibraryMatch]:
+        """The records of *kept* scored against *goal*, best first, at most *top_k*."""
         if not kept:
             return []
         scores, embedded = _scores(
@@ -741,3 +756,36 @@ class FSMLibrary:
             zip(kept, scores, strict=True), key=lambda p: (*order(p), p[0].digest)
         )
         return [LibraryMatch(r, s, embedded) for r, s in ranked[:top_k]]
+
+    def near_misses(
+        self,
+        goal: str,
+        *,
+        inputs_available: Collection[str],
+        return_keys: Collection[str],
+        tools_allowed: Collection[str],
+        min_lifecycle: str,
+        embed: EmbedTextsFn | None = None,
+        top_k: int = 1,
+    ) -> list[LibraryMatch]:
+        """The records ``search`` refuses ONLY for their key names, best first.
+
+        The same lifecycle and tool filter as ``search`` and the same scoring; a
+        record is kept when its inputs or return keys do NOT fit (a renamed
+        key). Never a reuse: the caller may show one to a compiler as data
+        and the result goes through every gate. Raises as ``search`` does.
+        """
+        _check_search(min_lifecycle, top_k)
+        have, want, tools = set(inputs_available), set(return_keys), set(tools_allowed)
+        kept = [
+            r
+            for r in self._records()
+            if r.lifecycle in _RANK
+            and _RANK[r.lifecycle] >= _RANK[min_lifecycle]
+            and set(r.signature["tools_used"]) <= tools
+            and not (
+                set(r.signature["inputs_required"]) <= have
+                and want <= set(r.signature["return_keys"])
+            )
+        ]
+        return self._rank(goal, kept, embed, top_k)
