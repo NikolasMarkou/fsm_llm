@@ -17,7 +17,7 @@ from ..__version__ import __version__
 from ..definitions import DashboardAlert, DashboardConfig, DashboardPanel, MonitorConfig
 from ..exceptions import MonitorError
 from .application import app, get_manager
-from .support import _GATED, _raise_http
+from .support import _GATED, _bounded, _raise_http
 
 # --- REST API: Monitoring ---
 
@@ -287,9 +287,10 @@ async def api_eventlog_timeline(
     log = get_manager().event_log
     if log is None:
         raise HTTPException(status_code=404, detail="no event log")
-    try:
-        return await asyncio.to_thread(
+    return await _bounded(
+        asyncio.to_thread(
             eventlog.timeline, log, conversation_id, since_seq=since_seq, limit=limit
-        )
-    except Exception as e:
-        _raise_http(e, f"read event log {conversation_id}")
+        ),
+        f"read event log {conversation_id}",
+        "event log read timed out",
+    )

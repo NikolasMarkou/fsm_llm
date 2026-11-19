@@ -421,6 +421,9 @@ class TestEventLogView:
         assert out["view"] == [True, True, True, False, 3]
         assert out["complete"] is True
 
+    def test_a_damaged_log_says_where_the_reading_stopped(self, probe):
+        assert probe("eventlog_view")["damaged"] == [True, False]
+
     def test_a_refusal_and_the_id_in_the_path(self, probe):
         out = probe("eventlog_view")
         assert out["failure"] is True

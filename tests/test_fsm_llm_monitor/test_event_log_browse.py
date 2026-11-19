@@ -198,3 +198,137 @@ def test_the_cli_flag_attaches_the_directory(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         monitor_main.main_cli()
     assert get_manager().event_log.root == tmp_path
+
+
+# ---- plan 51fde95b step 15, D-056: bounded work per page, a damaged line, no whole-dir scan
+
+
+def _long_log(root, *, count: int = 12, name: str = "long") -> EventLog:
+    log = EventLog(root)
+    for _ in range(count):
+        log.append(
+            name,
+            "llm/response",
+            source="s",
+            call_type="c",
+            stream=False,
+            model="m",
+            prompt_tokens=3,
+            completion_tokens=4,
+            total_tokens=7,
+        )
+    log.close()
+    return EventLog(root)
+
+
+def _serve(log: EventLog):
+    mgr = _manager()
+    mgr.attach_event_log(log)
+    configure(manager=mgr)
+    eventlog._USAGE_CACHE.clear()
+    return TestClient(app)
+
+
+class TestUsageIsTheWholeLogAndCached:
+    def test_usage_covers_events_beyond_the_page(self, tmp_path):
+        client = _serve(_long_log(tmp_path))
+        page = client.get("/api/eventlog/long", params={"limit": 2}).json()
+        assert len(page["events"]) == 2 and page["next_seq"] == 2
+        assert page["usage"]["total_tokens"] == 12 * 7  # not the 2 events shown
+        assert page["usage"]["calls"] == 12
+        assert (page["skipped"], page["corrupt_after_seq"]) == (0, None)
+
+    def test_an_unchanged_log_is_folded_once_and_a_grown_one_again(
+        self, tmp_path, monkeypatch
+    ):
+        log = _long_log(tmp_path)
+        client = _serve(log)
+        folds = []
+        real = eventlog._fold
+        monkeypatch.setattr(
+            eventlog, "_fold", lambda *a: (folds.append(a[1]), real(*a))[1]
+        )
+        for _ in range(3):
+            assert client.get("/api/eventlog/long").status_code == 200
+        assert folds == ["long"]
+        writer = EventLog(tmp_path)
+        writer.append("long", "turn/end", outcome="committed")
+        writer.close()
+        body = client.get("/api/eventlog/long").json()
+        assert folds == ["long", "long"] and body["usage"]["calls"] == 12
+
+    def test_the_cache_is_bounded(self, tmp_path, monkeypatch):
+        log = _long_log(tmp_path, count=1, name="aa")
+        _long_log(tmp_path, count=1, name="bb")
+        client = _serve(log)
+        monkeypatch.setattr(eventlog, "MAX_EVENTLOG_USAGE_CACHE", 1)
+        for name in ("aa", "bb", "aa"):
+            assert client.get(f"/api/eventlog/{name}").status_code == 200
+        assert len(eventlog._USAGE_CACHE) == 1
+
+
+class TestADamagedLine:
+    def _damage(self, tmp_path, line: int = 11):
+        log = _long_log(tmp_path, count=20)
+        path = tmp_path / "logs" / "long.jsonl"
+        lines = path.read_bytes().split(b"\n")
+        lines[line - 1] = b"{not json"
+        path.write_bytes(b"\n".join(lines))
+        return log
+
+    def test_a_page_before_the_damage_and_the_page_across_it_answer_200(self, tmp_path):
+        client = _serve(self._damage(tmp_path))
+        first = client.get("/api/eventlog/long", params={"limit": 5})
+        assert first.status_code == 200, first.text
+        body = first.json()
+        assert [e["seq"] for e in body["events"]] == [1, 2, 3, 4, 5]
+        assert (body["skipped"], body["corrupt_after_seq"]) == (1, 10)
+        assert body["usage"]["calls"] == 10  # the readable prefix
+        across = client.get("/api/eventlog/long", params={"since_seq": 8}).json()
+        assert [e["seq"] for e in across["events"]] == [9, 10]
+        assert across["next_seq"] is None and across["skipped"] == 1
+
+    def test_a_damaged_log_is_still_listed(self, tmp_path):
+        client = _serve(self._damage(tmp_path))
+        assert client.get("/api/eventlog").json()["conversations"] == ["long"]
+
+
+class TestNoWholeDirectoryWorkPerPage:
+    def test_a_page_lists_and_lstats_nothing_but_its_own_log(
+        self, tmp_path, monkeypatch
+    ):
+        log = _long_log(tmp_path, count=2, name="aa")
+        _long_log(tmp_path, count=2, name="bb")
+        client = _serve(log)
+        monkeypatch.setattr(
+            log, "conversation_ids", mock.Mock(side_effect=AssertionError("listed"))
+        )
+        lstats = []
+        real = eventlog.os.lstat
+        monkeypatch.setattr(
+            eventlog.os, "lstat", lambda p, *a, **k: (lstats.append(str(p)), real(p))[1]
+        )
+        assert client.get("/api/eventlog/aa").status_code == 200
+        assert [p.rsplit("/", 1)[1] for p in lstats] == ["aa.jsonl"]
+
+    def test_the_list_stops_checking_at_its_cap(self, tmp_path, monkeypatch):
+        log = _long_log(tmp_path, count=1, name="aa")
+        for name in ("bb", "cc", "dd"):
+            _long_log(tmp_path, count=1, name=name)
+        checked = []
+        real = eventlog._is_regular
+        monkeypatch.setattr(
+            eventlog, "_is_regular", lambda p: (checked.append(p.name), real(p))[1]
+        )
+        monkeypatch.setattr(eventlog, "MAX_EVENTLOG_CONVERSATIONS", 2)
+        assert eventlog.list_logs(log) == ["aa", "bb"] and len(checked) == 2
+
+    def test_the_timeline_route_is_time_bounded(self, tmp_path):
+        from fsm_llm.monitor.server import routes_monitoring
+
+        client = _serve(_long_log(tmp_path, count=1))
+        with mock.patch.object(
+            routes_monitoring, "_bounded", wraps=routes_monitoring._bounded
+        ) as bounded:
+            assert client.get("/api/eventlog/long").status_code == 200
+        assert bounded.call_count == 1
