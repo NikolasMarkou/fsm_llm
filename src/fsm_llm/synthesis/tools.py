@@ -17,6 +17,7 @@ hands back only its return values. Approval stays inside the synthesizer (G7).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from threading import Lock
 from typing import Any
 
@@ -108,6 +109,29 @@ _MORE = 40  # room kept for the "... N more" line
 _VALUE_CHARS = 300  # one return value
 
 
+class _Stalled(Exception):
+    """The message-free run stood still (private: raised by ``_stall_watch``)."""
+
+
+def _stall_watch(api: API, conversation_id: str, stays: int) -> Callable[[int], None]:
+    """A ``before_step`` hook that raises ``_Stalled`` once ``stays`` steps in a
+    row left the state and the public data exactly as they were: a procedure
+    that waits for a user cannot finish message-free, so the rest of the turn
+    budget would only be wasted calls. Nothing is judged by the text of a reply."""
+    last: tuple[str, dict[str, Any]] | None = None
+    held = 0
+
+    def before_step(step: int) -> None:
+        nonlocal last, held
+        now = (api.get_current_state(conversation_id), api.get_data(conversation_id))
+        held = held + 1 if now == last else 0
+        last = now
+        if held >= stays:
+            raise _Stalled
+
+    return before_step
+
+
 def _room(tool: str, **params: Any) -> int:
     """Characters a *tool* reply may use so its observation entry is not cut:
     the loop stores ``[Step n] Tool: .. | Input: <input> | Result: <reply>``."""
@@ -155,7 +179,10 @@ def create_procedure_tools(
           conversation always ended) and replies ``procedure_id``,
           ``status: ok`` and one defanged ``key: value`` line per return key.
           ``needs_user_input`` (budget spent) and ``return_keys_missing`` count
-          one failed run; ``provider_error`` counts none (an outage the core
+          one failed run. A run that leaves the state and the public data
+          unchanged for ``policy.dwell_threshold`` steps in a row waits for a
+          user: it stops there with ``needs_user_input`` and counts no run (the
+          rest of the budget would be wasted calls). ``provider_error`` counts none (an outage the core
           swallowed, which only shows as a stalled child, is told from the
           interface's meter as the runner tells it, D-061); ``push_failed`` is
           a procedure the sub-``API`` cannot be built for on *runner_llm* (a
@@ -269,7 +296,7 @@ def create_procedure_tools(
         except (FSMError, ValueError):
             # core's message names the compile's states and fields: a code only (D-030)
             return failed(REASON_PUSH_FAILED, room)
-        ok, values, reason = False, {}, _NEEDS_USER_INPUT
+        ok, values, reason, stalled = False, {}, _NEEDS_USER_INPUT, False
         outage = _no_errors
         try:
             with api:
@@ -279,7 +306,11 @@ def create_procedure_tools(
                 outage = watch_provider_errors(
                     runner_llm, getattr(api, "event_log", None), conv, 0
                 )
-                api.run_until_terminal(conv, max_steps=policy.max_turns)
+                api.run_until_terminal(
+                    conv,
+                    max_steps=policy.max_turns,
+                    before_step=_stall_watch(api, conv, policy.dwell_threshold),
+                )
                 data = api.get_data(conv)
                 if any(is_missing(data, k) for k in keys):
                     reason = REASON_RETURN_KEYS_MISSING
@@ -287,10 +318,14 @@ def create_procedure_tools(
                     ok, values = True, {k: data[k] for k in keys}
         except RunBudgetExceededError:
             pass  # the budget is spent: close() ended the sub-conversation
+        except _Stalled:
+            stalled = True  # it waits for a user: not a failed run of its own
         except LLMResponseError:
             return failed(REASON_PROVIDER_ERROR, room)  # not the procedure's fault
         if not ok and outage() > 0:  # core swallows an extraction error: a stalled
             return failed(REASON_PROVIDER_ERROR, room)  # child, no fault of the run
+        if stalled:
+            return failed(_NEEDS_USER_INPUT, room)  # counts no run, spends no budget
         try:
             library.record_run(
                 procedure_id, ok, trust_after_successes=policy.trust_after_successes
