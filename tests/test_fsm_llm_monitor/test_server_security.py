@@ -332,6 +332,88 @@ class TestBuilderGuards:
                 routes_builder._builder_sessions.pop(sid, None)
 
 
+_GOOD_DASHBOARD = {
+    "name": "Ops",
+    "panels": {"p1": {"title": "Errors", "metric": "total_errors"}},
+    "alerts": {"a1": {"metric": "total_errors", "threshold": 3}},
+    "config": {"refresh_interval_seconds": 15, "retention_hours": 2},
+}
+
+
+class TestDashboardConfigRefusesWhatItWouldDrop:
+    """F8 (monitor audit 2.2): a panel or alert that is not an object, and a
+    body that is the whole ``GET`` answer, are refused with 400 and leave the
+    applied config alone, instead of dropping the item (or the whole config)
+    silently behind a 200."""
+
+    def _applied(self, client):
+        assert (
+            client.post("/api/dashboard/config", json=_GOOD_DASHBOARD).status_code
+            == 200
+        )
+        return client.get("/api/dashboard/config").json()
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"panels": {"p1": 1}},
+            {"panels": {"p1": "x"}},
+            {"panels": {"p1": None}},
+            {"panels": {"p1": {"title": "ok"}, "p2": [1]}},
+            {"alerts": {"a1": 3}},
+            {"alerts": {"a1": {"metric": "m"}, "a2": "x"}},
+            {"config": {"panels": {"p1": 7}}},
+        ],
+        ids=[
+            "panel-int",
+            "panel-str",
+            "panel-null",
+            "one-bad-panel-among-good",
+            "alert-int",
+            "one-bad-alert-among-good",
+            "wrapped-bad-panel",
+        ],
+    )
+    def test_a_non_object_item_is_400_and_the_config_stays(self, body):
+        client = _client()
+        before = self._applied(client)
+
+        resp = client.post("/api/dashboard/config", json=body)
+
+        assert resp.status_code == 400
+        assert client.get("/api/dashboard/config").json() == before
+
+    def test_posting_the_whole_get_answer_is_400_and_does_not_wipe_the_config(self):
+        client = _client()
+        before = self._applied(client)
+
+        resp = client.post("/api/dashboard/config", json=before)
+
+        assert resp.status_code == 400
+        assert client.get("/api/dashboard/config").json() == before
+
+    def test_the_config_member_of_the_get_answer_is_still_400(self):
+        client = _client()
+        before = self._applied(client)
+
+        for body in (before["config"], {"config": before["config"]}):
+            assert client.post("/api/dashboard/config", json=body).status_code == 400
+        assert client.get("/api/dashboard/config").json() == before
+
+    def test_a_good_body_still_applies_and_replaces(self):
+        client = _client()
+        self._applied(client)
+
+        resp = client.post(
+            "/api/dashboard/config",
+            json={"name": "Two", "panels": {"p9": {"title": "T", "metric": "m"}}},
+        )
+
+        assert resp.status_code == 200
+        cfg = client.get("/api/dashboard/config").json()["config"]
+        assert cfg["name"] == "Two" and [p["panel_id"] for p in cfg["panels"]] == ["p9"]
+
+
 class _GatedAgent:
     """A builder agent whose ``send`` blocks on a gate (a slow worker thread)."""
 

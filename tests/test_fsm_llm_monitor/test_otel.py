@@ -158,6 +158,25 @@ class TestOTELExporterEnable:
         assert exporter.is_enabled is True
 
 
+class TestOTELEnableOrder:
+    """F8 (monitor audit 1.5b): ``enable()`` takes the collector's
+    ``record_event`` BEFORE it marks itself enabled, so a bad collector leaves
+    the exporter disabled and without a collector."""
+
+    def test_a_collector_without_record_event_leaves_the_exporter_disabled(self):
+        exporter = _import_otel()()
+
+        with pytest.raises(AttributeError):
+            exporter.enable(object())
+
+        assert exporter.is_enabled is False
+        assert exporter._collector is None
+        # the next enable on a real collector recovers
+        collector = MagicMock()
+        exporter.enable(collector)
+        assert exporter.is_enabled is True and exporter._collector is collector
+
+
 class TestOTELExporterDisable:
     def test_disable_restores_original(self):
         cls = _import_otel()
@@ -268,6 +287,17 @@ class TestOTELEventRouting:
         ]:
             event = _make_event(evt_type, "conv-1")
             exporter._route_event(event)  # Should not raise
+
+    def test_an_agent_cancelled_event_becomes_a_lifecycle_span(self):
+        """F8 (monitor audit 1.5a): the agent's cancel event is exported like
+        the workflow's, not dropped."""
+        exporter, _collector = self._make_exporter_with_collector()
+        exporter._tracer = MagicMock()
+
+        exporter._route_event(_make_event("agent_cancelled", "conv-1"))
+
+        calls = exporter._tracer.start_as_current_span.call_args_list
+        assert [call.args[0] for call in calls] == ["lifecycle.agent_cancelled"]
 
     def test_unknown_event_type_ignored(self):
         exporter, _collector = self._make_exporter_with_collector()

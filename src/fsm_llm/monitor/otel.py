@@ -14,6 +14,7 @@ from typing import Any
 from fsm_llm.logging import logger
 
 from .constants import (
+    EVENT_AGENT_CANCELLED,
     EVENT_AGENT_COMPLETED,
     EVENT_AGENT_FAILED,
     EVENT_AGENT_STARTED,
@@ -133,13 +134,12 @@ class OTELExporter:
             if self._enabled:
                 self._disable_locked()  # Disable previous collector first
 
+            # Store the original method before wrapping; a collector without
+            # one raises here, with the exporter still disabled.
+            original_record = collector.record_event
             self._collector = collector
             self._enabled = True
-
-            # Store the original method before wrapping
-            self._original_record_event = collector.record_event
-
-            original_record = self._original_record_event
+            self._original_record_event = original_record
 
             # NOTE: This closure captures a strong reference to `self` (the
             # OTELExporter), preventing garbage collection in CPython. Callers
@@ -219,6 +219,7 @@ class OTELExporter:
             self._on_error(event)
         elif event_type in (
             EVENT_AGENT_STARTED,
+            EVENT_AGENT_CANCELLED,
             EVENT_AGENT_COMPLETED,
             EVENT_AGENT_FAILED,
             EVENT_WORKFLOW_STARTED,

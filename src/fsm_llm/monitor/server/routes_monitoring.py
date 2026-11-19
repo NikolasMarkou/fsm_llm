@@ -143,8 +143,10 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
     settings = raw.get("config") or {}
     if not isinstance(panels_raw, dict) or not isinstance(alerts_raw, dict):
         raise ValueError("'panels' and 'alerts' must be objects keyed by id")
-    if not isinstance(settings, dict):
-        raise ValueError("'config' must be an object")
+    if not isinstance(settings, dict) or {"panels", "alerts"} & settings.keys():
+        # The whole GET answer (`{"active", "config": <dashboard>}`) has a
+        # dashboard where the settings go: refuse it, never store it empty.
+        raise ValueError("'config' must be an object of settings, not a dashboard")
 
     try:
         # Defaults are the models' own; the id comes from the key.
@@ -153,12 +155,10 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
                 {"title": str(pid), **pdata, "panel_id": str(pid)}
             )
             for pid, pdata in panels_raw.items()
-            if isinstance(pdata, dict)
         ]
         alerts = [
             DashboardAlert.model_validate({**adata, "alert_id": str(aid)})
             for aid, adata in alerts_raw.items()
-            if isinstance(adata, dict)
         ]
         return DashboardConfig(
             name=raw.get("name", ""),
