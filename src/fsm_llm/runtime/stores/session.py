@@ -187,16 +187,18 @@ def projection_from_legacy_file(path: str | os.PathLike[str]) -> SessionProjecti
 def _apply_delta(context: dict[str, Any], internal: dict[str, Any], delta: Any) -> None:
     """Apply one ``update_context`` delta blob; a ``None`` value is a value, as in the write.
 
-    The writer always emits both parts as objects: an absent or ``None`` part is empty, any
-    other part that is not an object is a forged blob (``LogCorruptError``, never skipped).
+    A whole delta that is not an object is a forged blob (``LogCorruptError``). A PART that is
+    absent, ``None`` or not an object is skipped, as before: a redaction hook may replace a part
+    (``DELTA`` kind), and a log written with one must stay restorable.
     """
     if not isinstance(delta, dict):
         raise LogCorruptError("a context delta blob is not a JSON object")
-    for target, name, keep_internal in (
-        (context, "context", False),
-        (internal, "internal", True),
+    for target, part, keep_internal in (
+        (context, delta.get("context"), False),
+        (internal, delta.get("internal"), True),
     ):
-        part = _mapping(delta, name, "delta part")
+        if not isinstance(part, dict):
+            continue
         for key, value in part.items():
             if not keep_internal and has_internal_prefix(key):
                 continue
@@ -247,14 +249,12 @@ def fold_session(
     return build_projection(ref, deltas, load_blob, conversation_id, last_seq, tools)
 
 
-def _mapping(
-    blob: Mapping[str, Any], key: str, what: str = "state blob field"
-) -> dict[str, Any]:
+def _mapping(blob: Mapping[str, Any], key: str) -> dict[str, Any]:
     value = blob.get(key)
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise LogCorruptError(f"{what} {key!r} is not a JSON object")
+        raise LogCorruptError(f"state blob field {key!r} is not a JSON object")
     return value
 
 

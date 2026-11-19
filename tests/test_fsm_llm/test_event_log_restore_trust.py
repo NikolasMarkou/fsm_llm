@@ -408,6 +408,10 @@ _BAD_MEMORY: list[Any] = [
     {"working_memory": {}, "hidden_buffers": {"a": 1}},
 ]
 _BAD_DELTAS: list[Any] = [
+    {
+        "context": "<redacted>",
+        "internal": "<redacted>",
+    },  # what a DELTA redaction hook stores
     {"context": "oops", "internal": ["x"]},
     {"context": [1, 2]},
     {"internal": 5},
@@ -461,9 +465,9 @@ def _delta(log: EventLog, tid: str, delta: Any, frame: int) -> None:
 
 
 class TestAForgedBlobIsCorruptAtTheFold:
-    """D2 (runtime audit 1.4): the fold checks the type of every part of a state blob and of a
+    """D2 (runtime audit 1.4): the fold checks the type of a state blob's parts and of a whole
     delta, so a forged log says ``LogCorruptError`` and never a raw ``ValueError`` or a
-    ``frozenset("abc")``. The honest writer emits a dict (or None), a list of str and dict parts."""
+    ``frozenset("abc")``. A delta PART that is not an object is skipped (R-A1)."""
 
     @pytest.mark.parametrize("route", ["fork", "resume", "store", "fold"])
     @pytest.mark.parametrize("forged", _BAD_MEMORY)
@@ -480,11 +484,20 @@ class TestAForgedBlobIsCorruptAtTheFold:
     # a fork at turn 1 cuts before a delta appended after that turn, so it is not a route here
     @pytest.mark.parametrize("route", ["resume", "store", "fold", "stack"])
     @pytest.mark.parametrize("delta", _BAD_DELTAS)
-    def test_a_forged_root_delta_part_is_corrupt(
+    def test_a_root_delta_part_that_is_not_an_object_is_skipped(
         self, log: EventLog, route: str, delta: Any
     ) -> None:
+        """R-A1: a redaction hook may replace a part; the log must still restore."""
         tid = _forge(log, _api(log))
         _delta(log, tid, delta, frame=0)
+        _restore_through(log, route, tid, at_turn=1)
+
+    @pytest.mark.parametrize("route", ["resume", "store", "fold", "stack"])
+    def test_a_delta_that_is_not_an_object_is_still_corrupt(
+        self, log: EventLog, route: str
+    ) -> None:
+        tid = _forge(log, _api(log))
+        _delta(log, tid, [1], frame=0)
         with pytest.raises(LogCorruptError):
             _restore_through(log, route, tid, at_turn=1)
 
@@ -501,13 +514,12 @@ class TestAForgedBlobIsCorruptAtTheFold:
     # a fork at turn 2 cuts before a delta appended after the child's turn, so it is not a route
     @pytest.mark.parametrize("route", ["resume", "stack"])
     @pytest.mark.parametrize("delta", _BAD_DELTAS)
-    def test_a_forged_frame_delta_part_is_corrupt(
+    def test_a_frame_delta_part_that_is_not_an_object_is_skipped(
         self, log: EventLog, route: str, delta: Any
     ) -> None:
         tid = _forge(log, _api(log), child=_KIDS)
         _delta(log, tid, delta, frame=1)
-        with pytest.raises(LogCorruptError):
-            _restore_through(log, route, tid, at_turn=2)
+        _restore_through(log, route, tid, at_turn=2)
 
     def test_the_fold_stack_refuses_a_forged_root_and_a_forged_frame(
         self, log: EventLog, forge_blob: Any
