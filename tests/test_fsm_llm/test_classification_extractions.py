@@ -1682,7 +1682,9 @@ _KIND_STATES = {
 }
 
 
-def _closed_fsm(result_key: str, *, after_transition: bool) -> dict[str, Any]:
+def _closed_fsm(
+    result_key: str, *, after_transition: bool, required: bool = False
+) -> dict[str, Any]:
     """State ``a`` classifies two fields: ``intent`` (listed in
     ``handler_only_keys``) and one named like the ``result_key`` of the completion
     or synthesize state ``c``. ``a`` is the initial state, or is entered from
@@ -1692,7 +1694,7 @@ def _closed_fsm(result_key: str, *, after_transition: bool) -> dict[str, Any]:
         return {"id": sid, "description": "d", "purpose": "p", **spec}
 
     fields = [
-        {**_a5_config(name).model_dump(), "required": False}
+        {**_a5_config(name).model_dump(), "required": required}
         for name in ("intent", result_key)
     ]
     to_c = {"target_state": "c", "description": "never", "conditions": [_NEVER]}
@@ -1720,11 +1722,16 @@ class TestResultKeyClosedToClassification:
     classification channel (Pass 1, its retry, after a transition) may write it; a
     listed ``handler_only_keys`` entry stays classifiable on all of them."""
 
+    @pytest.mark.parametrize("required", [False, True])  # True: the retry channel
     @pytest.mark.parametrize("after_transition", [False, True])
     @pytest.mark.parametrize("result_key", sorted(_KIND_STATES))
-    def test_only_the_listed_key_is_classified(self, result_key, after_transition):
+    def test_only_the_listed_key_is_classified(
+        self, result_key, after_transition, required
+    ):
         fsm = FSMDefinition(
-            **_closed_fsm(result_key, after_transition=after_transition)
+            **_closed_fsm(
+                result_key, after_transition=after_transition, required=required
+            )
         )
         api, conv_id, _ = _api(fsm)
         with _ClassifierCapture("buy", 0.9) as cap:
