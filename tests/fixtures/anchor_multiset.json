@@ -629,6 +629,11 @@
       "delta": 3,
       "reason": "step 4.8 of plan 51fde95b: D-007 is anchored once in LiteLLMInterface._asend (two transports, one send family) and named twice as the superseding decision, in the marker of the 944e2692/D-004 comment of _begin_send and in the marker of the 944e2692/D-002 comment of acomplete; no other token was added or lost",
       "token": "plan-2026-11-19T025425-51fde95b/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "step 6.1 of plan 51fde95b: D-007 is named once more as the superseding decision, in the marker of the 944e2692/D-005 comment of LiteLLMEmbedder (aembedding is a second binding of the same module, sent through the same aembed body); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-007"
     }
   ]
 }

@@ -19,7 +19,13 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
+from litellm.types.utils import (
+    Choices,
+    EmbeddingResponse,
+    Message,
+    ModelResponse,
+    Usage,
+)
 
 from fsm_llm.aio import async_name
 from fsm_llm.core.definitions import (
@@ -28,7 +34,7 @@ from fsm_llm.core.definitions import (
     FieldExtractionRequest,
     ResponseGenerationRequest,
 )
-from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.llm import LiteLLMEmbedder, LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.logging import logger
 from tests.test_fsm_llm.event_log_support import _chunk
@@ -629,6 +635,18 @@ class TestTheRealLibrary:
         assert sync.complete(complete) == await async_.acomplete(complete)
         assert sync.usage() == async_.usage() and sync.usage().calls == 3
 
+    async def test_the_embedder_reads_litellms_own_mock_embedding_on_both_names(
+        self,
+    ) -> None:
+        def real() -> LiteLLMEmbedder:
+            return LiteLLMEmbedder(
+                "text-embedding-3-small", api_key="sk-none", mock_response=[0.5, 0.25]
+            )
+
+        sync, async_ = real(), real()
+        assert sync.embed(["a"]) == await async_.aembed(["a"]) == [[0.5, 0.25]]
+        assert sync.usage() == async_.usage() and sync.usage().calls == 1
+
 
 # --- the subclass guard (D-009): it warns, it never changes dispatch -------------------
 
@@ -765,3 +783,71 @@ class TestOneBodyPerMethod:
         for sender in ("_send", "_asend"):
             calls = _calls(defs[sender])
             assert all(calls.count(helper) == 1 for helper in family), sender
+
+
+# --- the embedder twin (step 6.1): one body, two transports ----------------------------
+
+_EMBEDDER = "fsm_llm.llm.providers.embedder"
+_TEXTS = ["a", "b"]
+
+
+def _vectors(**params: Any) -> EmbeddingResponse:
+    data = [
+        {"object": "embedding", "index": i, "embedding": [float(i), 1.0]}
+        for i in range(len(params["input"]))
+    ]
+    return EmbeddingResponse(
+        model="m", data=data, usage=Usage(prompt_tokens=4, total_tokens=4)
+    )
+
+
+def _one_vector_for_two_texts(**params: Any) -> EmbeddingResponse:
+    return _vectors(input=["only"])
+
+
+def _down(**params: Any) -> Any:
+    raise ConnectionError("down")
+
+
+def _cancelled(**params: Any) -> Any:
+    raise asyncio.CancelledError()
+
+
+class TestTheEmbedderTwin:
+    @pytest.mark.parametrize(
+        ("script", "errors"),
+        [(_vectors, 0), (_one_vector_for_two_texts, 0), (_down, 1), (_cancelled, 1)],
+    )
+    async def test_both_names_give_one_result_one_request_and_one_count(
+        self, script: Callable[..., Any], errors: int
+    ) -> None:
+        seen: dict[str, tuple[Any, ...]] = {}
+        for mode in ("sync", "async"):
+            embedder = LiteLLMEmbedder("text-embedding-3-small", api_key="sk-none")
+            with (
+                patch(f"{_EMBEDDER}.embedding", side_effect=script) as sync,
+                patch(
+                    f"{_EMBEDDER}.aembedding",
+                    new_callable=AsyncMock,
+                    side_effect=script,
+                ) as async_,
+                _observed(_Recorder()) as recorder,
+            ):
+                try:
+                    if mode == "sync":
+                        out: Any = embedder.embed(_TEXTS)
+                    else:
+                        out = await embedder.aembed(_TEXTS)
+                except (Exception, asyncio.CancelledError) as exc:
+                    out = (type(exc).__name__, str(exc))
+            usage = embedder.usage()
+            assert (usage.calls, usage.errors) == (1, errors)  # counted once, not twice
+            assert (
+                recorder.events == []
+            )  # the embedder is not a request-observer client
+            assert (sync.call_count, async_.call_count) == (
+                (1, 0) if mode == "sync" else (0, 1)
+            )
+            call = sync.call_args if mode == "sync" else async_.call_args
+            seen[mode] = (out, usage, call)
+        assert seen["sync"] == seen["async"]

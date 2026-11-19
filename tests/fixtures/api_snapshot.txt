@@ -392,6 +392,7 @@ fsm_llm.LLMUsage class(LLMCallCounts)
   field by_kind: dict[str, LLMCallCounts] = factory
 fsm_llm.LiteLLMEmbedder class
   def __init__(self, model: str, *, api_key: str | None = None, timeout: float | None = 120.0, retries: int = 0, **kwargs: Any) -> None
+  def aembed(self, texts: Sequence[str]) -> list[list[float]]
   def embed(self, texts: Sequence[str]) -> list[list[float]]
   def reset_usage(self) -> LLMUsage
   def usage(self) -> LLMUsage

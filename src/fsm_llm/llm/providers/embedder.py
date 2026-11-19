@@ -2,23 +2,25 @@
 
 Layer ``llm`` (plan d454fd62, step 73): split out of the old ``fsm_llm/llm/__init__.py`` (the old ``llm.py``); definitions unchanged.
 
-The ``embedding`` binding comes from ``fsm_llm.llm.providers.litellm``, the one module that
-imports litellm; a test that replaces it patches ``fsm_llm.llm.providers.embedder.embedding``,
-the module whose code looks it up.
+The ``embedding`` and ``aembedding`` bindings come from ``fsm_llm.llm.providers.litellm``, the one
+module that imports litellm; a test that replaces one patches
+``fsm_llm.llm.providers.embedder.embedding`` or ``.aembedding``, the module whose code looks it up.
 """
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Sequence
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import RESERVED_EMBEDDING_CALL_KWARGS, USAGE_KIND_EMBED
 from fsm_llm.core.definitions import LLMResponseError
 from fsm_llm.llm.interface import DEFAULT_LLM_TIMEOUT_SECONDS
 from fsm_llm.llm.usage import _meter_of, _Metered, _reply_field
 
-from .litellm import embedding
+from .litellm import aembedding, embedding
 from .request import _checked_model, _connection_params, _warn_reserved_kwargs
 
 
@@ -37,7 +39,10 @@ class LiteLLMEmbedder(_Metered):
         vectors = embedder.embed(["first text", "second text"])
     """
 
-    # DECISION plan-2026-10-01T093600-944e2692/D-005: one concrete embedder
+    # DECISION plan-2026-10-01T093600-944e2692/D-005 [SUPERSEDED BY
+    # plan-2026-11-19T025425-51fde95b/D-007 on "the one ``embedding`` binding":
+    # ``aembedding`` is a second binding of the same module, sent by ``_asend``
+    # through the same ``aembed`` body]: one concrete embedder
     # owns the one ``embedding`` binding. Do NOT add an ``embed`` method to
     # ``LLMInterface``/``LiteLLMInterface`` (the embedding model differs from
     # the chat model and would inherit the chat model's credentials), do NOT
@@ -81,6 +86,8 @@ class LiteLLMEmbedder(_Metered):
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed ``texts`` in one provider request, one vector per text, in order.
 
+        ``run_sync`` over ``aembed``, the one body.
+
         No texts means no request and ``[]``. Provider errors propagate
         unchanged (callers keep their own degrade paths); each request is
         counted once on this embedder's meter, a raising one as an error.
@@ -90,6 +97,10 @@ class LiteLLMEmbedder(_Metered):
             LLMResponseError: the reply does not hold one numeric vector per
                 text.
         """
+        return run_sync(self.aembed(texts))
+
+    async def aembed(self, texts: Sequence[str]) -> list[list[float]]:
+        """The async twin of ``embed`` and the one body: same results, meter and errors."""
         if isinstance(texts, str):
             raise TypeError("texts must be a sequence of strings")
         # Materialised before the type check: checking an iterator consumed it
@@ -109,14 +120,23 @@ class LiteLLMEmbedder(_Metered):
         params["input"] = batch
         meter = _meter_of(self)
         try:
-            response = embedding(**params)
-        except Exception:
+            response = await acall(self, "_send", params)
+        except (Exception, asyncio.CancelledError):
             # Broad catch is intentional: count the failed request, re-raise
-            # it unchanged for the caller's own error boundary.
+            # it unchanged for the caller's own error boundary. A cancelled
+            # request was sent (and may be billed), so it counts as an error too.
             meter.record_error(USAGE_KIND_EMBED)
             raise
         meter.record(USAGE_KIND_EMBED, response)
         return _embedding_vectors(response, len(batch))
+
+    def _send(self, params: dict[str, Any]) -> Any:
+        """The one ``embedding`` call (sync transport)."""
+        return embedding(**params)
+
+    async def _asend(self, params: dict[str, Any]) -> Any:
+        """The one ``aembedding`` call (async transport)."""
+        return await aembedding(**params)
 
 
 def _embedding_vectors(response: Any, expected: int) -> list[list[float]]:
