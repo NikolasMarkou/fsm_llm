@@ -33,6 +33,32 @@ class TestClosedManagerIsNotServedAgain:
             finally:
                 fresh.close()
 
+    def test_the_fresh_manager_keeps_the_config_the_event_log_and_the_dashboard(
+        self, tmp_path
+    ):
+        """D-055: the setup of a closed manager is data the caller supplied."""
+        from fsm_llm.monitor.definitions import DashboardConfig, MonitorConfig
+        from fsm_llm.runtime import EventLog
+
+        mgr = InstanceManager(MonitorConfig(max_instances=7))
+        log = EventLog(tmp_path)
+        mgr.attach_event_log(log)
+        mgr.dashboard_config = DashboardConfig(name="kept")
+        configure(manager=mgr)
+        with TestClient(app):
+            pass
+        assert mgr.closed
+
+        with TestClient(app) as client:
+            fresh = application.get_manager()
+            try:
+                assert fresh is not mgr and not fresh.closed
+                assert client.get("/api/config").json()["max_instances"] == 7
+                assert fresh.event_log is log
+                assert fresh.dashboard_config.name == "kept"
+            finally:
+                fresh.close()
+
     def test_a_live_manager_stays_installed(self):
         mgr = _manager()
         configure(manager=mgr)

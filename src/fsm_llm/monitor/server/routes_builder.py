@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from fsm_llm.llm.interface import resolve_tool_model
 from fsm_llm.logging import logger
 
-from ..constants import MAX_BUILDER_SESSIONS
+from ..constants import MAX_ABANDONED_BUILDERS, MAX_BUILDER_SESSIONS
 from ..definitions import BuilderSendRequest, BuilderStartRequest
 from .application import app
 from .support import _GATED, _LLM_OPERATION_TIMEOUT
@@ -76,10 +76,21 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
     await _cleanup_stale_builder_sessions()
     async with _get_builder_lock():
-        if len(_builder_sessions) >= MAX_BUILDER_SESSIONS:
+        # A force-deleted build whose worker still runs stays counted until the
+        # thread ends (D-054): an id in _builder_busy with no live session.
+        abandoned = len(_builder_busy - _builder_sessions.keys())
+        if len(_builder_sessions) + abandoned >= MAX_BUILDER_SESSIONS:
             raise HTTPException(
                 status_code=429,
                 detail=f"too many builder sessions (max {MAX_BUILDER_SESSIONS})",
+            )
+        if abandoned >= MAX_ABANDONED_BUILDERS:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"{abandoned} cancelled builds are still running "
+                    f"(max {MAX_ABANDONED_BUILDERS}); try again when one ends"
+                ),
             )
     try:
         from fsm_llm.agents.meta_builder import (
@@ -268,7 +279,8 @@ async def api_builder_delete(session_id: str, force: bool = False) -> dict[str, 
 
     A forced delete drops the session at once but cannot stop the worker thread:
     the model call runs on and the id stays busy until it ends (``_release``
-    never puts the session back).
+    never puts the session back). Meanwhile it still counts against the session
+    cap and against ``MAX_ABANDONED_BUILDERS`` (``start`` answers 429, D-054).
     """
     async with _get_builder_lock():
         if session_id in _builder_busy and not force:

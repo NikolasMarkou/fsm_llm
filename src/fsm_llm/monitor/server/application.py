@@ -56,8 +56,17 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     if _manager is not None and _manager.closed:
         # A second run in one process (a restart, a test): a closed manager has
         # no log sink and no handlers, so it is never served again.
-        logger.warning("the configured manager was closed; serving a fresh one")
-        _manager = None
+        # D-055: its setup is data the caller supplied, its runtime state is gone.
+        logger.warning(
+            "the configured manager was closed; serving a fresh one with its "
+            "config, event log and dashboard config"
+        )
+        fresh = InstanceManager(_manager.config)
+        if (log := _manager.event_log) is not None:
+            fresh.attach_event_log(log)
+        if _manager.dashboard_config is not None:
+            fresh.dashboard_config = _manager.dashboard_config
+        _manager = fresh
     yield
     # Shutdown: close the manager (ends what it runs, detaches its handlers,
     # removes the loguru sink); `close()` is idempotent, a caller may have

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import threading
+import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -248,3 +249,93 @@ class TestForceDeleteOfABusyBuilderSession:
             assert keyed.status_code == 200
         finally:
             configure(manager=_manager())  # no key: the env key is unset by conftest
+
+
+class TestAbandonedBuildsStayCounted:
+    """D-054: a force-deleted build whose worker thread still runs counts against the
+    session cap and against ``MAX_ABANDONED_BUILDERS`` until that thread ends."""
+
+    @staticmethod
+    def _abandon(sid: str, agent: _SlowBuilderAgent):
+        """Start a send on ``sid`` and force-delete the session while it runs."""
+        from fsm_llm.monitor.definitions import BuilderSendRequest
+
+        async def go():
+            routes_builder._builder_sessions[sid] = (agent, 0.0)
+            send = asyncio.ensure_future(
+                routes_builder.api_builder_send(
+                    BuilderSendRequest(session_id=sid, message="m")
+                )
+            )
+            while not agent.started.is_set():
+                await asyncio.sleep(0.01)
+            deleted = await routes_builder.api_builder_delete(sid, force=True)
+            assert deleted == {"deleted": True}
+            return send
+
+        return go()
+
+    @staticmethod
+    async def _released(sid: str):
+        for _ in range(300):
+            if sid not in routes_builder._builder_busy:
+                return True
+            await asyncio.sleep(0.01)
+        return False
+
+    def test_start_is_refused_at_the_bound_and_allowed_when_a_worker_ends(
+        self, builder_client
+    ):
+        from fsm_llm.monitor.constants import MAX_ABANDONED_BUILDERS
+        from fsm_llm.monitor.definitions import BuilderStartRequest
+
+        agents = [_SlowBuilderAgent() for _ in range(MAX_ABANDONED_BUILDERS)]
+
+        async def run():
+            sends = [await self._abandon(f"x{i}", a) for i, a in enumerate(agents)]
+            try:
+                assert routes_builder._builder_sessions == {}
+                with pytest.raises(HTTPException) as refused:
+                    await routes_builder.api_builder_start(BuilderStartRequest())
+                assert refused.value.status_code == 429
+                assert "still running" in refused.value.detail
+                agents[0].gate.set()
+                await sends[0]
+                assert await self._released("x0")
+                allowed = await routes_builder.api_builder_start(BuilderStartRequest())
+                assert allowed["response"] == "hello"
+            finally:
+                for agent in agents:
+                    agent.gate.set()
+                await asyncio.gather(*sends)
+            assert all([await self._released(f"x{i}") for i in range(len(agents))])
+            assert routes_builder._builder_busy == set()
+
+        asyncio.run(run())
+
+    def test_an_abandoned_worker_counts_against_the_session_cap(self, builder_client):
+        from fsm_llm.monitor.constants import MAX_BUILDER_SESSIONS
+        from fsm_llm.monitor.definitions import BuilderStartRequest
+
+        agent = _SlowBuilderAgent()
+
+        async def run():
+            send = await self._abandon("gone", agent)
+            for i in range(MAX_BUILDER_SESSIONS - 1):
+                routes_builder._builder_sessions[f"s{i}"] = (
+                    _FakeBuilderAgent(None),
+                    time.time(),
+                )
+            try:
+                with pytest.raises(HTTPException) as refused:
+                    await routes_builder.api_builder_start(BuilderStartRequest())
+                assert refused.value.status_code == 429
+                assert "too many builder sessions" in refused.value.detail
+            finally:
+                agent.gate.set()
+                await send
+            assert await self._released("gone")
+            ok = await routes_builder.api_builder_start(BuilderStartRequest())
+            assert ok["response"] == "hello"
+
+        asyncio.run(run())
