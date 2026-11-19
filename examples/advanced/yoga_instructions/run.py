@@ -12,7 +12,7 @@ from fsm_llm import API
 
 def main():
     # Get model and API key from environment
-    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key and "ollama" not in model.lower():
         print("Please set your OPENAI_API_KEY environment variable")

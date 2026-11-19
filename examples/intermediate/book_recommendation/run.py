@@ -28,7 +28,9 @@ logger = logging.getLogger("BookRecommender")
 
 
 class BookRecommendationSystem:
-    def __init__(self, fsm_path, api_key, model="gpt-4o", temperature=0.7):
+    def __init__(
+        self, fsm_path, api_key, model="ollama_chat/bonsai-2:27b", temperature=0.7
+    ):
         """Initialize the book recommendation system."""
         self.fsm_path = fsm_path
         self.api_key = api_key
@@ -153,7 +155,7 @@ class BookRecommendationSystem:
 
 def main():
     # Get model and API key from environment
-    model = os.environ.get("LLM_MODEL", "gpt-4o")
+    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key and "ollama" not in model.lower():
         print("Please set your OPENAI_API_KEY environment variable")

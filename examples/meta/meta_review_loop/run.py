@@ -40,10 +40,7 @@ def main():
         print("This example requires the agents extra: pip install fsm-llm[agents]")
         return
 
-    model = os.environ.get("LLM_MODEL", "")
-    if not model:
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        model = "gpt-4o-mini" if api_key else "ollama_chat/qwen3.5:4b"
+    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     print("=" * 60)
     print("Meta-Builder + MakerChecker Quality Review")

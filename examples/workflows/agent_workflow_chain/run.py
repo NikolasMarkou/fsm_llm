@@ -152,7 +152,7 @@ def print_pipeline_summary(ctx: dict) -> None:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")

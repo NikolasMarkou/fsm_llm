@@ -126,7 +126,9 @@ class AgentWithQualityGate(WorkflowStep):
     max_retries: int = 2
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-        model = context.get("_model", os.getenv("LLM_MODEL", "gpt-4o-mini"))
+        model = context.get(
+            "_model", os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+        )
         best_output = ""
         best_score = 0.0
         tools_used: list = []
@@ -261,7 +263,7 @@ def build_workflow(model: str) -> WorkflowEngine:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")

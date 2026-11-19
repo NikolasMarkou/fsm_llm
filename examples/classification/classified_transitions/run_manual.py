@@ -31,7 +31,7 @@ FSM_PATH = os.path.join(CURRENT_DIR, "fsm_manual.json")
 
 
 def main():
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
     api_key = os.getenv("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():

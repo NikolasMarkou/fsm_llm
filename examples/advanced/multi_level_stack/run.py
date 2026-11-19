@@ -177,7 +177,7 @@ def build_main_fsm() -> dict:
 
 
 def main():
-    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():

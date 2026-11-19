@@ -274,7 +274,7 @@ def print_order_summary(ctx: dict) -> dict:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Error: OPENAI_API_KEY not set. Export it or use Ollama.")

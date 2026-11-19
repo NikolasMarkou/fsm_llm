@@ -94,7 +94,7 @@ def handle_clarification(message: str, entities: dict) -> str:
 
 
 def main():
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
     is_ollama = "ollama" in model.lower()
 
     if not is_ollama and not os.getenv("OPENAI_API_KEY"):

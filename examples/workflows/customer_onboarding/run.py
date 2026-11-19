@@ -299,7 +299,9 @@ class ComplianceAgentStep(WorkflowStep):
     error_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-        model = context.get("_model", os.getenv("LLM_MODEL", "gpt-4o-mini"))
+        model = context.get(
+            "_model", os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+        )
         company = context.get("company_name", "Unknown")
         reg = context.get("company_registration", "Unknown")
         jurisdiction = context.get("jurisdiction", "Unknown")
@@ -495,7 +497,7 @@ def build_onboarding_workflow(model: str) -> WorkflowEngine:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Error: OPENAI_API_KEY not set. Export it or use Ollama.")

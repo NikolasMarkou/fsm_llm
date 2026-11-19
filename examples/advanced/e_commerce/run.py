@@ -298,7 +298,7 @@ def run_stacking_example():
     main_fsm = create_main_customer_service_fsm()
     api = API.from_definition(
         main_fsm,
-        model=os.environ.get("LLM_MODEL", "gpt-4o-mini"),
+        model=os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b"),
         temperature=0.7,
         max_tokens=200,
     )
@@ -492,7 +492,7 @@ if __name__ == "__main__":
     5. Advanced features like shared context keys and merge strategies
     """
 
-    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Warning: OPENAI_API_KEY not set.")
         print("Set your API key: export OPENAI_API_KEY='your-key-here'")

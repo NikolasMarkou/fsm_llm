@@ -16,7 +16,7 @@ Usage:
     python examples/meta/build_fsm/run.py
 
 Environment Variables:
-    LLM_MODEL       - LLM model to use (default: gpt-4o-mini)
+    LLM_MODEL       - LLM model to use (default: ollama_chat/bonsai-2:27b)
     OPENAI_API_KEY  - OpenAI API key (if using OpenAI models)
 """
 
@@ -29,14 +29,7 @@ load_dotenv()
 
 
 def main():
-    # Try OpenAI first, fall back to Ollama
-    model = os.environ.get("LLM_MODEL", "")
-    if not model:
-        api_key = os.environ.get("OPENAI_API_KEY", "")
-        if api_key:
-            model = "gpt-4o-mini"
-        else:
-            model = "ollama_chat/qwen3.5:4b"
+    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     print(f"Using model: {model}")
     print("=" * 60)
