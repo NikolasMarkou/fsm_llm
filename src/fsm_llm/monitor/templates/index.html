@@ -385,6 +385,10 @@
                         <label for="builder-agent-task">Task (required)</label>
                         <textarea id="builder-agent-task" rows="3" placeholder="Describe the task for the agent..." class="form-textarea"></textarea>
                     </div>
+                    <div class="form-row"><label for="builder-agent-label">Label:</label><input type="text" id="builder-agent-label" class="flex-1"></div>
+                    <div class="form-row"><label for="builder-agent-model">Model:</label><input type="text" id="builder-agent-model" placeholder="empty: the server default" class="flex-1"></div>
+                    <div class="form-row"><label for="builder-agent-iters">Max Iterations:</label><input type="number" id="builder-agent-iters" value="10" min="1" max="100" class="input-narrow"></div>
+                    <div class="form-row"><label for="builder-agent-timeout">Timeout (s):</label><input type="number" id="builder-agent-timeout" value="120" min="1" max="3600" class="input-narrow"></div>
                     <div id="builder-agent-tools-section" style="display:none;">
                         <div class="form-row"><label>Tool Stub Responses</label></div>
                         <div id="builder-agent-tools-list"></div>

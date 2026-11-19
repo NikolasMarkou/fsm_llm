@@ -2,7 +2,7 @@
 
 import { fetchJson, postJson } from '../services/api.js';
 import { TOOL_BASED_AGENTS } from '../services/state.js';
-import { $, esc, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
+import { $, esc, intVal, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
 import { addTypingIndicator, removeTypingIndicator } from './conversations.js';
@@ -470,6 +470,7 @@ function _launchBuilderAgent() {
         form.style.display = 'block';
         launchBtn.textContent = 'Confirm Launch';
         _populateAgentToolStubs();
+        _prefillAgentForm();
         $('builder-agent-task')?.focus();
         return;
     }
@@ -498,10 +499,11 @@ function _launchBuilderAgent() {
         agent_type: agentType,
         task,
         tools,
-        model: parsed.config?.model || $('builder-model').value.trim() || undefined,
-        max_iterations: parsed.config?.max_iterations || 10,
-        timeout_seconds: parsed.config?.timeout_seconds || 120,
-        label: parsed.name || 'Built Agent',
+        // Never parsed.config.model: that is a template value of every built agent.
+        model: $('builder-agent-model').value.trim() || undefined,
+        max_iterations: intVal('builder-agent-iters', 10),
+        timeout_seconds: numVal('builder-agent-timeout', 120),
+        label: $('builder-agent-label').value.trim() || parsed.name || 'Built Agent',
     };
 
     launchBtn.disabled = true;
@@ -521,6 +523,22 @@ function _launchBuilderAgent() {
             showError('builder-status', `Launch failed: ${e.message}`);
         })
         .finally(() => { launchBtn.disabled = false; });
+}
+
+/** A positive finite number from the artifact config, else the fallback (the server bounds the value). */
+function _positive(v, fallback) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** Pre-fill the launch fields: name and limits from the artifact, the model from the Builder field. */
+function _prefillAgentForm() {
+    let parsed;
+    try { parsed = JSON.parse(_artifact); } catch { return; }
+    $('builder-agent-label').value = parsed.name || 'Built Agent';
+    $('builder-agent-model').value = $('builder-model').value.trim();
+    $('builder-agent-iters').value = _positive(parsed.config?.max_iterations, 10);
+    $('builder-agent-timeout').value = _positive(parsed.config?.timeout_seconds, 120);
 }
 
 function _populateAgentToolStubs() {

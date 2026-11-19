@@ -174,6 +174,44 @@ class TestBuilderAgentLaunch:
         }
 
 
+class TestBuilderAgentLaunchFields:
+    """Plan 51fde95b step 13.1: the model of a launched built agent is the
+    Builder field, then the launch form value, never ``artifact.config.model``
+    (a template value of every built agent); the label and the two limits are
+    editable fields pre-filled from the artifact."""
+
+    def test_the_model_is_the_builder_field_not_the_artifact_config(self, probe):
+        out = probe("builder_agent_fields")["fromBuilderField"]
+        assert out["prefilled"]["model"] == "ollama_chat/my-local-model"
+        assert out["sent"]["model"] == "ollama_chat/my-local-model"
+
+    def test_the_form_value_wins_and_every_field_is_sent_as_typed(self, probe):
+        sent = probe("builder_agent_fields")["typedInForm"]["sent"]
+        assert sent["model"] == "ollama_chat/other"
+        assert (sent["label"], sent["max_iterations"], sent["timeout_seconds"]) == (
+            "Mine",
+            3,
+            45,
+        )
+
+    def test_an_empty_model_sends_none_so_the_server_default_applies(self, probe):
+        sent = probe("builder_agent_fields")["emptyField"]["sent"]
+        assert "model" not in sent  # not gpt-4o-mini from the artifact
+
+    def test_the_fields_are_pre_filled_from_the_artifact(self, probe):
+        pre = probe("builder_agent_fields")["emptyField"]["prefilled"]
+        assert pre == {
+            "label": "Weather bot",
+            "model": "",
+            "iters": 7,
+            "timeout": 300,
+        }
+
+    def test_a_bad_artifact_limit_falls_back_to_the_default(self, probe):
+        pre = probe("builder_agent_fields")["badConfig"]["prefilled"]
+        assert (pre["iters"], pre["timeout"]) == (10, 120)
+
+
 class TestChatInputAndMarkdownBlocks:
     """Plan 51fde95b step 12.1: the two quirks plan 52ce5464 carried."""
 
