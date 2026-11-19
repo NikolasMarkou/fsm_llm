@@ -58,6 +58,7 @@ nav:
       - Changelog: changelog.md
       - Roadmaps:
           - 2026 roadmap: 2026_roadmap.md
+          - 2026 restructuring: 2026_restructuring.md
 
 theme:
   name: material

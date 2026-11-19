@@ -50,6 +50,7 @@ HISTORICAL = (
     "CHANGELOG.md",  # release history; its entries name the paths of their day
     "EVALUATE.md",  # eval run log
     "docs/2026_roadmap.md",  # the roadmap: plans, written before the layout
+    "docs/2026_restructuring.md",  # a dated plan: names the target layout, not today's
     "docs/strands_features",  # dated design records (prefix)
     "scripts/bench_data/",  # frozen bench record
     "plans/",  # planning artifacts
