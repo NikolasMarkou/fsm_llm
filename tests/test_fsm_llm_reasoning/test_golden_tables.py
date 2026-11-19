@@ -46,7 +46,7 @@ _GOLDEN_FSMS = {
     # proves it by reproducing the previous hash without that one key.
     "orchestrator": "890af39efa2cde911c7c89644cf5f5951994cbaeccdd198b7082813be3dc9b55",
     "classifier": "1ada9e1547adb115ae5ad902c4e612dd2290f355ed7b6d897679ef053465b6c7",
-    "simple_calculator": "4277a46339b2373db1fbb2b802a339f1f096e7390a4b6b52031c34e911826bde",
+    "simple_calculator": "5e74e1cb5164c203afafedc292131cc5553554c36d68fb2183f92a22bdf2f32b",
     "analytical": "13fd110501336bf248d06cc4376c1fb0798fcc84713e0fb655f2cefc154f4a20",
     "deductive": "d0d5c2cfb7978714284bbc47f3c71415c274e6a07ca15345bb8b9a0d3435174e",
     "inductive": "aedd000dba3f897707b774a8bcc2ffdf0f15a3edf7d8c831d6aa05cc2f250e72",

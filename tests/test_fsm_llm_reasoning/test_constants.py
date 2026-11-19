@@ -4,8 +4,11 @@ Unit tests for reasoning engine constants.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
+from fsm_llm.core.verify import FSMValidator
 from fsm_llm.reasoning.constants import (
     ORCHESTRATOR_HANDLER_ONLY_KEYS,
     ClassifierStates,
@@ -18,6 +21,7 @@ from fsm_llm.reasoning.constants import (
     ReasoningType,
 )
 from fsm_llm.reasoning.handlers import ReasoningHandlers
+from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
 
 
 class TestReasoningType:
@@ -100,10 +104,9 @@ class TestContextKeys:
         assert ContextKeys.MAX_RETRIES_REACHED == "max_retries_reached"
 
     def test_calculator_keys(self):
-        assert ContextKeys.OPERAND1 == "operand1"
-        assert ContextKeys.OPERAND2 == "operand2"
-        assert ContextKeys.OPERATOR == "operator"
+        assert ContextKeys.CALCULATION_EXPRESSION == "calculation_expression"
         assert ContextKeys.CALCULATION_RESULT == "calculation_result"
+        assert ContextKeys.CALCULATION_ERROR == "calculation_error"
 
     def test_reasoning_type_result_keys(self):
         """Each reasoning type should have result keys."""
@@ -128,6 +131,8 @@ class TestHandlerNames:
         assert HandlerNames.RETRY_LIMITER == "RetryLimiter"
         assert HandlerNames.RETRY_KEY_CLEARER == "RetryKeyClearer"
         assert HandlerNames.HYBRID_LOOP_COUNTER == "HybridLoopCounter"
+        assert HandlerNames.CALCULATOR_EXECUTOR == "CalculatorExecutor"
+        assert HandlerNames.CALCULATOR_FINALIZER == "CalculatorFinalizer"
 
 
 class TestDefaults:
@@ -169,14 +174,24 @@ class TestHandlerOnlyKeys:
         }
 
     def test_the_fsm_definitions_carry_them(self):
-        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
-
         assert ALL_REASONING_FSMS["orchestrator"]["handler_only_keys"] == list(
             ORCHESTRATOR_HANDLER_ONLY_KEYS
         )
         assert ALL_REASONING_FSMS["hybrid"]["handler_only_keys"] == [
             ContextKeys.HYBRID_LOOP_COUNT
         ]
+        assert ALL_REASONING_FSMS["simple_calculator"]["handler_only_keys"] == [
+            ContextKeys.CALCULATION_RESULT,
+            ContextKeys.CALCULATION_ERROR,
+        ]
+
+    def test_the_calculator_fsm_validates_clean(self):
+        """No D-054 warning: the handler-written keys are not ``required_context_keys``."""
+        result = FSMValidator(
+            copy.deepcopy(ALL_REASONING_FSMS["simple_calculator"])
+        ).validate()
+        assert result.is_valid
+        assert not result.warnings
 
 
 class TestErrorMessages:
@@ -192,6 +207,10 @@ class TestErrorMessages:
 
 class TestRemovedLegacyConstants:
     """Absence pins: each name existed (unread) on the commit before its removal."""
+
+    @pytest.mark.parametrize("name", ["OPERAND1", "OPERAND2", "OPERATOR"])
+    def test_context_key_is_gone(self, name):
+        assert not hasattr(ContextKeys, name)
 
     @pytest.mark.parametrize("name", ["MAX_CONTEXT_SIZE"])
     def test_defaults_name_is_gone(self, name):

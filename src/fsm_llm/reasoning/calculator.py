@@ -1,14 +1,10 @@
 """A total, bounded evaluator for the expression the ``simple_calculator`` strategy extracts.
 
 ``evaluate_expression(text)`` returns an ``int`` or a finite ``float``, or raises ``ValueError``
-with a fixed message, for ANY value: it never raises ``SyntaxError``, ``ZeroDivisionError``,
-``OverflowError``, ``TypeError``, ``RecursionError`` or ``MemoryError``, and it never calls
-``eval``, ``exec`` or ``compile``. ``calculate(text)`` is the same as ``(value, None)`` or
-``(None, reason)``. Standard library only; the model's text is untrusted input.
-
-The bounds hold the cost: the text is capped before it is parsed, so the parse tree, its
-recursion and every literal are small (no int literal near the 4300-digit limit), and an
-integer never grows past ``MAX_RESULT_BITS`` bits, so each operation is a few microseconds.
+with a fixed message, for ANY value (never ``SyntaxError``, ``ZeroDivisionError``,
+``OverflowError``, ``TypeError``, ``RecursionError`` or ``MemoryError``), and never calls
+``eval`` or ``compile``. The text is untrusted model output: it is capped before it is
+parsed and no integer grows past ``MAX_RESULT_BITS`` bits, so each call takes microseconds.
 """
 
 from __future__ import annotations
@@ -17,14 +13,7 @@ import ast
 import math
 import operator
 
-__all__ = [
-    "MAX_EXPONENT",
-    "MAX_EXPRESSION_CHARS",
-    "MAX_EXPRESSION_NODES",
-    "MAX_RESULT_BITS",
-    "calculate",
-    "evaluate_expression",
-]
+__all__ = ["calculate", "evaluate_expression"]
 
 #: Longest accepted text, checked before ``ast.parse``.
 MAX_EXPRESSION_CHARS = 200
@@ -32,8 +21,8 @@ MAX_EXPRESSION_CHARS = 200
 MAX_EXPRESSION_NODES = 100
 #: Largest ``|exponent|`` of ``**``.
 MAX_EXPONENT = 1000
-#: Largest integer, in bits (617 digits, below the 640-digit floor of
-#: ``sys.set_int_max_str_digits``, so ``str(result)`` never raises).
+#: Largest integer, in bits: 617 digits, under the 640-digit floor of
+#: ``sys.set_int_max_str_digits``, so ``str(result)`` never raises.
 MAX_RESULT_BITS = 2048
 
 _OPERATORS = {
@@ -50,13 +39,12 @@ _OPERATORS = {
 def evaluate_expression(text: object) -> int | float:
     """The value of ``text``: numbers, ``+ - * / // % **`` and parentheses.
 
-    ``^`` is not a power (it parses as xor and is refused). An integer-valued float
-    below 2**53 is returned as an ``int`` (``0.15 * 240`` is ``36``); any other float
-    keeps its IEEE value (one that underflows is ``0``). Raises ``ValueError`` (fixed text, no Python wording) for a
-    non-text value, a text over ``MAX_EXPRESSION_CHARS``, more than
-    ``MAX_EXPRESSION_NODES`` nodes, anything but arithmetic (a name, call, string,
-    ``bool``, complex number), a zero divisor, ``|exponent| > MAX_EXPONENT``, a
-    non-finite or complex result and an integer over ``MAX_RESULT_BITS`` bits.
+    ``^`` is xor, not a power, and is refused. An integer-valued float below 2**53 is
+    returned as an ``int`` (``0.15 * 240`` is ``36``); another float keeps its IEEE
+    value (one that underflows is ``0``). Raises ``ValueError`` for a non-text value, a
+    text over ``MAX_EXPRESSION_CHARS``, more than ``MAX_EXPRESSION_NODES`` nodes,
+    anything but arithmetic (a name, call, string, ``bool``, complex), a zero divisor,
+    ``|exponent| > MAX_EXPONENT``, a non-finite or complex result or an over-large int.
     """
     if not isinstance(text, str) or not text.strip():
         raise ValueError("no expression")
@@ -84,7 +72,7 @@ def evaluate_expression(text: object) -> int | float:
 
 
 def calculate(text: object) -> tuple[int | float | None, str | None]:
-    """``(value, None)`` for an expression, ``(None, reason)`` for a refused one; never raises."""
+    """``(value, None)``, or ``(None, reason)`` for a refused expression; never raises."""
     try:
         return evaluate_expression(text), None
     except ValueError as refusal:
@@ -92,7 +80,7 @@ def calculate(text: object) -> tuple[int | float | None, str | None]:
 
 
 def _checked(value: object) -> int | float:
-    """``value`` when it is a finite real number within the bit bound, else ``ValueError``."""
+    """``value`` when a finite real number within the bit bound, else ``ValueError``."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("result is not a real number")
     if isinstance(value, float):

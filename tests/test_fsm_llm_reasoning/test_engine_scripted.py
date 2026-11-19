@@ -384,10 +384,7 @@ class TestHandlerOnlyGate:
             "recommended_reasoning_type": "simple_calculator",
             "reasoning_strategy": "simple_calculator",
             "strategy_rationale": "plain addition",
-            "operand1": 2,
-            "operand2": 3,
-            "operator": "+",
-            "calculation_result": 5,
+            "calculation_expression": "2 + 3",
             "key_insights": ["addition"],
             "final_solution": "5",
         }
@@ -668,10 +665,7 @@ class TestNumericZeroAnswer:
             "recommended_reasoning_type": "simple_calculator",
             "reasoning_strategy": "simple_calculator",
             "strategy_rationale": "plain subtraction",
-            "operand1": 5,
-            "operand2": 5,
-            "operator": "-",
-            "calculation_result": 0,
+            "calculation_expression": "5 - 5",
             "key_insights": ["subtraction"],
             "final_solution": "0",
         }
@@ -684,6 +678,102 @@ class TestNumericZeroAnswer:
         assert context[ContextKeys.PROPOSED_SOLUTION] == 0
         assert context[ContextKeys.VALIDATION_RESULT] is True
         assert context[ContextKeys.RETRY_COUNT] == 0
+
+
+_CALC = ContextKeys.CALCULATION_RESULT
+_CALC_SCRIPT: dict[str, Any] = {
+    "problem_type": "arithmetic",
+    "problem_components": ["15%", "of", "240"],
+    "problem_domain": "math",
+    "recommended_reasoning_type": "simple_calculator",
+    "reasoning_strategy": "simple_calculator",
+    "strategy_rationale": "a percentage",
+    "calculation_expression": "0.15 * 240",
+    "key_insights": ["percentage"],
+    "final_solution": "36",
+}
+
+
+class TestCalculatorEvaluatesTheExpression:
+    """The calculator strategy asks the model for one expression; a handler evaluates it."""
+
+    def test_the_handler_computes_what_the_model_only_wrote_down(self):
+        claims = {_CALC: 999, ContextKeys.CALCULATION_ERROR: "x"}  # a bulk claim
+        llm = _ClaimingLLM(_CALC_SCRIPT, claims)
+        _solution, info = _engine(llm).solve_problem("What is 15% of 240?")
+        context = info["final_context"]
+
+        assert context[_CALC] == context[ContextKeys.PROPOSED_SOLUTION] == 36
+        assert type(context[_CALC]) is int
+        assert context[ContextKeys.VALIDATION_RESULT] is True
+        assert len(llm.field_requests(ContextKeys.CALCULATION_EXPRESSION)) == 1
+        for key in (_CALC, ContextKeys.CALCULATION_ERROR, "operand1", "operator"):
+            assert llm.field_requests(key) == [], key
+        # no Pass 2 reply from either state, and no request at all from perform_calculation
+        assert _replies_from(llm, "extract_elements") == 0
+        assert not any(
+            "<current_state>perform_calculation<" in getattr(r, "system_prompt", "")
+            for r in llm.requests
+        )
+
+    @pytest.mark.parametrize("written", [5, 7.5])
+    def test_a_number_written_as_the_expression_is_still_an_expression(self, written):
+        """The field is a ``str`` field: a JSON number reads as its text, it is not refused."""
+        script = {**_CALC_SCRIPT, "calculation_expression": written}
+        _solution, info = _engine(_ScriptedLLM(script)).solve_problem("What is 5?")
+
+        assert info["final_context"][_CALC] == written
+        assert info["final_context"][ContextKeys.RETRY_COUNT] == 0
+
+    def test_a_long_result_reaches_the_answer_digit_for_digit(self):
+        """The model's own ``final_solution`` (a cut number) is never what is returned."""
+        script = {
+            **_CALC_SCRIPT,
+            "calculation_expression": "2 ** 100",
+            "final_solution": "126765060022822",
+        }
+        llm = _ScriptedLLM(script)
+        solution, info = _engine(llm).solve_problem("What is 2^100?")
+
+        assert solution == info["final_context"][ContextKeys.FINAL_SOLUTION]
+        assert solution == "1267650600228229401496703205376"
+        assert llm.field_requests(ContextKeys.FINAL_SOLUTION) == []
+
+    def test_an_error_is_reported_and_an_explained_one_is_not_retried(self):
+        script = {
+            **_CALC_SCRIPT,
+            "calculation_expression": "10 / 0",
+            "proposed_solution": "Division by zero is undefined.",
+            "final_solution": "Undefined.",
+        }
+        llm = _ScriptedLLM(script)
+        solution, info = _engine(llm).solve_problem("10 / 0?")
+        context = info["final_context"]
+
+        assert context[ContextKeys.CALCULATION_ERROR_DETAILS] == "division by zero"
+        assert _CALC not in context
+        assert context[ContextKeys.RETRY_COUNT] == 0
+        assert solution == "Undefined."  # the model answers: no result to copy
+        assert len(llm.field_requests(ContextKeys.FINAL_SOLUTION)) == 1
+
+    @pytest.mark.parametrize("missing", ["10 / 0", None])
+    def test_an_error_nobody_explains_retries_at_most_the_limit(self, missing):
+        script = {**_CALC_SCRIPT, "calculation_expression": missing}
+        llm = _ScriptedLLM(script)
+        _solution, info = _engine(llm).solve_problem("10 / 0?")
+
+        assert info["final_context"][ContextKeys.RETRY_COUNT] == Defaults.MAX_RETRIES
+        assert len(llm.requests) < 120  # an edge gated on the key cost 428 calls
+
+    def test_a_handler_failure_stops_the_solve(self, monkeypatch):
+        def explode(context):
+            raise RuntimeError("calculator bug")
+
+        monkeypatch.setattr(
+            ReasoningHandlers, "execute_calculation", staticmethod(explode)
+        )
+        with pytest.raises(ReasoningExecutionError, match="calculator bug"):
+            _engine(_ScriptedLLM(_CALC_SCRIPT)).solve_problem("What is 15% of 240?")
 
 
 class TestCallerCannotDriveThePush:

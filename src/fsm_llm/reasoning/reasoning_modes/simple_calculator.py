@@ -1,71 +1,63 @@
 """SIMPLE CALCULATOR FSM - Basic arithmetic operations.
 
 Part of the reasoning FSM definitions (see `reasoning_modes/__init__.py`).
+The model writes ONE expression; the CalculatorExecutor handler evaluates it on
+entry to `perform_calculation` (`ReasoningHandlers.execute_calculation`).
 """
 
 from fsm_llm.reasoning.constants import (
+    CALCULATION_STATE,
     ContextKeys,
 )
 
-from ._phrases import _IMPORTANT_NO_QUESTIONS, _PRESENT_FINAL, _PRESENT_FINDINGS
+from ._phrases import _IMPORTANT_NO_QUESTIONS
+
+_EXPRESSION_INSTRUCTIONS = f"""
+            Write the problem as ONE Python arithmetic expression:
+
+            - Use only numbers, + - * / // % ** and parentheses
+            - Use / for division, // only for whole-number division
+            - "15% of 240" is "0.15 * 240"; "2^3" is "2 ** 3"; "(3 + 4) x 5" is "(3 + 4) * 5"
+            - Write numbers without thousands separators ("1000", not "1,000")
+            - Do NOT compute the answer yourself: a program evaluates the expression
+            - Use problem_components if available, otherwise problem_statement
+
+            {_IMPORTANT_NO_QUESTIONS} Write the expression from the available problem information.
+            """
 
 simple_calculator_fsm = {
     "name": "simple_calculator",
     "description": "Performs simple arithmetic calculations with error handling",
     "initial_state": "extract_elements",
     "persona": "You are a precise calculator that performs arithmetic operations accurately.",
+    "handler_only_keys": [
+        ContextKeys.CALCULATION_RESULT,
+        ContextKeys.CALCULATION_ERROR,
+    ],
     "states": {
         "extract_elements": {
-            "description": "Extract operands and operator from problem",
-            "purpose": f"Extract '{ContextKeys.OPERAND1}', '{ContextKeys.OPERAND2}', and '{ContextKeys.OPERATOR}'",
-            "required_context_keys": [
-                ContextKeys.OPERAND1,
-                ContextKeys.OPERAND2,
-                ContextKeys.OPERATOR,
+            "description": "Write the problem as one arithmetic expression",
+            "purpose": f"Extract '{ContextKeys.CALCULATION_EXPRESSION}'",
+            "field_extractions": [
+                {
+                    "field_name": ContextKeys.CALCULATION_EXPRESSION,
+                    "field_type": "str",
+                    "extraction_instructions": _EXPRESSION_INSTRUCTIONS,
+                }
             ],
-            "extraction_instructions": f"""
-            Extract the mathematical elements from the problem:
-
-            - Identify the first number (operand1)
-            - Identify the second number (operand2)
-            - Identify the operation (+, -, *, /, ^, etc.)
-            - Handle decimal numbers and negative numbers
-            - Extract from problem_components if available, otherwise parse from problem_statement
-
-            For expressions like "2 + 3", set operand1=2, operand2=3, operator="+"
-
-            {_IMPORTANT_NO_QUESTIONS} Extract elements from the available problem information.
-            """,
-            "response_instructions": _PRESENT_FINDINGS,
+            "extraction_instructions": _EXPRESSION_INSTRUCTIONS,
+            "response_instructions": "",
             "transitions": [
                 {
-                    "target_state": "perform_calculation",
-                    "description": "Elements extracted successfully",
+                    "target_state": CALCULATION_STATE,
+                    "description": "Expression extracted",
                 }
             ],
         },
-        "perform_calculation": {
-            "description": "Calculate the arithmetic result",
-            "purpose": f"Calculate and store result in '{ContextKeys.CALCULATION_RESULT}'",
-            "required_context_keys": [ContextKeys.CALCULATION_RESULT],
-            "extraction_instructions": f"""
-            Perform the arithmetic calculation:
-
-            - Execute the operation: operand1 operator operand2
-            - Handle basic operations: +, -, *, /, ^(power)
-            - Manage edge cases: division by zero, overflow, invalid operations
-            - Store the numerical result in calculation_result
-            - If error occurs, store error description in calculation_error
-
-            Examples:
-            - 2 + 3 = 5
-            - 10 / 2 = 5
-            - 5 * 4 = 20
-            - 2^3 = 8
-
-            {_IMPORTANT_NO_QUESTIONS} Perform calculation with extracted elements.
-            """,
-            "response_instructions": _PRESENT_FINAL,
+        CALCULATION_STATE: {
+            "description": "The handler evaluates the expression (no model call)",
+            "purpose": f"Hold '{ContextKeys.CALCULATION_RESULT}' or '{ContextKeys.CALCULATION_ERROR}'",
+            "response_instructions": "",
             "transitions": [],
         },
     },

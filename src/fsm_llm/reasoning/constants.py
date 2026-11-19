@@ -106,9 +106,6 @@ class ContextKeys:
     HYBRID_LOOP_COUNT = "hybrid_loop_count"
 
     # Simple calculator specific
-    OPERAND1 = "operand1"
-    OPERAND2 = "operand2"
-    OPERATOR = "operator"
     CALCULATION_EXPRESSION = "calculation_expression"
     CALCULATION_RESULT = "calculation_result"
     CALCULATION_ERROR = "calculation_error"
@@ -390,6 +387,9 @@ SOLVE_DRIVER_KEYS: tuple[str, ...] = (
     ContextKeys.CLASSIFIED_PROBLEM_TYPE,
 )
 
+# The calculator state whose entry evaluates the extracted expression.
+CALCULATION_STATE = "perform_calculation"
+
 # The hybrid strategy state whose exit the loop counter handler counts; its
 # back edge to the first hybrid state runs at most Defaults.MAX_HYBRID_LOOPS
 # times.
@@ -430,6 +430,8 @@ class HandlerNames:
     RETRY_KEY_CLEARER = "RetryKeyClearer"
     HYBRID_LOOP_COUNTER = "HybridLoopCounter"
     HYBRID_KEY_CLEARER = "HybridKeyClearer"
+    CALCULATOR_EXECUTOR = "CalculatorExecutor"
+    CALCULATOR_FINALIZER = "CalculatorFinalizer"
 
 
 class Defaults:

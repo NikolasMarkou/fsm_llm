@@ -541,7 +541,6 @@ class TestFinalizeCalculation:
         "context",
         [
             {},
-            {_RESULT: 5},
             {ContextKeys.REASONING_TYPE_SELECTED: "analytical", _RESULT: 5},
             dict(_SELECTED),
             {**_SELECTED, _RESULT: None},

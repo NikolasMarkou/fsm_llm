@@ -25,6 +25,7 @@ from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger
 
 from .constants import (
+    CALCULATION_STATE,
     HYBRID_CLEARED_KEYS,
     HYBRID_EVALUATION_STATE,
     HYBRID_FIRST_STATE,
@@ -176,6 +177,19 @@ class ReasoningEngine:
             .when_keys_updated(ContextKeys.PROPOSED_SOLUTION)
             .critical()
             .do(self.handlers.validate_when_insights_ready)
+        )
+
+        self.orchestrator.register_handler(
+            self.orchestrator.create_handler(HandlerNames.CALCULATOR_EXECUTOR)
+            .on_state_entry(CALCULATION_STATE)
+            .critical()
+            .do(self.handlers.execute_calculation)
+        )
+
+        self.orchestrator.register_handler(
+            self.orchestrator.create_handler(HandlerNames.CALCULATOR_FINALIZER)
+            .on_state_entry(OrchestratorStates.FINAL_ANSWER)
+            .do(self.handlers.finalize_calculation)
         )
 
         # Context pruner

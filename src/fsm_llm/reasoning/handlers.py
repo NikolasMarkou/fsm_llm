@@ -262,12 +262,11 @@ class ReasoningHandlers:
 
     @staticmethod
     def execute_calculation(context: dict[str, Any]) -> dict[str, Any]:
-        """Evaluate the ``calculation_expression`` the calculator strategy extracted.
+        """Evaluate the ``calculation_expression`` (on entry to ``perform_calculation``).
 
-        Registered on entry to ``perform_calculation``, a critical handler, so it never
-        raises (``calculate`` answers every value) and makes no LLM call. Returns
+        No LLM call, never raises (it is critical). Returns exactly
         ``{calculation_result: value, calculation_error: None}`` or
-        ``{calculation_result: None, calculation_error: reason}``; no other key.
+        ``{calculation_result: None, calculation_error: reason}``.
         """
         value, error = calculate(context.get(ContextKeys.CALCULATION_EXPRESSION))
         if error is not None:
@@ -281,11 +280,9 @@ class ReasoningHandlers:
     def finalize_calculation(context: dict[str, Any]) -> dict[str, Any]:
         """On entry to ``final_answer``: a calculator run answers with its result.
 
-        ``final_solution`` is read first by ``extract_final_solution`` and is otherwise
-        written by the model, which cuts a long number. Returns
-        ``{final_solution: str(calculation_result)}`` for a ``simple_calculator`` solve
-        with a numeric result (``0`` included, ``bool`` not), else ``{}``; core then
-        extracts ``final_solution`` only when it is unset.
+        ``final_solution`` is read first and is otherwise model-written, which cuts a
+        long number. Returns ``{final_solution: str(result)}`` for a ``simple_calculator``
+        solve with a numeric result (``0`` included, ``bool`` not), else ``{}``.
         """
         result = context.get(ContextKeys.CALCULATION_RESULT)
         if (
