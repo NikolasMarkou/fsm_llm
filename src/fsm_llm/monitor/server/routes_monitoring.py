@@ -207,8 +207,8 @@ async def api_info() -> dict[str, str]:
 
 
 @app.get("/api/capabilities")
-async def api_capabilities() -> dict[str, bool]:
-    """Return which extensions are installed."""
+async def api_capabilities() -> dict[str, Any]:
+    """Return which extensions are installed and the launchable agent types."""
     mgr = get_manager()
     return mgr.get_capabilities()
 

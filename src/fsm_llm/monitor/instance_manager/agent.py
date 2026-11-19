@@ -15,6 +15,7 @@ from fsm_llm.agents import (
     ADaPTAgent,
     AgentConfig,
     DebateAgent,
+    OrchestratorAgent,
     PlanExecuteAgent,
     ReactAgent,
     ReflexionAgent,
@@ -62,6 +63,7 @@ _AGENT_CLASSES: dict[str, type] = {
     "ADaPTAgent": ADaPTAgent,
     "DebateAgent": DebateAgent,
     "SelfConsistencyAgent": SelfConsistencyAgent,
+    "OrchestratorAgent": OrchestratorAgent,  # worker_factory=None: the LLM answers subtasks inline
 }
 
 # Agent types that require a ToolRegistry

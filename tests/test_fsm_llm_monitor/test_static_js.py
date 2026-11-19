@@ -212,6 +212,34 @@ class TestBuilderAgentLaunchFields:
         assert (pre["iters"], pre["timeout"]) == (10, 120)
 
 
+class TestBuilderAgentLaunchGate:
+    """Plan 51fde95b step 13.2: Launch is disabled, with a note, for an agent
+    type ``/api/capabilities`` does not list; unknown capabilities leave it on."""
+
+    def test_a_listed_type_stays_launchable(self, probe):
+        out = probe("builder_agent_gate")
+        assert out["listed"]["disabled"] is False
+        assert out["listed"]["noteShown"] == "none"
+        assert out["backToListed"]["disabled"] is False  # a later result re-enables it
+
+    def test_an_unlisted_type_is_disabled_with_a_note_and_no_request(self, probe):
+        out = probe("builder_agent_gate")
+        for key in ("unlisted", "unlistedPromptChain"):
+            assert out[key]["disabled"] is True
+            assert out[key]["noteShown"] == "block"
+            assert "cannot be launched" in out[key]["note"]
+            assert out[key]["posts"] == 0
+
+    def test_a_capabilities_reply_after_a_reset_is_dropped(self, probe):
+        stale = probe("builder_agent_gate")["staleAfterReset"]
+        assert stale == {"disabled": False, "note": ""}
+
+    def test_a_missing_list_or_a_failed_lookup_leaves_launch_on(self, probe):
+        out = probe("builder_agent_gate")
+        assert out["noList"]["disabled"] is False
+        assert out["capsDown"]["disabled"] is False
+
+
 class TestChatInputAndMarkdownBlocks:
     """Plan 51fde95b step 12.1: the two quirks plan 52ce5464 carried."""
 

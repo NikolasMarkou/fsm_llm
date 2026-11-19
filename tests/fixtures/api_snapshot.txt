@@ -1398,7 +1398,7 @@ fsm_llm.monitor.InstanceManager class
   def get_agent_status(self, instance_id: str) -> dict[str, Any]
   def get_all_activity_snapshots(self, include_ended: bool = True) -> list[ActivityItem]
   def get_all_conversation_snapshots(self, include_ended: bool = True) -> list[ConversationSnapshot]
-  def get_capabilities(self) -> dict[str, bool]
+  def get_capabilities(self) -> dict[str, Any]
   def get_conversation_snapshot(self, conversation_id: str) -> ConversationSnapshot | None
   def get_events(self, limit: int = 50) -> list[MonitorEvent]
   def get_fsm_conversations(self, instance_id: str) -> list[ConversationSnapshot]

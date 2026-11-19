@@ -1065,7 +1065,7 @@ class TestLaunchConstructsEveryAgentClass:
 
         if not agent_mod._AGENT_CLASSES:
             pytest.skip("fsm_llm.agents not importable")
-        assert len(agent_mod._AGENT_CLASSES) == 7
+        assert len(agent_mod._AGENT_CLASSES) == 8  # OrchestratorAgent: LLM-only
 
         constructed: dict[str, threading.Event] = {}
         for name, real_cls in list(agent_mod._AGENT_CLASSES.items()):
@@ -2157,11 +2157,12 @@ class TestInstanceManagerEdgesOfTheSplit:
     """Edges of ``InstanceManager`` that no test pinned before the split and
     that the mutation proof of step 93 reached (D-001)."""
 
-    def test_the_capabilities_report_is_exactly_the_three_flags(self):
+    def test_the_capabilities_report_is_the_flags_and_the_launchable_agent_types(self):
         assert _manager().get_capabilities() == {
             "fsm": True,
             "workflows": True,
             "agents": True,
+            "agent_types": sorted(agent_mod._AGENT_CLASSES),
         }
 
     def test_a_lexical_dot_dot_in_a_preset_id_is_refused_even_inside_the_tree(self):

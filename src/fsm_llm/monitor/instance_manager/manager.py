@@ -28,7 +28,7 @@ from ..exceptions import (
     MonitorConnectionError,
     MonitorInitializationError,
 )
-from .agent import AgentsMixin
+from .agent import _AGENT_CLASSES, AgentsMixin
 from .fsm import FsmMixin
 from .handlers import register_monitor_handlers, unregister_monitor_handlers
 from .lifecycle import LifecycleMixin
@@ -225,11 +225,13 @@ class InstanceManager(
             max_log_lines=self._config.max_log_lines,
         )
 
-    def get_capabilities(self) -> dict[str, bool]:
+    def get_capabilities(self) -> dict[str, Any]:
+        """Flags per extension, and ``agent_types``: the class names ``launch_agent`` runs."""
         return {
             "fsm": True,
             "workflows": True,
             "agents": True,
+            "agent_types": sorted(_AGENT_CLASSES),
         }
 
     def list_instances(self, type_filter: str | None = None) -> list[InstanceInfo]:

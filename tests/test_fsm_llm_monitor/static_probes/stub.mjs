@@ -10,6 +10,7 @@ export class El {
     insertAdjacentHTML(_pos, h) { this.html.push(h); }
     setAttribute(k, v) { this.attrs[k] = v; }
     getAttribute(k) { return this.attrs[k] ?? null; }
+    removeAttribute(k) { delete this.attrs[k]; }
     remove() { els.delete(this.id); }
     querySelector() { return null; }
     querySelectorAll() { return []; }

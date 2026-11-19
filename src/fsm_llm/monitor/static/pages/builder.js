@@ -221,23 +221,7 @@ function _onComplete(data) {
     $('builder-result-status').innerHTML = statusHtml;
     $('builder-result-summary').innerHTML = _buildResultSummary(artifact, artifactType);
 
-    const launchBtn = $('builder-launch-btn');
-    const launchNote = $('builder-launch-note');
-    if (launchBtn) {
-        const known = ['fsm', 'workflow', 'agent'].includes(artifactType);
-        const isWorkflow = artifactType === 'workflow';
-        launchBtn.textContent = known ? `Launch ${artifactType.toUpperCase()}` : 'Launch';
-        launchBtn.style.display = known ? '' : 'none';
-        // The server rejects definition_json launches, so do not offer one.
-        launchBtn.disabled = isWorkflow;
-        if (isWorkflow) launchBtn.setAttribute('aria-describedby', 'builder-launch-note');
-        else launchBtn.removeAttribute('aria-describedby');
-        launchBtn.title = isWorkflow ? 'Workflows cannot be launched from a JSON definition' : '';
-    }
-    if (launchNote) {
-        launchNote.textContent = artifactType === 'workflow' ? WORKFLOW_LAUNCH_NOTE : '';
-        launchNote.style.display = artifactType === 'workflow' ? 'block' : 'none';
-    }
+    _syncLaunch(artifact, artifactType);
 
     // Hide agent launch form from any previous result
     const agentForm = $('builder-agent-launch-form');
@@ -253,6 +237,50 @@ function _onComplete(data) {
 
     $('builder-result-json').textContent = _artifact || '{}';
     showStatus('builder-status', 'Build complete!', 'success');
+}
+
+/** The Launch button and its note for the artifact: workflows never launch; an agent type the manager cannot run is disabled with a note. */
+function _syncLaunch(artifact, artifactType) {
+    const launchBtn = $('builder-launch-btn');
+    const launchNote = $('builder-launch-note');
+    let note = artifactType === 'workflow' ? WORKFLOW_LAUNCH_NOTE : '';
+    if (launchBtn) {
+        const known = ['fsm', 'workflow', 'agent'].includes(artifactType);
+        const isWorkflow = artifactType === 'workflow';
+        launchBtn.textContent = known ? `Launch ${artifactType.toUpperCase()}` : 'Launch';
+        launchBtn.style.display = known ? '' : 'none';
+        // The server rejects definition_json launches, so do not offer one.
+        launchBtn.disabled = isWorkflow;
+        if (isWorkflow) launchBtn.setAttribute('aria-describedby', 'builder-launch-note');
+        else launchBtn.removeAttribute('aria-describedby');
+        launchBtn.title = isWorkflow ? 'Workflows cannot be launched from a JSON definition' : '';
+    }
+    if (launchNote) {
+        launchNote.textContent = note;
+        launchNote.style.display = note ? 'block' : 'none';
+    }
+    if (artifactType === 'agent') _gateAgentLaunch(_agentClass(artifact), _sessionToken);
+}
+
+/** Disable Launch with a note when /api/capabilities does not list the agent class (the list is the server's `_AGENT_CLASSES`). */
+function _gateAgentLaunch(agentClass, token) {
+    fetchJson('/api/capabilities').then(caps => {
+        if (token !== _sessionToken || !Array.isArray(caps?.agent_types) || caps.agent_types.includes(agentClass)) return;
+        const btn = $('builder-launch-btn');
+        const note = $('builder-launch-note');
+        if (btn) { btn.disabled = true; btn.setAttribute('aria-describedby', 'builder-launch-note'); btn.title = 'The monitor cannot launch this agent type'; }
+        if (note) {
+            note.textContent = `${agentClass} cannot be launched from the monitor (its constructor needs arguments a form cannot supply). `
+                + 'Copy or download the definition and build it with the fsm_llm.agents Python API.';
+            note.style.display = 'block';
+        }
+    }).catch(() => {});  // unknown: leave Launch enabled, the server answers 400 for a type it cannot run
+}
+
+/** The server class name of a built agent artifact (builder lowercase type -> class). */
+function _agentClass(artifact) {
+    const raw = (artifact.agent_type || 'react').toLowerCase();
+    return AGENT_TYPE_MAP[raw] || artifact.agent_type || 'ReactAgent';
 }
 
 function _buildResultSummary(artifact, artifactType) {
@@ -485,8 +513,7 @@ function _launchBuilderAgent() {
     let parsed;
     try { parsed = JSON.parse(_artifact); } catch { showError('builder-status', 'Invalid JSON'); return; }
 
-    const rawType = (parsed.agent_type || 'react').toLowerCase();
-    const agentType = AGENT_TYPE_MAP[rawType] || parsed.agent_type || 'ReactAgent';
+    const agentType = _agentClass(parsed);
     const tools = _collectAgentToolStubs(parsed);
     const needsTools = TOOL_BASED_AGENTS.includes(agentType);
 
