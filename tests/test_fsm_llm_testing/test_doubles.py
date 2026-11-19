@@ -12,6 +12,7 @@ pin what the repo's own tests rely on: mutable attributes, subclassing,
 from __future__ import annotations
 
 import ast
+import asyncio
 import inspect
 import subprocess
 import sys
@@ -37,7 +38,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface, implements_complete
-from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM
+from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM, ScriptedLLM
 from tests.test_fsm_llm_regression.workflow_support import passthrough_env
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -538,6 +539,13 @@ class _SyncOnly(LLMInterface):
             self.closed.set()
 
 
+def _outcome(call: Any) -> tuple[Any, ...]:
+    try:
+        return ("ok", call())
+    except Exception as exc:
+        return ("raised", type(exc), str(exc))
+
+
 class TestAsyncDefaults:
     @pytest.mark.parametrize("name", sorted(_TWINS))
     async def test_a_sync_only_interface_runs_on_a_worker_thread(
@@ -572,3 +580,80 @@ class TestAsyncDefaults:
         for name in ("complete", "extract_field", "extract_bulk_data"):
             with pytest.raises(NotImplementedError):
                 await getattr(Bare(), f"a{name}")(_TWINS[name]())
+
+
+def _doubles() -> list[Any]:
+    scripted = dict(
+        replies=["r"], extraction_data={"city": "Oslo"}, default_response="reply"
+    )
+    return [
+        pytest.param(lambda: MockLLM2Interface({"city": "Oslo"}), id="mock"),
+        pytest.param(
+            lambda: PromptGroundedLLM({"city": ("Oslo", "hi")}), id="grounded"
+        ),
+        pytest.param(lambda: ScriptedLLM(**scripted), id="scripted"),
+    ]
+
+
+def _records(llm: Any) -> list[Any]:
+    return list(llm.call_history if hasattr(llm, "call_history") else llm.requests)
+
+
+class TestAsyncMirror:
+    @pytest.mark.parametrize("make", _doubles())
+    @pytest.mark.parametrize("name", sorted(_TWINS))
+    def test_the_twin_gives_the_sync_outcome_and_records(
+        self, make: Any, name: str
+    ) -> None:
+        sync_llm, async_llm, request = make(), make(), _TWINS[name]()
+        expected = _outcome(lambda: getattr(sync_llm, name)(request))
+        actual = asyncio.run(_outcome_async(async_llm, name, request))
+        assert actual == expected
+        assert _records(async_llm) == _records(sync_llm)
+        usage = getattr(sync_llm, "usage", None)
+        if usage is not None:
+            assert async_llm.usage() == usage()
+
+    @pytest.mark.parametrize("make", _doubles())
+    @pytest.mark.parametrize("name", sorted(_TWINS))
+    async def test_the_twins_run_on_the_calling_thread(
+        self, make: Any, name: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm, seen = make(), []
+        real = getattr(type(llm), name)
+
+        def spy(self: Any, request: Any) -> Any:
+            seen.append(threading.get_ident())
+            return real(self, request)
+
+        monkeypatch.setattr(type(llm), name, spy)
+        await _outcome_async(llm, name, _TWINS[name]())
+        assert seen == [threading.get_ident()]
+
+    async def test_the_stream_twin_is_lazy_and_inline(self) -> None:
+        threads: list[int] = []
+
+        class Probe(ScriptedLLM):
+            def generate_response_stream(self, request: Any) -> Iterator[str]:
+                for chunk in super().generate_response_stream(request):
+                    threads.append(threading.get_ident())
+                    yield chunk
+
+        llm = Probe(stream_chunks=["a", "b", "c"])
+        stream = llm.agenerate_response_stream(_reply())
+        assert llm.call_history == []  # lazy, like the sync generator
+        assert await anext(stream) == "a"
+        await stream.aclose()
+        assert [name for name, _ in llm.call_history] == ["generate_response_stream"]
+        assert llm.usage().by_kind["stream"].calls == 1
+        assert threads == [threading.get_ident()]
+        rest = [c async for c in llm.agenerate_response_stream(_reply())]
+        assert rest == ["a", "b", "c"]
+        assert set(threads) == {threading.get_ident()}
+
+
+async def _outcome_async(llm: Any, name: str, request: Any) -> tuple[Any, ...]:
+    try:
+        return ("ok", await getattr(llm, f"a{name}")(request))
+    except Exception as exc:
+        return ("raised", type(exc), str(exc))

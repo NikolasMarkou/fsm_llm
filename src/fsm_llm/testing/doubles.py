@@ -22,7 +22,7 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator
 from typing import NoReturn
 
 from fsm_llm.constants import (
@@ -58,6 +58,44 @@ _KIND_FIELD = USAGE_KIND_BY_CALL_TYPE["field_extraction"]
 _KIND_BULK = USAGE_KIND_BY_CALL_TYPE["data_extraction"]
 
 
+class _AsyncMirror(LLMInterface):
+    """The ``a*`` twins of the three public doubles: the sync method, on the calling thread.
+
+    Interface contract (an ``LLMInterface`` that replaces the worker-thread defaults of
+    the base; the concrete doubles implement the sync methods):
+        - Each ``a<name>`` calls ``self.<name>`` inline, with no ``to_thread``: the same
+          result, the same ``call_history``/``requests`` and meter records, the same
+          errors (a subclass override of the sync method is honoured).
+        - ``agenerate_response_stream`` is lazy like the sync generator; the sync
+          generator is released (and so closed) when the consumer stops early.
+        - Not a public name: it is no part of ``__all__``.
+    """
+
+    async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        return self.complete(request)
+
+    async def agenerate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        return self.generate_response(request)
+
+    async def agenerate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> AsyncGenerator[str, None]:
+        for chunk in self.generate_response_stream(request):
+            yield chunk
+
+    async def aextract_field(
+        self, request: FieldExtractionRequest
+    ) -> FieldExtractionResponse:
+        return self.extract_field(request)
+
+    async def aextract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        return self.extract_bulk_data(request)
+
+
 def state_in_prompt(prompt: str) -> str | None:
     """The state id a response prompt was written for, or ``None``.
 
@@ -74,7 +112,7 @@ def state_in_prompt(prompt: str) -> str | None:
     return match.group(1) if match else None
 
 
-class MockLLM2Interface(LLMInterface):
+class MockLLM2Interface(_AsyncMirror):
     """A fixed-answer LLM double for the 2-pass pipeline.
 
     Not ``unittest.mock``: a plain ``LLMInterface`` subclass with public,
@@ -148,7 +186,7 @@ class MockLLM2Interface(LLMInterface):
         )
 
 
-class PromptGroundedLLM(LLMInterface):
+class PromptGroundedLLM(_AsyncMirror):
     """Fake LLM that knows a fact only when the prompt shows its evidence.
 
     ``MockLLM2Interface`` answers every field from a fixed dict whatever the
@@ -260,7 +298,7 @@ class UnscriptedCallError(AssertionError):
     """
 
 
-class ScriptedLLM(_Metered, LLMInterface):
+class ScriptedLLM(_Metered, _AsyncMirror):
     """A queue-driven ``LLMInterface`` for one test: script the replies, run, assert.
 
     Not ``unittest.mock``: a plain subclass with public, mutable attributes.
