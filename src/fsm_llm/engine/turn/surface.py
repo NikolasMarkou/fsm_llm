@@ -87,7 +87,7 @@ class _PipelineSurface:
             turn: _TurnRecord | None = None,
         ) -> tuple[DataExtractionResponse, bool, str | None]: ...
 
-        def _execute_response_generation_pass(
+        async def _execute_response_generation_pass(
             self,
             instance: FSMInstance,
             user_message: str | None,

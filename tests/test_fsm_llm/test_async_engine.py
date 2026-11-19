@@ -374,6 +374,20 @@ def _play(bound):
     return out
 
 
+async def _aplay(bound):
+    """The same work through ``aprocess``, ``aadvance`` and ``agenerate_initial_response``."""
+    pipeline, instance, cid = bound.pipeline, bound.instance, bound.cid
+    out = []
+    for message in bound.turns:
+        if message is None:
+            out.append(await _aoutcome(pipeline.aadvance(instance, cid), repr))
+            continue
+        instance.context.conversation.add_user_message(message)
+        out.append(await _aoutcome(pipeline.aprocess(instance, message, cid)))
+    out.append(await _aoutcome(pipeline.agenerate_initial_response(instance, cid)))
+    return out
+
+
 class TestSyncModeKeepsTheSyncNames:
     @pytest.mark.parametrize("name", ["plain", "tie", "completion"])
     def test_sync_mode_never_reaches_an_async_twin(self, name):
@@ -391,3 +405,16 @@ class TestSyncModeKeepsTheSyncNames:
                 patch.object(got.llm, "aextract_bulk_data", side_effect=AssertionError)
             )
             assert _seen(got, _play(got)) == expected
+
+
+class TestTurns:
+    @pytest.mark.parametrize("name", sorted(_SCENARIOS))
+    async def test_aprocess_and_aadvance_answer_like_process_and_advance(self, name):
+        """Per kind of turn (plain: field, bulk, classification and the extraction after a
+        transition; a classifier tie; a completion state; silent states; message-free steps;
+        a Pass 2 failure; a handler failure): the reply or the error type, the data, the
+        history, the state, the request bytes in order and the usage meter. The sync and the
+        async name run ONE body, so this proves the transport, not the logic. Kills: a model
+        call that skips its ``a`` twin or takes it in sync mode, an async-only difference in
+        what a failed turn leaves behind (the failure rows)."""
+        await _parity(name, _play, _aplay)

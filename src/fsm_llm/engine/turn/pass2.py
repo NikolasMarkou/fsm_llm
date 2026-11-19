@@ -196,7 +196,7 @@ class Pass2Mixin(_PipelineSurface):
     # Pass 2: Response generation
     # ----------------------------------------------------------
 
-    def _execute_response_generation_pass(
+    async def _execute_response_generation_pass(
         self,
         instance: FSMInstance,
         user_message: str | None,
@@ -239,7 +239,9 @@ class Pass2Mixin(_PipelineSurface):
         )
 
         with llm_call(self.llm_interface, "response_generation", request) as call:
-            response = self.llm_interface.generate_response(request)
+            response: ResponseGenerationResponse = await acall(
+                self.llm_interface, "generate_response", request
+            )
             call.response(response)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)

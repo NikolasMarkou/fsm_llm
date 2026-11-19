@@ -90,6 +90,14 @@ class ConversationExecutor(StateExecutor):
             new_state,
         )
 
+    # DECISION plan-2026-11-19T193704-f150ec28/D-012
+    # ``extract`` and ``after_transition`` above stay the SYNC route and keep their direct reads
+    # of ``_execute_data_extraction`` and ``_extract_after_transition``; these two twins are the
+    # async route and await the async bodies. Do NOT fold ``extract`` into
+    # ``run_sync(self.aextract(...))``: in sync mode the pipeline reaches the executor through
+    # ``acall(executor, "extract", ...)``, so a patch of ``extract`` must stay the thing that is
+    # called (``test_regression_transition_eval``), and ``test_executors`` pins which names this
+    # module reads.
     async def aextract(
         self,
         pipeline: _PipelineServices,

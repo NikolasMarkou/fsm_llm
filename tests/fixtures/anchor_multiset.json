@@ -694,6 +694,16 @@
       "delta": 1,
       "reason": "step 1.3 of plan f150ec28: new anchor at engine/fsm/manager.py where the per-conversation lock is created (a TurnGate, not an RLock); no other token was added or lost",
       "token": "plan-2026-11-19T193704-f150ec28/D-004"
+    },
+    {
+      "delta": 1,
+      "reason": "step 2.3 of plan f150ec28: new anchor at engine/kinds/base.py where the StateExecutor aextract default runs the sync extract on a worker thread (not abstract, not inline, not acall of itself); no other token was added or lost",
+      "token": "plan-2026-11-19T193704-f150ec28/D-003"
+    },
+    {
+      "delta": 1,
+      "reason": "step 2.3 of plan f150ec28: new anchor at engine/kinds/conversation/executor.py where the async twins sit beside the unchanged sync extract and after_transition; no other token was added or lost",
+      "token": "plan-2026-11-19T193704-f150ec28/D-012"
     }
   ]
 }

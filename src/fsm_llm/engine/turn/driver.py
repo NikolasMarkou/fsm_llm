@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
+from fsm_llm.aio import run_sync
 from fsm_llm.constants import METADATA_KEY_TRANSITION_CLASSIFICATION
 from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
@@ -31,6 +32,12 @@ class DriverMixin(_PipelineSurface):
     # ----------------------------------------------------------
 
     def process(self, instance: FSMInstance, message: str, conversation_id: str) -> str:
+        """``run_sync`` over ``aprocess``, the one body."""
+        return run_sync(self.aprocess(instance, message, conversation_id))
+
+    async def aprocess(
+        self, instance: FSMInstance, message: str, conversation_id: str
+    ) -> str:
         """Execute the full 2-pass message processing pipeline.
 
         Pass 1: PRE_PROCESSING handlers → data extraction → context update →
@@ -46,10 +53,16 @@ class DriverMixin(_PipelineSurface):
             Generated response message; the empty string when the turn ended
             on a silent state (empty ``response_instructions``).
         """
-        turn = self._run_turn(instance, message, conversation_id)
+        turn = await self._run_turn(instance, message, conversation_id)
         return turn.response or ""
 
     def advance(self, instance: FSMInstance, conversation_id: str) -> AdvanceResult:
+        """``run_sync`` over ``aadvance``, the one body."""
+        return run_sync(self.aadvance(instance, conversation_id))
+
+    async def aadvance(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> AdvanceResult:
         """Run one turn of the current state with no user message.
 
         The same turn body as ``process`` (snapshot and rollback, handler
@@ -70,7 +83,7 @@ class DriverMixin(_PipelineSurface):
                 can run), or anything the turn body raises, after its rollback.
         """
         self._require_non_terminal(instance, conversation_id)
-        turn = self._run_turn(instance, None, conversation_id)
+        turn = await self._run_turn(instance, None, conversation_id)
         if turn.transition_outcome is None:
             raise FSMError(f"Cannot advance from terminal state '{turn.state_before}'")
         return AdvanceResult(
@@ -95,10 +108,12 @@ class DriverMixin(_PipelineSurface):
                 f"Cannot advance from terminal state '{instance.current_state}'"
             )
 
-    def _run_turn(
+    async def _run_turn(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
     ) -> _TurnRecord:
-        """Run one turn of the current state: the single sync turn body.
+        """Run one turn of the current state: the single turn body, an ``async def`` that
+        ``process`` and ``advance`` drive through ``run_sync`` (it has no sync name: the
+        anchors below name it).
 
         Contract: ``user_message`` is the user's text, or ``None`` for a turn
         with no user message. ``process`` is the entry for a message,
@@ -210,10 +225,12 @@ class DriverMixin(_PipelineSurface):
                 raise
 
             # Pass 1: Data extraction + transition evaluation + execution
-            extraction_response, transition_occurred, previous_state = (
-                self._execute_extraction_and_transition_pass(
-                    instance, user_message, conversation_id, turn=turn
-                )
+            (
+                extraction_response,
+                transition_occurred,
+                previous_state,
+            ) = await self._aexecute_extraction_and_transition_pass(
+                instance, user_message, conversation_id, turn=turn
             )
 
             try:
@@ -232,7 +249,7 @@ class DriverMixin(_PipelineSurface):
                 )
 
                 # Pass 2: Response generation based on final state
-                turn.response = self._execute_response_generation_pass(
+                turn.response = await self._execute_response_generation_pass(
                     instance,
                     user_message,
                     extraction_response,

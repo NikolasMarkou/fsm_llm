@@ -55,6 +55,12 @@ class StateExecutor:
         """The async twin of ``extract``. The default runs ``extract`` on a worker thread in
         async mode, so an executor with only the sync method keeps working (a cancel returns
         at once and the thread runs on)."""
+        # DECISION plan-2026-11-19T193704-f150ec28/D-003
+        # The default twin runs the SYNC ``extract`` through ``_on_worker``. Do NOT make it
+        # abstract (the custom executors of the suite override only ``extract``), do NOT run
+        # ``extract`` inline in async mode (it would block the loop), and do NOT write it as
+        # ``acall(self, "extract", ...)``: ``acall`` looks up ``aextract`` on ``self`` first,
+        # which is this method. ``aafter_transition`` follows the same rule.
         response: DataExtractionResponse = await _on_worker(
             self.extract, pipeline, instance, user_message, conversation_id, state
         )
