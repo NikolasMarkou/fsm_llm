@@ -817,6 +817,20 @@ class TestASymlinkNeverRedirectsTheWriter:
         assert seen["nf.jsonl"] & os.O_NOFOLLOW
         assert seen["nf.lock"] & os.O_NOFOLLOW
 
+    def test_a_log_swapped_between_the_two_opens_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        if os.name == "nt":
+            pytest.skip("Windows refuses to rename a file held open")
+        path = tmp_path / "logs" / "r1.jsonl"
+
+        def swap(directory: Path) -> None:  # between the append and the scan open
+            os.replace(path, path.with_name("moved"))
+            path.write_bytes(b"abc")
+
+        monkeypatch.setattr(jsonl, "fsync_directory", swap)
+        assert isinstance(self._refusal(path, create=True), LogCorruptError)
+
     def test_without_o_nofollow_the_flag_is_zero_and_a_plain_log_still_opens(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

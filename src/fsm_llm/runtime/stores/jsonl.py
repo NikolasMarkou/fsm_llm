@@ -364,13 +364,19 @@ class JsonlWriter:
         )
         if not existed:
             fsync_directory(self.path.parent)
-        read_fd = os.open(self.path, os.O_RDONLY | _binary_flag())
+        read_fd = os.open(self.path, os.O_RDONLY | _binary_flag() | _nofollow())
         try:
+            held, scanned = os.fstat(self._fd), os.fstat(read_fd)
+            # a path swapped since the append fd opened: scan and cut must judge the file
+            # that fd holds (st_ino is 0 on some Windows filesystems: no comparison there)
+            same = (held.st_dev, held.st_ino) == (scanned.st_dev, scanned.st_ino)
+            if held.st_ino and not same:
+                raise LogCorruptError(f"log {self.path.name} changed while opened")
             good = 0
             for event, end in _scan(read_fd):
                 self._seq = event["seq"]
                 good = end
-            size = os.fstat(read_fd).st_size
+            size = scanned.st_size
         finally:
             os.close(read_fd)
         if size > good:  # a torn tail: we hold the lock, so cutting it is ours to do
