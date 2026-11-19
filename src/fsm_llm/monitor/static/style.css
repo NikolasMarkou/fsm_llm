@@ -1590,8 +1590,10 @@ tr.clickable-row.selected td {
 }
 
 .log-pill.active { color: var(--text-on-color); }
+.log-pill.active[data-level="TRACE"]    { background: var(--text-dim); border-color: var(--text-dim); }
 .log-pill.active[data-level="DEBUG"]    { background: var(--text-dim); border-color: var(--text-dim); }
 .log-pill.active[data-level="INFO"]     { background: var(--primary); border-color: var(--primary); }
+.log-pill.active[data-level="SUCCESS"]  { background: var(--success); border-color: var(--success); color: var(--bg); }
 .log-pill.active[data-level="WARNING"]  { background: var(--warning); border-color: var(--warning); color: var(--bg); }
 .log-pill.active[data-level="ERROR"]    { background: var(--danger); border-color: var(--danger); }
 .log-pill.active[data-level="CRITICAL"] { background: var(--danger); border-color: var(--danger); }

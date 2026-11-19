@@ -384,6 +384,27 @@ class TestUiMatchesServerLimits:
         assert max_attr is not None
         assert int(max_attr.group(1)) == MAX_AGENT_ITERATIONS
 
+    def test_log_pills_cover_every_server_level_in_order(self):
+        match = re.search(
+            r'<div class="log-pills" id="log-pills">(.*?)</div>', self._html(), re.S
+        )
+        assert match is not None
+        assert re.findall(r'data-level="(\w+)"', match.group(1)) == list(LOG_LEVELS)
+        on = re.findall(r'class="log-pill active" data-level="(\w+)"', match.group(1))
+        assert on == "INFO SUCCESS WARNING ERROR CRITICAL".split()  # TRACE, DEBUG off
+        logs_js = (self._MONITOR_DIR / "static" / "pages" / "logs.js").read_text(
+            encoding="utf-8"
+        )
+        order = re.search(r"const order = \[([^\]]*)\]", logs_js)
+        assert order is not None
+        assert re.findall(r"'(\w+)'", order.group(1)) == list(LOG_LEVELS)
+
+    def test_css_colours_every_active_log_pill(self):
+        css = (self._MONITOR_DIR / "static" / "style.css").read_text(encoding="utf-8")
+        assert re.findall(r'\.log-pill\.active\[data-level="(\w+)"\]', css) == list(
+            LOG_LEVELS
+        )
+
     def test_css_styles_every_log_level(self):
         css = (self._MONITOR_DIR / "static" / "style.css").read_text(encoding="utf-8")
         for level in LOG_LEVELS:

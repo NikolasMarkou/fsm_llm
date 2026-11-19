@@ -60,7 +60,7 @@ function getActiveLogLevels() {
 }
 
 function getMinLogLevel() {
-    const order = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+    const order = ['TRACE', 'DEBUG', 'INFO', 'SUCCESS', 'WARNING', 'ERROR', 'CRITICAL'];
     const active = getActiveLogLevels();
     for (const level of order) {
         if (active.includes(level)) return level;
