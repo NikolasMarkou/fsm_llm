@@ -2,8 +2,8 @@
 
 `static_probes/*.mjs` import the real modules from a copy of `monitor/static` that carries
 a `package.json` of `"type": "module"`, run on a DOM stand-in, and print one JSON line each.
-No bundler, no npm, no network. Without `node` the probes skip; on a Linux GitHub Actions
-leg a missing `node` fails, so a CI skip cannot hide a regression.
+No bundler, no npm, no network. Without `node` 18 or newer the probes skip; on a Linux GitHub Actions
+leg that fails instead, so a CI skip cannot hide a regression.
 """
 
 import json
@@ -17,18 +17,36 @@ import pytest
 
 _STATIC = Path(__file__).parent.parent.parent / "src" / "fsm_llm" / "monitor" / "static"
 _PROBES = Path(__file__).parent / "static_probes"
-_NODE = shutil.which("node")
+
+
+def _usable_node() -> str | None:
+    """The `node` on PATH when it is 18 or newer (the modules use ?. and top-level await)."""
+    path = shutil.which("node")
+    if path is None:
+        return None
+    try:
+        out = subprocess.run(
+            [path, "--version"], capture_output=True, encoding="utf-8", timeout=20
+        ).stdout
+        return path if int(out.strip().lstrip("v").split(".")[0]) >= 18 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+_NODE = _usable_node()
 
 
 def test_node_is_present_on_linux_ci():
     if os.environ.get("GITHUB_ACTIONS") == "true" and sys.platform == "linux":
-        assert _NODE, "node is missing on a Linux CI leg: the JS probes would all skip"
+        assert _NODE, (
+            "node 18 or newer is missing on a Linux CI leg: the JS probes would all skip"
+        )
 
 
 @pytest.fixture(scope="module")
 def probe(tmp_path_factory):
     if _NODE is None:
-        pytest.skip("node is not installed")
+        pytest.skip("node 18 or newer is not installed")
     root = tmp_path_factory.mktemp("monitor_js")
     (root / "package.json").write_text('{"type": "module"}', encoding="utf-8")
     shutil.copytree(
