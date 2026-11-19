@@ -18,7 +18,6 @@ from pydantic import (
     computed_field,
     field_serializer,
     field_validator,
-    model_validator,
 )
 
 # ============================================================================
@@ -164,6 +163,7 @@ class ReasoningStep(TimestampedModel):
         return sorted(value)
 
     @field_validator("content")
+    @classmethod
     def validate_content_not_empty(cls, v: str) -> str:
         """Ensure content is not just whitespace."""
         if not v.strip():
@@ -171,6 +171,7 @@ class ReasoningStep(TimestampedModel):
         return v.strip()
 
     @field_validator("evidence")
+    @classmethod
     def validate_evidence_items(cls, v: list[str]) -> list[str]:
         """Ensure all evidence items are non-empty."""
         cleaned = [item.strip() for item in v if item.strip()]
@@ -298,21 +299,6 @@ class ReasoningTrace(TimestampedModel):
     decision_points: list[dict[str, Any]] = Field(
         default_factory=list, description="Key decision points in the reasoning process"
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def remove_computed_fields_from_input(cls, data: Any) -> Any:
-        """Remove computed fields from input data to prevent validation errors."""
-        if isinstance(data, dict):
-            # Remove computed field names that might be passed as input
-            computed_fields = {
-                "total_steps",
-                "unique_states_visited",
-                "reasoning_complexity",
-                "average_step_time",
-            }
-            return {k: v for k, v in data.items() if k not in computed_fields}
-        return data
 
     @computed_field  # type: ignore[prop-decorator]
     @property

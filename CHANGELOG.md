@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - `make counts`, `scripts/doc_counts.py` and the documented-count tests of `tests/test_packaging.py` (the three count classes `TestTheMakeTestPinLivesInContributing`, `TestDocumentedTestCountsMatchCollection` and `TestEveryDocumentedCountMatchesCollection`, with the unit tests of the script) are gone, and so is the README test that looked for a test count line. Documents state no count of tests, test files, modules or lines: a reader measures one with `make test` or `pytest --collect-only -q`, and `tests/test_fsm_llm_regression/test_doc_count_ratchet.py` fails when a tracked `.md` file gains one. The rule that a tests README row names a real test file, and that every test file has a row, went with the script.
+- `ReasoningTrace.remove_computed_fields_from_input`, a `model_validator(mode="before")` that dropped the four computed names (`total_steps`, `unique_states_visited`, `reasoning_complexity`, `average_step_time`) from a dict input. It was redundant: `TimestampedModel` has `extra="ignore"`, so those names are still accepted and ignored on input and nothing changes for a caller that never called the method (plan 51fde95b, reasoning audit R5).
 
 ### Fixed
 

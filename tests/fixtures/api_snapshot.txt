@@ -1576,7 +1576,6 @@ fsm_llm.reasoning.ReasoningTrace class(TimestampedModel)
   field decision_points: list[dict[str, Any]] = factory
   property average_step_time
   property reasoning_complexity
-  classmethod def remove_computed_fields_from_input(cls, data: Any) -> Any
   property total_steps
   property unique_states_visited
 fsm_llm.reasoning.ReasoningType class(str, Enum)
