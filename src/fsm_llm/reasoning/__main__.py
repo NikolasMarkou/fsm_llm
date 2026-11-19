@@ -335,21 +335,16 @@ def save_results_to_file(
         trace_info: Reasoning trace information
         output_format: Format used for display output
     """
-    try:
-        # Create parent directories if they don't exist
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+    # Create parent directories if they don't exist
+    save_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Determine save format based on file extension or output format
-        if save_path.suffix.lower() == ".json" or output_format == OutputFormat.JSON:
-            _save_as_json(save_path, problem, solution, trace_info)
-        else:
-            _save_as_text(save_path, problem, solution, trace_info, output_format)
+    # Determine save format based on file extension or output format
+    if save_path.suffix.lower() == ".json" or output_format == OutputFormat.JSON:
+        _save_as_json(save_path, problem, solution, trace_info)
+    else:
+        _save_as_text(save_path, problem, solution, trace_info, output_format)
 
-        logger.info(f"Results saved to: {save_path}")
-
-    except Exception as e:
-        logger.error(f"Failed to save results to {save_path}: {e}")
-        raise
+    logger.info(f"Results saved to: {save_path}")
 
 
 def _save_as_json(
@@ -430,31 +425,26 @@ def solve_problem_with_engine(
     Raises:
         Exception: If reasoning engine initialization or problem solving fails
     """
-    try:
-        # Initialize engine
-        if verbose:
-            logger.info(f"Initializing reasoning engine with model: {model}")
+    # Any failure propagates: main() reports it as the one error line, never the
+    # logger (its record carries a timestamp, D-053 of plan 51fde95b).
+    # Initialize engine
+    if verbose:
+        logger.info(f"Initializing reasoning engine with model: {model}")
 
-        engine = ReasoningEngine(model=model)
+    engine = ReasoningEngine(model=model)
 
-        # Solve problem
-        if verbose:
-            logger.info("Starting problem solving process...")
-            logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
+    # Solve problem
+    if verbose:
+        logger.info("Starting problem solving process...")
+        logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
 
-        solution, trace_info = engine.solve_problem(problem, initial_context)
+    solution, trace_info = engine.solve_problem(problem, initial_context)
 
-        if verbose:
-            logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
-            logger.info("Problem solving completed successfully")
+    if verbose:
+        logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
+        logger.info("Problem solving completed successfully")
 
-        return solution, trace_info
-
-    except ModelNotConfiguredError:
-        raise  # a configuration failure: main() reports it as one line
-    except Exception as e:
-        logger.error(f"Failed to solve problem: {e}")
-        raise
+    return solution, trace_info
 
 
 def main() -> int:
@@ -519,7 +509,7 @@ def main() -> int:
         return 0
 
     except KeyboardInterrupt:
-        logger.info("\nOperation interrupted by user")
+        report_error(_PROG, "interrupted by user")
         return 1
 
     except argparse.ArgumentError as e:
@@ -533,13 +523,15 @@ def main() -> int:
         return 1
 
     except Exception as e:
-        report_error(_PROG, f"error: {e}")
         if verbose:
+            report_error(_PROG, f"error: {e}")
             import traceback
 
             traceback.print_exc()
-        else:
-            report_error(_PROG, "use --verbose for detailed error information")
+        else:  # one line, the hint inside it (D-053)
+            report_error(
+                _PROG, f"error: {e} (use --verbose for detailed error information)"
+            )
         return 1
 
 

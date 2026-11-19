@@ -171,6 +171,8 @@ class TestHandlerOnlyKeys:
             "classified_problem_type",
             "reasoning_push_pending",
             "hybrid_loop_count",  # F3: a model claim must not reach final_context
+            "calculation_result",  # D-052 of plan 51fde95b: no bulk claim is the answer
+            "calculation_error_details",
         }
 
     def test_the_fsm_definitions_carry_them(self):

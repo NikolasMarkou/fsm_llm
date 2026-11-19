@@ -72,3 +72,55 @@ class TestTracebackFollowsTheParsedFlag:
         assert completed.returncode == 1, completed.stderr
         assert "error: boom" in completed.stderr
         assert ("Traceback" in completed.stderr) is traceback
+
+
+_AS_MAIN = (
+    "import runpy, sys\n"
+    "import fsm_llm.reasoning.engine as engine\n"
+    "MODE = sys.argv[1]\n"
+    "class Engine:\n"
+    "    def __init__(self, *a, **k):\n"
+    "        pass\n"
+    "    def solve_problem(self, *a, **k):\n"
+    "        if MODE == 'interrupt':\n"
+    "            raise KeyboardInterrupt\n"
+    "        if MODE == 'fail':\n"
+    "            raise RuntimeError('engine exploded')\n"
+    "        return 'four', {'reasoning_trace': {'steps': []}}\n"
+    "engine.ReasoningEngine = Engine\n"
+    "rest = sys.argv[2:]\n"
+    "sys.argv = ['python -m fsm_llm.reasoning', 'what is 2+2?', '--model', 'x/y', *rest]\n"
+    "runpy.run_module('fsm_llm.reasoning', run_name='__main__', alter_sys=True)\n"
+)
+
+
+class TestEveryErrorIsOneStderrLine:
+    """D-053 of plan 51fde95b: run as ``__main__`` (the module name the library
+    disable does not cover), a failed solve, a failed save and Ctrl-C each print
+    one line on stderr and nothing from the logger."""
+
+    @staticmethod
+    def _run(mode: str, *argv: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-c", _AS_MAIN, mode, *argv],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    @pytest.mark.parametrize(
+        ("mode", "argv", "text"),
+        [
+            ("fail", (), "error: engine exploded"),
+            ("interrupt", (), "interrupted by user"),
+            ("ok", ("--save", "/dev/null/x/out.txt"), "error:"),
+        ],
+        ids=["failed-solve", "ctrl-c", "failed-save"],
+    )
+    def test_one_line_and_no_logger_record(self, mode, argv, text) -> None:
+        completed = self._run(mode, *argv)
+        lines = [ln for ln in completed.stderr.splitlines() if ln.strip()]
+        assert completed.returncode == 1, completed.stderr
+        assert len(lines) == 1, completed.stderr
+        assert lines[0].startswith("python -m fsm_llm.reasoning: ")
+        assert text in lines[0] and "ERROR" not in lines[0] and "|" not in lines[0]

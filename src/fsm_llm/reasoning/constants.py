@@ -356,6 +356,10 @@ RETRY_CLEARED_KEYS: tuple[str, ...] = (
     ContextKeys.PROPOSED_SOLUTION,
     ContextKeys.KEY_INSIGHTS,
     ContextKeys.VALIDATION_RESULT,
+    # The calculator's outcome is the merge's of THIS attempt (D-052 of plan
+    # 51fde95b): a stale error or result, or a caller's claim, never survives.
+    ContextKeys.CALCULATION_RESULT,
+    ContextKeys.CALCULATION_ERROR_DETAILS,
 )
 
 
@@ -372,6 +376,10 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.CLASSIFIED_PROBLEM_TYPE,
     ContextKeys.REASONING_PUSH_PENDING,
     ContextKeys.HYBRID_LOOP_COUNT,
+    # Only the strategy merge writes the calculator's outcome (D-052): a bulk
+    # reply must not claim a result that becomes the answer.
+    ContextKeys.CALCULATION_RESULT,
+    ContextKeys.CALCULATION_ERROR_DETAILS,
 )
 
 # Keys only the engine's own handlers write to choose and push the strategy
@@ -460,6 +468,9 @@ class ErrorMessages:
     """Standard error messages."""
 
     MAX_RETRIES_EXCEEDED = "Maximum retry attempts exceeded"
+    #: The answer of a calculator solve whose expression was refused on every
+    #: attempt; ``{reason}`` is one of the calculator's fixed refusals.
+    CALCULATION_REFUSED = "The calculation could not be completed: {reason}"
     INVALID_REASONING_TYPE = "Invalid reasoning type: {type}"
     FSM_NOT_FOUND = "FSM definition not found: {name}"
 

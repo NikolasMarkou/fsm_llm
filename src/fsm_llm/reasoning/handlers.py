@@ -175,8 +175,11 @@ class ReasoningHandlers:
             == ReasoningType.SIMPLE_CALCULATOR.value
         )
 
-        # Validation checks
-        has_solution = _is_solution(solution)
+        # Validation checks. A refused calculation has no solution, whatever the
+        # model wrote beside it (D-052): the bounded retry runs.
+        has_solution = _is_solution(solution) and not context.get(
+            ContextKeys.CALCULATION_ERROR_DETAILS
+        )
         has_insights = (
             bool(insights) or is_simple_problem
         )  # Simple problems may not need insights
@@ -282,15 +285,22 @@ class ReasoningHandlers:
 
         ``final_solution`` is read first and is otherwise model-written, which cuts a
         long number. Returns ``{final_solution: str(result)}`` for a ``simple_calculator``
-        solve with a numeric result (``0`` included, ``bool`` not), else ``{}``.
+        solve with a numeric result (``0`` included, ``bool`` not); for one whose
+        expression was refused (``calculation_error_details``) the fixed
+        ``ErrorMessages.CALCULATION_REFUSED``, never model text; else ``{}``. Both keys
+        are handler-only and cleared on every attempt (D-052).
         """
-        result = context.get(ContextKeys.CALCULATION_RESULT)
         if (
             context.get(ContextKeys.REASONING_TYPE_SELECTED)
             != ReasoningType.SIMPLE_CALCULATOR.value
-            or isinstance(result, bool)
-            or not isinstance(result, (int, float))
         ):
+            return {}
+        reason = context.get(ContextKeys.CALCULATION_ERROR_DETAILS)
+        if reason:
+            message = ErrorMessages.CALCULATION_REFUSED.format(reason=reason)
+            return {ContextKeys.FINAL_SOLUTION: message}
+        result = context.get(ContextKeys.CALCULATION_RESULT)
+        if isinstance(result, bool) or not isinstance(result, (int, float)):
             return {}
         return {ContextKeys.FINAL_SOLUTION: str(result)}
 

@@ -41,10 +41,11 @@ _ALIAS_PROBES = (
 )
 
 _GOLDEN_FSMS = {
-    # Re-baselined on purpose (F3): the only change is `hybrid_loop_count` added to
-    # `handler_only_keys`; `test_orchestrator_hash_moved_only_by_hybrid_loop_count`
-    # proves it by reproducing the previous hash without that one key.
-    "orchestrator": "890af39efa2cde911c7c89644cf5f5951994cbaeccdd198b7082813be3dc9b55",
+    # Re-baselined on purpose (D-052 of plan 51fde95b): the only change is
+    # `calculation_result` and `calculation_error_details` added to
+    # `handler_only_keys`; `test_orchestrator_hash_moved_only_by_the_calculator_keys`
+    # proves it by reproducing the previous hash without those two keys.
+    "orchestrator": "9fdeca073453c9408fe39f39cc1a497ef876de2a34a4f844c7d3d2bf4aa2de51",
     "classifier": "1ada9e1547adb115ae5ad902c4e612dd2290f355ed7b6d897679ef053465b6c7",
     "simple_calculator": "5e74e1cb5164c203afafedc292131cc5553554c36d68fb2183f92a22bdf2f32b",
     "analytical": "13fd110501336bf248d06cc4376c1fb0798fcc84713e0fb655f2cefc154f4a20",
@@ -183,13 +184,14 @@ class TestOneStrategyTable:
 
 
 _PREVIOUS_ORCHESTRATOR_HASH = (
-    "0c07a006f8422ae033be38263f3c08919fd6aa661ee927db0852c9f19d558cd9"
+    "890af39efa2cde911c7c89644cf5f5951994cbaeccdd198b7082813be3dc9b55"
 )
 
 
-def test_orchestrator_hash_moved_only_by_hybrid_loop_count():
+def test_orchestrator_hash_moved_only_by_the_calculator_keys():
     definition = copy.deepcopy(ALL_REASONING_FSMS["orchestrator"])
-    assert ContextKeys.HYBRID_LOOP_COUNT in definition["handler_only_keys"]
-    definition["handler_only_keys"].remove(ContextKeys.HYBRID_LOOP_COUNT)
+    for key in (ContextKeys.CALCULATION_RESULT, ContextKeys.CALCULATION_ERROR_DETAILS):
+        assert key in definition["handler_only_keys"]
+        definition["handler_only_keys"].remove(key)
 
     assert _hash(definition) == _PREVIOUS_ORCHESTRATOR_HASH

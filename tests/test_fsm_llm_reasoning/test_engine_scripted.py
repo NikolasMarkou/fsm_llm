@@ -739,22 +739,71 @@ class TestCalculatorEvaluatesTheExpression:
         assert solution == "1267650600228229401496703205376"
         assert llm.field_requests(ContextKeys.FINAL_SOLUTION) == []
 
-    def test_an_error_is_reported_and_an_explained_one_is_not_retried(self):
+    @pytest.mark.parametrize(
+        ("expression", "written", "reason"),
+        [
+            ("10 / 0", "Division by zero is undefined.", "division by zero"),
+            ("2 ^ 10", "1000", "not an arithmetic expression"),
+        ],
+    )
+    def test_a_refused_expression_never_ends_with_the_models_own_answer(
+        self, expression, written, reason
+    ):
+        """D-052: the model's text beside a refusal is no solution; the bounded
+        retry runs and the solve ends with the fixed message."""
         script = {
             **_CALC_SCRIPT,
-            "calculation_expression": "10 / 0",
-            "proposed_solution": "Division by zero is undefined.",
-            "final_solution": "Undefined.",
+            "calculation_expression": expression,
+            "proposed_solution": written,
+            "final_solution": written,
         }
         llm = _ScriptedLLM(script)
-        solution, info = _engine(llm).solve_problem("10 / 0?")
+        solution, info = _engine(llm).solve_problem("What is 2^10?")
         context = info["final_context"]
 
-        assert context[ContextKeys.CALCULATION_ERROR_DETAILS] == "division by zero"
-        assert _CALC not in context
-        assert context[ContextKeys.RETRY_COUNT] == 0
-        assert solution == "Undefined."  # the model answers: no result to copy
-        assert len(llm.field_requests(ContextKeys.FINAL_SOLUTION)) == 1
+        assert solution == f"The calculation could not be completed: {reason}"
+        assert context[ContextKeys.CALCULATION_ERROR_DETAILS] == reason
+        assert context.get(_CALC) is None
+        assert context[ContextKeys.RETRY_COUNT] == Defaults.MAX_RETRIES
+        assert context[ContextKeys.MAX_RETRIES_REACHED] is True
+        assert llm.field_requests(ContextKeys.FINAL_SOLUTION) == []
+
+    def test_a_bulk_claim_of_the_result_is_not_the_answer_of_a_refused_solve(self):
+        script = {**_CALC_SCRIPT, "calculation_expression": "10 / 0"}
+        llm = _ClaimingLLM(script, {_CALC: 999})
+        solution, info = _engine(llm).solve_problem("10 / 0?")
+
+        assert "999" not in solution and "division by zero" in solution
+        assert info["final_context"].get(_CALC) is None
+
+    def test_a_refusal_then_a_success_keeps_no_stale_error(self):
+        class Seq(_ScriptedLLM):
+            asked = 0
+
+            def extract_field(self, request):
+                if request.field_name == ContextKeys.CALCULATION_EXPRESSION:
+                    self.asked += 1
+                    expression = "10 / 0" if self.asked == 1 else "6 * 7"
+                    self.script = {**self.script, request.field_name: expression}
+                return super().extract_field(request)
+
+        script = {k: v for k, v in _CALC_SCRIPT.items() if k != "final_solution"}
+        solution, info = _engine(Seq(script)).solve_problem("What is 6 times 7?")
+        context = info["final_context"]
+
+        assert solution == "42" and context[_CALC] == 42
+        assert context[ContextKeys.RETRY_COUNT] == 1
+        assert context.get(ContextKeys.CALCULATION_ERROR_DETAILS) is None
+
+    def test_a_callers_claim_does_not_survive_into_the_answer(self):
+        context = {_CALC: 999, ContextKeys.CALCULATION_ERROR_DETAILS: "stale"}
+        script = {k: v for k, v in _CALC_SCRIPT.items() if k != "final_solution"}
+        solution, info = _engine(_ScriptedLLM(script)).solve_problem(
+            "What is 15% of 240?", initial_context=context
+        )
+
+        assert solution == "36"
+        assert info["final_context"].get(ContextKeys.CALCULATION_ERROR_DETAILS) is None
 
     @pytest.mark.parametrize("missing", ["10 / 0", None])
     def test_an_error_nobody_explains_retries_at_most_the_limit(self, missing):
