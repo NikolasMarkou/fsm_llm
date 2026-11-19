@@ -17,12 +17,17 @@ export class El {
     closest() { return null; }
     focus() {}
     scrollTo() {}
-    appendChild() {}
+    appendChild(child) { (this.children ??= []).push(child); }
+    /** The DOM contract the JSON colouring relies on: the new children replace the old, textContent is their text joined. */
+    replaceChildren(...nodes) {
+        this.children = nodes.flatMap(n => (n.isFragment ? n.children ?? [] : [n]));
+        this.textContent = this.children.map(c => c.textContent).join('');
+    }
     after() {}
 }
 export const el = id => els.get(id) ?? (els.set(id, new El(id)), els.get(id));
 Object.assign(globalThis, {
-    document: { getElementById: el, querySelector: () => null, querySelectorAll: () => [], createElement: () => new El('created'), body: new El('body') },
+    document: { getElementById: el, querySelector: () => null, querySelectorAll: () => [], createElement: () => new El('created'), createDocumentFragment: () => Object.assign(new El('fragment'), { isFragment: true }), body: new El('body') },
     requestAnimationFrame: f => f(),
     getComputedStyle: () => ({ display: 'block' }),
     CSS: { escape: s => s },
