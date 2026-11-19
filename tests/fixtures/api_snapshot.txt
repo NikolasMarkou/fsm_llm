@@ -1332,6 +1332,7 @@ fsm_llm.monitor.EventCollector class
   def create_handler_callbacks(self) -> dict[str, Any]
   def create_loguru_sink(self) -> Any
   def events_after(self, cursor: int, limit: int = 50) -> tuple[list[MonitorEvent], int]
+  def forget_conversations(self, conversation_ids: Iterable[str]) -> None
   def get_events(self, limit: int = 0) -> list[MonitorEvent]
   def get_logs(self, limit: int = 0, level: str | None = None) -> list[LogRecord]
   def get_metrics(self) -> MetricSnapshot

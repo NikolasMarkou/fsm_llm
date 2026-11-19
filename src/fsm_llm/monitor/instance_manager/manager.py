@@ -12,6 +12,7 @@ import threading
 from typing import Any, TypeVar
 
 from fsm_llm import API
+from fsm_llm.logging import logger
 
 from ..collector import EventCollector
 from ..definitions import (
@@ -56,6 +57,7 @@ class InstanceManager(
         self._collectors: dict[str, EventCollector] = {}
         self._global_collector = self._new_collector()
         self._lock = threading.RLock()
+        self._closed = False
 
         # Register loguru sink so log records flow into the collector
         self._setup_loguru_sink()
@@ -151,12 +153,26 @@ class InstanceManager(
             self._attached_api = api
         if previous is not None and previous is not api:
             unregister_monitor_handlers(previous, self._global_collector)
+            # Its handlers are off now, so its END events will never arrive:
+            # stop counting its live conversations (the API stays the
+            # caller's, never closed here, D-015 of plan 5ed71cf2).
+            try:
+                live = previous.list_active_conversations()
+            except Exception as e:
+                logger.debug(f"Failed to list previous API conversations: {e}")
+            else:
+                self._global_collector.forget_conversations(live)
 
     def close(self) -> None:
         """Detach from every API, tear every instance down like
         ``end_instance`` (agents are signalled, not joined) and remove the
-        log sink (the manager can no longer be used afterwards)."""
+        log sink (the manager can no longer be used afterwards). Runs once:
+        a second call (the server's shutdown after the caller's own) does
+        nothing."""
         with self._lock:
+            if self._closed:
+                return
+            self._closed = True
             attached_api = self._attached_api
             instances = list(self._instances.values())
         if attached_api is not None:

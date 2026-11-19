@@ -2368,3 +2368,93 @@ class TestInstanceManagerLoggingModules:
         for module in ("fsm", "lifecycle", "snapshots", "workflow"):
             loaded = importlib.import_module(f"{_PACKAGE}.{module}")
             assert loaded.logger is library_logging.logger, module
+
+
+def _chat_api(llm_text: str = "What is your name?"):
+    """A real ``API`` on a scripted interface, as a caller would attach."""
+    from fsm_llm import API
+    from fsm_llm.testing import MockLLM2Interface
+
+    return API.from_definition(
+        _CHAT_FSM, llm_interface=MockLLM2Interface(response_text=llm_text)
+    )
+
+
+class TestManagerCloseIsIdempotent:
+    """F6 (monitor audit 1.3): ``close()`` runs once; the server's shutdown
+    and a caller's own ``close()`` may both reach it."""
+
+    def test_a_second_close_tears_nothing_down_again(self):
+        mgr = _manager()
+        api = MagicMock()
+        api.list_active_conversations.return_value = []
+        _fsm(mgr, "f1", api)
+
+        mgr.close()
+        mgr.close()
+
+        api.close.assert_called_once_with()
+
+    def test_close_without_instances_twice_is_harmless(self):
+        mgr = _manager()
+
+        mgr.close()
+        mgr.close()
+
+
+class TestAttachApiForgetsThePreviousApisConversations:
+    """F6 (monitor audit 1.6): switching the attached API leaves no live
+    conversation of the old one counted as active on the global collector."""
+
+    def test_the_metric_drops_to_zero_when_another_api_is_attached(self):
+        mgr = _manager()
+        first, second = _chat_api(), _chat_api()
+        mgr.attach_api(first)
+        conv_id, _ = first.start_conversation({})
+        assert mgr.global_collector.get_metrics().active_conversations == 1
+
+        mgr.attach_api(second)
+
+        assert mgr.global_collector.get_metrics().active_conversations == 0
+        # the caller's API is never closed by the manager (D-015): still live
+        assert first.list_active_conversations() == [conv_id]
+        # ending it later records nothing (its handlers are off), and the new
+        # API counts exactly its own
+        first.end_conversation(conv_id)
+        other_id, _ = second.start_conversation({})
+        assert mgr.global_collector.get_metrics().active_conversations == 1
+        second.end_conversation(other_id)
+        assert mgr.global_collector.get_metrics().active_conversations == 0
+
+    def test_attaching_the_same_api_again_keeps_its_conversations_counted(self):
+        mgr = _manager()
+        api = _chat_api()
+        mgr.attach_api(api)
+        api.start_conversation({})
+
+        mgr.attach_api(api)
+
+        assert mgr.global_collector.get_metrics().active_conversations == 1
+
+    def test_a_previous_api_that_cannot_list_its_conversations_is_detached_anyway(self):
+        mgr = _manager()
+        broken = MagicMock()
+        broken.list_active_conversations.side_effect = RuntimeError("closed")
+        mgr.attach_api(broken)
+
+        mgr.attach_api(_chat_api())  # must not raise
+
+        assert mgr.get_active_conversations() == []
+
+    def test_forget_conversations_discards_only_the_ids_it_is_given(self):
+        collector = EventCollector()
+        for conversation_id in ("a", "b"):
+            collector.record_event(
+                MonitorEvent(
+                    event_type="conversation_start", conversation_id=conversation_id
+                )
+            )
+
+        collector.forget_conversations(["a", "unknown"])
+
+        assert collector.get_metrics().active_conversations == 1

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import threading
 from collections import deque
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -235,6 +236,13 @@ class EventCollector:
             self._total_agent_iterations = 0
             self._total_tool_calls = 0
             self._total_workflow_steps = 0
+
+    def forget_conversations(self, conversation_ids: Iterable[str]) -> None:
+        """Stop counting ``conversation_ids`` as active; ids not counted are
+        ignored. For an API whose handlers were switched off (its END events
+        will never arrive). Thread-safe; touches nothing else."""
+        with self._lock:
+            self._active_conversations.difference_update(conversation_ids)
 
     def cleanup(self) -> None:
         """Remove the loguru sink if one was registered."""

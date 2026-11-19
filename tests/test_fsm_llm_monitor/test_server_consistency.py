@@ -567,3 +567,42 @@ class TestChunkedBodyIsCapped:
         )
 
         assert resp.status_code == 413
+
+
+class TestShutdownClosesTheManager:
+    """F6 (monitor audit 1.3): leaving the server's lifespan closes the
+    manager, so what it runs ends: conversations end on the metric and the
+    instance's monitor handlers go inactive (the sink alone was removed)."""
+
+    def test_lifespan_exit_ends_the_live_conversations(self, monkeypatch):
+        from fsm_llm.monitor.instance_manager.handlers import monitor_handlers_on
+        from tests.test_fsm_llm_monitor import test_instance_manager as helpers
+
+        mgr, inst, _conv = helpers.TestDestroyClosesBeforeUnregister()._live_manager(
+            monkeypatch
+        )
+        configure(manager=mgr)
+        collector = mgr.global_collector
+
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200
+            assert collector.get_metrics().active_conversations == 1
+            assert monitor_handlers_on(inst.api, collector)
+
+        assert collector.get_metrics().active_conversations == 0
+        assert inst.api.list_active_conversations() == []
+        assert monitor_handlers_on(inst.api, collector) == []
+
+    def test_leaving_the_lifespan_after_a_manual_close_stops_the_engine_once(self):
+        mgr = _manager()
+        api = mock.MagicMock()
+        api.list_active_conversations.return_value = []
+        from fsm_llm.monitor.instance_manager.managed import ManagedFSM
+
+        mgr._instances["f1"] = ManagedFSM(instance_id="f1", api=api)
+        configure(manager=mgr)
+
+        with TestClient(app):
+            mgr.close()
+
+        api.close.assert_called_once_with()

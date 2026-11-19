@@ -53,9 +53,11 @@ _requests_processed: int = 0
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage server startup/shutdown lifecycle."""
     yield
-    # Shutdown: remove loguru sink to prevent resource leaks
+    # Shutdown: close the manager (ends what it runs, detaches its handlers,
+    # removes the loguru sink); `close()` is idempotent, a caller may have
+    # closed it already.
     if _manager is not None:
-        _manager.global_collector.cleanup()
+        _manager.close()
 
 
 def _env_list(name: str) -> list[str]:
