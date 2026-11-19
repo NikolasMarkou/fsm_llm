@@ -109,6 +109,7 @@ class ContextKeys:
     OPERAND1 = "operand1"
     OPERAND2 = "operand2"
     OPERATOR = "operator"
+    CALCULATION_EXPRESSION = "calculation_expression"
     CALCULATION_RESULT = "calculation_result"
     CALCULATION_ERROR = "calculation_error"
 

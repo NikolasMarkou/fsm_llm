@@ -493,3 +493,61 @@ class TestContextManagerEnforcement:
         """Empty context should return empty dict regardless of max_size."""
         result = ContextManager.extract_relevant_context({}, ["key"], max_size=10)
         assert result == {}
+
+
+_EXPR = ContextKeys.CALCULATION_EXPRESSION
+_RESULT = ContextKeys.CALCULATION_RESULT
+_ERROR = ContextKeys.CALCULATION_ERROR
+_SELECTED = {ContextKeys.REASONING_TYPE_SELECTED: ReasoningType.SIMPLE_CALCULATOR.value}
+
+
+class TestExecuteCalculation:
+    """The calculator handler: no model call, two keys written, never raises."""
+
+    @pytest.mark.parametrize(
+        ("expression", "value"),
+        [("0.15 * 240", 36), ("5 - 5", 0), ("2 ** 100", 2**100)],
+    )
+    def test_writes_the_result_and_clears_the_error(self, expression, value):
+        out = ReasoningHandlers.execute_calculation(
+            {_EXPR: expression, _ERROR: "stale"}
+        )
+        assert out == {_RESULT: value, _ERROR: None}
+        assert type(out[_RESULT]) is type(value)
+
+    @pytest.mark.parametrize(
+        "context",
+        [{}, {_EXPR: None}, {_EXPR: ""}, {_EXPR: ["1+1"]}, {_EXPR: 5}]
+        + [{_EXPR: text} for text in ("10 / 0", "x + 1", "9 ** 9 ** 9", "2 ^ 3")],
+    )
+    def test_a_bad_expression_is_an_error_result_not_an_exception(self, context):
+        out = ReasoningHandlers.execute_calculation(context)
+        assert set(out) == {_RESULT, _ERROR}
+        assert out[_RESULT] is None
+        assert isinstance(out[_ERROR], str) and out[_ERROR]
+
+
+class TestFinalizeCalculation:
+    """On entry to final_answer a calculator run answers with its result, not the model's copy."""
+
+    @pytest.mark.parametrize(
+        ("result", "text"), [(36, "36"), (0, "0"), (2**100, str(2**100)), (0.5, "0.5")]
+    )
+    def test_the_result_is_the_final_solution(self, result, text):
+        out = ReasoningHandlers.finalize_calculation({**_SELECTED, _RESULT: result})
+        assert out == {ContextKeys.FINAL_SOLUTION: text}
+
+    @pytest.mark.parametrize(
+        "context",
+        [
+            {},
+            {_RESULT: 5},
+            {ContextKeys.REASONING_TYPE_SELECTED: "analytical", _RESULT: 5},
+            dict(_SELECTED),
+            {**_SELECTED, _RESULT: None},
+            {**_SELECTED, _RESULT: True},
+            {**_SELECTED, _RESULT: "36"},
+        ],
+    )
+    def test_nothing_else_is_written(self, context):
+        assert ReasoningHandlers.finalize_calculation(context) == {}
