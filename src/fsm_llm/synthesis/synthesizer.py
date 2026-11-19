@@ -338,10 +338,10 @@ class FSMSynthesizer:
         goal: str,
         ins: tuple[str, ...],
         keys: tuple[str, ...],
-        reference: str | None,
+        reference: dict[str, Any] | None,
     ) -> CompileResult:
-        """``compile`` after the argument checks; ``reference`` is the JSON text
-        of a stored near miss for ``compile_messages`` (or ``None``)."""
+        """``compile`` after the argument checks; ``reference`` is the stored near
+        miss (a definition dict) for ``compile_messages`` (or ``None``)."""
         policy = self.policy
         if policy.require_simulation and self.simulator is None:
             raise SynthesisError(
@@ -532,8 +532,8 @@ class FSMSynthesizer:
 
     def _reference(
         self, goal: str, ins: Sequence[str], keys: Sequence[str], min_lifecycle: str
-    ) -> str | None:
-        """The stored near miss for the compile prompt: the JSON of the best
+    ) -> dict[str, Any] | None:
+        """The stored near miss for the compile prompt: the definition of the best
         record ``near_misses`` finds that scores as a reuse would (the same
         threshold per scale, D-033), abort path stripped; else ``None``. A hint
         only: a failure to read it is no failure of the compile."""
@@ -553,7 +553,7 @@ class FSMSynthesizer:
                     data = library.get_definition(match.record.digest)
                     stored = strip_abort(data.model_dump(exclude_defaults=True))
                     if stored is not None:
-                        return json.dumps(stored, sort_keys=True, separators=(",", ":"))
+                        return stored
         except LibraryError:
             logger.warning("the library could not give a near miss; compiling without")
         return None
