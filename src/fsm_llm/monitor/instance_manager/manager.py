@@ -158,6 +158,13 @@ class InstanceManager(
             # caller's, never closed here, D-015 of plan 5ed71cf2).
             try:
                 live = previous.list_active_conversations()
+                # a pushed frame has a conversation id of its own, and START
+                # counted it
+                live += [
+                    f.conversation_id
+                    for stack in list(previous.conversation_stacks.values())
+                    for f in list(stack)
+                ]
             except Exception as e:
                 logger.debug(f"Failed to list previous API conversations: {e}")
             else:

@@ -2426,6 +2426,15 @@ class TestAttachApiForgetsThePreviousApisConversations:
         second.end_conversation(other_id)
         assert mgr.global_collector.get_metrics().active_conversations == 0
 
+    def test_a_pushed_frames_conversation_is_forgotten_too(self):
+        mgr, first = _manager(), _chat_api()
+        mgr.attach_api(first)
+        first.push_fsm(first.start_conversation({})[0], _CHAT_FSM)
+
+        mgr.attach_api(_chat_api())
+
+        assert mgr.global_collector.get_metrics().active_conversations == 0
+
     def test_attaching_the_same_api_again_keeps_its_conversations_counted(self):
         mgr = _manager()
         api = _chat_api()
