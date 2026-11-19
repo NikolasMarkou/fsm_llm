@@ -2662,6 +2662,12 @@ button.btn.btn-warning:hover {
     list-style: disc;
 }
 
+.md-body ol {
+    margin: var(--space-1) 0;
+    padding-left: var(--space-5);
+    list-style: decimal;
+}
+
 .md-body li {
     margin-bottom: var(--space-1);
 }
