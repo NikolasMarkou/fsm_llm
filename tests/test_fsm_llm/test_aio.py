@@ -395,6 +395,23 @@ class TestAiterate:
         assert drive[1](drain(held, stop=2)) == [0, 1]
         assert log == ["closed"]
 
+    def test_a_source_that_is_both_follows_the_mode(self, drive):
+        used: list[str] = []
+
+        class Both:  # the shape of litellm's stream wrapper: a sync and an async side
+            def __iter__(self):
+                used.append("sync")
+                return iter([1, 2])
+
+            async def __aiter__(self):
+                used.append("async")
+                yield 1
+                yield 2
+
+        mode, run = drive
+        assert run(drain(Both())) == [1, 2]
+        assert used == [mode]
+
     def test_an_async_source_is_iterated_natively(self, drive):
         async def source():
             yield 1

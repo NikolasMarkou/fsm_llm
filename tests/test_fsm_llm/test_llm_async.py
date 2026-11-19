@@ -543,6 +543,29 @@ class TestTheStream:
         errors = [c[0] for c in chunks if isinstance(c, tuple)]
         assert errors == ([] if scenario == "success" else ["LLMResponseError"])
 
+    async def test_a_wrapper_with_a_sync_and_an_async_side_is_read_on_the_modes_side(
+        self,
+    ) -> None:
+        # litellm's stream wrapper iterates both ways; its async side needs a running loop
+        used: list[str] = []
+
+        class Both:
+            def __iter__(self) -> Iterator[Any]:
+                used.append("sync")
+                return iter(_STREAMS["success"])
+
+            async def __aiter__(self) -> AsyncIterator[Any]:
+                used.append("async")
+                for chunk in _STREAMS["success"]:
+                    yield chunk
+
+        got = {}
+        for transport in ("sync", "async"):
+            with _providers(lambda **_: Both(), lambda **_: Both()):
+                got[transport] = await _stream(_llm(), transport)
+        assert got["sync"] == got["async"] == ["Hel", "lo"]
+        assert used == ["sync", "async"]
+
     async def test_nothing_is_sent_before_the_first_next(self) -> None:
         for transport in ("sync", "async"):
             llm = _llm()
@@ -574,6 +597,37 @@ class TestTheStream:
                     assert closed == []
                     await agen.aclose()
             assert closed == ["closed"], transport
+
+
+# --- the real library: litellm's own ``mock_response`` answers, no network, no patch -----
+
+
+class TestTheRealLibrary:
+    """Unit doubles cannot show how litellm's wrappers behave (its stream is both sync and
+    async, and its async side needs a loop): one pass through the real ``completion`` and
+    ``acompletion`` for every kind of call."""
+
+    async def test_both_names_read_the_same_reply_the_same_stream_and_the_same_meter(
+        self,
+    ) -> None:
+        def real() -> LiteLLMInterface:
+            return LiteLLMInterface(
+                "gpt-4o", api_key="sk-none", mock_response="Hello there"
+            )
+
+        sync, async_ = real(), real()
+        request, complete = (
+            _METHODS["generate_response"][0](),
+            _METHODS["complete"][0](),
+        )
+        assert sync.generate_response(request) == await async_.agenerate_response(
+            request
+        )
+        streamed = [chunk async for chunk in async_.agenerate_response_stream(request)]
+        assert list(sync.generate_response_stream(request)) == streamed
+        assert "".join(streamed) == "Hello there" and len(streamed) > 1
+        assert sync.complete(complete) == await async_.acomplete(complete)
+        assert sync.usage() == async_.usage() and sync.usage().calls == 3
 
 
 # --- the subclass guard (D-009): it warns, it never changes dispatch -------------------

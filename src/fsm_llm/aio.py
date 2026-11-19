@@ -144,9 +144,12 @@ async def aiterate(source: Iterable[T] | AsyncIterable[T]) -> AsyncGenerator[T, 
 
     An async iterable is iterated natively and ``aclose``d on exit. A sync one is stepped
     inline in sync mode and one ``next`` per worker thread in async mode, so the loop is
-    never blocked.
+    never blocked. A source that is both (litellm's stream wrapper) follows the mode: its
+    sync side in sync mode, where there is no loop to run its async side on.
     """
-    if isinstance(source, AsyncIterable):
+    if isinstance(source, AsyncIterable) and not (
+        SYNC.get() and isinstance(source, Iterable)
+    ):
         ait = source.__aiter__()
         try:
             async for item in ait:
