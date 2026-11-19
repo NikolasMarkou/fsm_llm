@@ -7,15 +7,17 @@ function bodies are unchanged.
 
 from __future__ import annotations
 
-import threading
 import traceback
 from functools import wraps
-from typing import Any, Literal, Protocol, overload
+from typing import TYPE_CHECKING, Any, Literal, Protocol, overload
 
 from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH, has_internal_prefix
 from fsm_llm.context.filtering import filter_context_tree
 from fsm_llm.core.definitions import FSMError, FSMInstance
 from fsm_llm.logging import logger
+
+if TYPE_CHECKING:
+    from .gate import TurnGate
 
 # --------------------------------------------------------------
 # Caller-visible context filter
@@ -105,7 +107,7 @@ class _ConversationRegistry(Protocol):
     """
 
     instances: dict[str, FSMInstance]
-    _conversation_locks: dict[str, threading.RLock]
+    _conversation_locks: dict[str, TurnGate]
 
 
 @overload
@@ -114,7 +116,7 @@ def _conversation_entry(
     conversation_id: str,
     *,
     missing_lock: Literal["raise", "keyerror"],
-) -> tuple[FSMInstance, threading.RLock]: ...
+) -> tuple[FSMInstance, TurnGate]: ...
 
 
 @overload
@@ -123,7 +125,7 @@ def _conversation_entry(
     conversation_id: str,
     *,
     missing_lock: Literal["unlocked"],
-) -> tuple[FSMInstance, threading.RLock | None]: ...
+) -> tuple[FSMInstance, TurnGate | None]: ...
 
 
 def _conversation_entry(
@@ -131,7 +133,7 @@ def _conversation_entry(
     conversation_id: str,
     *,
     missing_lock: Literal["raise", "keyerror", "unlocked"],
-) -> tuple[FSMInstance, threading.RLock | None]:
+) -> tuple[FSMInstance, TurnGate | None]:
     """The instance and the per-conversation lock of ``conversation_id``.
 
     Interface contract: the CALLER HOLDS ``manager._lock`` (the lookup reads

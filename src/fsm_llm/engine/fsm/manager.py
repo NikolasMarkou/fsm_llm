@@ -56,6 +56,7 @@ from fsm_llm.logging import logger
 from fsm_llm.runtime.stores import check_conversation_id
 
 from .budget import TurnBudget, check_turn_limits, open_budget
+from .gate import TurnGate
 from .helpers import _conversation_entry, with_conversation_context
 from .snapshots import SnapshotsMixin
 from .turns import TurnsMixin
@@ -129,7 +130,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         # Lock for thread-safe access to shared class-level dicts
         self._lock = threading.Lock()
         # Per-conversation locks to prevent concurrent mutations on the same instance
-        self._conversation_locks: dict[str, threading.RLock] = {}
+        self._conversation_locks: dict[str, TurnGate] = {}
         # Conversation ids with a turn in flight (D-018 re-entrancy guard). Added
         # under ``_lock`` after ``conv_lock`` is acquired; discarded WITHOUT any
         # lock in the ``finally`` (a lone ``set.discard`` is atomic under the GIL).
@@ -370,7 +371,15 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
             if explicit_id and conversation_id in self.instances:
                 raise FSMError(f"conversation id '{conversation_id}' is already live")
             self.instances[conversation_id] = instance
-            self._conversation_locks[conversation_id] = threading.RLock()
+            # DECISION plan-2026-11-19T193704-f150ec28/D-004
+            # The per-conversation lock is a ``TurnGate`` (``gate.py``), owned by a ticket
+            # in a ContextVar, not a ``threading.RLock`` owned by a thread. Do NOT go back
+            # to an RLock: under asyncio every task of a loop shares one thread, so an RLock
+            # lets a sibling task's reader or ``end_conversation`` run INSIDE a suspended
+            # turn (probed: it ended a conversation mid-turn). Do NOT add a waiting async
+            # acquire or a queue of waiters: a second turn is refused (D-001) and a blocking
+            # reader on the loop thread fails fast with ``ConversationBusyError``.
+            self._conversation_locks[conversation_id] = TurnGate(conversation_id)
             budget = open_budget(max_steps, max_seconds)
             if budget is not None:
                 self._turn_budgets[conversation_id] = budget

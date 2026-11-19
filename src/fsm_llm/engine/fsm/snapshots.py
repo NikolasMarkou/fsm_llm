@@ -33,6 +33,8 @@ from .helpers import (
 if TYPE_CHECKING:
     from fsm_llm.core.definitions import FSMDefinition, State
 
+    from .gate import TurnGate
+
 
 # Return type of a read snapshot (see FSMManager._read_under_lock).
 _SnapshotT = TypeVar("_SnapshotT")
@@ -84,7 +86,7 @@ class SnapshotsMixin:
     if TYPE_CHECKING:
         # Provided by ``FSMManager`` (declared for mypy only).
         _lock: threading.Lock
-        _conversation_locks: dict[str, threading.RLock]
+        _conversation_locks: dict[str, TurnGate]
         instances: dict[str, FSMInstance]
 
         def get_fsm_definition(self, fsm_id: str) -> FSMDefinition: ...
@@ -104,7 +106,10 @@ class SnapshotsMixin:
             ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS`` (read at call time), logs
             ERROR and raises ``ConversationBusyError`` (an ``FSMError``, "...
             still processing a turn ..."); the lock is not held and nothing
-            has been changed.
+            has been changed. A ``TurnGate`` held by a turn of THIS event loop
+            (a task) never makes the loop thread wait: the gate raises
+            ``ConversationBusyError`` at once, with no log line, and nothing has
+            been changed either.
         """
         if not conv_lock.acquire(timeout=END_CONVERSATION_LOCK_TIMEOUT_SECONDS):
             logger.error(
@@ -137,7 +142,10 @@ class SnapshotsMixin:
           - Failure: raises ``FSMError`` if the conversation is unknown, or if
             its instance is present but its per-conversation lock is missing
             (a broken create-together / remove-together invariant — L11), or
-            (``bounded`` only) if the lock is not acquired in time.
+            (``bounded`` only) if the lock is not acquired in time. Called on
+            the thread of an event loop while a task of that loop holds the
+            conversation, it raises ``ConversationBusyError`` at once (bounded
+            or not): waiting would block the loop that must release it.
 
         HARD RULE: ``snapshot_fn`` runs while holding ``conv_lock`` and MUST do
         only fast in-memory work. It MUST NOT call ``resolve_state_definition`` /

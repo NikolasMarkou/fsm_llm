@@ -1,19 +1,15 @@
-"""``TurnGate``: the per-conversation lock owned by a ticket (plan f150ec28, step 1.2).
+"""``TurnGate``: the per-conversation lock owned by a ticket (plan f150ec28, steps 1.2 and 1.3).
 
-The ``threading.RLock`` it replaces is owned by a thread, so under asyncio every task of one
-loop is "the same owner". The rows below state who the owner is, in terms of behaviour: a
-child task, a ``to_thread`` worker and a ``copy_context().run`` thread re-enter; a sibling task
-and a plain thread do not. Each row names the mutant of the gate it exists to kill:
-
-- ownership by thread id: ``test_who_inherits_the_ticket[sibling_task]``
-- exclusion removed: ``test_a_second_owner_is_refused_at_once``,
-  ``test_a_blocking_acquire_waits_for_the_holder_and_wakes_at_release``
-- release that needs the current Context: ``test_release_by_ticket_works_from_any_context_and_thread``
-- a wait on the loop thread: ``test_a_blocking_acquire_on_the_loop_thread_fails_fast`` (a
-  watchdog frees the holder so the mutant ends the test instead of hanging it)
-- a ticket reset by token: ``test_an_asyncgen_finalizer_releases_without_a_loop_error``
-
-No sleeps and no clock assertion: events and bounded joins only (Windows ticks 15.6 ms).
+The ``threading.RLock`` it replaces is owned by a thread, so every task of one loop is "the same
+owner". The rows state who the owner is: a child task, a ``to_thread`` worker and a
+``copy_context().run`` thread re-enter; a sibling task and a plain thread do not. Each row names
+the mutant of the gate it kills: ownership by thread id (``sibling_task``), exclusion removed
+(the second-owner and the waiting rows), a release that needs the current Context (the
+release-by-ticket row), a wait on the loop thread (the fail-fast row; a watchdog frees the
+holder so the mutant ends the test instead of hanging it), a ticket reset by token (the
+asyncgen finalizer row), a binding never pruned (the pile-up row). The ``TestManagerLevel`` rows
+have the shape of ``findings/probes/p1_reentry.py``. No sleeps and no clock assertion: events and
+bounded joins only (Windows ticks 15.6 ms).
 """
 
 from __future__ import annotations
@@ -21,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import gc
+import json
 import sys
 import threading
 from collections.abc import Callable
@@ -28,9 +25,13 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.core.definitions import ConversationBusyError
+from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, FSMError
 from fsm_llm.engine.fsm import gate as gate_module
 from fsm_llm.engine.fsm.gate import TurnGate
+from fsm_llm.engine.fsm.manager import FSMManager
+from fsm_llm.engine.fsm.turns import _claim_turn, _release_turn
+from fsm_llm.handlers import HandlerTiming, create_handler
+from fsm_llm.testing import ScriptedLLM
 
 BOUND_SECONDS = 10.0
 #: A build whose plain threads copy the Context cannot show the plain-thread row.
@@ -309,3 +310,90 @@ class TestAsyncGeneratorFinalizer:
             blocking=False
         )  # a stale binding grants nothing and blocks nothing
         gate.release()
+
+
+_FSM = json.loads(
+    '{"name": "GateFsm", "description": "d", "initial_state": "chat", "states": {'
+    '"chat": {"id": "chat", "description": "c", "purpose": "p", "response_instructions": "r",'
+    ' "transitions": [{"target_state": "done", "description": "never", "conditions":'
+    ' [{"description": "n", "logic": {"==": [1, 2]}}]}]},'
+    ' "done": {"id": "done", "description": "t", "purpose": "e", "response_instructions": "bye"}}}'
+)
+
+
+def _manager() -> tuple[FSMManager, str]:
+    definition = FSMDefinition(**_FSM)
+    manager = FSMManager(
+        fsm_loader=lambda _id: definition,
+        llm_interface=ScriptedLLM(default_response="hi"),
+    )
+    conversation_id, _ = manager.start_conversation("x")
+    return manager, conversation_id
+
+
+async def _while_a_task_holds(
+    manager: FSMManager, cid: str, probe: Callable[[], None]
+) -> None:
+    """Hold a turn claim in one task, suspended, and run ``probe`` from a sibling task."""
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def turn() -> None:
+        claim = _claim_turn(manager, cid)  # what a turn does first
+        started.set()
+        await release.wait()  # suspended mid-turn, the gate still held
+        _release_turn(manager, cid, *claim)
+
+    async def sibling() -> None:
+        await started.wait()
+        try:
+            probe()
+        finally:
+            release.set()
+
+    await asyncio.gather(turn(), sibling())
+
+
+class TestManagerLevel:
+    async def test_a_sibling_task_cannot_read_or_end_a_conversation_mid_turn(self):
+        manager, cid = _manager()
+
+        def probe() -> None:
+            for call in (
+                lambda: manager.get_conversation_state(cid),
+                lambda: manager.end_conversation(cid),
+            ):
+                with pytest.raises(ConversationBusyError, match=cid):
+                    call()
+            assert cid in manager.instances  # nothing was ended
+
+        await _while_a_task_holds(manager, cid, probe)
+        assert not manager._conversation_locks[cid].locked()
+        assert manager.get_conversation_state(cid) == "chat"  # the holder let go
+        manager.end_conversation(cid)
+        assert cid not in manager.instances
+
+    async def test_a_sync_turn_from_the_loop_thread_is_refused_while_a_task_holds(self):
+        manager, cid = _manager()
+
+        def probe() -> None:
+            with pytest.raises(FSMError, match="already being processed"):
+                manager.process_message(cid, "hello")
+
+        await _while_a_task_holds(manager, cid, probe)
+        assert manager.process_message(cid, "hello") == "hi"  # free again
+
+    def test_a_copy_context_handler_thread_reads_during_the_turn(self):
+        manager, cid = _manager()
+        seen: dict[str, Any] = {}
+
+        def reads_through_the_manager() -> None:
+            ctx = contextvars.copy_context()  # what the handler runner does
+            seen["state"] = _in_thread(manager.get_conversation_state, cid, ctx=ctx)
+
+        manager.handler_system.register_handler(
+            create_handler("reader")
+            .at(HandlerTiming.POST_PROCESSING)
+            .do(lambda context: reads_through_the_manager() or {})
+        )
+        assert manager.process_message(cid, "hello") == "hi"
+        assert seen == {"state": "chat"}
