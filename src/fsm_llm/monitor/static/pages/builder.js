@@ -5,7 +5,7 @@ import { TOOL_BASED_AGENTS } from '../services/state.js';
 import { $, esc, intVal, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
-import { addTypingIndicator, removeTypingIndicator } from './conversations.js';
+import { addTypingIndicator, removeTypingIndicator, showConversationInDrawer } from './conversations.js';
 
 // Agent type mapping: builder lowercase → server class names
 const AGENT_TYPE_MAP = {
@@ -476,8 +476,12 @@ function _launchBuilderFSM() {
         .then(data => {
             showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
             _refreshInstances?.();
-            return postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, {}).then(() => {
-                setTimeout(() => _showPage?.('control'), 500);
+            return postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, {}).then(startData => {
+                setTimeout(() => {
+                    _showPage?.('control');
+                    // Open the new conversation, as the Launch modal does.
+                    if (startData?.conversation_id) showConversationInDrawer(data.instance_id, startData.conversation_id);
+                }, 500);
             });
         })
         .catch(e => showError('builder-status', `Launch failed: ${e.message}`));

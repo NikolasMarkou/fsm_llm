@@ -240,6 +240,21 @@ class TestBuilderAgentLaunchGate:
         assert out["capsDown"]["disabled"] is False
 
 
+class TestBuilderFsmLaunchOpensTheConversation:
+    """Plan 51fde95b step 13.3: the conversation the launch starts opens in the drawer."""
+
+    def test_the_started_conversation_is_selected_after_the_switch_to_control(
+        self, probe
+    ):
+        out = probe("builder_fsm_launch")["withConversation"]
+        assert (out["instance"], out["conv"]) == ("inst-1", "conv-77")
+        assert "control" in out["pages"]
+
+    def test_a_start_reply_with_no_conversation_only_switches_page(self, probe):
+        out = probe("builder_fsm_launch")["withoutConversation"]
+        assert (out["instance"], out["conv"], out["pages"]) == (None, None, ["control"])
+
+
 class TestChatInputAndMarkdownBlocks:
     """Plan 51fde95b step 12.1: the two quirks plan 52ce5464 carried."""
 
