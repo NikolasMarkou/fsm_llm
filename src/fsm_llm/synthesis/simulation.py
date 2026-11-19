@@ -198,7 +198,7 @@ def happy_path(
     no path (a stuck procedure) every declared name says its fixed sample,
     ``min(max_turns, non-terminal states + 1)`` times.
     """
-    fire = edge_witnesses(definition, inputs=inputs)
+    fire = edge_witnesses(definition, inputs=inputs, best_effort=True)
     route = _route(definition, fire)
     outside = frozenset(inputs) | handler_only_names(definition)
     if route is None:

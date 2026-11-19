@@ -25,6 +25,7 @@ from __future__ import annotations
 import itertools
 import math
 from collections.abc import Iterable
+from operator import add, sub
 from typing import Any
 
 from fsm_llm.core.definitions import (
@@ -61,6 +62,9 @@ FILLER = "sample"
 #: empty string is "missing" but not null, and the evaluator reads "true" and
 #: "false" apart from the booleans.
 POOL_STRINGS = ("", "true", "false")
+#: Numeric literals of an unknown edge combined into extra values (sums and
+#: differences) by ``fallback_witness``; a bound, so the pool stays small.
+FALLBACK_LITERALS = 4
 
 
 def _plain(name: Any) -> bool:
@@ -354,8 +358,60 @@ def _states(
     }
 
 
+def fallback_witness(
+    state: State,
+    index: int,
+    narrow: dict[str, tuple[str, tuple[str, ...]]],
+    evaluator: TransitionEvaluator,
+) -> dict[str, Any] | None:
+    """A best-effort context under which the evaluator takes edge ``index`` of
+    ``state``, for an edge outside the fragment (arithmetic, a key against a
+    key). Never a verdict: only ``edge_witnesses(best_effort=True)`` calls it.
+
+    Interface contract: ``narrow`` is ``_narrowing`` of the state. The keys are
+    the ones the edge reads (``var``); the pool is ``_pool`` over the scalar
+    literals at any depth plus sums and differences of the first
+    ``FALLBACK_LITERALS`` numbers, narrowed as for G6a. At most
+    ``MAX_ASSIGNMENTS`` assignments are tried, judged by the whole state.
+    Returns the present keys of the first that opens the edge, else None (also
+    for a dotted read or a computed name). Never raises.
+    """
+    edges = state.transitions or []
+    lits: list[Any] = []
+    keys: set[str] = set()
+    stack: list[Any] = [c.logic for c in edges[index].conditions or []]
+    while stack:  # iterative: model-written logic has no depth we trust
+        node = stack.pop()
+        if isinstance(node, list):
+            stack.extend(node)
+        elif isinstance(node, dict):
+            for op, args in node.items():
+                if op == "var":  # a name is no value, its default is
+                    args = args if isinstance(args, list) else [args]
+                    if not args or not _plain(args[0]):
+                        return None  # dotted (a nested value) or computed
+                    keys.add(args[0])
+                    args = args[1:]
+                stack.append(args)
+        elif _number(node) or isinstance(node, str):
+            lits.append(node)
+    for condition in edges[index].conditions or []:
+        keys.update(condition.requires_context_keys or [])
+    nums = [v for v in lits if _number(v) and _finite(v)][:FALLBACK_LITERALS]
+    pool = lits + [f(a, b) for a in nums for b in nums for f in (add, sub)]
+    names = sorted(keys)
+    pools = [_pool(narrow.get(k), pool) for k in names]
+    found = _first_fires(
+        state, edges, [index], names, pools, evaluator, MAX_ASSIGNMENTS
+    )
+    return (found or {}).get(index)
+
+
 def edge_witnesses(
-    definition: FSMDefinition, *, inputs: Iterable[str] = ()
+    definition: FSMDefinition,
+    *,
+    inputs: Iterable[str] = (),
+    best_effort: bool = False,
 ) -> dict[str, dict[int, dict[str, Any] | None]]:
     """For each state reachable over the edges: edge index -> the context under
     which the evaluator takes that edge's target.
@@ -366,16 +422,29 @@ def edge_witnesses(
     outside the fragment (unknown, it counts as firing) maps to ``None``; every
     other edge maps to the present keys of the first assignment that opens it
     (pool values, ``FILLER`` among them, are plain Python scalars). Never
-    raises.
+    raises. ``best_effort`` (``happy_path`` sets it) fills each such ``None``
+    from ``fallback_witness``; it adds a value, never removes a dead edge, and
+    ``analyze_dryrun`` never reads it.
     """
-    return {
+    found = {
         sid: {
-            i: found.get(i)
+            i: witness.get(i)
             for i in range(len(definition.states[sid].transitions or []))
             if i not in dead
         }
-        for sid, (dead, found) in _states(definition, inputs).items()
+        for sid, (dead, witness) in _states(definition, inputs).items()
     }
+    if best_effort:
+        outside = frozenset(inputs) | handler_only_names(definition)
+        mentions = _mentions(definition)
+        evaluator = TransitionEvaluator()
+        for sid, edges in found.items():
+            narrow = _narrowing(definition.states[sid], sid, mentions, outside)
+            for i in [i for i, w in edges.items() if w is None]:
+                edges[i] = fallback_witness(
+                    definition.states[sid], i, narrow, evaluator
+                )
+    return found
 
 
 def analyze_dryrun(
