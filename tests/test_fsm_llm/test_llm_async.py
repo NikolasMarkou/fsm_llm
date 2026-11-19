@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import inspect
+import json
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import contextmanager
@@ -30,10 +31,15 @@ from litellm.types.utils import (
 from fsm_llm.aio import async_name
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
+    ClassificationSchema,
     CompletionRequest,
+    CompletionResponse,
     FieldExtractionRequest,
+    HierarchicalSchema,
+    IntentDefinition,
     ResponseGenerationRequest,
 )
+from fsm_llm.engine.classification import Classifier, HierarchicalClassifier
 from fsm_llm.llm import LiteLLMEmbedder, LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.logging import logger
@@ -851,3 +857,111 @@ class TestTheEmbedderTwin:
             call = sync.call_args if mode == "sync" else async_.call_args
             seen[mode] = (out, usage, call)
         assert seen["sync"] == seen["async"]
+
+
+# --- the classifier twins (step 6.2): one body per method ------------------------------
+
+
+def _schema(*names: str) -> ClassificationSchema:
+    intents = [IntentDefinition(name=n, description=f"The {n} intent") for n in names]
+    return ClassificationSchema(intents=intents, fallback_intent=names[-1])
+
+
+def _one(intent: str) -> str:
+    return json.dumps({"reasoning": "r", "intent": intent, "confidence": 0.9})
+
+
+_MANY = json.dumps({"intents": [{"intent": "buy", "confidence": 0.9}]})
+_HIERARCHY = HierarchicalSchema(
+    domain_schema=_schema("sales", "support"),
+    intent_schemas={"sales": _schema("buy", "browse")},
+)
+# (method, the replies of a success, the requests a success sends)
+_CLASSIFIERS = {
+    "classify": (_one("buy"),),
+    "classify_multi": (_MANY,),
+    "hierarchical": (_one("sales"), _one("buy")),
+}
+
+
+def _classify_call(
+    method: str, llm: LiteLLMInterface, transport: str
+) -> Awaitable[Any]:
+    if method == "hierarchical":
+        hier = HierarchicalClassifier(_HIERARCHY, llm_interface=llm)
+        name, owner = "classify", hier
+    else:
+        name, owner = method, Classifier(_schema("buy", "browse"), llm_interface=llm)
+    if transport == "async":
+        return getattr(owner, "a" + name)("hi")
+
+    async def now() -> Any:
+        return getattr(owner, name)("hi")
+
+    return now()
+
+
+class TestTheClassifierTwins:
+    @pytest.mark.parametrize("method", list(_CLASSIFIERS))
+    @pytest.mark.parametrize("scenario", ["success", "outage", "malformed"])
+    async def test_both_names_give_one_result_one_request_path_and_one_meter(
+        self, method: str, scenario: str
+    ) -> None:
+        seen: dict[str, tuple[Any, ...]] = {}
+        for transport in ("sync", "async"):
+            replies = iter(_CLASSIFIERS[method])
+
+            def script(*, queue: Iterator[str] = replies, **_: Any) -> Any:
+                if scenario == "outage":
+                    raise RuntimeError("provider down")
+                return _reply("not json" if scenario == "malformed" else next(queue))
+
+            llm = _llm()
+            with _providers(script) as (sync, async_), _observed(_Recorder()) as rec:
+                out = await _outcome(_classify_call(method, llm, transport))
+                landed, other = (
+                    (sync, async_) if transport == "sync" else (async_, sync)
+                )
+                sent = len(_CLASSIFIERS[method]) if scenario == "success" else 1
+                assert (landed.call_count, other.call_count) == (sent, 0)
+            assert llm.usage().calls == sent  # the meter is fed once per request
+            prompt = rec.events[0][1][0]["messages"][0]["content"]
+            assert ("ranked by confidence" in prompt) == (method == "classify_multi")
+            seen[transport] = (out, rec.shape(), llm.usage())
+        assert seen["sync"] == seen["async"]
+        out = seen["async"][0]
+        failure = {
+            "outage": "ClassificationError",
+            "malformed": "ClassificationResponseError",
+        }
+        assert (
+            out[1] == failure[scenario] if scenario in failure else out[0] == "returned"
+        )
+
+    async def test_a_patched_private_or_public_method_still_intercepts_each_mode(
+        self,
+    ) -> None:
+        llm = _llm()
+        classifier = Classifier(_schema("buy", "browse"), llm_interface=llm)
+        raw = {"intent": "buy", "confidence": 0.9}
+        reply = CompletionResponse(kind="final", text=_one("buy"))
+        with (
+            patch.object(Classifier, "_call_llm", return_value=raw) as call_llm,
+            patch.object(
+                Classifier, "_acall_llm", new_callable=AsyncMock, return_value=raw
+            ) as acall_llm,
+        ):
+            assert classifier.classify("hi").intent == "buy"
+            assert (call_llm.call_count, acall_llm.call_count) == (1, 0)
+            assert (await classifier.aclassify("hi")).intent == "buy"
+            assert (call_llm.call_count, acall_llm.call_count) == (1, 1)
+        with (
+            patch.object(llm, "complete", return_value=reply) as complete,
+            patch.object(
+                llm, "acomplete", new_callable=AsyncMock, return_value=reply
+            ) as acomplete,
+        ):
+            assert classifier.classify("hi").intent == "buy"
+            assert (complete.call_count, acomplete.call_count) == (1, 0)
+            assert (await classifier.aclassify("hi")).intent == "buy"
+            assert (complete.call_count, acomplete.call_count) == (1, 1)

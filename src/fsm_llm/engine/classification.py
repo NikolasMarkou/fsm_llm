@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import (
     MAX_MULTI_INTENTS,
     RESERVED_LLM_CALL_KWARGS,
@@ -276,7 +277,15 @@ class Classifier:
             ClassificationResponseError: The reply is not a classification
                 (it is a ``ClassificationError`` too).
         """
-        raw = self._call_llm(user_message, multi_intent=False, context=context)
+        return run_sync(self.aclassify(user_message, context))
+
+    async def aclassify(
+        self, user_message: str | None, context: dict[str, Any] | None = None
+    ) -> ClassificationResult:
+        """The async twin of ``classify`` and the one body."""
+        raw = await acall(
+            self, "_call_llm", user_message, multi_intent=False, context=context
+        )
         return self._parse_single(raw)
 
     def classify_multi(
@@ -291,7 +300,15 @@ class Classifier:
         Returns:
             MultiClassificationResult with a ranked list of IntentScores.
         """
-        raw = self._call_llm(user_message, multi_intent=True, context=context)
+        return run_sync(self.aclassify_multi(user_message, context))
+
+    async def aclassify_multi(
+        self, user_message: str | None, context: dict[str, Any] | None = None
+    ) -> MultiClassificationResult:
+        """The async twin of ``classify_multi`` and the one body."""
+        raw = await acall(
+            self, "_call_llm", user_message, multi_intent=True, context=context
+        )
         return self._parse_multi(raw)
 
     def is_low_confidence(self, result: ClassificationResult) -> bool:
@@ -303,6 +320,18 @@ class Classifier:
     # ----------------------------------------------------------
 
     def _call_llm(
+        self,
+        user_message: str | None,
+        *,
+        multi_intent: bool,
+        context: dict[str, Any] | None = None,
+    ) -> dict:
+        """``run_sync`` over ``_acall_llm``, the one body."""
+        return run_sync(
+            self._acall_llm(user_message, multi_intent=multi_intent, context=context)
+        )
+
+    async def _acall_llm(
         self,
         user_message: str | None,
         *,
@@ -367,7 +396,7 @@ class Classifier:
         # generate_response, not become a silent "stay" (0d9c218e/D-001).
         try:
             with llm_call(self._llm, "classification", request) as call:
-                response = self._llm.complete(request)
+                response = await acall(self._llm, "complete", request)
                 call.response(response)
         except LLMResponseError as e:
             raise ClassificationError(f"Classification LLM call failed: {e!s}") from e
@@ -567,7 +596,15 @@ class HierarchicalClassifier:
         the intent result mirrors the domain result. ``context`` is forwarded
         to both stages (see ``Classifier.classify``).
         """
-        domain_result = self._domain_classifier.classify(user_message, context)
+        return run_sync(self.aclassify(user_message, context))
+
+    async def aclassify(
+        self, user_message: str | None, context: dict[str, Any] | None = None
+    ) -> HierarchicalResult:
+        """The async twin of ``classify`` and the one body."""
+        domain_result = await acall(
+            self._domain_classifier, "classify", user_message, context
+        )
 
         sub = self._intent_classifiers.get(domain_result.intent)
         if sub is None:
@@ -580,7 +617,7 @@ class HierarchicalClassifier:
                 intent=domain_result,
             )
 
-        intent_result = sub.classify(user_message, context)
+        intent_result = await acall(sub, "classify", user_message, context)
         return HierarchicalResult(
             domain=domain_result,
             intent=intent_result,

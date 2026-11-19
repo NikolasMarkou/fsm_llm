@@ -101,6 +101,8 @@ fsm_llm.ClassificationSchema class(BaseModel)
   def validate_schema(self) -> ClassificationSchema
 fsm_llm.Classifier class
   def __init__(self, schema: ClassificationSchema, model: str | None = None, *, llm_interface: LLMInterface | None = None, api_key: str | None = None, config: ClassificationPromptConfig | None = None, **llm_kwargs) -> None
+  def aclassify(self, user_message: str | None, context: dict[str, Any] | None = None) -> ClassificationResult
+  def aclassify_multi(self, user_message: str | None, context: dict[str, Any] | None = None) -> MultiClassificationResult
   def classify(self, user_message: str | None, context: dict[str, Any] | None = None) -> ClassificationResult
   def classify_multi(self, user_message: str | None, context: dict[str, Any] | None = None) -> MultiClassificationResult
   def is_low_confidence(self, result: ClassificationResult) -> bool
@@ -337,6 +339,7 @@ fsm_llm.HandlerTiming class(str, Enum)
   HandlerTiming.ERROR = 'error'
 fsm_llm.HierarchicalClassifier class
   def __init__(self, schema: HierarchicalSchema, model: str | None = None, *, llm_interface: LLMInterface | None = None, api_key: str | None = None, config: ClassificationPromptConfig | None = None, **llm_kwargs) -> None
+  def aclassify(self, user_message: str | None, context: dict[str, Any] | None = None) -> HierarchicalResult
   def classify(self, user_message: str | None, context: dict[str, Any] | None = None) -> HierarchicalResult
 fsm_llm.HierarchicalResult class(BaseModel)
   field domain: ClassificationResult required
