@@ -1,8 +1,10 @@
 import { renderMarkdown } from '../static/utils/markdown.js';
 const r = renderMarkdown;
 const code = r('```py\nx = a*b*c\n__init__\n\nz\n```');
+const nested = r('`a ```\nx<b>\n``` b`');  // a fenced block inside inline backticks
 const out = {
-    fence_keeps_code: code.includes('x = a*b*c\n__init__\n\nz</code>') && !code.includes('<em>') && !code.includes('<br>'),
+    fence_keeps_code: code.includes('x = a*b*c\n__init__\n\nz</code>') && !code.includes('<em>') && !code.includes('<br>')
+        && nested.includes('<code>x&lt;b&gt;</code>') && !nested.includes('\u0000'),
     inline_keeps_code: r('use `snake_case_a` and `a*b*c` now'),
     ordered: r('Steps:\n1. first\n2. second'),
     unordered: r('- a\n- b'),

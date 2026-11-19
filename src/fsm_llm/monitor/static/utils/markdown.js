@@ -18,8 +18,8 @@ export function renderMarkdown(text) {
     s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) =>
         hold(`<pre class="md-code-block"><code>${code.trim()}</code></pre>`));
 
-    // Inline code
-    s = s.replace(/`([^`\n]+)`/g, (_m, code) => hold(`<code class="md-code-inline">${code}</code>`));
+    // Inline code (a span never swallows a placeholder: a fenced block inside backticks stays one)
+    s = s.replace(/`([^`\n\u0000]+)`/g, (_m, code) => hold(`<code class="md-code-inline">${code}</code>`));
 
     // Headers (only at line start)
     s = s.replace(/^### (.+)$/gm, '<strong class="md-h3">$1</strong>');
