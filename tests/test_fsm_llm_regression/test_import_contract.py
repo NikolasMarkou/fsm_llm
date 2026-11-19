@@ -79,6 +79,7 @@ NAMED_DEBTS = {
 # Kernel modules (D-014, D-016), entry modules and the test doubles: the top-level names that are
 # not layer packages. Every other top-level module or package must be in the layers contract.
 KERNEL = {
+    "aio",
     "cli_support",
     "constants",
     "env",

@@ -1066,6 +1066,7 @@
     "fsm_llm.agents.swarm",
     "fsm_llm.agents.tool_registries",
     "fsm_llm.agents.verified_react",
+    "fsm_llm.aio",
     "fsm_llm.cli_support",
     "fsm_llm.constants",
     "fsm_llm.context.layout",

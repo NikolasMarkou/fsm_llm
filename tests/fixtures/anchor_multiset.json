@@ -609,6 +609,11 @@
       "delta": 1,
       "reason": "step 3.1 of plan 52ce5464 (B1, the owner's option A): D-002 is anchored once at the post-transition classification filter (engine/kinds/conversation/post_transition.py): a framework result key is closed to every classification channel, an author-listed handler_only_keys entry stays classifiable and supersedes the clause \"or handler_only_keys\" of D-006 of plan 8a03483a in place; no other token was added or lost",
       "token": "plan-2026-11-18T194536-52ce5464/D-002"
+    },
+    {
+      "delta": 1,
+      "reason": "step 2 of plan 51fde95b: D-004 is anchored once at the cleanup of a suspended step in the new kernel module aio.py (a suspended asend() is ended with throw(GeneratorExit), never close(), and the suspension error is raised outside any finally); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-004"
     }
   ]
 }

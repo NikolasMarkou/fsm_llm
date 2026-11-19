@@ -65,6 +65,9 @@ SUBPACKAGES = (
 )
 #: Layer packages and kernel modules that load only on request.
 ON_REQUEST = (
+    # plan 51fde95b step 2: a kernel module no module imports yet; it joins EAGER in the commit
+    # that first imports it (the LLM layer, step 4.2)
+    "aio",
     "okf",
     "skills",
     "tools",

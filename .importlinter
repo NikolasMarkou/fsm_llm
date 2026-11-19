@@ -101,6 +101,7 @@ ignore_imports =
 name = kernel modules import no layer package, subpackage, testing or entry module
 type = forbidden
 source_modules =
+    fsm_llm.aio
     fsm_llm.cli_support
     fsm_llm.constants
     fsm_llm.env
