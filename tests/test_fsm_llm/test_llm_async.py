@@ -18,7 +18,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
-from fsm_llm.core.definitions import CompletionRequest, ResponseGenerationRequest
+from fsm_llm.core.definitions import (
+    BulkExtractionRequest,
+    CompletionRequest,
+    FieldExtractionRequest,
+    ResponseGenerationRequest,
+)
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.logging import logger
@@ -223,6 +228,19 @@ def _hanging(started: asyncio.Event) -> Callable[..., Awaitable[Any]]:
     return hang
 
 
+def _scripted(*replies: Any) -> Callable[..., Any]:
+    """A provider script that answers each call with the next reply (an exception is raised)."""
+    queue = iter(replies)
+
+    def script(**_: Any) -> Any:
+        reply = next(queue)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    return script
+
+
 class TestACancelledRequest:
     """D-008: a cancelled in-flight request is reported to the observer and the meter."""
 
@@ -278,19 +296,50 @@ class TestIsObservedReadsBothSends:
 # --- one parity table over the methods: the same scripted reply through the sync name and
 # the async name (a row per method grows with each converted family) -------------------
 
-_METHODS: dict[str, Callable[[], Any]] = {
-    "generate_response": lambda: ResponseGenerationRequest(
-        system_prompt="Greet.", user_message="hi"
+# method -> (a request, the text of a reply that method can read)
+_METHODS: dict[str, tuple[Callable[[], Any], str]] = {
+    "generate_response": (
+        lambda: ResponseGenerationRequest(system_prompt="Greet.", user_message="hi"),
+        "Hello",
     ),
-    "complete": lambda: CompletionRequest(messages=[{"role": "user", "content": "hi"}]),
+    "extract_field": (
+        lambda: FieldExtractionRequest(
+            system_prompt="Extract.",
+            user_message="I am Bob",
+            field_name="name",
+            field_type="str",
+        ),
+        '{"name": "Bob", "confidence": 0.9}',
+    ),
+    "extract_bulk_data": (
+        lambda: BulkExtractionRequest(
+            system_prompt="Extract.", user_message="I am Bob"
+        ),
+        '{"extracted_data": {"name": "Bob"}, "confidence": 0.9}',
+    ),
+    "complete": (
+        lambda: CompletionRequest(messages=[{"role": "user", "content": "hi"}]),
+        "Hello",
+    ),
 }
-# scenario -> (what the provider does, the call raises, calls, errors, events, cut warnings)
-_SCENARIOS: dict[str, tuple[Any, bool, int, int, tuple[str, ...], int]] = {
-    "success": (_reply(), False, 1, 0, ("begin", "end"), 0),
-    "cut": (_reply("partial", "length"), False, 1, 0, ("begin", "end"), 1),
-    "malformed": (ModelResponse(choices=[]), True, 1, 0, ("begin", "end"), 0),
-    "outage": (None, True, 1, 1, ("begin", "fail"), 0),
+# scenario -> (the call raises, calls, errors, observer events, cut-off warnings)
+_SCENARIOS: dict[str, tuple[bool, int, int, tuple[str, ...], int]] = {
+    "success": (False, 1, 0, ("begin", "end"), 0),
+    "cut": (False, 1, 0, ("begin", "end"), 1),
+    "malformed": (True, 1, 0, ("begin", "end"), 0),
+    "outage": (True, 1, 1, ("begin", "fail"), 0),
 }
+
+
+def _reply_for(method: str, scenario: str) -> Any:
+    """The provider reply of a scenario (``None``: the provider raises) for one method."""
+    text = _METHODS[method][1]
+    return {
+        "success": lambda: _reply(text),
+        "cut": lambda: _reply(text, "length"),
+        "malformed": lambda: ModelResponse(choices=[]),
+        "outage": lambda: None,
+    }[scenario]()
 
 
 async def _invoke(llm: LiteLLMInterface, name: str, request: Any) -> Any:
@@ -299,7 +348,7 @@ async def _invoke(llm: LiteLLMInterface, name: str, request: Any) -> Any:
 
 
 async def _drive(method: str, transport: str, scenario: str) -> tuple[Any, ...]:
-    reply = _SCENARIOS[scenario][0]
+    reply = _reply_for(method, scenario)
     llm = _llm()
 
     def script(**_: Any) -> Any:
@@ -310,7 +359,7 @@ async def _drive(method: str, transport: str, scenario: str) -> tuple[Any, ...]:
     name = method if transport == "sync" else f"a{method}"
     with _providers(script) as (sync, async_), _observed(_Recorder()) as rec:
         with _warnings() as warned:
-            result = await _outcome(_invoke(llm, name, _METHODS[method]()))
+            result = await _outcome(_invoke(llm, name, _METHODS[method][0]()))
         landed = (sync.call_count, async_.call_count)
     assert landed == ((1, 0) if transport == "sync" else (0, 1))
     return result, rec.shape(), llm.usage(), warned
@@ -326,7 +375,7 @@ class TestEveryMethodGivesTheSameOnBothNames:
         async_ = await _drive(method, "async", scenario)
         assert sync == async_
         # non-vacuity: what the scenario is
-        _, raises, calls, errors, events, cut = _SCENARIOS[scenario]
+        raises, calls, errors, events, cut = _SCENARIOS[scenario]
         result, shape, usage, warned = async_
         assert (result[0] == "raised") is raises
         if raises:
@@ -352,7 +401,7 @@ class TestEveryMethodGivesTheSameOnBothNames:
     async def test_a_cancel_reaches_the_observer_and_the_meter_of_every_method(
         self,
     ) -> None:
-        for method, request in _METHODS.items():
+        for method, (request, _) in _METHODS.items():
             llm, started = _llm(), asyncio.Event()
             with _providers(_boom, _hanging(started)), _observed(_Recorder()) as rec:
                 task = asyncio.ensure_future(_invoke(llm, f"a{method}", request()))
@@ -367,25 +416,12 @@ class TestEveryMethodGivesTheSameOnBothNames:
     async def test_the_async_names_do_not_land_on_the_sync_binding(self) -> None:
         # a patched `completion` is NOT intercepted by an async name, and a patched
         # `acompletion` is not intercepted by a sync name (each mode has its own binding)
-        for method, request in _METHODS.items():
-            with _providers(lambda **_: _reply()) as (sync, async_):
+        for method, (request, text) in _METHODS.items():
+            with _providers(_scripted(*[_reply(text)] * 2)) as (sync, async_):
                 await _invoke(_llm(), f"a{method}", request())
                 assert (sync.call_count, async_.call_count) == (0, 1)
                 await _invoke(_llm(), method, request())
                 assert (sync.call_count, async_.call_count) == (1, 1)
-
-
-def _scripted(*replies: Any) -> Callable[..., Any]:
-    """A provider script that answers each call with the next reply (an exception is raised)."""
-    queue = iter(replies)
-
-    def script(**_: Any) -> Any:
-        reply = next(queue)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
-
-    return script
 
 
 class TestTheApologyRetryIsOneBody:
@@ -399,7 +435,7 @@ class TestTheApologyRetryIsOneBody:
             retry = _reply("Hello") if second == "recovers" else RuntimeError("down")
             script = _scripted(_reply('{"message": ""}'), retry)
             with _providers(script) as (sync, async_), _observed(_Recorder()) as rec:
-                out = await _invoke(llm, name, _METHODS["generate_response"]())
+                out = await _invoke(llm, name, _METHODS["generate_response"][0]())
             # both attempts, the retry too, land on the binding of the name's own mode
             assert (sync.call_count, async_.call_count) in {(2, 0), (0, 2)}
             assert (async_.call_count == 2) is (name == "agenerate_response")

@@ -395,6 +395,12 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
 
     def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse:
         """Extract a single specific field from user input."""
+        return run_sync(self.aextract_field(request))
+
+    async def aextract_field(
+        self, request: FieldExtractionRequest
+    ) -> FieldExtractionResponse:
+        """The async twin of ``extract_field`` and its one body."""
         try:
             start_time = time.time()
 
@@ -416,8 +422,12 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
                 if is_ollama_model(self.model)
                 else None
             )
-            response = self._make_llm_call(
-                messages, "field_extraction", response_format=typed_format
+            response = await acall(
+                self,
+                "_make_llm_call",
+                messages,
+                "field_extraction",
+                response_format=typed_format,
             )
             response_time = time.time() - start_time
 
@@ -468,13 +478,19 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
               wrapper) loses its top-level ``confidence``/``reasoning``
               envelope keys (the confidence is still read from it).
         """
+        return run_sync(self.aextract_bulk_data(request))
+
+    async def aextract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        """The async twin of ``extract_bulk_data`` and its one body (contract: see there)."""
         try:
             messages: list[dict[str, str | None]] = [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.user_message},
             ]
 
-            response = self._make_llm_call(messages, "data_extraction")
+            response = await acall(self, "_make_llm_call", messages, "data_extraction")
             content = response.choices[0].message.content
 
             if isinstance(content, str):
