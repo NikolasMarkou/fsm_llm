@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import threading
 from pathlib import Path
 from typing import ClassVar
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import fsm_llm.agents as agents_pkg
@@ -153,3 +156,102 @@ class TestTheBuilderMaxTokensField:
         attrs = _input_attrs("builder-max-tokens")
         assert f'value="{DEFAULT_BUILDER_MAX_TOKENS}"' in attrs
         assert f'max="{MAX_BUILDER_TOKENS}"' in attrs
+
+
+class _SlowBuilderAgent(_FakeBuilderAgent):
+    """``send`` blocks until ``gate`` is set, as a model call that is still running."""
+
+    def __init__(self):
+        self.started, self.gate = threading.Event(), threading.Event()
+
+    def send(self, message):
+        self.started.set()
+        self.gate.wait(10)
+        return "late reply"
+
+
+class TestForceDeleteOfABusyBuilderSession:
+    """13.5: ``DELETE ?force=true`` drops a session with a send in flight at once; the
+    worker thread runs on, the id stays busy until it ends and the session is never put back."""
+
+    def _scenario(self, *steps):
+        from fsm_llm.monitor.definitions import BuilderSendRequest
+
+        agent = _SlowBuilderAgent()
+        routes_builder._builder_sessions["b1"] = (agent, 0.0)
+
+        async def run():
+            send = asyncio.ensure_future(
+                routes_builder.api_builder_send(
+                    BuilderSendRequest(session_id="b1", message="m")
+                )
+            )
+            while not agent.started.is_set():
+                await asyncio.sleep(0.01)
+            seen = [await step() for step in steps]
+            agent.gate.set()
+            await send  # the abandoned reply is computed and dropped
+            for _ in range(200):
+                if "b1" not in routes_builder._builder_busy:
+                    break
+                await asyncio.sleep(0.01)
+            return [
+                *seen,
+                (
+                    "b1" in routes_builder._builder_sessions,
+                    "b1" in routes_builder._builder_busy,
+                ),
+            ]
+
+        try:
+            return asyncio.run(run())
+        finally:
+            agent.gate.set()
+            routes_builder._builder_busy.discard("b1")
+            routes_builder._builder_sessions.pop("b1", None)
+
+    def test_a_plain_delete_is_refused_and_a_forced_one_drops_the_session(self):
+        async def plain():
+            with pytest.raises(HTTPException) as refused:
+                await routes_builder.api_builder_delete("b1")
+            return refused.value.status_code, "b1" in routes_builder._builder_sessions
+
+        async def forced():
+            result = await routes_builder.api_builder_delete("b1", force=True)
+            return (
+                result,
+                "b1" in routes_builder._builder_sessions,
+                "b1" in routes_builder._builder_busy,
+            )
+
+        expected = [
+            (409, True),
+            (
+                {"deleted": True},
+                False,
+                True,
+            ),  # gone at once, still busy: the thread runs on
+            (False, False),  # the thread ended: released, the session is not put back
+        ]
+        assert self._scenario(plain, forced) == expected
+
+    def test_force_on_an_idle_or_unknown_session_deletes_normally(self, builder_client):
+        assert builder_client.delete("/api/builder/nope?force=true").json() == {
+            "deleted": False
+        }
+        routes_builder._builder_sessions["b2"] = (_FakeBuilderAgent(None), 0.0)
+        assert builder_client.delete("/api/builder/b2?force=true").json() == {
+            "deleted": True
+        }
+
+    def test_a_forced_delete_is_behind_the_api_key(self):
+        configure(manager=_manager(), api_key="k")
+        try:
+            client = TestClient(app)
+            assert client.delete("/api/builder/b1?force=true").status_code == 401
+            keyed = client.delete(
+                "/api/builder/b1?force=true", headers={"X-API-Key": "k"}
+            )
+            assert keyed.status_code == 200
+        finally:
+            configure(manager=_manager())  # no key: the env key is unset by conftest

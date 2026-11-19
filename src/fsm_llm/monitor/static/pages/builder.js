@@ -45,9 +45,44 @@ const WORKFLOW_LAUNCH_NOTE = 'Workflows built here cannot be launched from the m
     + 'its built-in workflow presets, not a JSON definition. Copy or download the definition and build it with '
     + 'the fsm_llm.workflows Python DSL.';
 
+// The send in flight: its abort controller and elapsed-time timer.
+let _abort = null;
+let _elapsedTimer = null;
+
+// An abandoned session is dropped even with a send in flight (force): the worker
+// thread cannot be stopped, so the model call runs on until the provider answers.
 function _deleteServerSession(sessionId) {
     if (!sessionId) return;
-    fetchJson(`/api/builder/${encodeURIComponent(sessionId)}`, { method: 'DELETE' }).catch(() => {});
+    fetchJson(`/api/builder/${encodeURIComponent(sessionId)}?force=true`, { method: 'DELETE' }).catch(() => {});
+}
+
+/** The send ended: stop the elapsed timer and hide Cancel. */
+function _stopSendUi() {
+    _abort = null;
+    clearInterval(_elapsedTimer);
+    _elapsedTimer = null;
+    const cancel = $('builder-cancel-btn');
+    if (cancel) cancel.style.display = 'none';
+}
+
+/** Stop waiting for the send in flight: abort its request too. */
+function _endSend() {
+    _abort?.abort();
+    _stopSendUi();
+}
+
+/** Cancel the build in flight: abandon the session (the server keeps the model call running until it ends). */
+export function cancelBuilderSend() {
+    if (!_sending) return;
+    _endSend();
+    _deleteServerSession(_sessionId);
+    _sessionToken++;
+    _sessionId = null;
+    _sending = false;
+    removeTypingIndicator();
+    _appendBubble('error', 'Cancelled. The model call runs on until the provider answers; start a new session.');
+    $('builder-input-area').style.display = 'none';
+    showStatus('builder-status', 'Cancelled', 'info');
 }
 
 function _resetInputControls() {
@@ -98,6 +133,7 @@ export function startBuilderSession() {
 
     // Abandon the previous session: free it on the server and ignore any of
     // its replies still in flight.
+    _endSend();
     if (_sessionId && !_complete) _deleteServerSession(_sessionId);
     const token = ++_sessionToken;
 
@@ -153,15 +189,19 @@ export function sendBuilderMessage() {
     const chat = $('builder-chat');
     addTypingIndicator(chat);
 
-    // Hint that a long build may be in progress after 5s
-    const buildTimer = setTimeout(() => {
-        showStatus('builder-status', 'Building artifact... (this may take a moment)', 'info');
-    }, 5000);
+    // Elapsed time of the build call, and a Cancel button while it runs.
+    const began = Date.now();
+    _abort = new AbortController();
+    _elapsedTimer = setInterval(() => {
+        showStatus('builder-status', `Building artifact... ${Math.round((Date.now() - began) / 1000)} s`, 'info');
+    }, 1000);
+    const cancel = $('builder-cancel-btn');
+    if (cancel) cancel.style.display = '';
 
-    postJson('/api/builder/send', { session_id: _sessionId, message: msg })
+    postJson('/api/builder/send', { session_id: _sessionId, message: msg }, { signal: _abort.signal })
         .then(data => {
-            clearTimeout(buildTimer);
             if (token !== _sessionToken) return;
+            _stopSendUi();
             _sending = false;
             removeTypingIndicator();
             _appendBubble('assistant', data.response);
@@ -177,8 +217,8 @@ export function sendBuilderMessage() {
             }
         })
         .catch(e => {
-            clearTimeout(buildTimer);
             if (token !== _sessionToken) return;
+            _stopSendUi();
             _sending = false;
             removeTypingIndicator();
             _appendBubble('error', e.message || 'Request failed');
@@ -610,6 +650,7 @@ function _collectAgentToolStubs(parsed) {
 }
 
 export function resetBuilder() {
+    _endSend();
     if (_sessionId && !_complete) _deleteServerSession(_sessionId);
     _sessionToken++;
     _sessionId = null;

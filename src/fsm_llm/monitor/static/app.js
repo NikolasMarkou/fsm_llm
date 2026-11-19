@@ -206,6 +206,7 @@ const ACTIONS = {
     'start-builder':        () => builder.startBuilderSession(),
     'reset-builder':        () => builder.resetBuilder(),
     'send-builder-message':  () => builder.sendBuilderMessage(),
+    'cancel-builder-send':   () => builder.cancelBuilderSend(),
     'builder-jump-latest':   () => builder.builderJumpToLatest(),
     'copy-builder-result':   () => builder.copyBuilderResult(),
     'download-builder-result': () => builder.downloadBuilderResult(),

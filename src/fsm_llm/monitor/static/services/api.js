@@ -60,8 +60,9 @@ export async function fetchJson(url, opts, _retried = false) {
     return resp.json();
 }
 
-export function postJson(url, data) {
+export function postJson(url, data, opts) {
     return fetchJson(url, {
+        ...opts,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

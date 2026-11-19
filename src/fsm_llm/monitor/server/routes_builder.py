@@ -263,10 +263,15 @@ async def api_builder_result(session_id: str) -> dict[str, Any]:
 
 
 @app.delete("/api/builder/{session_id}", dependencies=_GATED)
-async def api_builder_delete(session_id: str) -> dict[str, Any]:
-    """Delete a builder session (refused with 409 while a send is in flight)."""
+async def api_builder_delete(session_id: str, force: bool = False) -> dict[str, Any]:
+    """Delete a builder session (409 while a send is in flight, unless ``force``).
+
+    A forced delete drops the session at once but cannot stop the worker thread:
+    the model call runs on and the id stays busy until it ends (``_release``
+    never puts the session back).
+    """
     async with _get_builder_lock():
-        if session_id in _builder_busy:
+        if session_id in _builder_busy and not force:
             raise HTTPException(
                 status_code=409, detail="Builder session is processing a message"
             )

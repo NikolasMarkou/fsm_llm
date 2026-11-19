@@ -8,6 +8,7 @@ leg that fails instead, so a CI skip cannot hide a regression.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -262,6 +263,43 @@ class TestBuilderStartSendsMaxTokens:
         self, probe
     ):
         assert probe("builder_start")["tokens"] == [8000, 4096, 4096]
+
+
+class TestBuilderCancel:
+    """Plan 51fde95b step 13.5: Cancel aborts the send and drops the session with
+    ``?force=true``; the elapsed timer runs only while a send is in flight."""
+
+    def test_a_running_send_shows_cancel_and_the_elapsed_time(self, probe):
+        out = probe("builder_cancel")["whileSending"]
+        assert out["cancelShown"] == ""
+        assert re.search(r"Building artifact\.\.\. \d+ s", out["status"])
+
+    def test_cancel_aborts_the_request_and_force_deletes_the_session(self, probe):
+        out = probe("builder_cancel")["cancelled"]
+        assert out["deletes"] == ["/api/builder/s1?force=true"]
+        assert (out["aborted"], out["cancelBtn"], out["input"]) == (
+            True,
+            "none",
+            "none",
+        )
+        assert out["bubble"] and "Cancelled" in out["status"]
+        assert out["noAbortBubble"]  # the aborted request is not shown as an error
+
+    def test_a_reset_during_a_send_aborts_and_force_deletes_too(self, probe):
+        out = probe("builder_cancel")["reset"]
+        assert out["deletes"] == ["/api/builder/s2?force=true"]
+        assert (out["aborted"], out["cancelBtn"]) == (True, "none")
+
+    def test_starting_again_during_a_send_aborts_and_force_deletes_the_old_session(
+        self, probe
+    ):
+        out = probe("builder_cancel")["restart"]
+        assert out == {"deletes": ["/api/builder/s3?force=true"], "aborted": True}
+
+    def test_a_finished_send_stops_the_timer_and_cancel_is_then_a_no_op(self, probe):
+        out = probe("builder_cancel")
+        assert out["finished"] == {"cancelBtn": "none", "timerStopped": True}
+        assert out["deletesAfterNoop"] == 4  # cancel, reset, restart, the next start
 
 
 class TestChatInputAndMarkdownBlocks:
