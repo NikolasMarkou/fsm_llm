@@ -9,6 +9,7 @@ the result, the observer events and the usage meter. Nothing here reaches a netw
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Callable
 from contextlib import contextmanager
 from typing import Any
@@ -17,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
+from fsm_llm.core.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.logging import logger
@@ -72,14 +74,17 @@ class _Recorder:
 
 
 @contextmanager
-def _providers(script: Callable[..., Any]):
-    """Both provider bindings run ``script``: a call that lands on either is visible."""
+def _providers(
+    script: Callable[..., Any], async_script: Callable[..., Any] | None = None
+):
+    """Both provider bindings run ``script`` (``acompletion`` may run its own coroutine
+    function): a call that lands on either is visible."""
     with (
         patch(f"{_PROVIDER}.completion", side_effect=script) as sync,
         patch(f"{_PROVIDER}.acompletion", new_callable=AsyncMock) as async_,
         patch(f"{_PROVIDER}.get_supported_openai_params", return_value=[]),
     ):
-        async_.side_effect = script
+        async_.side_effect = async_script or script
         yield sync, async_
 
 
@@ -208,18 +213,22 @@ def _boom(**_: Any) -> Any:
     raise RuntimeError("provider down")
 
 
+def _hanging(started: asyncio.Event) -> Callable[..., Awaitable[Any]]:
+    """An ``acompletion`` that signals it is in flight and then never answers."""
+
+    async def hang(**_: Any) -> Any:
+        started.set()
+        await asyncio.Event().wait()
+
+    return hang
+
+
 class TestACancelledRequest:
     """D-008: a cancelled in-flight request is reported to the observer and the meter."""
 
     async def test_a_cancel_is_a_failed_send_and_is_raised_again(self) -> None:
         llm, started = _llm(), asyncio.Event()
-
-        async def hang(**_: Any) -> Any:
-            started.set()
-            await asyncio.Event().wait()
-
-        with _providers(lambda **_: None) as (_, async_), _observed(_Recorder()) as rec:
-            async_.side_effect = hang
+        with _providers(_boom, _hanging(started)), _observed(_Recorder()) as rec:
             task = asyncio.ensure_future(_send(llm, "async", _PARAMS))
             await asyncio.wait_for(started.wait(), 5)
             task.cancel()
@@ -264,3 +273,100 @@ class TestIsObservedReadsBothSends:
         assert obs.is_observed(_llm())
         assert not obs.is_observed(Own(model="m"))
         assert obs.is_observed(Restates(model="m")) and obs.is_observed(Inherits("m"))
+
+
+# --- one parity table over the methods: the same scripted reply through the sync name and
+# the async name (a row per method grows with each converted family) -------------------
+
+_METHODS: dict[str, Callable[[], Any]] = {
+    "complete": lambda: CompletionRequest(messages=[{"role": "user", "content": "hi"}]),
+}
+# scenario -> (what the provider does, the call raises, calls, errors, events, cut warnings)
+_SCENARIOS: dict[str, tuple[Any, bool, int, int, tuple[str, ...], int]] = {
+    "success": (_reply(), False, 1, 0, ("begin", "end"), 0),
+    "cut": (_reply("partial", "length"), False, 1, 0, ("begin", "end"), 1),
+    "malformed": (ModelResponse(choices=[]), True, 1, 0, ("begin", "end"), 0),
+    "outage": (None, True, 1, 1, ("begin", "fail"), 0),
+}
+
+
+async def _invoke(llm: LiteLLMInterface, name: str, request: Any) -> Any:
+    value = getattr(llm, name)(request)
+    return await value if inspect.isawaitable(value) else value
+
+
+async def _drive(method: str, transport: str, scenario: str) -> tuple[Any, ...]:
+    reply = _SCENARIOS[scenario][0]
+    llm = _llm()
+
+    def script(**_: Any) -> Any:
+        if reply is None:
+            raise RuntimeError("provider down")
+        return reply
+
+    name = method if transport == "sync" else f"a{method}"
+    with _providers(script) as (sync, async_), _observed(_Recorder()) as rec:
+        with _warnings() as warned:
+            result = await _outcome(_invoke(llm, name, _METHODS[method]()))
+        landed = (sync.call_count, async_.call_count)
+    assert landed == ((1, 0) if transport == "sync" else (0, 1))
+    return result, rec.shape(), llm.usage(), warned
+
+
+class TestEveryMethodGivesTheSameOnBothNames:
+    @pytest.mark.parametrize("scenario", list(_SCENARIOS))
+    @pytest.mark.parametrize("method", list(_METHODS))
+    async def test_result_events_meter_and_warnings_are_equal(
+        self, method: str, scenario: str
+    ) -> None:
+        sync = await _drive(method, "sync", scenario)
+        async_ = await _drive(method, "async", scenario)
+        assert sync == async_
+        # non-vacuity: what the scenario is
+        _, raises, calls, errors, events, cut = _SCENARIOS[scenario]
+        result, shape, usage, warned = async_
+        assert (result[0] == "raised") is raises
+        if raises:
+            assert result[1] == "LLMResponseError"
+        assert (usage.calls, usage.errors) == (calls, errors)
+        assert tuple(e[0] for e in shape) == events
+        assert sum("was cut off" in w for w in warned) == cut
+
+    async def test_a_garbled_tool_call_is_data_on_both_names(self) -> None:
+        request = CompletionRequest(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=[{"type": "function", "function": {"name": "t", "parameters": {}}}],
+        )
+
+        def script(**_: Any) -> Any:
+            raise RuntimeError("Invalid tool call: xml syntax error")
+
+        with _providers(script):
+            sync = await _invoke(_llm(), "complete", request)
+            async_ = await _invoke(_llm(), "acomplete", request)
+        assert sync == async_ and sync.kind == "malformed"
+
+    async def test_a_cancel_reaches_the_observer_and_the_meter_of_every_method(
+        self,
+    ) -> None:
+        for method, request in _METHODS.items():
+            llm, started = _llm(), asyncio.Event()
+            with _providers(_boom, _hanging(started)), _observed(_Recorder()) as rec:
+                task = asyncio.ensure_future(_invoke(llm, f"a{method}", request()))
+                await asyncio.wait_for(started.wait(), 5)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            assert [e[0] for e in rec.shape()] == ["begin", "fail"], method
+            assert rec.shape()[1][1] == "CancelledError"
+            assert (llm.usage().calls, llm.usage().errors) == (1, 1), method
+
+    async def test_the_async_names_do_not_land_on_the_sync_binding(self) -> None:
+        # a patched `completion` is NOT intercepted by an async name, and a patched
+        # `acompletion` is not intercepted by a sync name (each mode has its own binding)
+        for method, request in _METHODS.items():
+            with _providers(lambda **_: _reply()) as (sync, async_):
+                await _invoke(_llm(), f"a{method}", request())
+                assert (sync.call_count, async_.call_count) == (0, 1)
+                await _invoke(_llm(), method, request())
+                assert (sync.call_count, async_.call_count) == (1, 1)

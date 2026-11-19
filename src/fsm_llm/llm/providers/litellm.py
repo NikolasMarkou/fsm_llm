@@ -52,6 +52,7 @@ finally:
         os.environ.pop("LITELLM_MODE", None)
 del _LITELLM_MODE_PREVIOUS
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import (
     DEFAULT_TEMPERATURE,
     RESERVED_LLM_CALL_KWARGS,
@@ -550,6 +551,10 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
             LLMResponseError: the provider call failed, chained from its
                 error, or the reply could not be read.
         """
+        return run_sync(self.acomplete(request))
+
+    async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        """The async twin of ``complete`` and the one body: ``complete`` is ``run_sync`` over it."""
         # DECISION plan-2026-10-01T093600-944e2692/D-002: one request primitive
         # (supersedes 07ad3f8c/D-022's classifier-only method). Do NOT add a
         # second builder, a second `completion` binding or a per-kind method
@@ -576,7 +581,9 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
         try:
-            response = self._send(call_params, call_type=request.call_type)
+            response = await acall(
+                self, "_send", call_params, call_type=request.call_type
+            )
         except Exception as e:
             # Broad catch is intentional: the provider boundary. A garbled
             # tool call is a model behaviour, every other failure an outage.
