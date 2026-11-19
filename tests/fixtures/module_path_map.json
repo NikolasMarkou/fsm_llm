@@ -1135,6 +1135,7 @@
     "fsm_llm.reasoning",
     "fsm_llm.reasoning.__main__",
     "fsm_llm.reasoning.__version__",
+    "fsm_llm.reasoning.calculator",
     "fsm_llm.reasoning.constants",
     "fsm_llm.reasoning.definitions",
     "fsm_llm.reasoning.engine",
