@@ -1,4 +1,4 @@
-import { el, serve, sleep, out } from './stub.mjs';
+import { serve, sleep, out } from './stub.mjs';
 import { state } from '../static/services/state.js';
 import * as builder from '../static/pages/builder.js';
 // 13.3: launching a built FSM opens its conversation in the drawer, as the Launch modal does.
