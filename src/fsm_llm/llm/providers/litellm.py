@@ -73,7 +73,7 @@ from fsm_llm.llm.interface import (
     is_malformed_tool_call_error,
 )
 from fsm_llm.llm.json_extraction import extract_json_from_text
-from fsm_llm.llm.observer import begin_send, end_send, fail_send
+from fsm_llm.llm.observer import SendHandle, begin_send, end_send, fail_send
 from fsm_llm.llm.ollama import build_ollama_response_format, is_ollama_model
 from fsm_llm.llm.parsing import (
     _GENERIC_FALLBACK_MESSAGE,
@@ -83,7 +83,7 @@ from fsm_llm.llm.parsing import (
     cut_off_note,
 )
 from fsm_llm.llm.text import resolve_reasoning_trace, strip_think_and_fences
-from fsm_llm.llm.usage import _meter_of, _Metered, usage_kind
+from fsm_llm.llm.usage import _meter_of, _Metered, _UsageMeter, usage_kind
 from fsm_llm.logging import logger
 
 from .call import CallMixin
@@ -592,17 +592,14 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
             logger.error(error_msg)
             raise LLMResponseError(error_msg) from e
 
-    def _send(self, call_params: dict[str, Any], *, call_type: str) -> Any:
-        """Send one built request to the provider: the one ``completion`` call.
+    def _begin_send(
+        self, call_params: dict[str, Any], call_type: str
+    ) -> tuple[str, _UsageMeter, SendHandle | None]:
+        """What comes BEFORE the provider call: the usage kind, the meter, the observer token.
 
-        Every provider request of this interface (Pass 1, Pass 2, stream,
-        ``complete``) goes through here; the raw provider reply (a stream
-        iterator when ``call_params["stream"]``) is returned and errors
-        propagate unchanged. Each request is counted once on this instance's
-        usage meter, under the kind of ``call_type`` (``stream`` for a
-        streamed call): a raising request as a call and an error, a streamed
-        one as a call with usage missing (its chunks carry no usage on
-        Ollama, and the reply is not read here).
+        One of the three helpers of the send family (``_begin_send``, ``_failed_send``,
+        ``_finished_send``); ``begin_send`` fails closed, so a refusing observer stops the
+        call before it is made.
         """
         # DECISION plan-2026-10-01T093600-944e2692/D-004 [SUPERSEDED BY
         # plan-2026-11-18T071726-5a6a1f80/D-014 on resets]: the meter is per
@@ -610,20 +607,35 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
         # Do NOT add a process-global counter, do NOT count in the public
         # methods, do NOT read usage off a stream (its chunks carry none).
         # Readers that want counts own (inject) the interface. See D-004, D-014.
-        stream = bool(call_params.get("stream"))
-        kind = usage_kind(call_type, stream)
+        kind = usage_kind(call_type, bool(call_params.get("stream")))
         meter = _meter_of(self)
         # DECISION plan-2026-11-17T100529-21e6f00d/D-002: the observer gets an
         # allow-listed copy and is not a counter; begin_send fails closed. See observer.py.
         token = begin_send(call_params, call_type=call_type)
-        try:
-            response = completion(**call_params)
-        except Exception as exc:
-            # Broad catch is intentional: count the failed request, re-raise
-            # it unchanged for the caller's own error boundary.
-            meter.record_error(kind)
-            fail_send(token, exc)
-            raise
+        return kind, meter, token
+
+    def _failed_send(
+        self,
+        meter: _UsageMeter,
+        kind: str,
+        token: SendHandle | None,
+        exc: BaseException,
+    ) -> None:
+        """A request that raised: one call and one error on the meter, then the observer."""
+        meter.record_error(kind)
+        fail_send(token, exc)
+
+    def _finished_send(
+        self,
+        meter: _UsageMeter,
+        kind: str,
+        token: SendHandle | None,
+        call_params: dict[str, Any],
+        call_type: str,
+        response: Any,
+    ) -> Any:
+        """A request that returned: the meter, the observer, the cut-off warning; the reply."""
+        stream = bool(call_params.get("stream"))
         meter.record(kind, None if stream else response)
         end_send(token, response)
         # DECISION plan-2026-11-06T093029-0068b055/D-024: finish_reason
@@ -641,6 +653,28 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
                 "(or LLM_MAX_TOKENS) if the full reply is needed"
             )
         return response
+
+    def _send(self, call_params: dict[str, Any], *, call_type: str) -> Any:
+        """Send one built request to the provider: the one ``completion`` call.
+
+        Every provider request of this interface (Pass 1, Pass 2, stream,
+        ``complete``) goes through here; the raw provider reply (a stream
+        iterator when ``call_params["stream"]``) is returned and errors
+        propagate unchanged. Each request is counted once on this instance's
+        usage meter, under the kind of ``call_type`` (``stream`` for a
+        streamed call): a raising request as a call and an error, a streamed
+        one as a call with usage missing (its chunks carry no usage on
+        Ollama, and the reply is not read here).
+        """
+        kind, meter, token = self._begin_send(call_params, call_type)
+        try:
+            response = completion(**call_params)
+        except Exception as exc:
+            # Broad catch is intentional: count the failed request, re-raise
+            # it unchanged for the caller's own error boundary.
+            self._failed_send(meter, kind, token, exc)
+            raise
+        return self._finished_send(meter, kind, token, call_params, call_type, response)
 
     def _supported_openai_params(self) -> list[str] | None:
         """Return litellm's supported-param list for ``self.model``, memoised.

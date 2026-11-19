@@ -372,36 +372,45 @@ class TestTheSharedSendPathStaysIntact:
     def test_send_hooks_surround_the_one_provider_call_and_the_meter_order_holds(
         self,
     ) -> None:
+        # Plan 51fde95b, step 4.1 (D-007): `_send` is three calls around `completion`; the
+        # meter and the observer are fed by the send family (`_begin_send`, `_failed_send`,
+        # `_finished_send`), in the same order as before. The property is unchanged: one
+        # place feeds them, in this order, and no public method counts.
         source = _LITELLM.read_text(encoding="utf-8")
-        send = next(
-            n
+        defs = {
+            n.name: n
             for n in ast.walk(ast.parse(source))
-            if isinstance(n, ast.FunctionDef) and n.name == "_send"
-        )
-        calls = [
-            (n.lineno, n.func.id if isinstance(n.func, ast.Name) else n.func.attr)
-            for n in ast.walk(send)
-            if isinstance(n, ast.Call)
-            and isinstance(n.func, ast.Name | ast.Attribute)
-            and (n.func.id if isinstance(n.func, ast.Name) else n.func.attr)
-            in {
-                "begin_send",
-                "completion",
-                "record_error",
-                "fail_send",
-                "record",
-                "end_send",
-            }
-        ]
-        order = [name for _, name in sorted(calls)]
-        assert order == [
-            "begin_send",
+            if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+
+        def order(fn_name: str, wanted: set[str]) -> list[str]:
+            calls = [
+                (n.lineno, n.func.id if isinstance(n.func, ast.Name) else n.func.attr)
+                for n in ast.walk(defs[fn_name])
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name | ast.Attribute)
+                and (n.func.id if isinstance(n.func, ast.Name) else n.func.attr)
+                in wanted
+            ]
+            return [name for _, name in sorted(calls)]
+
+        family = {"_begin_send", "completion", "_failed_send", "_finished_send"}
+        assert order("_send", family) == [
+            "_begin_send",
             "completion",
+            "_failed_send",
+            "_finished_send",
+        ]
+        assert order("_begin_send", {"begin_send", "usage_kind", "_meter_of"}) == [
+            "usage_kind",
+            "_meter_of",
+            "begin_send",
+        ]
+        assert order("_failed_send", {"record_error", "fail_send"}) == [
             "record_error",
             "fail_send",
-            "record",
-            "end_send",
         ]
+        assert order("_finished_send", {"record", "end_send"}) == ["record", "end_send"]
         # D-004 of plan 944e2692, superseded IN PLACE on resets by D-014 of plan 5a6a1f80
         # (step 9): the same six lines, the rule that a reset clears is the one that changed
         flat = " ".join(source.replace("# ", " ").split())
@@ -414,8 +423,8 @@ class TestTheSharedSendPathStaysIntact:
             "Readers that want counts own (inject) the interface. See D-004, D-014."
         ) in flat
         assert source.count("meter.record(") == 1
-        # D-002 of plan 21e6f00d: a reference at the hook, so an editor of `_send` sees it
+        # D-002 of plan 21e6f00d: a reference at the hook, so an editor of the family sees it
         assert "plan-2026-11-17T100529-21e6f00d/D-002" in (
-            ast.get_source_segment(source, send) or ""
+            ast.get_source_segment(source, defs["_begin_send"]) or ""
         )
         assert "observes_requests = True" in source
