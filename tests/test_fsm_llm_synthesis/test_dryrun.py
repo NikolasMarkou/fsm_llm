@@ -706,6 +706,30 @@ class TestAWiderPoolNeverFalselyRejects:
         assert [bad for seed in seeds for bad in _fuzz_false_rejects(seed)] == []
 
 
+class TestALiteralAFloatCannotStepBeyond:
+    """D-042: a finding is never a false reject. A float absorbs ``x + 1`` from
+    2**53 up and an ``int`` past float range cannot become a float at all."""
+
+    LITERALS: ClassVar[list[Any]] = [2**53, 10**17, 1.7e18, 1e300, 1.7e308, 10**400]
+
+    @pytest.mark.parametrize("op", [">", "<", ">=", "<=", "==", "!="])
+    @pytest.mark.parametrize("lit", LITERALS, ids=repr)
+    @pytest.mark.parametrize("sign", [1, -1], ids=["pos", "neg"])
+    def test_a_gate_on_a_large_literal_fires_through_the_real_evaluator(
+        self, op, lit, sign
+    ):
+        logic = {op: [X, sign * lit]}
+        definition = _two(logic, requires=("x",))
+        assert _found(definition) == set()  # no false reject, no OverflowError
+        witness = dryrun.edge_witnesses(definition)["ask"][0]
+        assert witness is not None and evaluate_logic(logic, witness)
+
+    @pytest.mark.parametrize("lit", [10**400, -(10**400)], ids=["pos", "neg"])
+    def test_an_int_no_float_can_hold_never_raises_in_the_pool(self, lit):
+        gate = {"in": [X, [lit, 1]]}
+        assert _found(_two(gate, requires=("x",))) == set()
+
+
 class TestEdgeWitnesses:
     def test_a_witness_is_the_context_under_which_the_edge_wins(self):
         gate = {"in": [_var("k"), ["billing", "sales"]]}

@@ -110,6 +110,15 @@ class TestConverges:
         assert second[2]["content"] == bad
         assert _codes(second[3]["content"]) == {"persona-set", "priority-reserved"}
 
+    @pytest.mark.parametrize("op", ["==", "<", ">"])
+    def test_an_integer_literal_outside_float_range_is_a_verdict_not_an_overflow(
+        self, valid_fsm, op
+    ):
+        gate = {op: [{"var": "answer"}, 10**400]}
+        valid_fsm["states"]["ask"]["transitions"][0]["conditions"][0]["logic"] = gate
+        synth, _ = _synth([_text(valid_fsm)])
+        assert synth.compile("g", return_keys=RET).report.passed
+
     def test_the_result_is_the_gated_abort_injected_form(self, valid_fsm):
         result = _synth([_text(valid_fsm)])[0].compile("g", return_keys=RET)
         expected = run_gates(valid_fsm, SynthesisPolicy(), return_keys=RET)

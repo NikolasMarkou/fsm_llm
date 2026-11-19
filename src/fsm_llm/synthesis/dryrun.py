@@ -141,22 +141,34 @@ def _scan(edge: Transition) -> tuple[list[Any], set[str], set[str]] | None:
     return lits, tested | required, tested
 
 
+def _finite(value: Any) -> bool:
+    """Whether a numeric literal is a finite number a float can hold (a huge
+    ``int`` raises ``OverflowError`` in ``float``, ``math.isfinite`` included)."""
+    try:
+        return math.isfinite(float(value))
+    except (ValueError, OverflowError):
+        return False
+
+
 def _numbers(lits: list[Any]) -> list[float]:
     """The numeric partition: each numeric literal (a numeric string as its
     number), 0 and 1, the midpoint of every adjacent pair and one step beyond
-    both ends. It decides every ``var <op> number`` the fragment allows."""
+    both ends. It decides every ``var <op> number`` the fragment allows. From
+    ``2**53`` up ``x + 1`` is absorbed by a float, so a step beyond a large end
+    doubles it as an ``int`` (also for an ``int`` no float can hold)."""
     found = {0.0, 1.0}
+    huge: list[int] = []
     for value in lits:
         if _number(value) or isinstance(value, str):
-            try:
-                number = float(value)
-            except (ValueError, OverflowError):
-                continue
-            if math.isfinite(number):
-                found.add(number)
+            if _finite(value):
+                found.add(float(value))
+            elif isinstance(value, int):
+                huge.append(value * 2)
     points = sorted(found)
     mids = [a / 2 + b / 2 for a, b in itertools.pairwise(points)]
-    return sorted([*points, *mids, points[0] - 1, points[-1] + 1])
+    below = points[0] - 1 if points[0] > -(2**53) else int(points[0]) * 2
+    above = points[-1] + 1 if points[-1] < 2**53 else int(points[-1]) * 2
+    return sorted([*points, *mids, below, above, *huge])
 
 
 def _strings(lits: list[Any]) -> list[str]:
@@ -164,7 +176,7 @@ def _strings(lits: list[Any]) -> list[str]:
     for 3.0, else the repr); a non-finite literal has none."""
     found = ["0", "1"]
     for value in lits:
-        if _number(value) and math.isfinite(value):
+        if _number(value) and _finite(value):
             found.append(str(int(value)) if value == int(value) else repr(float(value)))
     return found
 

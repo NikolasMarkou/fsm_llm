@@ -90,6 +90,7 @@ Findings of six external audits of the engine, core, runtime, synthesis, monitor
 - A refused agent launch from the Builder keeps the launch form (task and stub responses) open for a retry (G5).
 - The Logs page has TRACE and SUCCESS pills (SUCCESS on, TRACE off by default) and the minimum-level request uses the full level order, so TRACE and SUCCESS records are no longer filtered out; TRACE records appear only when the monitor's log level is set to TRACE (G6).
 - `FSMSynthesizer.obtain` refuses a stored `deprecated` digest with `SynthesisRefusedError` (`lifecycle_too_low`) before the reviewer is asked and before `FSMLibrary.put` can touch it, so a deprecated record no longer gains an approver or gates and a human is no longer asked about a procedure that is then refused; the `draft` to `verified` step is one lock hold (the new `FSMLibrary.ensure_verified`), so a concurrent `verify` or `deprecate` no longer makes `obtain` raise `LibraryError: illegal lifecycle edge` (plan 51fde95b, second synthesis audit).
+- The G6a dead-edge gate (`analyze_dryrun`, `edge_witnesses`, `run_gates` and so `FSMSynthesizer.compile`) no longer raises `OverflowError` for an integer literal outside float range (a model reply with `10**400` crashed `obtain`), and no longer rejects an ordering gate on a literal of 2**53 or more (`x > 10**17` was reported `edge-unfireable` because a float absorbs `x + 1`): the pool now steps beyond a large end in the integer domain (plan 51fde95b, second synthesis audit).
 
 ## [0.13.0] - 2026-11-16
 
