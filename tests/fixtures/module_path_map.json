@@ -1086,6 +1086,7 @@
     "fsm_llm.engine.api.surface",
     "fsm_llm.engine.events",
     "fsm_llm.engine.fsm",
+    "fsm_llm.engine.fsm.gate",
     "fsm_llm.engine.intent_router",
     "fsm_llm.engine.kinds",
     "fsm_llm.engine.kinds.conversation",
