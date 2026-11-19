@@ -147,8 +147,12 @@ class SynthesisPolicy:
         ``trust_after_successes`` is ``None`` or an ``int`` from 1.
         ``allowed_tools`` is a collection of non-blank names (a bare string is
         refused); it is stored as a ``frozenset``. ``require_approval`` is a
-        ``bool``. A bad value raises ``SynthesisError`` at construction and is
-        never clamped; ``dataclasses.replace`` validates again.
+        ``bool``. ``allow_classification`` (a ``bool``, default False) puts the
+        classification paragraph in the compile prompt (``prompts.system_prompt``
+        reads it, G5 does not): set it only when the interface that runs the
+        procedures implements ``complete``. A bad value raises ``SynthesisError``
+        at construction and is never clamped; ``dataclasses.replace`` validates
+        again.
     """
 
     max_states: int = 12
@@ -177,6 +181,7 @@ class SynthesisPolicy:
     allowed_tools: frozenset[str] = frozenset()
     require_approval: bool = False
     require_simulation: bool = False
+    allow_classification: bool = False
 
     def __post_init__(self) -> None:
         def put(name: str, value: Any) -> None:
@@ -217,7 +222,7 @@ class SynthesisPolicy:
         if not all(name.strip() for name in tools):
             raise refuse("allowed_tools", "a collection of non-blank names")
         put("allowed_tools", tools)
-        for flag in ("require_approval", "require_simulation"):
+        for flag in ("require_approval", "require_simulation", "allow_classification"):
             if not isinstance(getattr(self, flag), bool):
                 raise refuse(flag, "a bool")
 
