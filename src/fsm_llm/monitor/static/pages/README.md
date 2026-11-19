@@ -35,7 +35,7 @@ flowchart LR
 - `conversations.js` - conversation detail view and chat box inside the drawer, End conversation; its typing indicator is reused by the builder.
 - `launch.js` - launch modal for FSMs, workflows, and agents, including ready-made stub tool templates.
 - `visualizer.js` - FSM, agent, and workflow graph drawing, preset dropdown, resizable split pane.
-- `builder.js` - chat session with the meta-builder, internal state panel, result summary, copy, download, and launch.
+- `builder.js` - chat session with the meta-builder (with Cancel and an elapsed-time status), internal state panel, result summary, Edit JSON, copy, download, and launch (model, label and limits editable).
 - `eventlog.js` - the Event log panel of the Logs page (read only).
 - `logs.js` - log stream with pause buffer, level pills, search highlight, sidebar error badge.
 - `settings.js` - load, save, and reset monitor configuration; save or clear the API key.
@@ -60,4 +60,4 @@ Every page is reachable from the sidebar. To launch something, open the Launch m
 - While logs are paused, up to 5,000 new entries are buffered and older ones are dropped. The visible stream keeps at most 1,000 entries.
 - Custom dashboard panels only appear when a dashboard config has been set on the server (`POST /api/dashboard/config`).
 - The API key entered in Settings is kept in the browser tab's sessionStorage only.
-- A few node probes cover the chat switch, the Send Event targets, the custom panels, the launch modal and the builder launch retry (`tests/test_fsm_llm_monitor/test_static_js.py`); the rest of these pages has no automated test, so check changes by running `fsm-llm-monitor` and using the page.
+- A few node probes cover the chat switch, the Send Event targets, the custom panels, the launch modal and the builder launch, cancel, edit and start requests (`tests/test_fsm_llm_monitor/test_static_js.py`); the rest of these pages has no automated test, so check changes by running `fsm-llm-monitor` and using the page.

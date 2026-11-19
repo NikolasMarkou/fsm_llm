@@ -47,7 +47,7 @@ sequenceDiagram
 
 `api.js`
 - `fetchJson(url: string, opts?: RequestInit, _retried = false): Promise<any>` - copies `opts`, sets `X-API-Key` from `getApiKey()` (deletes it when no key), on any method. On `!resp.ok` tries `resp.json()` and builds the message with `formatErrorDetail(body?.detail, resp.statusText || "HTTP <status>")`. On a 401 with `_retried` false it awaits `requestApiKey({message})` and, if a key was saved, retries once with `_retried = true`. Otherwise throws `Error(detail)` with `err.status = resp.status`. On success returns `resp.json()`.
-- `postJson(url: string, data: any): Promise<any>` - `fetchJson` with `method: 'POST'`, `Content-Type: application/json`, `JSON.stringify(data)`.
+- `postJson(url: string, data: any, opts?: object): Promise<any>` - `fetchJson` with `method: 'POST'`, `Content-Type: application/json`, `JSON.stringify(data)`; `opts` (for example `{signal}` of an `AbortController`) is spread first, so it can never replace the method, headers or body.
 - `formatErrorDetail(detail, fallback)` - `null`/`''` gives `fallback || 'Request failed'`; a string is returned as is; a FastAPI 422 list of `{loc, msg}` becomes `"a.b: msg; ..."` with `body`/`query`/`path` removed from `loc`; an object gives `msg`, `message`, or its JSON.
 
 `auth.js`

@@ -59,7 +59,7 @@ Control flow in `app.js`:
 - `conversations.js`: conversation detail and chat in the drawer, End conversation; `showConversationInDrawer`, `showConversationDetail`, `addTypingIndicator`, `removeTypingIndicator`, `setDeps`. `_detailRequestId` drops stale responses.
 - `launch.js`: launch modal for FSMs (preset or pasted JSON), workflow presets, agents with stub tools (`TOOL_TEMPLATES`). Launch FSM also starts one conversation and opens it in the drawer after 500 ms.
 - `visualizer.js`: FSM, agent, and workflow graphs through `utils/graph.js`, preset dropdown, resizable split pane (`initVizDivider`).
-- `builder.js`: chat with the meta-builder (`/api/builder/start`, `/send`, DELETE), result summary, copy, download (`artifact.json`), launch. Workflow artifacts cannot be launched.
+- `builder.js`: chat with the meta-builder (`/api/builder/start`, `/send`, DELETE with `?force=true`), Cancel (abort controller plus force delete) with an elapsed-seconds status, result summary, Edit JSON then Apply, copy, download (`artifact.json`), launch. Workflow artifacts cannot be launched, and neither can an agent type missing from `/api/capabilities` `agent_types`.
 - `logs.js`: `appendLogs`, `syncLogs`, `onShowLogs`. Level pills, search highlight, pause buffer (cap 5000), DOM cap 1000, de-dup by `timestamp|level|module:line|message`, sidebar error badge.
 - `settings.js`: `loadSettings`. Config form (`/api/config`, client bounds `refresh_interval` 0.5..60, `max_events` and `max_log_lines` 10..100000), API key field, system info (`/api/info`).
 

@@ -59,7 +59,7 @@ python -m fsm_llm.monitor --info
 
 The dashboard starts without a model. A launch (FSM, agent or builder) uses the model its request names, else `LLM_MODEL` (the `--env-file` file can supply it), else `ollama_chat/bonsai-2:27b` (`DEFAULT_TOOL_MODEL`), so no launch route answers 400 for an unset model. The command exits with 0 after `--version` and `--info`, and with 1 if `fastapi`, `uvicorn` or `jinja2` is missing. The health route is `GET /health`; the FSM routes are under `/api/fsm/...`. The OpenAPI document (`/openapi.json`, UI at `/api/docs`) reports the package version. Other flags: `--host` (default `127.0.0.1`), `--api-key` and `--otel` (below).
 
-Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent and workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
+Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent and workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent, cancel a running build, edit the JSON, launch the result with its own model, label and limits), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
 
 Watch an `API` object from your own program:
 
