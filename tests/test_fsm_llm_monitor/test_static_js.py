@@ -38,7 +38,11 @@ def probe(tmp_path_factory):
     )
     shutil.copytree(_PROBES, root / "probes")
 
+    seen: dict[str, dict] = {}
+
     def run(name: str) -> dict:
+        if name in seen:
+            return seen[name]
         done = subprocess.run(
             [_NODE, "--no-warnings", str(root / "probes" / f"{name}.mjs")],
             capture_output=True,
@@ -47,7 +51,8 @@ def probe(tmp_path_factory):
             cwd=root,
         )
         assert done.returncode == 0, done.stderr
-        return json.loads(done.stdout.strip().splitlines()[-1])
+        seen[name] = json.loads(done.stdout.strip().splitlines()[-1])
+        return seen[name]
 
     return run
 
@@ -114,3 +119,17 @@ class TestDashboard:
             "alerts": None,
         }
         assert out["three"]["section"] is False
+
+
+class TestLaunchModal:
+    def test_the_button_stays_disabled_until_the_modal_closes(self, probe):
+        out = probe("launch_modal")
+        for name, posts in (("agent", 1), ("fsm", 2), ("workflow", 1)):
+            assert out[f"{name}_ok"]["returned"] is True
+            assert out[f"{name}_ok"]["window"] == [True, posts]
+            assert out[f"{name}_ok"]["end"][0] is False
+
+    def test_a_refused_launch_re_enables_the_button_at_once(self, probe):
+        out = probe("launch_modal")
+        for name in ("agent", "fsm", "workflow"):
+            assert out[f"{name}_failed"]["returned"] is False

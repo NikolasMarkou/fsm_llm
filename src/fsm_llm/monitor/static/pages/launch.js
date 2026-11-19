@@ -193,11 +193,14 @@ export async function doLaunchFSM(btn) {
 
         const startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, { initial_context: {} });
         if (startData) {
+            // The button stays disabled until the modal is closed (no second POST in the 500 ms window).
             setTimeout(() => {
                 closeLaunchModal();
                 _showPage?.('control');
                 if (startData.conversation_id) _showConversationInDrawer?.(data.instance_id, startData.conversation_id);
+                _resetBtn();
             }, 500);
+            return;
         }
     } catch (e) {
         showError('launch-fsm-status', `Launch failed: ${e.message}`);
@@ -229,7 +232,8 @@ export async function doLaunchWorkflow(btn) {
         const data = await postJson('/api/workflow/launch', body);
         showStatus('launch-wf-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
-        setTimeout(() => { closeLaunchModal(); _showPage?.('control'); }, 500);
+        setTimeout(() => { closeLaunchModal(); _showPage?.('control'); _resetBtn(); }, 500);
+        return;
     } catch (e) {
         showError('launch-wf-status', `Launch failed: ${e.message}`);
     }
@@ -349,7 +353,8 @@ export async function doLaunchAgent(btn) {
         const data = await postJson('/api/agent/launch', body);
         showStatus('launch-agent-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
-        setTimeout(() => { closeLaunchModal(); _showPage?.('control'); }, 500);
+        setTimeout(() => { closeLaunchModal(); _showPage?.('control'); _resetBtn(); }, 500);
+        return;
     } catch (e) {
         showError('launch-agent-status', `Launch failed: ${e.message}`);
     }
