@@ -332,6 +332,69 @@ class TestBuilderGuards:
                 routes_builder._builder_sessions.pop(sid, None)
 
 
+class _GatedAgent:
+    """A builder agent whose ``send`` blocks on a gate (a slow worker thread)."""
+
+    def __init__(self) -> None:
+        import threading
+
+        self.started = threading.Event()
+        self.gate = threading.Event()
+
+    def send(self, message: str) -> str:
+        self.started.set()
+        self.gate.wait(30)
+        return "done"
+
+    def is_complete(self) -> bool:
+        return False
+
+
+class TestACancelledBuilderSendReleasesTheSession:
+    """F7 (monitor audit 1.2): a handler task that is cancelled (a server or
+    embedder that cancels it) leaves its worker thread running; the session is
+    released when that thread ends, never left busy for good (a stuck session
+    answers every later send and delete with 409)."""
+
+    def _cancel_then_finish(self) -> bool:
+        import asyncio
+
+        from fsm_llm.monitor.definitions import BuilderSendRequest
+
+        agent = _GatedAgent()
+        routes_builder._builder_sessions["b1"] = (agent, 0.0)
+
+        async def scenario() -> bool:
+            request = BuilderSendRequest(session_id="b1", message="hello")
+            task = asyncio.ensure_future(routes_builder.api_builder_send(request))
+            for _ in range(500):
+                if agent.started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert agent.started.is_set() and "b1" in routes_builder._builder_busy
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # still busy while the worker thread is running: no second send
+            assert "b1" in routes_builder._builder_busy
+            agent.gate.set()
+            for _ in range(500):
+                if "b1" not in routes_builder._builder_busy:
+                    break
+                await asyncio.sleep(0.01)
+            return "b1" not in routes_builder._builder_busy
+
+        try:
+            return asyncio.run(scenario())
+        finally:
+            agent.gate.set()
+            routes_builder._builder_busy.discard("b1")
+            routes_builder._builder_sessions.pop("b1", None)
+
+    def test_the_session_is_released_when_the_worker_ends(self):
+        assert self._cancel_then_finish() is True
+
+
 class TestPresetValidation:
     def test_traversal_and_absolute_ids_rejected(self, tmp_path):
         (tmp_path / "ok.json").write_text("{}", encoding="utf-8")

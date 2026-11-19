@@ -186,6 +186,11 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
         await _release()
         logger.error(f"Builder send failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+    except BaseException:
+        # Cancelled: the worker thread keeps running, so the session is
+        # released when it ends (as for a timeout), never left busy for good.
+        work.add_done_callback(_release_when_done)
+        raise
 
     try:
         result: dict[str, Any] = {
