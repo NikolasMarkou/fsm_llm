@@ -1013,14 +1013,28 @@ class TestEverySiteIsWrapped:
                 for child in ast.iter_child_nodes(node):
                     parents[child] = node
             for node in ast.walk(tree):
-                if not (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in _CALLS
-                ):
+                if self._called(node) is None:
                     continue
                 found.append((path, node.lineno, self._inside_llm_call(node, parents)))
         return found
+
+    @staticmethod
+    def _called(node: ast.AST) -> str | None:
+        """The model method a call node calls: ``x.<name>(...)`` or ``acall(x, "<name>", ...)``.
+
+        Plan 51fde95b (D-007): a call that goes through the transport helper of ``fsm_llm.aio``
+        names the method as a string, and is still a model call site.
+        """
+        if not isinstance(node, ast.Call):
+            return None
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr if node.func.attr in _CALLS else None
+        named = (
+            getattr(node.args[1], "value", None)
+            if getattr(node.func, "id", None) == "acall" and len(node.args) > 1
+            else None
+        )
+        return named if named in _CALLS else None
 
     @staticmethod
     def _inside_llm_call(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
@@ -1050,6 +1064,24 @@ class TestEverySiteIsWrapped:
             "pass2.py",
             "pass2.py",
         ]
+
+    def test_the_sweep_sees_a_call_through_acall_and_flags_it_unwrapped(self):
+        for source, name in [
+            ('async def f(x):\n    return await acall(x, "complete", 1)\n', "complete"),
+            ('async def f(x):\n    return await acall(x, "_send", 1)\n', None),
+            ("async def f(x):\n    return await acall(x)\n", None),
+        ]:
+            tree = ast.parse(source)
+            call = next(
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "acall"
+            )
+            assert self._called(call) == name
+        tree = ast.parse('async def f(x):\n    return await acall(x, "complete", 1)\n')
+        call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
+        parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+        assert self._inside_llm_call(call, parents) is False
 
     def test_the_sweep_would_flag_an_unwrapped_call(self):
         tree = ast.parse("def f(x):\n    return x.generate_response(1)\n")

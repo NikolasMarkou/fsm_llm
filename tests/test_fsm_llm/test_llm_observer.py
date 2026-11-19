@@ -416,12 +416,16 @@ class TestTheSharedSendPathStaysIntact:
         ]
         assert order("_finished_send", {"record", "end_send"}) == ["record", "end_send"]
         # D-004 of plan 944e2692, superseded IN PLACE on resets by D-014 of plan 5a6a1f80
-        # (step 9): the same six lines, the rule that a reset clears is the one that changed
+        # (step 9) and on "fed here" by D-007 of plan 51fde95b (step 4.8): the meter is fed in
+        # one place, which is now the send family of `_send` and `_asend`; the rule not to
+        # count in a public method stays as written
         flat = " ".join(source.replace("# ", " ").split())
         assert (
             "DECISION plan-2026-10-01T093600-944e2692/D-004 [SUPERSEDED BY "
-            "plan-2026-11-18T071726-5a6a1f80/D-014 on resets]: the meter is per "
-            "instance and fed here only; a reset moves a marker, see llm/usage.py. "
+            "plan-2026-11-18T071726-5a6a1f80/D-014 on resets, and BY "
+            'plan-2026-11-19T025425-51fde95b/D-007 on "here": the send family of '
+            "`_send` and `_asend`]: the meter is per instance and fed here only; a "
+            "reset moves a marker, see llm/usage.py. "
             "Do NOT add a process-global counter, do NOT count in the public "
             "methods, do NOT read usage off a stream (its chunks carry none). "
             "Readers that want counts own (inject) the interface. See D-004, D-014."

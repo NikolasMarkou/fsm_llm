@@ -599,7 +599,10 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
         """The async twin of ``complete`` and the one body: ``complete`` is ``run_sync`` over it."""
-        # DECISION plan-2026-10-01T093600-944e2692/D-002: one request primitive
+        # DECISION plan-2026-10-01T093600-944e2692/D-002 [SUPERSEDED BY
+        # plan-2026-11-19T025425-51fde95b/D-007 on "a second `completion` binding" and
+        # "_send": `acompletion` is this module's binding, built by the same builder and
+        # sent through the same send family]: one request primitive
         # (supersedes 07ad3f8c/D-022's classifier-only method). Do NOT add a
         # second builder, a second `completion` binding or a per-kind method
         # (one for tools, one for text, one for schemas): every request
@@ -658,7 +661,9 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
         call before it is made.
         """
         # DECISION plan-2026-10-01T093600-944e2692/D-004 [SUPERSEDED BY
-        # plan-2026-11-18T071726-5a6a1f80/D-014 on resets]: the meter is per
+        # plan-2026-11-18T071726-5a6a1f80/D-014 on resets, and BY
+        # plan-2026-11-19T025425-51fde95b/D-007 on "here": the send family of `_send`
+        # and `_asend`]: the meter is per
         # instance and fed here only; a reset moves a marker, see llm/usage.py.
         # Do NOT add a process-global counter, do NOT count in the public
         # methods, do NOT read usage off a stream (its chunks carry none).
@@ -738,6 +743,10 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
         The meter and the observer are fed by the same three helpers as in ``_send``, in
         the same order, so a request counts once and is logged once on either transport.
         """
+        # DECISION plan-2026-11-19T025425-51fde95b/D-007: two transports, one send family.
+        # `acompletion` is a binding of this module beside `completion`, built by the same
+        # `_build_call_params` and fed through the same `_begin_send`, `_failed_send` and
+        # `_finished_send`. Do NOT write a second send path or count in a public method.
         kind, meter, token = self._begin_send(call_params, call_type)
         try:
             response = await acompletion(**call_params)

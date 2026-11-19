@@ -8,11 +8,13 @@ the result, the observer events and the usage meter. Nothing here reaches a netw
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -631,3 +633,81 @@ class TestTheSubclassGuard:
             and async_.call_count == 1
             and sync.call_count == 0
         )
+
+
+# --- one body per method, one send family: read from the source, so a copy cannot hide ---
+
+_PROVIDERS_DIR = Path(__file__).resolve().parents[2] / "src/fsm_llm/llm/providers"
+# public sync name -> the providers file that holds it; each is only `return run_sync|iterate_sync(self.a<name>(...))`
+_WRAPPERS = {
+    "generate_response": "litellm.py",
+    "extract_field": "litellm.py",
+    "extract_bulk_data": "litellm.py",
+    "complete": "litellm.py",
+    "generate_response_stream": "litellm.py",
+    "_make_llm_call": "call.py",
+}
+
+
+def _defs(file: str) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    tree = ast.parse((_PROVIDERS_DIR / file).read_text(encoding="utf-8"))
+    return {
+        n.name: n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
+def _calls(node: ast.AST) -> list[str]:
+    return [
+        n.func.id if isinstance(n.func, ast.Name) else n.func.attr
+        for n in ast.walk(node)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name | ast.Attribute)
+    ]
+
+
+class TestOneBodyPerMethod:
+    @pytest.mark.parametrize("name", list(_WRAPPERS))
+    def test_a_sync_method_is_only_a_wrapper_over_its_async_twin(
+        self, name: str
+    ) -> None:
+        defs = _defs(_WRAPPERS[name])
+        twin = async_name(name)
+        assert isinstance(defs[twin], ast.AsyncFunctionDef)
+        body = [
+            n
+            for n in defs[name].body
+            if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))
+        ]
+        assert len(body) == 1 and isinstance(body[0], ast.Return)
+        driver = "iterate_sync" if name == "generate_response_stream" else "run_sync"
+        # `return <driver>(self.<twin>(...))` and no other call: no parse, no retry, no send
+        assert [c for c in _calls(body[0]) if c != twin] == [driver]
+        assert twin in _calls(body[0])
+
+    def test_the_parse_and_retry_bodies_exist_once(self) -> None:
+        source = (_PROVIDERS_DIR / "litellm.py").read_text(encoding="utf-8")
+        defs = _defs("litellm.py")
+        assert source.count("self.apology_retry_count += 1") == 1
+        for sync_name in ("generate_response", "extract_field", "extract_bulk_data"):
+            assert not [c for c in _calls(defs[sync_name]) if c.startswith("_parse")]
+        parsers = [
+            c for c in _calls(defs["agenerate_response"]) if c.startswith("_parse")
+        ]
+        assert (
+            parsers == ["_parse_response_generation_response"] * 2
+        )  # first read, retry
+
+    def test_the_meter_and_the_observer_are_fed_only_in_the_send_family(self) -> None:
+        defs = _defs("litellm.py")
+        family = {"_begin_send", "_failed_send", "_finished_send"}
+        fed = {"record", "record_error", "begin_send", "end_send", "fail_send"}
+        for name, node in defs.items():
+            if name not in family:
+                assert not fed & set(_calls(node)), name
+        source = (_PROVIDERS_DIR / "litellm.py").read_text(encoding="utf-8")
+        assert all(source.count(f"def {name}(") == 1 for name in family)
+        assert source.count("meter.record(") == 1
+        for sender in ("_send", "_asend"):
+            calls = _calls(defs[sender])
+            assert all(calls.count(helper) == 1 for helper in family), sender
