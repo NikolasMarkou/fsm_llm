@@ -13,8 +13,10 @@ engine has one more entry that is run as a module. Each section gives the entry 
 `fsm-llm-meta`, `python -m fsm_llm.reasoning`) take `--model` (`-m` on `fsm-llm` and the
 reasoning CLI), then the process environment variable `LLM_MODEL`, then the file named by
 `--env-file`. With none of the three they exit 1 with one message on stderr
-(`ModelNotConfiguredError`). `fsm-llm-monitor` starts without a model: `LLM_MODEL` reaches its
-launch routes, which answer 400 when none is set.
+(`ModelNotConfiguredError`). Two entry points end on a default instead:
+`fsm-llm-eval` uses `ollama_chat/bonsai-2:27b` (`DEFAULT_TOOL_MODEL`) when none of the three
+names a model, and `fsm-llm-monitor`, which starts without a model, uses it for a launch
+request that names none and finds no `LLM_MODEL`.
 
 **`--env-file PATH`.** Importing `fsm_llm` reads no `.env` file. The five model CLIs
 (`fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `fsm-llm-monitor`, `python -m fsm_llm.reasoning`)

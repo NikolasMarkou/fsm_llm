@@ -195,8 +195,9 @@ The library is organized into these groups of features.
 Things to know:
 
 * The `fsm-llm` command needs `LLM_MODEL`. The Python `API` takes `model=`, then `LLM_MODEL`,
-  and raises `ModelNotConfiguredError` when neither is set (there is no built-in default
-  model). Importing `fsm_llm` loads no `.env` file; read one on purpose with
+  and raises `ModelNotConfiguredError` when neither is set (the core has no built-in
+  default model; only `fsm-llm-eval` and the monitor launch routes fall back to
+  `ollama_chat/bonsai-2:27b`). Importing `fsm_llm` loads no `.env` file; read one on purpose with
   `fsm_llm.load_env()` or the `--env-file PATH` flag of a CLI.
 * The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both
   also replace loguru's default handler, so a library record prints once.
