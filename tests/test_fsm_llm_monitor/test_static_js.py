@@ -94,3 +94,23 @@ class TestChatAndTargets:
         block = app.split("'activity-row-click'")[1].split("// Control Center")[0]
         assert "setTimeout" not in block
         assert block.count("showConversationInDrawer(instanceId, itemId)") == 1
+
+
+class TestDashboard:
+    def test_a_new_config_replaces_the_whole_custom_section(self, probe):
+        out = probe("custom_panels")
+        assert out["one"] == {
+            "section": True,
+            "title": "Config ONE",
+            "desc": True,
+            "panels": ["P1"],
+            "alerts": ["ALERT ONE"],
+        }
+        assert out["two"] == {
+            "section": True,
+            "title": "Config TWO",
+            "desc": False,
+            "panels": ["P2"],
+            "alerts": None,
+        }
+        assert out["three"]["section"] is False

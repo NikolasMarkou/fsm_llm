@@ -43,6 +43,9 @@ export function loadDashboardConfig() {
 }
 
 function _renderCustomPanelsContainer() {
+    // Rebuild the whole section: a new config must not keep the old title,
+    // description or alerts row, and a config with no panels shows no section.
+    _removeCustomPanelsContainer();
     if (!_dashboardConfig || !_dashboardConfig.panels?.length) return;
 
     let container = $('custom-panels');
