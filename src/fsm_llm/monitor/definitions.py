@@ -17,6 +17,7 @@ from fsm_llm import LLMUsage
 from .constants import (
     DEFAULT_AGENT_MAX_ITERATIONS,
     DEFAULT_AGENT_TIMEOUT_SECONDS,
+    DEFAULT_BUILDER_MAX_TOKENS,
     DEFAULT_FSM_TEMPERATURE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MAX_EVENTS,
@@ -381,7 +382,9 @@ class BuilderStartRequest(BaseModel):
     artifact_type: str = ""
     model: str | None = None  # None or blank: env LLM_MODEL, else DEFAULT_TOOL_MODEL
     temperature: float = Field(default=0.7, ge=MIN_TEMPERATURE, le=MAX_TEMPERATURE)
-    max_tokens: int = Field(default=2000, ge=1, le=MAX_BUILDER_TOKENS)
+    max_tokens: int = Field(
+        default=DEFAULT_BUILDER_MAX_TOKENS, ge=1, le=MAX_BUILDER_TOKENS
+    )
 
 
 class BuilderSendRequest(BaseModel):

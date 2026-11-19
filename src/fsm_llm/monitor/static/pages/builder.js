@@ -94,6 +94,7 @@ export function onBuilderScroll() {
 export function startBuilderSession() {
     const model = $('builder-model').value.trim();
     const temp = numVal('builder-temp', 0.7);
+    const maxTokens = intVal('builder-max-tokens', 4096);
 
     // Abandon the previous session: free it on the server and ignore any of
     // its replies still in flight.
@@ -114,7 +115,7 @@ export function startBuilderSession() {
     $('builder-input-area').style.display = 'flex';
     showStatus('builder-status', 'Starting session...', 'info');
 
-    postJson('/api/builder/start', { model: model || undefined, temperature: temp })
+    postJson('/api/builder/start', { model: model || undefined, temperature: temp, max_tokens: maxTokens })
         .then(data => {
             if (token !== _sessionToken) {
                 // A newer start or a reset superseded this one.

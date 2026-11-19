@@ -324,6 +324,7 @@
                     <div class="panel-title">New Artifact</div>
                     <div class="form-row"><label for="builder-model">Model:</label><input type="text" id="builder-model" placeholder="e.g. gpt-4o-mini, ollama_chat/llama3" class="flex-1"></div>
                     <div class="form-row"><label for="builder-temp">Temperature:</label><input type="number" id="builder-temp" value="0.7" step="0.1" min="0" max="2" class="input-narrow"></div>
+                    <div class="form-row"><label for="builder-max-tokens">Max Tokens:</label><input type="number" id="builder-max-tokens" value="4096" step="256" min="1" max="100000" class="input-narrow" title="Reply limit of one build call; a build cut at this limit is not flagged"></div>
                     <div class="btn-row">
                         <button class="btn btn-primary" data-action="start-builder">Start Building</button>
                         <button class="btn" data-action="reset-builder">Reset</button>

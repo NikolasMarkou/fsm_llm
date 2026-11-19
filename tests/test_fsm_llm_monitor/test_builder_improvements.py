@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import ClassVar
 
+import pytest
 from fastapi.testclient import TestClient
 
 import fsm_llm.agents as agents_pkg
+import fsm_llm.agents.meta_builder as meta_builder
 from fsm_llm.agents.meta_builders import AgentArtifactBuilder
-from fsm_llm.monitor.constants import MAX_AGENT_ITERATIONS, MAX_AGENT_TIMEOUT_SECONDS
+from fsm_llm.monitor.constants import (
+    DEFAULT_BUILDER_MAX_TOKENS,
+    MAX_AGENT_ITERATIONS,
+    MAX_AGENT_TIMEOUT_SECONDS,
+    MAX_BUILDER_TOKENS,
+)
 from fsm_llm.monitor.instance_manager import agent as agent_mod
-from fsm_llm.monitor.server import app, configure
+from fsm_llm.monitor.server import app, configure, routes_builder
 from tests.test_fsm_llm_monitor.support import _manager
 
 _MONITOR = Path(__file__).parent.parent.parent / "src" / "fsm_llm" / "monitor"
@@ -87,3 +95,61 @@ class TestTheLaunchableAgentTypesAreOneList:
         )
         listed = re.search(r"TOOL_BASED_AGENTS = \[(.*?)\]", state_js).group(1)
         assert set(re.findall(r"'(\w+)'", listed)) == agent_mod._TOOL_BASED_AGENTS
+
+
+class _FakeBuilderAgent:
+    """Stands in for ``MetaBuilderAgent``: records its config, answers with no model call."""
+
+    configs: ClassVar[list] = []
+
+    def __init__(self, config):
+        self.config = config
+        type(self).configs.append(config)
+
+    def start(self, message):
+        return "hello"
+
+    def is_complete(self):
+        return False
+
+    def get_internal_state(self):
+        return {"phase": "collect", "turn_count": 0}
+
+
+@pytest.fixture
+def builder_client(monkeypatch):
+    """A client whose Builder routes build a `_FakeBuilderAgent` (a real route, no model call)."""
+    _FakeBuilderAgent.configs = []
+    monkeypatch.setattr(meta_builder, "MetaBuilderAgent", _FakeBuilderAgent)
+    configure(manager=_manager())
+    yield TestClient(app)
+    routes_builder._builder_sessions.clear()
+    routes_builder._builder_busy.clear()
+
+
+class TestTheBuilderMaxTokensField:
+    """13.4: the default is the library's 4096 (was 2000) and a request value reaches the config."""
+
+    def test_the_default_is_the_meta_builder_default(self, builder_client):
+        assert builder_client.post("/api/builder/start", json={}).status_code == 200
+        assert (
+            _FakeBuilderAgent.configs[-1].max_tokens
+            == DEFAULT_BUILDER_MAX_TOKENS
+            == 4096
+        )
+
+    def test_a_request_value_reaches_the_config_and_the_bounds_hold(
+        self, builder_client
+    ):
+        post = builder_client.post
+        assert post("/api/builder/start", json={"max_tokens": 777}).status_code == 200
+        assert _FakeBuilderAgent.configs[-1].max_tokens == 777
+        for bad in (0, MAX_BUILDER_TOKENS + 1):
+            assert (
+                post("/api/builder/start", json={"max_tokens": bad}).status_code == 422
+            )
+
+    def test_the_form_field_mirrors_the_default_and_the_bound(self):
+        attrs = _input_attrs("builder-max-tokens")
+        assert f'value="{DEFAULT_BUILDER_MAX_TOKENS}"' in attrs
+        assert f'max="{MAX_BUILDER_TOKENS}"' in attrs

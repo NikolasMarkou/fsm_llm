@@ -255,6 +255,15 @@ class TestBuilderFsmLaunchOpensTheConversation:
         assert (out["instance"], out["conv"], out["pages"]) == (None, None, ["control"])
 
 
+class TestBuilderStartSendsMaxTokens:
+    """Plan 51fde95b step 13.4: the Max Tokens field reaches the start request."""
+
+    def test_the_field_is_sent_and_an_unusable_value_falls_back_to_the_default(
+        self, probe
+    ):
+        assert probe("builder_start")["tokens"] == [8000, 4096, 4096]
+
+
 class TestChatInputAndMarkdownBlocks:
     """Plan 51fde95b step 12.1: the two quirks plan 52ce5464 carried."""
 
