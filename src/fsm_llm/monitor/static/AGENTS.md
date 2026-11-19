@@ -25,7 +25,7 @@ flowchart TD
     Server -->|_load_flows| Flows[flows.json]
 ```
 
-Layering: `utils/` imports only `utils/` (`markdown.js` and `graph.js` import `esc` from `dom.js`); `services/` imports `utils/` (`ws.js` uses `hashInstances`, `$`; `auth.js` uses `openDialog`); `pages/` import `services/`, `utils/`, and a few sibling pages; `app.js` imports everything. Pages never import `app.js`. It injects functions with `setDeps(...)` (builder, control, conversations, launch) and `dashboard.setNavigateToInstance(control.navigateToInstance)`. Direct page-to-page imports: `control.js` takes `showConversationInDrawer` (conversations) and `refreshInstances` (dashboard); `builder.js` takes `addTypingIndicator`/`removeTypingIndicator` (conversations).
+Layering: `utils/` imports only `utils/` (`markdown.js` and `graph.js` import `esc` from `dom.js`, and `dom.js` imports the class name from `json_highlight.js`, which imports nothing); `services/` imports `utils/` (`ws.js` uses `hashInstances`, `$`; `auth.js` uses `openDialog`); `pages/` import `services/`, `utils/`, and a few sibling pages; `app.js` imports everything. Pages never import `app.js`. It injects functions with `setDeps(...)` (builder, control, conversations, launch) and `dashboard.setNavigateToInstance(control.navigateToInstance)`. Direct page-to-page imports: `control.js` takes `showConversationInDrawer` (conversations) and `refreshInstances` (dashboard); `builder.js` takes `addTypingIndicator`/`removeTypingIndicator` (conversations).
 
 Control flow in `app.js`:
 
@@ -47,7 +47,7 @@ Control flow in `app.js`:
 | `flows.json` | Pattern graphs for the Visualizer | Hand-maintained; schema under Data shapes |
 | `pages/` | Screen modules | `dashboard`, `control`, `conversations`, `launch`, `visualizer`, `builder`, `logs`, `settings` |
 | `services/` | `api.js`, `auth.js`, `state.js`, `ws.js` | REST client, API key, shared state, WebSocket |
-| `utils/` | `dom.js`, `format.js`, `markdown.js`, `graph.js` | `esc()`, formatting, safe Markdown subset, BFS SVG layout |
+| `utils/` | `dom.js`, `format.js`, `markdown.js`, `json_highlight.js`, `graph.js` | `esc()`, formatting, safe Markdown subset, JSON colouring, BFS SVG layout |
 
 ## Public interface
 
@@ -70,9 +70,10 @@ Control flow in `app.js`:
 - `ws.js`: `connectWS()` (same host `/ws`, `ws:` or `wss:` by page protocol), `registerHandlers(handlers)`. Handler names `app.js` registers: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `renderUnifiedTable`, `updateRunningAgents`, `appendLogs`, `refreshActivityTable`, `showConversationDetail`, `refreshDetailPanel`, `dashboardConfigChanged`.
 
 `utils/`:
-- `dom.js`: `esc`, `$`, `showError`, `showStatus`, `showToast`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `highlightText`, `renderPagination(el, page, totalPages, action)`, `showDrawerDetailView`, `hashInstances` (hash over `instance_id:status`), `numVal`, `intVal`, `copyToClipboard`.
+- `dom.js`: `esc`, `$`, `showError`, `showStatus`, `showToast`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `jsonViewHtml`, `highlightText`, `renderPagination(el, page, totalPages, action)`, `showDrawerDetailView`, `hashInstances` (hash over `instance_id:status`), `numVal`, `intVal`, `copyToClipboard`.
 - `format.js`: `formatTime`, `relativeTime`, `formatNumber`.
 - `markdown.js`: `renderMarkdown(text)`; escapes first, then a fixed regex sequence (code, headings as bold, bold, italic, lists, rules). No links or tables.
+- `json_highlight.js`: `tokenizeJson(text)`, `renderJson(el, text)`, `highlightJsonIn(root)`; colours JSON text by building `span.json-key|string|number|bool|null|punct` nodes with `textContent` only (never `innerHTML`), so the element's text stays the input byte for byte. A text that does not parse, or is over `JSON_HIGHLIGHT_MAX_CHARS` (200000), stays plain. The colours are the `--json-*` variables of `style.css`.
 - `graph.js`: `renderGraph(svgId, {nodes, edges}, opts)`; BFS layers from the first `is_initial` node, rows of at most 5 columns, writes `x`/`y` onto the passed nodes.
 
 Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`, `/api/config`, `/api/info`, `/api/dashboard/config`, `/api/instances`, `/api/activity`, the `/api/fsm/...`, `/api/workflow/...`, `/api/agent/...`, `/api/builder/...` routes, `GET /api/agent/visualize?agent_type=` (default `ReactAgent`), `GET /api/workflow/visualize?workflow_id=` (default `order_processing`), and `WS /ws`. Error bodies carry `detail`.

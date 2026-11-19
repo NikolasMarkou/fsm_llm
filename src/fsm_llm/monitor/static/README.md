@@ -34,7 +34,7 @@ flowchart LR
 - `flows.json` - hand-written graphs of the agent patterns and the workflow examples (`order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`) for the Visualizer.
 - `pages/` - one module per screen: Dashboard, Control Center (with a side drawer), Conversations (inside the drawer), Launch modal, Visualizer, Builder, Logs, Settings. Each builds HTML strings and calls the REST API.
 - `services/` - the REST helper (`api.js`), optional API key handling (`auth.js`), shared reactive state (`state.js`), and the WebSocket connection with automatic reconnect (`ws.js`).
-- `utils/` - HTML escaping and UI feedback (`dom.js`), time and number formatting (`format.js`), a small safe Markdown renderer (`markdown.js`), and an SVG graph drawer (`graph.js`).
+- `utils/` - HTML escaping and UI feedback (`dom.js`), time and number formatting (`format.js`), a small safe Markdown renderer (`markdown.js`), JSON syntax colouring (`json_highlight.js`), and an SVG graph drawer (`graph.js`).
 
 ## How to use it
 

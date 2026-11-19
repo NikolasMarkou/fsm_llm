@@ -106,8 +106,8 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 - `../services/api.js`: `fetchJson`, `postJson`.
 - `../services/state.js`: `state`, `scheduleRefresh(key, fn, ms)`, `cancelRefresh(...keys)`, `TOOL_BASED_AGENTS`.
 - `../services/auth.js`: `getApiKey`, `setApiKey`, `clearApiKey`, `checkAuthRequired` (settings only).
-- `../utils/dom.js`: `$`, `esc`, `statusBadge`, `hashInstances`, `showToast`, `showError`, `showStatus`, `levelClass`, `highlightText`, `renderPagination`, `showDrawerDetailView`, `renderLLMData`, `renderResultBanner`, `copyToClipboard`, `openDialog`, `closeDialog`, `numVal`, `intVal`.
-- `../utils/format.js` (`formatTime`, `relativeTime`, `formatNumber`), `../utils/markdown.js` (`renderMarkdown`), `../utils/graph.js` (`renderGraph`).
+- `../utils/dom.js`: `$`, `esc`, `statusBadge`, `hashInstances`, `showToast`, `showError`, `showStatus`, `levelClass`, `highlightText`, `renderPagination`, `showDrawerDetailView`, `renderLLMData`, `jsonViewHtml`, `renderResultBanner`, `copyToClipboard`, `openDialog`, `closeDialog`, `numVal`, `intVal`.
+- `../utils/format.js` (`formatTime`, `relativeTime`, `formatNumber`), `../utils/markdown.js` (`renderMarkdown`), `../utils/graph.js` (`renderGraph`), `../utils/json_highlight.js` (`highlightJsonIn`, `renderJson`: `eventlog.js`, `conversations.js`, `builder.js` and `control.js` mark their JSON with `jsonViewHtml` and colour it after the `innerHTML` assignment; a page that shows JSON must do the same).
 - Element ids from `src/fsm_llm/monitor/templates/index.html` (for example `ctrl-drawer`, `conv-detail`, `builder-chat`, `log-stream`, `viz-svg`). Renaming an id there breaks the page silently because most lookups are null-guarded.
 
 ## Failure modes

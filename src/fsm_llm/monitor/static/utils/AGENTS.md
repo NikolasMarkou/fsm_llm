@@ -1,13 +1,13 @@
 # utils
 
 Path: `src/fsm_llm/monitor/static/utils`
-Purpose: Browser helpers for the FSM-LLM Monitor frontend: escaping and DOM helpers, formatting, Markdown-to-HTML, SVG graph layout.
+Purpose: Browser helpers for the FSM-LLM Monitor frontend: escaping and DOM helpers, formatting, Markdown-to-HTML, JSON colouring, SVG graph layout.
 
 ## Scope
 
 The ES modules used by the monitor dashboard (`fsm-llm-monitor`, a FastAPI app in `src/fsm_llm/monitor/server/`). The frontend has no build step or framework; `server/application.py` mounts `static/` at `/static` and a middleware sets `Cache-Control: no-cache, no-store, must-revalidate` on `/static/` paths. No network calls here; server access lives in `static/services/api.js`.
 
-Consumers (import sites): `static/app.js`, `static/services/auth.js`, `static/services/ws.js`, and `static/pages/` `builder.js`, `control.js`, `conversations.js`, `dashboard.js`, `launch.js`, `logs.js`, `settings.js`, `visualizer.js`. `graph.js` is used by `builder.js` and `visualizer.js`; `markdown.js` by `builder.js` and `conversations.js`; `format.js` by `control.js`, `dashboard.js`, `logs.js`.
+Consumers (import sites): `static/app.js`, `static/services/auth.js`, `static/services/ws.js`, and `static/pages/` `builder.js`, `control.js`, `conversations.js`, `dashboard.js`, `launch.js`, `logs.js`, `settings.js`, `visualizer.js`. `graph.js` is used by `builder.js` and `visualizer.js`; `markdown.js` by `builder.js` and `conversations.js`; `json_highlight.js` by `builder.js`, `conversations.js`, `control.js` and `eventlog.js` (and by `dom.js`, for the class name); `format.js` by `control.js`, `dashboard.js`, `logs.js`.
 
 State: `dom.js` keeps one module-level `Map` (`_returnFocus`) for dialog focus restore. `graph.js` mutates the node objects passed in. Everything else is stateless.
 
@@ -34,6 +34,7 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 | `dom.js` | Escaping, DOM, UI feedback, dialogs | Base of the XSS model: `esc()` |
 | `format.js` | Time and number formatting | No imports |
 | `markdown.js` | Safe Markdown subset renderer | Imports `esc`; escapes first, then regex transforms |
+| `json_highlight.js` | JSON tokenizer and `textContent`-only renderer | Imports nothing; a size cap and a plain fallback |
 | `graph.js` | BFS layered layout + SVG string render | Imports `esc`; node box `W=180`, `H=60` |
 
 ## Public interface
@@ -50,7 +51,8 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 - `openDialog(el, display = 'flex', focusTarget = null)` - sets `el.style.display`. Only when the element was hidden: records `document.activeElement` (unless it is `body`) and focuses `focusTarget` or the first visible, enabled focusable descendant.
 - `closeDialog(el)` - no-op if hidden; sets `display: none`, restores and forgets the recorded focus if that element is still in the document.
 - `renderResultBanner(success): string` - `div.result-banner.success|failure` with fixed text `Agent completed successfully` / `Agent failed`.
-- `renderLLMData(obj): string` - `div.llm-kv` rows; skips null values; objects as pretty JSON in `<pre>`; non-object -> `No data`, no rows -> `Empty`.
+- `jsonViewHtml(text, tag = 'span'): string` - `<tag class="json-view">` holding the escaped text, the marker that `highlightJsonIn` finds.
+- `renderLLMData(obj): string` - `div.llm-kv` rows; skips null values; objects as pretty JSON in `pre.json-view`; non-object -> `No data`, no rows -> `Empty`.
 - `highlightText(text, query): string` - regex-escapes the raw query, splits the raw text on case-insensitive matches, escapes every part and wraps the matches in `span.search-highlight` (so `amp` never matches inside `&amp;`).
 - `renderPagination(el, page, totalPages, action): void` - hides `el` for one page, else fills it with Prev/Next buttons whose `data-action` is `<action>-prev` / `<action>-next`.
 - `showDrawerDetailView(): void` - shows the Control drawer's detail view and hides the conversation sub-view.
@@ -65,6 +67,11 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 
 `markdown.js`
 - `renderMarkdown(text): string` - falsy -> `''`. Order: `esc` (and NULs dropped) -> fenced code to `pre.md-code-block` and inline code to `code.md-code-inline`, both stashed behind NUL placeholders so no later pass touches them -> `###`/`##`/`#` to `<strong class="md-h3|md-h2|md-h1">` -> `**`/`__` bold -> `*`/`_` italic -> `-`/`*` items wrapped in `<ul>` -> `1.` runs as `<ol>` (a distinct `<oli>` marker keeps them out of the `<ul>` pass) -> `---`/`***` to `<hr class="md-hr">` -> blank lines to `</p><p>`, newlines to `<br>` -> wrap in `<p>` -> restore the stashed code -> cleanup of empty `<p>` and `<p>`/`<br>` around `pre`, `ul`, `ol`, `hr`.
+
+`json_highlight.js`
+- `tokenizeJson(text): {type, text}[] | null` - `type` is `key`, `string`, `number`, `bool`, `null` or `punct`; one linear scan, no recursion and no regex, so nesting depth costs no stack. Whitespace belongs to the neighbouring `punct` token and no character is dropped: the token texts joined equal `text`. `null` for a non-string, a text over `JSON_HIGHLIGHT_MAX_CHARS` (200000) or a text `JSON.parse` refuses. A string is a `key` when the next non-space character is `:`.
+- `renderJson(el, text): boolean` - fills `el` with one `span.json-<type>` per token (a `DocumentFragment`, then `replaceChildren`) and returns true, else sets `el.textContent = text` and returns false. Either way `el.textContent === text`.
+- `highlightJsonIn(root)` - runs `renderJson` on every `.json-view` under `root` with its own text; call it after `root.innerHTML = html`. Idempotent, null-safe.
 
 `graph.js`
 - `renderGraph(svgId, data, opts = {})` - no-op if the SVG element is missing. Replaces the SVG's `innerHTML` and sets its `width`/`height` to `100%`, `viewBox`, and `style.minWidth`/`minHeight`. Returns nothing. Shapes of `data` and `opts` are under Data shapes.
@@ -107,13 +114,14 @@ Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `t
 - `graph.js` layout: start is the first node with `is_initial`, else `nodes[0]`. Unreachable nodes go to layer `max+1`. Layers wrap into rows of at most `MAX_COLS = 5` columns in serpentine order (odd rows reversed). Constants `XPAD=120`, `YPAD=100`, outer `PAD=60`, plus 60 px top padding for self-loop arcs.
 - Edges: self-loops are a cubic arc above the node; a node pair with more than one edge gets quadratic curves offset +12 then -12 px; other edges are straight lines. Arrow marker id is `arrow-<svgId>`, so several graphs can share a page.
 - The viewBox is the larger of content and container size; content is centered when the container is larger. `minWidth`/`minHeight` are set only when content exceeds the container.
+- `json_highlight.js` builds nodes with `textContent` only: never `innerHTML` for a token or for the fallback (a probe records every `innerHTML` write and every created tag), so a JSON string holding `<script>` or HTML stays text. The page text is the source of truth and the coloured nodes must hold exactly the same characters. Only object or array values are marked `json-view` (a plain string that happens to read as a number would be coloured as one). The colours are CSS variables in `:root` of `style.css` (the dashboard has one dark theme; a test checks the 4.5:1 contrast and that no second theme appeared).
 - `openDialog`/`closeDialog` must be used as a pair on the same element for focus restore to work.
 
 ## Dependencies
 
-- Internal: `markdown.js` and `graph.js` import `esc` from `dom.js`. Nothing else.
+- Internal: `markdown.js` and `graph.js` import `esc` from `dom.js`; `dom.js` imports `JSON_VIEW_CLASS` from `json_highlight.js`, which imports nothing. Nothing else.
 - External: none. Browser APIs only (DOM, `navigator.clipboard`, `requestAnimationFrame`, `getComputedStyle`).
-- CSS classes used (`toast`, `toast-visible`, `badge`, `error-message`, `status-msg`, `result-banner`, `llm-kv`, `search-highlight`, `node-rect`, `edge-line`, `edge-label`, `node-label`, `node-subtitle`, `md-code-block`, `md-hr`, `text-dim`) are defined in `static/style.css`.
+- CSS classes used (`toast`, `toast-visible`, `badge`, `error-message`, `status-msg`, `result-banner`, `llm-kv`, `search-highlight`, `json-key`, `json-string`, `json-number`, `json-bool`, `json-null`, `json-punct`, `node-rect`, `edge-line`, `edge-label`, `node-label`, `node-subtitle`, `md-code-block`, `md-hr`, `text-dim`) are defined in `static/style.css`.
 - `showToast` expects `#toast-live` in `templates/index.html`; it skips the mirror if missing.
 
 ## Failure modes
@@ -131,6 +139,6 @@ Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `t
 - Adding a Markdown feature: insert the regex step after `esc()` and before paragraph wrapping, and add a cleanup rule if it produces block elements.
 - Changing node box size: update `W`/`H` in `graph.js` and the matching CSS.
 - Adding a new file here: `pyproject.toml` package data (`"fsm_llm.monitor" = ["static/**/*", "templates/*"]`) already ships it; `tests/test_packaging.py` checks every static file is covered.
-- Renaming or removing a file breaks `tests/test_fsm_llm_monitor/test_app.py`, which lists `utils/dom.js`, `utils/format.js`, `utils/markdown.js`, `utils/graph.js` for serving and existence checks.
-- Only `markdown.js` has a node probe (`tests/test_fsm_llm_monitor/test_static_js.py`). Check the other files visually in the Visualizer and Builder pages of `fsm-llm-monitor` (default `http://127.0.0.1:8420`).
+- Renaming or removing a file breaks `tests/test_fsm_llm_monitor/test_app.py`, which lists `utils/dom.js`, `utils/format.js`, `utils/markdown.js`, `utils/json_highlight.js`, `utils/graph.js` for serving and existence checks.
+- `markdown.js` and `json_highlight.js` have node probes (`tests/test_fsm_llm_monitor/test_static_js.py`; `json_surfaces.mjs` probes the pages that show JSON). A new page or panel that shows JSON writes it with `jsonViewHtml` and calls `highlightJsonIn` after `innerHTML`, and gets a row in that probe. Check the other files visually in the Visualizer and Builder pages of `fsm-llm-monitor` (default `http://127.0.0.1:8420`).
 - Style: 4-space indent, ES module named exports, JSDoc one-liners.
