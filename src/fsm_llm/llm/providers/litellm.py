@@ -4,13 +4,15 @@ imports litellm.
 Layer ``llm`` (plan d454fd62, step 73): split out of the old ``fsm_llm/llm/__init__.py`` (the old ``llm.py``); definitions unchanged.
 
 This module owns the ``import litellm`` line with its ``LITELLM_MODE`` guard, the
-``suppress_debug_info`` setting, and the ``completion`` and ``get_supported_openai_params``
-bindings the interface looks up; ``embedding`` is bound here for ``providers/embedder.py``.
-A test that replaces a provider call patches the module that looks it up.
+``suppress_debug_info`` setting, and the ``completion``, ``acompletion`` and
+``get_supported_openai_params`` bindings the interface looks up; ``embedding`` and
+``aembedding`` are bound here for ``providers/embedder.py``. A test that replaces a provider
+call patches the module that looks it up.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -36,9 +38,11 @@ if _LITELLM_MODE_PREVIOUS is None:
 try:
     import litellm
 
-    # ``embedding`` is not looked up in this module: it is bound for
-    # ``providers/embedder.py``, which takes it from here.
+    # ``embedding`` and ``aembedding`` are not looked up in this module: they are bound
+    # for ``providers/embedder.py``, which takes them from here.
     from litellm import (  # noqa: F401
+        acompletion,
+        aembedding,
         completion,
         embedding,
         get_supported_openai_params,
@@ -126,7 +130,8 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
     _supported_params_memo: tuple[str, list[str] | None] | None = None
     # Times the D-020 apology retry fired on this instance (read-only for callers).
     apology_retry_count: int = 0
-    # Every request goes through ``_send``, so the request observer sees it.
+    # Every request goes through ``_send`` or ``_asend`` (one send family), so the request
+    # observer sees it.
     observes_requests = True
 
     def __init__(
@@ -672,6 +677,27 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
         except Exception as exc:
             # Broad catch is intentional: count the failed request, re-raise
             # it unchanged for the caller's own error boundary.
+            self._failed_send(meter, kind, token, exc)
+            raise
+        return self._finished_send(meter, kind, token, call_params, call_type, response)
+
+    async def _asend(self, call_params: dict[str, Any], *, call_type: str) -> Any:
+        """The async twin of ``_send``: the one ``acompletion`` call, through the same family.
+
+        The meter and the observer are fed by the same three helpers as in ``_send``, in
+        the same order, so a request counts once and is logged once on either transport.
+        """
+        kind, meter, token = self._begin_send(call_params, call_type)
+        try:
+            response = await acompletion(**call_params)
+        except (Exception, asyncio.CancelledError) as exc:
+            # DECISION plan-2026-11-19T025425-51fde95b/D-008: unlike `_send`, this arm also
+            # catches the cancel. A cancelled request was already sent (and may be billed),
+            # so the observer must get `fail_send` and the meter an error before the
+            # CancelledError goes on unchanged. Do NOT narrow it to `Exception` (a cancelled
+            # request would stay a `llm/request` with no `provider/error`) and do NOT
+            # swallow the cancel. KeyboardInterrupt and SystemExit pass through as in
+            # `_send`. See decisions.md D-008.
             self._failed_send(meter, kind, token, exc)
             raise
         return self._finished_send(meter, kind, token, call_params, call_type, response)

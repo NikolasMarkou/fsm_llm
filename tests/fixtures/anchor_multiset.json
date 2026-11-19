@@ -614,6 +614,11 @@
       "delta": 1,
       "reason": "step 2 of plan 51fde95b: D-004 is anchored once at the cleanup of a suspended step in the new kernel module aio.py (a suspended asend() is ended with throw(GeneratorExit), never close(), and the suspension error is raised outside any finally); no other token was added or lost",
       "token": "plan-2026-11-19T025425-51fde95b/D-004"
+    },
+    {
+      "delta": 1,
+      "reason": "step 4.2 of plan 51fde95b: D-008 is anchored once at the cancel arm of LiteLLMInterface._asend (a cancelled request is reported to the observer and the meter and the cancel is raised again, never narrowed to Exception); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-008"
     }
   ]
 }

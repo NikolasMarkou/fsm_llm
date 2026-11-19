@@ -401,6 +401,10 @@ class TestTheSharedSendPathStaysIntact:
             "_failed_send",
             "_finished_send",
         ]
+        # the async transport feeds the same family in the same order (D-007)
+        assert order(
+            "_asend", {"_begin_send", "acompletion", "_failed_send", "_finished_send"}
+        ) == ["_begin_send", "acompletion", "_failed_send", "_finished_send"]
         assert order("_begin_send", {"begin_send", "usage_kind", "_meter_of"}) == [
             "usage_kind",
             "_meter_of",
