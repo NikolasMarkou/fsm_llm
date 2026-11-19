@@ -335,7 +335,11 @@ class StackMixin(_ApiSurface):
         context_to_return: dict[str, Any] | None = None,
         merge_strategy: str | ContextMergeStrategy = ContextMergeStrategy.UPDATE,
     ) -> str:
-        """Pop current FSM from stack and return to previous with enhanced context handling."""
+        """Pop current FSM from stack and return to previous with enhanced context handling.
+
+        On ``ConversationBusyError`` (ending the child was refused) the frame stays, but the
+        parent may already hold the merged return keys; a retry merges again.
+        """
         # DECISION plan_2026-05-29_d9092060/D-001 [STALE]
         # Narrow lock scope: snapshot frame references under _stack_lock, then release
         # the lock before calling fsm_manager methods (which acquire per-conversation

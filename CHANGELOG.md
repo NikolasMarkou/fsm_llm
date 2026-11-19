@@ -50,7 +50,7 @@ Findings of six external audits of the engine, core, runtime, synthesis, monitor
 
 - A plain `restore_session`, and the frames that `fork` and `resume` rebuild, seed only the public keys of a saved session (A1): a tampered session file carrying `_approval_granted` or `_run_output_keys` in `context_data` no longer reaches a live context, and the public keys are kept. This closes the hole that stayed open since the event log, where only the log-backed folds filtered those keys. `start_conversation` itself still filters nothing (agents seed `_max_iterations`).
 - A failed `restore_session`, `fork` or `resume` no longer leaves its half-built conversation cached as ended: `has_conversation_ended` read True for an id that was never restored, and an entry the id already had was replaced (A2).
-- `pop_fsm` keeps the frame when ending the child is refused (a turn holds the child's lock past `END_CONVERSATION_LOCK_TIMEOUT_SECONDS`), so the child is no longer orphaned and ending the root still ends it; `push_fsm` and `pop_fsm` log the stack depth read in the same hold that changed the stack, so two racing calls no longer log the depth of the other (A3).
+- `pop_fsm` keeps the frame when ending the child is refused (a turn holds the child's lock past `END_CONVERSATION_LOCK_TIMEOUT_SECONDS`), so the child is no longer orphaned and ending the root still ends it; `push_fsm` and `pop_fsm` log the stack depth read in the same hold that changed the stack, so two racing calls no longer log the depth of the other. On `ConversationBusyError` from a refused pop the parent may already hold the merged return keys, and a retry merges again (A3).
 - A `KeyboardInterrupt` or `SystemExit` during `start_conversation` releases the conversation's instance, lock and turn budget (A4).
 - The event-log producers raise `FSMError` ("Conversation not found") instead of `KeyError` for a frame that ended just before its record (A5).
 - `push_fsm` is annotated to accept `os.PathLike[str]`, like `process_fsm_definition`; type only, a path already worked (A6).
@@ -74,7 +74,7 @@ Findings of six external audits of the engine, core, runtime, synthesis, monitor
 - A validator verdict given before `key_insights` arrived no longer costs a whole strategy pass and a retry slot; the attempt is judged at `validate_refine` entry (F2).
 - `ReasoningEngine.model` reports the injected interface's model when it states one; `ReasoningStep.context_keys_used` and `SolutionResult.used_context_keys` write a sorted list in JSON, so the same result gives the same bytes under any hash seed; a model claim of `hybrid_loop_count` no longer lands in `final_context` (F3).
 - The monitor's workflow instances list (`GET /api/workflow/{id}/instances`) shows every run, finished ones included; it showed none for a preset that completes inside `start` (F4).
-- A request body over 1 MiB with no `Content-Length` (chunked) is refused with 413 and the security headers before the API key check and without reading the rest of the body (F5).
+- A request body over 1 MiB with no `Content-Length` (chunked) is refused with 413 and the security headers before the API key check, and the app buffers no more than the cap plus one chunk of it; uvicorn still receives and discards the rest of the upload. The check runs before the Host check, so an oversize chunked body from a refused Host now gets 413, not 400 (F5).
 - Leaving the monitor server's lifespan closes the `InstanceManager` (conversations end, handlers detach), `InstanceManager.close()` runs once, and `attach_api` stops counting the previous API's live conversations (F6).
 - A cancelled builder send releases its session when the worker thread ends (F7).
 - `POST /api/dashboard/config` answers 400 for a panel or alert that is not an object and for a `config` that holds a dashboard (the whole `GET` answer), instead of dropping items or storing an empty config; the OTEL exporter emits a `lifecycle.agent_cancelled` span, and `OTELExporter.enable` on a collector without `record_event` leaves the exporter disabled (F8).
@@ -83,7 +83,7 @@ Findings of six external audits of the engine, core, runtime, synthesis, monitor
 - Applying a new dashboard config rebuilds the custom panels section: the old title, description and alerts row no longer stay, and a config with no panels shows no section (G3).
 - The Launch button stays disabled until the modal closes, so a second click inside the 500 ms window no longer starts a second agent, FSM or workflow (G4).
 - A refused agent launch from the Builder keeps the launch form (task and stub responses) open for a retry (G5).
-- The Logs page has TRACE and SUCCESS pills (SUCCESS on, TRACE off by default) and the minimum-level request uses the full level order, so TRACE and SUCCESS records are no longer filtered out (G6).
+- The Logs page has TRACE and SUCCESS pills (SUCCESS on, TRACE off by default) and the minimum-level request uses the full level order, so TRACE and SUCCESS records are no longer filtered out; TRACE records appear only when the monitor's log level is set to TRACE (G6).
 
 ## [0.13.0] - 2026-11-16
 
