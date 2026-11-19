@@ -23,6 +23,8 @@ export const el = id => els.get(id) ?? (els.set(id, new El(id)), els.get(id));
 Object.assign(globalThis, {
     document: { getElementById: el, querySelector: () => null, querySelectorAll: () => [], createElement: () => new El('created'), body: new El('body') },
     requestAnimationFrame: f => f(),
+    getComputedStyle: () => ({ display: 'block' }),
+    CSS: { escape: s => s },
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     Headers: class { constructor() { this.m = new Map(); } set(k, v) { this.m.set(k, v); } delete(k) { this.m.delete(k); } },
     location: { hash: '', protocol: 'http:', host: 'x' },

@@ -73,3 +73,24 @@ class TestMarkdown:
         assert "\x00" not in out["nul_forged"] and out["nul_forged"].startswith(
             "<p>a0b "
         )
+
+
+class TestChatAndTargets:
+    def test_a_reply_changes_only_the_conversation_still_shown(self, probe):
+        out = probe("chat_switch")
+        assert out["stay"] == {"badge": "END_A", "input_display": "none", "bubbles": 1}
+        assert out["switched"] == {
+            "badge": "stateB",
+            "input_display": "block",
+            "bubbles": 0,
+        }
+
+    def test_send_event_targets_are_the_runs_that_can_take_one(self, probe):
+        options = probe("send_targets")["options"]
+        assert options == [["", False], ["live-1", True], ["wait-1", False]]
+
+    def test_an_activity_row_opens_its_conversation_once(self):
+        app = (_STATIC / "app.js").read_text(encoding="utf-8")
+        block = app.split("'activity-row-click'")[1].split("// Control Center")[0]
+        assert "setTimeout" not in block
+        assert block.count("showConversationInDrawer(instanceId, itemId)") == 1

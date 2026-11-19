@@ -230,14 +230,17 @@ export async function sendChatMessage() {
         });
         _removeTypingIndicator();
 
+        // The drawer may show another conversation by now: its badge and chat
+        // input are not this reply's to change.
+        const here = state.selectedConvId === convId;
         const responseText = data.response || '';
-        if (chatLog && responseText) {
+        if (here && chatLog && responseText) {
             chatLog.insertAdjacentHTML('beforeend',
                 `<div class="chat-bubble assistant"><div class="chat-role-tag">assistant</div><div class="md-body">${renderMarkdown(responseText)}</div></div>`
             );
             _smoothScrollToBottom(chatLog);
         }
-        if (data.current_state || data.is_terminal) {
+        if (here && (data.current_state || data.is_terminal)) {
             const stateEl = $('conv-detail')?.querySelector('.text-primary-bold');
             if (stateEl && data.current_state) stateEl.textContent = data.current_state;
             if (data.is_terminal) {

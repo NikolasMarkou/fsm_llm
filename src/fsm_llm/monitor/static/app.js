@@ -154,8 +154,7 @@ const ACTIONS = {
         const instanceId = el.dataset.instanceId;
         const itemId = el.dataset.itemId;
         if (itemType === 'fsm_conversation') {
-            control.navigateToInstance(instanceId, 'fsm');
-            setTimeout(() => conversations.showConversationInDrawer(instanceId, itemId), 200);
+            conversations.showConversationInDrawer(instanceId, itemId);
         } else if (itemType === 'agent_task') {
             control.navigateToInstance(instanceId, 'agent');
         } else if (itemType === 'workflow_instance') {

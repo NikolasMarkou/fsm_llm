@@ -500,8 +500,10 @@ async function _buildFSMDetail(instanceId, inst) {
 const _ACTIVE_WF_STATUSES = ['running', 'pending', 'active', 'waiting'];
 
 function _workflowEventForm(instanceId, wfInstances) {
-    const targets = wfInstances.filter(w => !w.error && w.workflow_instance_id);
-    const active = targets.find(w => _ACTIVE_WF_STATUSES.includes(String(w.status || '').toLowerCase()));
+    // Only a run that can still take an event is a target (the list also holds finished runs).
+    const targets = wfInstances.filter(w => !w.error && w.workflow_instance_id
+        && _ACTIVE_WF_STATUSES.includes(String(w.status || '').toLowerCase()));
+    const active = targets[0];
     const defaultTarget = active ? String(active.workflow_instance_id) : '';
     let opts = `<option value=""${defaultTarget === '' ? ' selected' : ''}>Broadcast (all instances)</option>`;
     for (const w of targets) {
