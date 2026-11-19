@@ -210,6 +210,7 @@ const ACTIONS = {
     'builder-jump-latest':   () => builder.builderJumpToLatest(),
     'copy-builder-result':   () => builder.copyBuilderResult(),
     'download-builder-result': () => builder.downloadBuilderResult(),
+    'edit-builder-result':   () => builder.editBuilderResult(),
     'launch-builder-result': () => builder.launchBuilderResult(),
 
     // Settings

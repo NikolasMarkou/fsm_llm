@@ -237,6 +237,8 @@ function _onComplete(data) {
         $('builder-result-json').textContent = '{}';
         $('builder-result-summary').innerHTML = '';
         $('builder-result-graph').style.display = 'none';
+        _setEditing(false);
+        $('builder-edit-btn').style.display = 'none';
         const errLaunchBtn = $('builder-launch-btn');
         if (errLaunchBtn) errLaunchBtn.style.display = 'none';
         const errNote = $('builder-launch-note');
@@ -262,6 +264,8 @@ function _onComplete(data) {
     $('builder-result-status').innerHTML = statusHtml;
     $('builder-result-summary').innerHTML = _buildResultSummary(artifact, artifactType);
 
+    _setEditing(false);
+    $('builder-edit-btn').style.display = '';
     _syncLaunch(artifact, artifactType);
 
     // Hide agent launch form from any previous result
@@ -480,6 +484,44 @@ function _renderInternalState(state) {
     container.innerHTML = html;
 }
 
+/** Show the JSON as read-only text (`false`) or as an editable textarea (`true`). */
+function _setEditing(editing) {
+    $('builder-result-json').style.display = editing ? 'none' : '';
+    $('builder-result-edit').style.display = editing ? 'block' : 'none';
+    $('builder-edit-btn').textContent = editing ? 'Apply JSON' : 'Edit JSON';
+}
+
+/**
+ * Edit JSON, then Apply: the text is only parsed here, never executed. A parse
+ * error is shown and the editor stays open. The applied artifact is what Launch
+ * sends, and Launch (the server loader) is the validator.
+ */
+export function editBuilderResult() {
+    const area = $('builder-result-edit');
+    if (area.style.display !== 'block') {
+        area.value = _artifact || '{}';
+        _setEditing(true);
+        const details = $('builder-result-json').closest?.('details');
+        if (details) details.open = true;
+        return;
+    }
+    let edited;
+    try { edited = JSON.parse(area.value); } catch (e) { showError('builder-status', `Invalid JSON: ${e.message}`); return; }
+    if (!edited || typeof edited !== 'object' || Array.isArray(edited)) {
+        showError('builder-status', 'The artifact must be a JSON object');
+        return;
+    }
+    _artifact = JSON.stringify(edited, null, 2);
+    $('builder-result-json').textContent = _artifact;
+    _setEditing(false);
+    $('builder-result-summary').innerHTML = _buildResultSummary(edited, _artifactType);
+    _syncLaunch(edited, _artifactType);
+    const agentForm = $('builder-agent-launch-form');
+    if (agentForm) agentForm.style.display = 'none';
+    if (_artifactType === 'fsm' && edited.states && Object.keys(edited.states).length > 0) _renderBuilderGraph(edited);
+    showStatus('builder-status', 'Edited JSON applied; Launch checks it', 'success');
+}
+
 export function copyBuilderResult() {
     const json = $('builder-result-json').textContent;
     copyToClipboard(json).then(() => showStatus('builder-status', 'Copied to clipboard!', 'success'));
@@ -500,6 +542,10 @@ export function downloadBuilderResult() {
 // --- Launch ---
 
 export function launchBuilderResult() {
+    if ($('builder-result-edit').style.display === 'block') {
+        showError('builder-status', 'Apply the JSON edit first (the editor is open)');
+        return;
+    }
     if (_artifactType === 'fsm') return _launchBuilderFSM();
     if (_artifactType === 'workflow') return _launchBuilderWorkflow();
     if (_artifactType === 'agent') return _launchBuilderAgent();
@@ -667,6 +713,7 @@ export function resetBuilder() {
     $('builder-input-area').style.display = 'none';
     const agentForm = $('builder-agent-launch-form');
     if (agentForm) agentForm.style.display = 'none';
+    _setEditing(false);
     const stateContent = $('builder-state-content');
     if (stateContent) stateContent.innerHTML = '<div class="empty-state">Start a session to see internal state</div>';
     showStatus('builder-status', '');

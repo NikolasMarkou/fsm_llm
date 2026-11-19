@@ -302,6 +302,45 @@ class TestBuilderCancel:
         assert out["deletesAfterNoop"] == 4  # cancel, reset, restart, the next start
 
 
+class TestBuilderEditJson:
+    """Plan 51fde95b step 13.6: Edit JSON, Apply, then Launch sends the edited artifact."""
+
+    def test_edit_opens_an_editor_on_the_artifact_text(self, probe):
+        out = probe("builder_edit")["opened"]
+        assert out == {
+            "label": "Apply JSON",
+            "editor": "block",
+            "pre": "none",
+            "text": "Built",
+        }
+
+    def test_a_parse_error_or_a_non_object_is_shown_and_the_editor_stays_open(
+        self, probe
+    ):
+        out = probe("builder_edit")
+        assert "Invalid JSON" in out["bad"]["status"]
+        assert (out["bad"]["stillEditing"], out["bad"]["preUnchanged"]) == (
+            "block",
+            True,
+        )
+        assert "must be a JSON object" in out["array"]["status"]
+
+    def test_launch_waits_for_the_edit_and_then_sends_the_edited_object(self, probe):
+        out = probe("builder_edit")
+        assert (
+            out["openLaunch"]["posts"] == 0
+            and "Apply the JSON edit" in out["openLaunch"]["status"]
+        )
+        assert out["applied"] == {
+            "label": "Edit JSON",
+            "editor": "none",
+            "pre": "Edited",
+            "launchLabel": "Launch FSM",  # the launch button is re-derived from the edit
+            "summary": True,
+        }
+        assert (out["launched"], out["label"]) == (["Edited"], "Edited")
+
+
 class TestChatInputAndMarkdownBlocks:
     """Plan 51fde95b step 12.1: the two quirks plan 52ce5464 carried."""
 

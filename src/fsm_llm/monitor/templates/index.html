@@ -368,6 +368,7 @@
                     <div class="flex-row-gap-4">
                         <button class="btn btn-sm" data-action="copy-builder-result">Copy JSON</button>
                         <button class="btn btn-sm" data-action="download-builder-result">Download</button>
+                        <button class="btn btn-sm" id="builder-edit-btn" data-action="edit-builder-result" title="Edit the JSON, then launch the edited artifact (Launch validates it)">Edit JSON</button>
                         <button class="btn btn-sm btn-primary" id="builder-launch-btn" data-action="launch-builder-result">Launch</button>
                     </div>
                 </div>
@@ -381,6 +382,7 @@
                 <details class="builder-json-details">
                     <summary>JSON Definition</summary>
                     <pre class="builder-result-json" id="builder-result-json"></pre>
+                    <textarea class="builder-result-json form-textarea" id="builder-result-edit" rows="14" spellcheck="false" style="display:none;"></textarea>
                 </details>
                 <div id="builder-agent-launch-form" class="builder-agent-launch-form" style="display:none;">
                     <div class="form-row">

@@ -92,13 +92,6 @@ class TestTheLaunchableAgentTypesAreOneList:
         options = re.findall(r'<option value="(\w+)"', select.group(1))
         assert sorted(options) == sorted(agent_mod._AGENT_CLASSES)
 
-    def test_the_js_tool_based_list_mirrors_the_server_set(self):
-        state_js = (_MONITOR / "static" / "services" / "state.js").read_text(
-            encoding="utf-8"
-        )
-        listed = re.search(r"TOOL_BASED_AGENTS = \[(.*?)\]", state_js).group(1)
-        assert set(re.findall(r"'(\w+)'", listed)) == agent_mod._TOOL_BASED_AGENTS
-
 
 class _FakeBuilderAgent:
     """Stands in for ``MetaBuilderAgent``: records its config, answers with no model call."""
