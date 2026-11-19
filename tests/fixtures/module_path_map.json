@@ -1126,6 +1126,7 @@
     "fsm_llm.monitor.collector",
     "fsm_llm.monitor.constants",
     "fsm_llm.monitor.definitions",
+    "fsm_llm.monitor.eventlog",
     "fsm_llm.monitor.exceptions",
     "fsm_llm.monitor.instance_manager.fsm",
     "fsm_llm.monitor.instance_manager.surface",

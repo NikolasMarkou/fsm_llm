@@ -238,3 +238,23 @@ class TestConversationSignals:
         assert out["none"] == [False, False, False]
         assert out["some"] == [True, True, True, True]
         assert out["raw_tags"] is False
+
+
+class TestEventLogView:
+    """Plan 51fde95b step 12.3b: the Event log panel of the Logs page."""
+
+    def test_the_list_says_when_there_is_no_log_and_escapes_ids(self, probe):
+        out = probe("eventlog_view")
+        assert out["unavailable"] is True
+        assert out["list"] == [True, True, False]
+
+    def test_the_timeline_is_escaped_summarised_and_says_when_cut(self, probe):
+        out = probe("eventlog_view")
+        # summary, cut note, escaped text, no raw tag, header row plus two events
+        assert out["view"] == [True, True, True, False, 3]
+        assert out["complete"] is True
+
+    def test_a_refusal_and_the_id_in_the_path(self, probe):
+        out = probe("eventlog_view")
+        assert out["failure"] is True
+        assert out["path"] == "/api/eventlog/a%20b%2Fc"

@@ -36,6 +36,7 @@ flowchart LR
 - `launch.js` - launch modal for FSMs, workflows, and agents, including ready-made stub tool templates.
 - `visualizer.js` - FSM, agent, and workflow graph drawing, preset dropdown, resizable split pane.
 - `builder.js` - chat session with the meta-builder, internal state panel, result summary, copy, download, and launch.
+- `eventlog.js` - the Event log panel of the Logs page (read only).
 - `logs.js` - log stream with pause buffer, level pills, search highlight, sidebar error badge.
 - `settings.js` - load, save, and reset monitor configuration; save or clear the API key.
 

@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 
 from fsm_llm import API, LLMUsage
 from fsm_llm.logging import logger
+from fsm_llm.runtime import EventLog
 
 from ..collector import EventCollector
 from ..definitions import (
@@ -78,6 +79,8 @@ class InstanceManager(
 
         # An API created by the caller and attached with attach_api()
         self._attached_api: API | None = None
+        # A directory of event logs given by the caller (the Event log page)
+        self._event_log: EventLog | None = None
         # What the interfaces of torn-down FSM instances used (see _fold_usage)
         self._ended_usage: LLMUsage | None = None
 
@@ -139,6 +142,19 @@ class InstanceManager(
         """True once ``close()`` ran: the manager has no log sink and no handlers."""
         with self._lock:
             return self._closed
+
+    @property
+    def event_log(self) -> EventLog | None:
+        """The log the Event log page reads: the one given to ``attach_event_log``,
+        else the attached API's own (``API.event_log``); None when neither."""
+        with self._lock:
+            return self._event_log or getattr(self._attached_api, "event_log", None)
+
+    def attach_event_log(self, log: EventLog) -> None:
+        """Show an ``EventLog`` read-only (only the public readers are called;
+        the caller keeps it and closes it)."""
+        with self._lock:
+            self._event_log = log
 
     @property
     def global_collector(self) -> EventCollector:

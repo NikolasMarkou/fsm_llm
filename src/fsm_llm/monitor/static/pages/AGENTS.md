@@ -35,6 +35,7 @@ flowchart TD
 | `launch.js` | Launch modal | `TOOL_TEMPLATES` (the stub tools); default FSM temperature 0.5, agent `max_iterations` 10 |
 | `visualizer.js` | Graph rendering for fsm/agent/workflow, preset dropdown, split pane | Uses `renderGraph` from `utils/graph.js` |
 | `builder.js` | Meta-builder chat and launch | `AGENT_TYPE_MAP` lowercase -> class name; `_sessionToken` drops replies from abandoned sessions |
+| `eventlog.js` | Event log panel of the Logs page (`loadEventLogs`, `openEventLog`) | Read only; every id and field goes through `esc()`; shown on page show and by Refresh |
 | `logs.js` | Log stream | Pause buffer cap 5000, DOM cap 1000, de-dup key set cap 10000 |
 | `settings.js` | Config form and API key field | Reset defaults 1.0 / 1000 / 5000 / INFO; client bounds in `LIMITS` |
 

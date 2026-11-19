@@ -172,6 +172,8 @@ _ROUTES = [
     ("GET", "/api/instances/{instance_id}"),
     ("GET", "/api/instances/{instance_id}/events"),
     ("DELETE", "/api/instances/{instance_id}"),
+    ("GET", "/api/eventlog"),
+    ("GET", "/api/eventlog/{conversation_id}"),
     ("POST", "/api/fsm/launch"),
     ("POST", "/api/fsm/{instance_id}/start"),
     ("POST", "/api/fsm/{instance_id}/converse"),
@@ -207,7 +209,7 @@ _ROUTE_HOMES = (
     ["fastapi"] * 4
     + ["starlette"]
     + ["application"] * 3
-    + ["routes_monitoring"] * 17
+    + ["routes_monitoring"] * 19
     + ["routes_fsm"] * 5
     + ["routes_workflow"] * 7
     + ["routes_agent"] * 4

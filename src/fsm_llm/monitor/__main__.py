@@ -93,6 +93,12 @@ def main_cli() -> None:
         action="store_true",
         help="Export monitor events as OpenTelemetry spans (console exporter)",
     )
+    parser.add_argument(
+        "--event-log",
+        metavar="DIR",
+        default=None,
+        help="Show the event logs under DIR on the Event log page (read only)",
+    )
     add_env_file(parser)
     args = parser.parse_args()
 
@@ -174,6 +180,13 @@ def main_cli() -> None:
 
         exporter = OTELExporter(service_name="fsm-llm-monitor")
         exporter.enable(get_manager().global_collector)
+
+    if args.event_log:
+        from fsm_llm.runtime import EventLog
+
+        from .server import get_manager
+
+        get_manager().attach_event_log(EventLog(args.event_log))
 
     url = _browser_url(args.host, args.port)
     print(f"FSM-LLM Monitor starting at {url}")

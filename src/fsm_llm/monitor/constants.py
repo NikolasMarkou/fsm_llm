@@ -45,6 +45,8 @@ MAX_AGENT_TIMEOUT_SECONDS = 3600.0
 MAX_STUB_TOOLS = 50
 MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MiB
 MAX_BUILDER_SESSIONS = 50
+MAX_EVENTLOG_CONVERSATIONS = 200  # logs the event log list shows
+MAX_EVENTLOG_EVENTS = 500  # events one event log timeline answer carries
 MAX_WORKFLOW_RUNS_LISTED = 200  # the newest runs the instances route lists
 
 # Host header values the server answers to by default (DNS-rebinding defence);

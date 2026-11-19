@@ -16,6 +16,7 @@ import * as launch from './pages/launch.js';
 import * as control from './pages/control.js';
 import * as visualizer from './pages/visualizer.js';
 import * as logs from './pages/logs.js';
+import * as eventlog from './pages/eventlog.js';
 import * as settings from './pages/settings.js';
 import * as builder from './pages/builder.js';
 
@@ -26,7 +27,7 @@ const VALID_PAGES = ['dashboard', 'control', 'visualizer', 'logs', 'builder', 's
 // Data (re)load hooks run when a page is shown or a new API key is saved.
 const PAGE_REFRESH = {
     dashboard: () => { dashboard.loadDashboardConfig(); dashboard.refreshActivityTable(); },
-    logs: () => logs.onShowLogs(),
+    logs: () => { logs.onShowLogs(); eventlog.loadEventLogs(); },
     settings: () => settings.loadSettings(),
     control: () => control.refreshControlCenter(),
 };
@@ -195,6 +196,8 @@ const ACTIONS = {
     // Logs
     'toggle-log-pill':   (el) => logs.toggleLogPill(el),
     'refresh-logs':      () => logs.refreshLogs(),
+    'refresh-eventlog':  () => eventlog.loadEventLogs(),
+    'open-eventlog':     (el) => eventlog.openEventLog(el.dataset.convId),
     'toggle-log-pause':  () => logs.toggleLogPause(),
     'clear-logs':        () => logs.clearLogs(),
     'log-jump-latest':   () => logs.logJumpToLatest(),

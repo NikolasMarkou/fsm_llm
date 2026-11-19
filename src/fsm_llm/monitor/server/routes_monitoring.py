@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from fsm_llm import __version__ as core_version
 from fsm_llm.logging import logger
 
+from .. import eventlog
 from ..__version__ import __version__
 from ..definitions import DashboardAlert, DashboardConfig, DashboardPanel, MonitorConfig
 from ..exceptions import MonitorError
@@ -261,3 +262,34 @@ async def api_instance_destroy(instance_id: str) -> dict[str, str]:
         return {"status": "ok"}
     except Exception as e:
         _raise_http(e, f"destroy instance {instance_id}")
+
+
+# --- REST API: event log browse (read only) ---
+
+
+@app.get("/api/eventlog", dependencies=_GATED)
+async def api_eventlog_list() -> dict[str, Any]:
+    """The logs of the event log the dashboard was given (none: ``available`` false)."""
+    log = get_manager().event_log
+    if log is None:
+        return {"available": False, "conversations": []}
+    return {
+        "available": True,
+        "conversations": await asyncio.to_thread(eventlog.list_logs, log),
+    }
+
+
+@app.get("/api/eventlog/{conversation_id}", dependencies=_GATED)
+async def api_eventlog_timeline(
+    conversation_id: str, since_seq: int = 0, limit: int = 200
+) -> dict[str, Any]:
+    """One log as whitelisted events (no blob, no ``*_ref``) plus its usage fold."""
+    log = get_manager().event_log
+    if log is None:
+        raise HTTPException(status_code=404, detail="no event log")
+    try:
+        return await asyncio.to_thread(
+            eventlog.timeline, log, conversation_id, since_seq=since_seq, limit=limit
+        )
+    except Exception as e:
+        _raise_http(e, f"read event log {conversation_id}")
