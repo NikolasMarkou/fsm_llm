@@ -31,7 +31,7 @@ The strategies and the result key each one fills:
 
 | Strategy | Main result key |
 | --- | --- |
-| `simple_calculator` | `calculation_result` |
+| `simple_calculator` | `calculation_result` (computed in Python, not by the model) |
 | `analytical` | `integrated_analysis`, `key_insights` |
 | `deductive` | `conclusion` |
 | `inductive` | `hypothesis` |
@@ -41,8 +41,11 @@ The strategies and the result key each one fills:
 | `critical` | `critical_assessment` |
 | `hybrid` | `final_hybrid_solution` |
 
+In `simple_calculator` the model only writes the problem as a single arithmetic expression (`15% of 240` becomes `0.15 * 240`); a handler evaluates it in Python on entry to `perform_calculation`, so that state makes no model call and the answer is exact (a big integer such as `2 ** 100` keeps every digit). The evaluator takes numbers, `+ - * / // % **` and parentheses only, refuses anything else, and never runs `eval`; its text, node, exponent and integer-size bounds are listed in `AGENTS.md`. A refused expression (for example division by zero) is reported as `calculation_error_details` and retried at most 3 times like any attempt without a solution. The model only translates the problem, and a small model can mis-translate: on a direct probe a 2B model mis-parenthesised 6 of 20 expressions, a 9B model none.
+
 ## Files
 
+- `calculator.py` - the bounded arithmetic evaluator behind `simple_calculator` (standard library only).
 - `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the hooks and handlers.
 - `reasoning_modes/` - the FSM definitions as Python dictionaries, one module per FSM (orchestrator, classifier, and the strategies), and the `ALL_REASONING_FSMS` registry (`registry.py`); the package re-exports them.
 - `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.

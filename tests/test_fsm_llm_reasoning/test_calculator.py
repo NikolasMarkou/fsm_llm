@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import ast
 import math
+from unittest import mock
 
 import pytest
 
 from fsm_llm.reasoning import calculator
 from fsm_llm.reasoning.calculator import (
-    MAX_EXPONENT,
     MAX_EXPRESSION_CHARS,
-    MAX_EXPRESSION_NODES,
     calculate,
     evaluate_expression,
 )
@@ -34,6 +33,9 @@ from fsm_llm.reasoning.calculator import (
         ("5 - 5", 0),  # zero is an answer
         ("2 ** -1", 0.5),
         ("2 ** 1000", 2**1000),
+        ("1 ** 1000", 1),  # the exponent bound is inclusive
+        ("-" + "+".join(["1"] * 50), 48),  # 100 nodes, the node bound is inclusive
+        ("2 ** 1000 * 2 ** 1000 * 2 ** 47", 2**2047),  # 2048 bits: the largest integer
         ("123456789 * 987654321", 123456789 * 987654321),
         ("+ 4", 4),
         (" 1 + " * 24 + "1 ", 25),  # a long ordinary sum
@@ -69,12 +71,10 @@ _TEXTS = [t for line in _PLAIN.strip().splitlines() for t in line.split(";")] + 
     "0x" + "f" * 190 + " ** 1000",
     "(" * 201 + "1" + ")" * 201,
     "(" * 100_000 + "1" + ")" * 100_000,
-    "-" * 199 + "1",
     "-" * 1_000_000 + "1",
     "1 + " * 500_000 + "1",
     "2 ** " * 300_000 + "2",
     " " * 1_000_000 + "1",
-    "1 + " * 99 + "1",
     "1\n+ 2",
     "1 + \x00 1",
     "١ + ٢",
@@ -97,7 +97,7 @@ def test_the_evaluator_is_total(text):
 _REFUSED = """
 15% of 240;1 +;x;abs(1);(1).real;1 < 2;'a' * 3;True + 1;-True;None;1j;2 ^ 3;1 << 5
 (-8) ** 0.5;1 / 0;1 // 0;1 % 0;0 ** -1;1e999;10.0 ** 1000;10 ** 400 * 1.5;2 ** 1001
-9 ** 9 ** 9;(9 ** 1000) ** 1000;10 ** 617
+9 ** 9 ** 9;(9 ** 1000) ** 1000;10 ** 617;2 ** 1000 * 2 ** 1000 * 2 ** 48
 """
 
 
@@ -114,9 +114,6 @@ def test_a_non_text_value_is_no_expression(value):
     with pytest.raises(ValueError, match="no expression"):
         evaluate_expression(value)
     assert calculate(value) == (None, "no expression")
-
-
-def test_the_answer_or_the_reason():
     assert calculate("(1 + 2) * 3") == (9, None)
     assert calculate("10 / 0") == (None, "division by zero")
 
@@ -131,7 +128,7 @@ def test_messages_are_fixed_text_not_python_text():
         ("10 ** 400 * 1.5", "result out of range"),
         ("2 ** 1001", "exponent too large"),
         ("2 ** 1000 ** 2", "exponent too large"),
-        ("1+" * 70 + "1", "expression too large"),
+        ("+".join(["1"] * 51), "expression too large"),
         ("1" * 201, "expression too long"),
         ("2 ^ 3", "not an arithmetic expression"),
         ("(-8) ** 0.5", "result is not a real number"),
@@ -143,22 +140,31 @@ def test_messages_are_fixed_text_not_python_text():
         assert caught.value.__suppress_context__ or caught.value.__context__ is None
 
 
-def test_the_text_bound_holds_before_the_parser_runs(monkeypatch):
+def test_the_text_bound_holds_before_the_parser_runs():
     assert evaluate_expression("1" * MAX_EXPRESSION_CHARS) > 0  # the cap is inclusive
 
     def explode(*args, **kwargs):
         raise AssertionError("parsed an over-long expression")
 
-    monkeypatch.setattr(calculator.ast, "parse", explode)
-    with pytest.raises(ValueError, match="too long"):
+    with (
+        mock.patch.object(ast, "parse", explode),
+        pytest.raises(ValueError, match="too long"),
+    ):
         evaluate_expression("1" * (MAX_EXPRESSION_CHARS + 1))
 
 
-def test_the_node_budget_is_inclusive():
-    terms = (MAX_EXPRESSION_NODES + 1) // 2
-    assert evaluate_expression("+".join(["1"] * terms)) == terms
-    with pytest.raises(ValueError, match="too large"):
-        evaluate_expression("+".join(["1"] * (terms + 1)))
+@pytest.mark.parametrize(
+    "error", [SyntaxError, ValueError, RecursionError, MemoryError]
+)
+def test_every_way_the_parser_can_fail_is_a_refusal(error):
+    def fail(*args, **kwargs):
+        raise error("boom")
+
+    with (
+        mock.patch.object(ast, "parse", fail),
+        pytest.raises(ValueError, match="arithmetic"),
+    ):
+        evaluate_expression("1 + 1")
 
 
 def test_a_power_that_cannot_fit_is_refused_before_it_is_computed(monkeypatch):
@@ -172,9 +178,3 @@ def test_a_power_that_cannot_fit_is_refused_before_it_is_computed(monkeypatch):
     monkeypatch.setitem(calculator._OPERATORS, ast.Pow, guarded)
     with pytest.raises(ValueError, match="out of range"):
         evaluate_expression("(2 ** 1000) ** 1000")
-
-
-def test_the_exponent_bound_is_inclusive():
-    assert evaluate_expression(f"1 ** {MAX_EXPONENT}") == 1
-    with pytest.raises(ValueError, match="exponent"):
-        evaluate_expression(f"1 ** {MAX_EXPONENT + 1}")

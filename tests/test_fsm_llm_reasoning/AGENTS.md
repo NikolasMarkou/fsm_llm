@@ -21,6 +21,7 @@ Tests call static methods and model constructors directly with small context dic
 | --- | --- | --- |
 | `test_cli_logging.py` | The parametrized cases: `["--verbose"]` gives one `I-PROBE` line in stderr, `[]` gives none; `D-PROBE` never appears | Subprocess, `timeout=60`, deletes `FSM_LLM_LOG_LEVEL` |
 | `test_cli_output.py` | `_format_json_output` and `_save_as_json` fed a real `ReasoningTrace(...).model_dump()` write `reasoning_types_used` as a sorted list, never redacted; CLI escape of unencodable output, `--quiet` output, summary facts stated once | Uses `tmp_path`; includes the plan 5980fbb7 step 18 CLI fixes |
+| `test_calculator.py` | The calculator's evaluator is total: a table of adversarial inputs (the plain ones plus huge literals, chains and nests) each ends in a value or a `ValueError`, refusals, fixed messages, the text bound before the parser (spy), the pow pre-check (spy), inclusive exponent and node bounds | Runs on every Python of the matrix; a `bool`, complex or non-finite result is refused |
 | `test_constants.py` | Constant values | Pins literal strings and numbers |
 | `test_definitions.py` | Pydantic models | Validators, computed properties, thresholds |
 | `test_engine.py` | Models, handlers, `map_reasoning_type`, ANALYTICAL-only fallback (D-009); audit regression classes (malformed user message, final solution keys, classification exception handling, removed dead code, `execution_time_seconds`, `direct computation` no special case, no classifier tracer, core truncation suffix, classifier cleanup warning) | Uses loguru sink for the warning; several assertions match literal source strings |
@@ -51,7 +52,7 @@ Tests call static methods and model constructors directly with small context dic
 
 Pinned `Defaults`: `TEMPERATURE == 0.7`, `MAX_TOKENS == 2000`, `MAX_RETRIES == 3`, `MAX_SOLVE_STEPS == 170`, `MAX_HYBRID_LOOPS == 2`, `MAX_TRACE_STEPS == 50`, `CONTEXT_PRUNE_THRESHOLD == 8000`, `MIN_SOLUTION_LENGTH == 20`, `PRUNE_LIST_MAX_LENGTH == 10`, `PRUNE_STRING_MAX_LENGTH == 1000`. `MODEL` is only checked to be a `str`.
 
-Pinned `ContextKeys` strings include `problem_statement`, `problem_type`, `problem_components`, `proposed_solution`, `final_solution`, `key_insights`, `validation_result`, `solution_confidence`, `reasoning_push_pending`, `reasoning_type_selected`, `retry_count`, `max_retries_reached`, `operand1`, `operand2`, `operator`, `calculation_result`, `deductive_conclusion`, `inductive_hypothesis`, `best_creative_solution`, `critical_assessment`, `final_hybrid_solution`, `best_explanation`, `analogical_solution`.
+Pinned `ContextKeys` strings include `problem_statement`, `problem_type`, `problem_components`, `proposed_solution`, `final_solution`, `key_insights`, `validation_result`, `solution_confidence`, `reasoning_push_pending`, `reasoning_type_selected`, `retry_count`, `max_retries_reached`, `calculation_expression`, `calculation_result`, `calculation_error`, `deductive_conclusion`, `inductive_hypothesis`, `best_creative_solution`, `critical_assessment`, `final_hybrid_solution`, `best_explanation`, `analogical_solution`.
 
 Model behaviour pinned in `test_definitions.py`:
 
