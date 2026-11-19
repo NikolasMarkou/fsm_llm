@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -27,6 +27,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.logging import logger
+from tests.test_fsm_llm.event_log_support import _chunk
 
 _PROVIDER = "fsm_llm.llm.providers.litellm"
 _PARAMS = {"model": "gpt-4o", "messages": [{"role": "user", "content": "hi"}]}
@@ -450,3 +451,122 @@ class TestTheApologyRetryIsOneBody:
             "end" if second == "recovers" else "fail",
         ]
         assert (out.message == "Hello") is (second == "recovers")
+
+
+# --- the stream: lazy, equal on both names, closing it closes the provider stream ------
+
+
+def _stream_script(*items: Any, closed: list[str] | None = None) -> tuple[Any, Any]:
+    """Provider scripts for ``completion`` and ``acompletion`` that stream ``items``.
+
+    An item is a chunk or an exception to raise at that point; ``closed`` gets one entry
+    when the provider's generator is closed (finished, failed or closed early).
+    """
+
+    def run() -> Iterator[Any]:
+        try:
+            for item in items:
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            if closed is not None:
+                closed.append("closed")
+
+    async def arun() -> AsyncIterator[Any]:
+        try:
+            for item in items:
+                if isinstance(item, Exception):
+                    raise item
+                yield item
+        finally:
+            if closed is not None:
+                closed.append("closed")
+
+    return (lambda **_: run()), (lambda **_: arun())
+
+
+_STREAM_REQUEST = _METHODS["generate_response"][0]
+_STREAMS: dict[str, tuple[Any, ...]] = {
+    "success": (_chunk("Hel"), _chunk("lo")),
+    "empty": (_chunk(""), _chunk(None)),
+    "failure_midway": (_chunk("Hel"), RuntimeError("boom")),
+}
+
+
+async def _stream(llm: LiteLLMInterface, transport: str) -> list[Any]:
+    """The chunks the stream gave, then the error it ended with (if any)."""
+    out: list[Any] = []
+    try:
+        if transport == "sync":
+            out.extend(llm.generate_response_stream(_STREAM_REQUEST()))
+        else:
+            async for chunk in llm.agenerate_response_stream(_STREAM_REQUEST()):
+                out.append(chunk)
+    except Exception as exc:
+        out.append((type(exc).__name__, str(exc)))
+    return out
+
+
+class TestTheStream:
+    @pytest.mark.parametrize("scenario", [*_STREAMS, "outage"])
+    async def test_both_names_give_the_same_chunks_events_and_meter(
+        self, scenario: str
+    ) -> None:
+        seen = []
+        for transport in ("sync", "async"):
+            llm = _llm()
+            if scenario == "outage":
+                scripts: tuple[Any, Any] = (_boom, _boom)
+            else:
+                scripts = _stream_script(*_STREAMS[scenario])
+            with _providers(*scripts) as (sync, async_), _observed(_Recorder()) as rec:
+                chunks = await _stream(llm, transport)
+            assert (sync.call_count, async_.call_count) == (
+                (1, 0) if transport == "sync" else (0, 1)
+            )
+            seen.append((chunks, rec.shape(), llm.usage()))
+        assert seen[0] == seen[1]
+        chunks, events, usage = seen[1]
+        assert usage.calls == 1 and set(usage.by_kind) == {"stream"}
+        assert [e[0] for e in events] == [
+            "begin",
+            "fail" if scenario == "outage" else "end",
+        ]
+        assert (usage.errors, usage.usage_missing) == (
+            (1, 0) if scenario == "outage" else (0, 1)
+        )
+        errors = [c[0] for c in chunks if isinstance(c, tuple)]
+        assert errors == ([] if scenario == "success" else ["LLMResponseError"])
+
+    async def test_nothing_is_sent_before_the_first_next(self) -> None:
+        for transport in ("sync", "async"):
+            llm = _llm()
+            with _providers(*_stream_script(*_STREAMS["success"])) as (sync, async_):
+                if transport == "sync":
+                    it = llm.generate_response_stream(_STREAM_REQUEST())
+                    assert sync.call_count == 0
+                    assert next(it) == "Hel" and sync.call_count == 1
+                    it.close()
+                else:
+                    agen = llm.agenerate_response_stream(_STREAM_REQUEST())
+                    assert async_.call_count == 0
+                    assert await anext(agen) == "Hel" and async_.call_count == 1
+                    await agen.aclose()
+
+    async def test_closing_early_closes_the_provider_stream(self) -> None:
+        for transport in ("sync", "async"):
+            closed: list[str] = []
+            llm = _llm()
+            with _providers(*_stream_script(*_STREAMS["success"], closed=closed)):
+                if transport == "sync":
+                    it = llm.generate_response_stream(_STREAM_REQUEST())
+                    assert next(it) == "Hel"
+                    assert closed == []
+                    it.close()
+                else:
+                    agen = llm.agenerate_response_stream(_STREAM_REQUEST())
+                    assert await anext(agen) == "Hel"
+                    assert closed == []
+                    await agen.aclose()
+            assert closed == ["closed"], transport

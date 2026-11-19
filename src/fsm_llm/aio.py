@@ -142,12 +142,19 @@ def _next(it: Iterator[Any]) -> Any:
 async def aiterate(source: Iterable[T] | AsyncIterable[T]) -> AsyncGenerator[T, None]:
     """Iterate a sync or async iterable from async code, closing a sync source on exit.
 
-    An async iterable is iterated natively. A sync one is stepped inline in sync mode and
-    one ``next`` per worker thread in async mode, so the loop is never blocked.
+    An async iterable is iterated natively and ``aclose``d on exit. A sync one is stepped
+    inline in sync mode and one ``next`` per worker thread in async mode, so the loop is
+    never blocked.
     """
     if isinstance(source, AsyncIterable):
-        async for item in source:
-            yield item
+        ait = source.__aiter__()
+        try:
+            async for item in ait:
+                yield item
+        finally:
+            aclose = getattr(ait, "aclose", None)
+            if aclose is not None:
+                await aclose()
         return
     it = iter(source)
     try:

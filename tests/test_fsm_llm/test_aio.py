@@ -381,6 +381,20 @@ class TestAiterate:
         assert drive[1](drain(source, stop=2)) == [0, 1]
         assert log[-1] == "closed"
 
+    def test_stopping_early_closes_an_async_source(self, drive):
+        log: list = []
+
+        async def source():
+            try:
+                for i in range(4):
+                    yield i
+            finally:
+                log.append("closed")
+
+        held = source()  # held here, so only an explicit aclose() can end it
+        assert drive[1](drain(held, stop=2)) == [0, 1]
+        assert log == ["closed"]
+
     def test_an_async_source_is_iterated_natively(self, drive):
         async def source():
             yield 1

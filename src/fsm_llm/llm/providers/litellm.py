@@ -17,7 +17,8 @@ import json
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing
 from typing import Any
 
 # DECISION plan-2026-11-12T073150-d454fd62/D-005: litellm loads a ``.env`` file
@@ -52,7 +53,7 @@ finally:
         os.environ.pop("LITELLM_MODE", None)
 del _LITELLM_MODE_PREVIOUS
 
-from fsm_llm.aio import acall, run_sync
+from fsm_llm.aio import acall, aiterate, iterate_sync, run_sync
 from fsm_llm.constants import (
     DEFAULT_TEMPERATURE,
     RESERVED_LLM_CALL_KWARGS,
@@ -311,7 +312,17 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
 
         Pass 1 (extraction) is never streamed — it must complete fully
         for transition evaluation.  This method only streams Pass 2
-        (user-facing response generation).
+        (user-facing response generation). Lazy: nothing is sent before the first
+        ``next``; closing the iterator closes the provider stream.
+        """
+        return iterate_sync(self.agenerate_response_stream(request))
+
+    async def agenerate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``generate_response_stream`` and its one body.
+
+        Closing it (``aclose``) closes the provider stream.
         """
         try:
             messages: list[dict[str, str | None]] = [
@@ -335,40 +346,43 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
                 temperature=request.temperature,
             )
 
-            response = self._send(call_params, call_type="response_generation")
+            response = await acall(
+                self, "_send", call_params, call_type="response_generation"
+            )
 
             accumulated: list[str] = []
             reasoning_parts: list[str] = []
-            for chunk in response:
-                # DECISION plan-2026-09-20T114608-a8e47b88/D-022
-                # `getattr(chunk, "choices", None)` replaces
-                # `hasattr(chunk, "choices") and chunk.choices` -- a "not
-                # falsy" check either way, so an ABSENT attribute (getattr's
-                # None default) and a PRESENT-but-falsy one (`None`/`[]`)
-                # both `continue` identically to before. Safe here because
-                # nothing downstream distinguishes "attribute missing" from
-                # "attribute present but falsy" -- see decisions.md D-022 for
-                # the ONE flagged call site (the content check in this module) where that
-                # distinction IS load-bearing and was deliberately left as
-                # `hasattr()`.
-                choices = getattr(chunk, "choices", None)
-                if not choices:
-                    continue
-                delta = getattr(choices[0], "delta", None)
-                if delta is None:
-                    continue
-                # Accumulate reasoning the same way content is accumulated: a
-                # provider may stream `reasoning_content` as one fragment per
-                # chunk. Reuse the shared resolver so a Delta is read via the
-                # same field precedence as a Message — never hand-roll the
-                # `getattr(..., "thinking")` lookup here. See decisions.md D-002.
-                frag = resolve_reasoning_trace(delta)
-                if frag:
-                    reasoning_parts.append(frag)
-                content = getattr(delta, "content", None)
-                if content is not None:
-                    accumulated.append(content)
-                    yield content
+            async with aclosing(aiterate(response)) as chunks:
+                async for chunk in chunks:
+                    # DECISION plan-2026-09-20T114608-a8e47b88/D-022
+                    # `getattr(chunk, "choices", None)` replaces
+                    # `hasattr(chunk, "choices") and chunk.choices` -- a "not
+                    # falsy" check either way, so an ABSENT attribute (getattr's
+                    # None default) and a PRESENT-but-falsy one (`None`/`[]`)
+                    # both `continue` identically to before. Safe here because
+                    # nothing downstream distinguishes "attribute missing" from
+                    # "attribute present but falsy" -- see decisions.md D-022 for
+                    # the ONE flagged call site (the content check in this module) where that
+                    # distinction IS load-bearing and was deliberately left as
+                    # `hasattr()`.
+                    choices = getattr(chunk, "choices", None)
+                    if not choices:
+                        continue
+                    delta = getattr(choices[0], "delta", None)
+                    if delta is None:
+                        continue
+                    # Accumulate reasoning the same way content is accumulated: a
+                    # provider may stream `reasoning_content` as one fragment per
+                    # chunk. Reuse the shared resolver so a Delta is read via the
+                    # same field precedence as a Message — never hand-roll the
+                    # `getattr(..., "thinking")` lookup here. See decisions.md D-002.
+                    frag = resolve_reasoning_trace(delta)
+                    if frag:
+                        reasoning_parts.append(frag)
+                    content = getattr(delta, "content", None)
+                    if content is not None:
+                        accumulated.append(content)
+                        yield content
 
             # Same two tail guards _make_llm_call applies: a stream whose every
             # delta.content is "" is a FAILURE, not a silent empty reply. Recover
