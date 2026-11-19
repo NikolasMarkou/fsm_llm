@@ -225,6 +225,12 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
         This method creates prompts that generate appropriate user-facing responses
         based on the final state context and all extracted information.
         """
+        return run_sync(self.agenerate_response(request))
+
+    async def agenerate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        """The async twin of ``generate_response`` and its one body (the apology retry too)."""
         try:
             start_time = time.time()
 
@@ -240,7 +246,9 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
             ]
 
             # Get LLM response
-            response = self._make_llm_call(
+            response = await acall(
+                self,
+                "_make_llm_call",
                 messages,
                 "response_generation",
                 response_format=request.response_format,
@@ -269,7 +277,9 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
                 with _APOLOGY_COUNT_LOCK:
                     self.apology_retry_count += 1
                 try:
-                    retried = self._make_llm_call(
+                    retried = await acall(
+                        self,
+                        "_make_llm_call",
                         messages,
                         "response_generation",
                         response_format=request.response_format,

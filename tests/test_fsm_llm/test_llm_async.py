@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
-from fsm_llm.core.definitions import CompletionRequest
+from fsm_llm.core.definitions import CompletionRequest, ResponseGenerationRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm import observer as obs
 from fsm_llm.logging import logger
@@ -279,6 +279,9 @@ class TestIsObservedReadsBothSends:
 # the async name (a row per method grows with each converted family) -------------------
 
 _METHODS: dict[str, Callable[[], Any]] = {
+    "generate_response": lambda: ResponseGenerationRequest(
+        system_prompt="Greet.", user_message="hi"
+    ),
     "complete": lambda: CompletionRequest(messages=[{"role": "user", "content": "hi"}]),
 }
 # scenario -> (what the provider does, the call raises, calls, errors, events, cut warnings)
@@ -370,3 +373,44 @@ class TestEveryMethodGivesTheSameOnBothNames:
                 assert (sync.call_count, async_.call_count) == (0, 1)
                 await _invoke(_llm(), method, request())
                 assert (sync.call_count, async_.call_count) == (1, 1)
+
+
+def _scripted(*replies: Any) -> Callable[..., Any]:
+    """A provider script that answers each call with the next reply (an exception is raised)."""
+    queue = iter(replies)
+
+    def script(**_: Any) -> Any:
+        reply = next(queue)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    return script
+
+
+class TestTheApologyRetryIsOneBody:
+    """21cd7f8e/D-020: an empty reply is retried once, whichever name made the call."""
+
+    @pytest.mark.parametrize("second", ["recovers", "fails"])
+    async def test_it_fires_once_and_equally_on_either_name(self, second: str) -> None:
+        results = []
+        for name in ("generate_response", "agenerate_response"):
+            llm = _llm()
+            retry = _reply("Hello") if second == "recovers" else RuntimeError("down")
+            script = _scripted(_reply('{"message": ""}'), retry)
+            with _providers(script) as (sync, async_), _observed(_Recorder()) as rec:
+                out = await _invoke(llm, name, _METHODS["generate_response"]())
+            # both attempts, the retry too, land on the binding of the name's own mode
+            assert (sync.call_count, async_.call_count) in {(2, 0), (0, 2)}
+            assert (async_.call_count == 2) is (name == "agenerate_response")
+            results.append((out, llm.apology_retry_count, rec.shape(), llm.usage()))
+        assert results[0] == results[1]
+        out, count, events, usage = results[1]
+        assert count == 1 and usage.calls == 2
+        assert [e[0] for e in events] == [
+            "begin",
+            "end",
+            "begin",
+            "end" if second == "recovers" else "fail",
+        ]
+        assert (out.message == "Hello") is (second == "recovers")

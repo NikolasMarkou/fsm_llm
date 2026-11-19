@@ -1,8 +1,9 @@
-"""``CallMixin``: the non-streaming request of ``LiteLLMInterface`` (``_make_llm_call``) and the
-reasoning-trace readers it uses.
+"""``CallMixin``: the non-streaming request of ``LiteLLMInterface`` (``_make_llm_call`` over its
+one body ``_amake_llm_call``) and the reasoning-trace readers it uses.
 
 Layer ``llm`` (plan 51fde95b, step 3): split out of ``providers/litellm.py`` to keep that
-module under the size guard; bodies unchanged. Nothing here looks up a provider binding
+module under the size guard; the bodies moved unchanged and step 4.4 made ``_make_llm_call`` the
+``run_sync`` wrapper of the async body. Nothing here looks up a provider binding
 (``completion`` and the like stay in ``litellm.py``, where a test patches them), so this module
 imports neither litellm nor ``providers/litellm.py``.
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.core.definitions import LLMResponseError
 from fsm_llm.llm.parsing import ParseMixin
 from fsm_llm.llm.text import resolve_reasoning_trace
@@ -38,8 +40,6 @@ class CallMixin:
             max_tokens: int | None = None,
         ) -> dict[str, Any]: ...
 
-        def _send(self, call_params: dict[str, Any], *, call_type: str) -> Any: ...
-
     def _make_llm_call(
         self,
         messages: list[dict[str, str | None]],
@@ -62,6 +62,21 @@ class CallMixin:
         Returns:
             Raw LLM response
         """
+        return run_sync(
+            self._amake_llm_call(
+                messages, call_type, response_format, temperature=temperature
+            )
+        )
+
+    async def _amake_llm_call(
+        self,
+        messages: list[dict[str, str | None]],
+        call_type: str,
+        response_format: dict[str, Any] | None = None,
+        *,
+        temperature: float | None = None,
+    ) -> Any:
+        """The async twin of ``_make_llm_call`` and its one body: build, send, validate."""
         call_params = self._build_call_params(
             messages,
             call_type,
@@ -70,7 +85,7 @@ class CallMixin:
         )
 
         # Make the API call
-        response = self._send(call_params, call_type=call_type)
+        response = await acall(self, "_send", call_params, call_type=call_type)
 
         # Validate response structure. D-022: `getattr(response, "choices", None)`
         # replaces `hasattr(response, "choices") and response.choices` -- see the
