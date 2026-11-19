@@ -718,8 +718,8 @@ class LiteLLMInterface(RequestMixin, ParseMixin, CallMixin, LLMInterface, _Meter
     def _send(self, call_params: dict[str, Any], *, call_type: str) -> Any:
         """Send one built request to the provider: the one ``completion`` call.
 
-        Every provider request of this interface (Pass 1, Pass 2, stream,
-        ``complete``) goes through here; the raw provider reply (a stream
+        Every sync provider request of this interface (Pass 1, Pass 2, stream,
+        ``complete``) goes through here (the async ones through ``_asend``); the raw provider reply (a stream
         iterator when ``call_params["stream"]``) is returned and errors
         propagate unchanged. Each request is counted once on this instance's
         usage meter, under the kind of ``call_type`` (``stream`` for a

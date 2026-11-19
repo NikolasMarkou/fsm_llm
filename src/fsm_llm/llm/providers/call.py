@@ -147,7 +147,8 @@ class CallMixin:
 
         # Validate response structure. D-022: `getattr(response, "choices", None)`
         # replaces `hasattr(response, "choices") and response.choices` -- see the
-        # streaming loop above for why this "not falsy" shape is safe to convert.
+        # D-022 comment of ``LiteLLMInterface.agenerate_response_stream`` for why this
+        # "not falsy" shape is safe to convert.
         choices = getattr(response, "choices", None) if response else None
         if not choices:
             raise LLMResponseError("Invalid response structure from LLM")
