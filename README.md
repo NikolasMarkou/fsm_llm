@@ -15,12 +15,37 @@
 
 A language model call starts from nothing. A multi-turn conversation that must collect data, follow a set flow and decide the same way every time needs structure around the model. **FSM-LLM** is a Python framework for chatbots and agents that follow a fixed structure: you describe the conversation as a finite state machine in JSON, and the language model does the language work inside each state.
 
+The split is simple. The **model** understands the user, pulls out facts and writes replies. The **state machine** decides where the conversation goes next, by rules evaluated in plain Python, so the same facts always lead to the same state. The **framework** keeps everything else: what was collected, the history, your hooks, sessions, budgets and an optional replayable log.
+
 It is one package, `fsm_llm`, with a small core and subpackages on top: reasoning strategies, a workflow engine, agent patterns, a monitoring dashboard, an evaluation harness, runtime FSM synthesis and public test doubles. Every subpackage is built from the same parts as the core (stacked FSMs, message-free steps, one LLM layer), so there is one way to run a model, not one per subpackage.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NikolasMarkou/fsm_llm/main/images/fsm-diagram-example.png" alt="A form-collection FSM drawn by fsm-llm-visualize: welcome, name, email, age, a summary, a correction loop back to any field, then confirm and end" width="760"/>
+</p>
+<p align="center"><sub>A data-collection conversation with a correction loop. The states, the guards on each edge and the loop back are data in a JSON file, not prompt text.</sub></p>
+
+---
+
+## What You Can Build
+
+| You want | What FSM-LLM gives you | Look at |
+|----------|------------------------|---------|
+| A form, intake or onboarding flow that never skips a required field | Per-state extraction, gates on the context (`requires_context_keys` plus a JsonLogic rule), correction handling | [form_filling](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/basic/form_filling) |
+| Triage that routes by intent, with a deterministic fallback | `classification_extractions`, `Classifier`, `IntentRouter`; the model only breaks a tie | [smart_helpdesk](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/classification/smart_helpdesk) |
+| A conversation that hands part of the job to a specialist and takes the result back | FSM stacking: `push_fsm` and `pop_fsm`, with only the keys you declare coming back | [e_commerce](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/advanced/e_commerce), [multi_level_stack](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/advanced/multi_level_stack) |
+| Business logic around a chat: audit, analytics, lookups, side effects | Handlers at eight lifecycle points, with `continue` or `raise` error modes | [handler_hooks](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/advanced/handler_hooks) |
+| A tool-using agent where a person approves risky calls | ReAct, ReWOO, Reflexion and more; human approval as a driver-only grant bound to one exact call | [hitl_approval](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/agents/hitl_approval), [react_search](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/agents/react_search) |
+| A tree of agents with a manager and workers | `orchestrator`, `AgentGraph`, agents as tools of other agents | [hierarchical_orchestrator](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/agents/hierarchical_orchestrator) |
+| A tutor that reasons in the middle of a chat | A reasoning engine that picks a strategy, runs it as stacked FSMs and validates the answer | [math_tutor](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/reasoning/math_tutor) |
+| Long-running processes with events, timers and branches | An async workflow engine with typed steps, a Python DSL, waits and parallel steps, no model needed | [order_processing](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/workflows/order_processing) |
+| A bot you can crash, replay and fork | An opt-in write-ahead event log, `API.fork` and `API.resume` (on main, for the next release) | [Durable runs](#durable-runs-log-fork-resume) |
+| A bot you can unit test with no network | `fsm_llm.testing`: scripted models, a scripted user and state, path and context assertions | [Quick Start](#quick-start) |
+| An FSM, workflow or agent you describe in chat | The meta-builder (`fsm-llm-meta`) | [build_fsm](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/meta/build_fsm) |
 
 ---
 
 ## Table of Contents
-1.  [**Key Features**](#key-features): What is in the box.
+1.  [**Key Features**](#key-features): What it can do, with code.
 2.  [**Why FSM-LLM?**](#why-fsm-llm): Where it fits and where it does not.
 3.  [**Installation**](#installation): `pip install llm-fsm`, extras, picking a model.
 4.  [**Quick Start**](#quick-start): A conversation, a fake model, a builder, an agent, a workflow.
@@ -39,75 +64,162 @@ It is one package, `fsm_llm`, with a small core and subpackages on top: reasonin
 
 ## Key Features
 
-The library is organized into pillars. Each one is a collapsible section.
+### Flow is code, language is the model
 
-<details>
-<summary><b>1. The Core: Finite State Machines Driven by an LLM</b></summary>
-<p>
+Every transition is a rule over the collected context, written in JsonLogic and evaluated in plain Python. The operators cover comparison, boolean logic, arithmetic, `in`, `contains`, `if`, `var` with dot paths, and two additions for this library, `has_context` and `context_length`. The lowest `priority` among the passing transitions wins outright. Only a tie at the lowest priority asks the model, and then only to choose among the tied targets. If nothing passes, the conversation stays where it is.
 
-- **Two-pass turns**: every message goes through Pass 1 (extract data) and Pass 2 (write the reply from the state you ended up in). Transition rules are JsonLogic evaluated in plain Python, so they are predictable and unit-testable. The LLM is asked to choose only when two rules tie at the lowest priority.
-- **State kinds**: `conversation` (the default), `completion` (one native tool-calling or JSON-schema call per turn, over a transcript you own) and `synthesize` (a goal that a model turns into a child FSM, behind gates). Each kind is a spec plus an executor, so a new kind is an addition, not a rewrite.
-- **Handlers**: your functions run at lifecycle points (start, before and after processing, before and after a transition, context update, end, error), built with `create_handler`, with a `continue` or `raise` error mode.
-- **Intent classification**: `classification_extractions` on a state, plus `Classifier`, `HierarchicalClassifier` and `IntentRouter`.
-- **FSM stacking**: hand a conversation to a sub-FSM and come back with its results (`push_fsm` / `pop_fsm`).
-- **Streaming**: `converse_stream()` yields reply tokens as they arrive.
-- **Steps without a user message**: `advance()` runs one turn and returns an `AdvanceResult`; `run_until_terminal()` repeats it within a step and time budget and raises `RunBudgetExceededError` when the budget is spent. Agents, workflow agent steps and the reasoning engine run on these loops.
-- **Sessions and memory**: `save_session` / `restore_session` with `FileSessionStore`, and `WorkingMemory` buffers.
-- **Static checks and diagrams**: a validator and data-flow and liveness analyses for FSM definitions, a versioned schema (4.0 to 4.2) with `fsm-llm-validate --upgrade`, and `build_fsm_graph()`, `to_mermaid()`, `to_dot()` with the `fsm-llm-visualize` command.
-</p>
-</details>
+```json
+{
+  "target_state": "adult_flow",
+  "description": "The user is an adult",
+  "priority": 10,
+  "conditions": [
+    {"description": "Age is known and at least 18",
+     "requires_context_keys": ["age"],
+     "logic": {">=": [{"var": "age"}, 18]}}
+  ]
+}
+```
 
-<details>
-<summary><b>2. Reasoning, Workflows, Agents and Synthesis</b></summary>
-<p>
+Numeric comparison coerces only plain decimal strings, so `"21"` passes `>= 18` and `"inf"` does not. A key you list in `handler_only_keys` cannot be written by the model, which keeps gates such as `is_admin` out of its reach.
+
+### Extraction and classification, per state
+
+Pass 1 of each turn extracts the fields the state declares: from `required_context_keys`, from the keys the outgoing edges need, or from explicit `field_extractions` with validation rules, retries and a confidence threshold. `classification_extractions` turn free text into one of your named intents. A wrong correction leaves the stored value in place and tells Pass 2 it was rejected. `context_scope` limits which keys a state's prompts can see.
+
+### Conversations inside conversations
+
+`push_fsm` starts a sub-conversation, `pop_fsm` ends it and merges back only the keys you declared. Stacks nest, each frame has its own history and turn budget, and an ended pushed FSM can be popped inside a message-free run so the parent continues on its own.
+
+```python
+api.register_handler(audit)                       # a handler from create_handler, see Quick Start
+api.push_fsm(conv_id, "address_form.json", shared_context_keys=["zip"])
+reply = api.converse("90210", conv_id)            # the child FSM collects the zip code
+api.pop_fsm(conv_id)                              # back in the parent, with context["zip"]
+```
+
+### Hooks for everything around the model
+
+Handlers run at `START_CONVERSATION`, `PRE_PROCESSING`, `POST_PROCESSING`, `PRE_TRANSITION`, `POST_TRANSITION`, `CONTEXT_UPDATE`, `END_CONVERSATION` and `ERROR`. A fluent builder targets them by state, by target state, by context keys or by a condition. Return a dict and it merges into the context. A critical handler always raises; the others follow the `continue` or `raise` error mode, and `handler_timeout` bounds a slow one.
+
+### Steps without a user message
+
+`advance(conversation_id)` runs one turn with no incoming message and returns an `AdvanceResult`. `run_until_terminal(conversation_id, max_steps=..., max_seconds=...)` repeats it and raises `RunBudgetExceededError` when the budget is spent. Lifetime budgets on `API(max_steps=, max_seconds=)` are charged outside anything a model can write, so no extraction can reset them. Agents, workflow agent steps and the reasoning engine all run on these loops.
+
+### One call primitive for tools and structured output
+
+A state with the optional `completion` field makes its Pass 1 one `complete` call, with tool schemas or a JSON schema, over a transcript you own. The result lands in the context as `{kind, text, calls}` and your transitions read `<result_key>.kind`. Core runs no tool; your handlers or an agent loop do. Native function calling in the agents package is built on exactly this.
+
+### Atomic turns and honest failures
+
+A turn that fails is rolled back to its snapshot. A reply cut off at `max_tokens` is flagged `truncated`, logged once and never shown as an unreadable half envelope. Dead or contradictory state configuration is refused when the definition loads, and `FSMValidator` reports what the loader would accept but you probably did not mean. `fsm-llm-validate --upgrade` moves an older schema version (4.0 to 4.2) forward.
+
+### Durable runs: log, fork, resume
+
+On main, for the next release. Pass `event_log=` and every turn of a conversation tree is appended to one JSONL file, with large payloads in a content-addressed blob store, fsynced before each model call. A log that cannot be written refuses the call.
+
+```python
+from fsm_llm import API
+
+api = API.from_file("greeter.json", event_log="logs")
+conv_id, _ = api.start_conversation()
+api.converse("Hi, I'm Alice.", conv_id)
+
+branch_id, state = api.fork(conv_id, at_turn=0)   # a new conversation from the state before turn 1
+api.converse("Hi, I'm Bob.", branch_id)           # a different answer; the original is untouched
+
+# after a crash, in a new process, on the same log directory:
+api = API.from_file("greeter.json", event_log="logs")
+conv_id, state = api.resume(conv_id)              # same id; an in-flight tool is reported, never re-run
+```
+
+`fork` and `resume` rebuild the whole stack of pushed FSMs from the log. Privacy is a setting: `EventLog(root, privacy="values")` is the default, `"shape"` keeps ids, names and outcomes with no text (and then the log cannot be forked), and a `redact` hook handles free text. `EventLog.prune` is explicit retention and deletes nothing by default. Usage totals can be folded back out of the log with `fsm_llm.runtime.usage`.
+
+### Check a definition before it runs
+
+```python
+from fsm_llm import FSMValidator, build_fsm_graph, to_mermaid
+from fsm_llm.core.loaders import load_fsm_definition
+from fsm_llm.core.verify.flow import analyze_data_flow, analyze_liveness
+
+definition = load_fsm_definition("greeter.json")
+print(to_mermaid(build_fsm_graph(definition)))        # a stateDiagram-v2 you can paste into a README
+for finding in analyze_data_flow(definition) + analyze_liveness(definition):
+    print(finding)                                    # for example shadowed-edge, permanent-tie, cycle-no-exit
+```
+
+The data-flow pass catches a state that reads a key nothing extracts. The liveness pass catches an edge a higher-priority edge always hides, a tie that can never resolve and a loop with no exit. `fsm-llm-visualize` draws any FSM as ASCII, Mermaid or Graphviz DOT.
+
+### Agents, with a security boundary where it matters
+
+`create_agent(pattern, tools, config=...)` builds an agent on the same FSM core. There is one registry of patterns, plus `AgentGraph` for a DAG of agents and a meta-builder that designs FSMs, workflows and agents by chat.
+
+- **`fsm_llm.agents`**: the agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
+- **Tools done properly**: the `@tool` decorator with annotations, enforced timeouts, tools loaded from folders of Python files (trusted sources only), standard operating procedures, retry and caching registries, and semantic tool selection.
+- **MCP client**: `MCPToolProvider` discovers and registers tools from a stdio or HTTP MCP server (the `mcp` extra). There is no MCP server in the package yet.
+- **Agent to agent over HTTP**: `AgentServer` exposes an agent at `/invoke`, `/stream`, `/health` and `/info` with an optional API key, and `RemoteAgentTool` calls it as a tool. It is a small HTTP protocol, not the full A2A specification.
+- **Memory**: semantic memory with embeddings, working-memory tools, auto-memory agents and a read-only OKF backend.
+
+Human approval is enforced by the driver, not the prompt:
+
+```python
+from fsm_llm.agents import AgentConfig, HumanInTheLoop, create_agent, tool
+
+
+@tool(requires_approval=True)
+def wire_money(amount: int) -> str:
+    """Send money."""
+    return f"sent {amount}"
+
+
+hitl = HumanInTheLoop(approval_callback=lambda request: input("Allow this call? [y/N] ") == "y")
+agent = create_agent("react", [wire_money], config=AgentConfig(model="openai/gpt-4o-mini"), hitl=hitl)
+```
+
+A gated tool runs only with a grant bound to that exact call. The model cannot set it, a caller's `initial_context` cannot set it, and one approval covers one call. `react`, `reflexion` and `reasoning_react` support it; the patterns that cannot enforce it refuse a registry that holds a gated tool instead of ignoring the flag.
+
+### Reasoning, workflows and synthesis
 
 - **`fsm_llm.reasoning`**: a solver that picks one of the reasoning strategies, runs it as stacked FSMs inside one message-free core run, validates the answer and retries up to 3 times. `ReasoningEngine.solve_problem(problem)` returns the solution and a trace.
-- **`fsm_llm.workflows`**: an async in-memory engine with typed steps and a Python DSL (`create_workflow_builder`, `auto_step`, `condition_step`). It runs without an LLM unless you add LLM steps.
-- **`fsm_llm.agents`**: the agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
-- **Tools done properly**: the `@tool` decorator, annotations, enforced timeouts, MCP and A2A support, tools loaded from folders of Python files, and standard operating procedures.
-- **Human approval as a security boundary**: a gated tool runs only with a driver-only grant bound to that exact call, which a caller's initial context can never set.
-- **A meta-builder** that designs FSMs, workflows and agents by chat (`fsm-llm-meta`).
-- **`fsm_llm.synthesis`**: a host FSM names a goal in a `synthesize` state, a model writes a child FSM for it, static checks, a bounded simulation and an optional approval decide whether it may run, a file-backed library stores it and a runner pushes it as a child of the host conversation (`FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `create_procedure_tools`). `verified` means those checks passed over a model-written spec, not that the procedure is correct. Bench status: blocks `s0`, `s1` and `s2` were run on one model; all three verdicts are INCONCLUSIVE. See the [synthesis guide](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/synthesis.md).
-</p>
-</details>
+  The nine strategies are `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical` and `hybrid`. A classifier FSM recommends one; `preferred_reasoning_type` or `--type` overrides it.
+- **`fsm_llm.workflows`**: an async in-memory engine with typed steps (`auto_step`, `api_step`, `condition_step`, `switch_step`, `llm_step`, `parallel_step`, `wait_event_step`, `timer_step`, `retry_step`, `conversation_step`, `agent_step`) and a Python DSL. Waits match events by a correlation key and can time out into another step; a parallel step gives each child its own copy of the context. It runs without an LLM unless you add LLM steps.
+- **`fsm_llm.synthesis`** (experimental): a host FSM names a goal in a `synthesize` state, a model writes a child FSM for it, and the child runs only after gates: it loads, passes the validator, a data-flow check, a liveness check, a policy allow-list, a dead-edge check through the real evaluator, an optional bounded simulation and an optional approval. A file-backed library stores it and a runner pushes it as a child of the host conversation. `verified` means those gates passed over a model-written spec, not that the procedure is correct. Bench blocks `s0`, `s1` and `s2` were run on one model and all three verdicts are INCONCLUSIVE. See the [synthesis guide](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/synthesis.md).
 
-<details>
-<summary><b>3. Knowledge Bundles and Agent Skills</b></summary>
-<p>
+### Knowledge bundles and Agent Skills
 
-- **Open Knowledge Format (OKF)**: `fsm_llm.okf` reads, searches, validates and writes OKF bundles (a directory of markdown files with YAML frontmatter). `fsm_llm.engine.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context. `fsm_llm.agents` adds read-only OKF tools, a read-only memory backend and bundle exporters. `fsm-llm-okf` runs it from the shell. This follows OKF v0.2 (pre-1.0 and mutable).
-- **Agent Skills**: `fsm_llm.skills` reads folders with a `SKILL.md` from the paths you name (the open standard at agentskills.io, unversioned and mutable). `fsm_llm.agents.create_skill_tools` gives an agent the read-only tools (`skill_list`, `skill_load`, `skill_read`), and `fsm-llm-skills` validates, lists and shows them.
-- **Untrusted by design**: bundle and skill text reaches a model only as capped, control-stripped tool output (or labelled summaries), never as a tool description, instruction or persona. Nothing in a bundle or skill folder is executed, and `allowed-tools` is reported, not enforced.
-</p>
-</details>
+- **Open Knowledge Format (OKF)**: `fsm_llm.okf` reads, searches, validates and writes OKF bundles (a directory of markdown files with YAML frontmatter). `fsm_llm.engine.okf_bridge.create_okf_handler()` puts capped concept summaries into a plain FSM's context, `fsm_llm.agents` adds read-only OKF tools and bundle exporters, and `fsm-llm-okf` runs it from the shell. It follows OKF v0.2 (pre-1.0 and mutable).
+- **Agent Skills**: `fsm_llm.skills` reads folders with a `SKILL.md` from the paths you name (the open standard at agentskills.io, unversioned and mutable). `fsm_llm.agents.create_skill_tools` gives an agent `skill_list`, `skill_load` and `skill_read`, and `fsm-llm-skills` validates, lists and shows them.
+- **Untrusted by design**: bundle and skill text reaches a model only as capped, control-stripped tool output or labelled summaries, never as a tool description, instruction or persona. Nothing in a bundle or skill folder is executed, and `allowed-tools` is reported, not enforced.
 
-<details>
-<summary><b>4. Monitoring, Evaluation and Testing</b></summary>
-<p>
+### Watch it, score it, test it
 
-- **`fsm_llm.monitor`**: a FastAPI dashboard (REST, WebSocket, vanilla-JS single-page app) to launch, watch and chat with FSMs, agents and workflows, with optional OpenTelemetry export.
-- **`fsm_llm.eval`**: scores the examples 0 to 4, or runs scripted conversations N times and reports pass rates with Wilson confidence intervals (`EvalConfig`, `run_examples`, `run_cases`, `run_dataset`, `wilson_ci`).
-- **`fsm_llm.testing`**: public test doubles for your own code: fake `LLMInterface` implementations (`ScriptedLLM`, `MockLLM2Interface`, `PromptGroundedLLM`), reply builders, a `ScriptedUser` that drives a conversation, and the assertions `assert_state`, `assert_context`, `assert_path` and `assert_result`. It never imports pytest.
-- **Pre-registered benches**: `scripts/agents_bench.py`, `scripts/skills_bench.py` and `scripts/synthesis_bench.py` record blocks that are run once at a fixed n and never edited, so a number in the repository can be recounted from its rows.
-</p>
-</details>
+- **`fsm_llm.monitor`**: a FastAPI dashboard (REST, WebSocket, a vanilla-JS single-page app) with events, logs, metrics, a visualizer, a chat console and the meta-builder. `InstanceManager.attach_api(api)` lets it watch your own `API`. It launches example FSMs from a checkout, a set of agent patterns with stub tools and two demo workflows; it is a development tool. Optional OpenTelemetry export (`--otel`).
+- **`fsm_llm.eval`**: scores the examples 0 to 4, or plays scripted conversations N times and reports pass rates with Wilson confidence intervals (`run_dataset`, `run_cases`, `wilson_ci`).
+- **`fsm_llm.testing`**: public test doubles for your own code, and it never imports pytest. `ScriptedLLM`, `MockLLM2Interface` and `PromptGroundedLLM` are fake `LLMInterface` implementations that also answer the async twins; reply builders such as `final_reply` and `tool_call_reply`; a `ScriptedUser` that drives a conversation; and the assertions `assert_state`, `assert_context`, `assert_path` and `assert_result`.
 
-<details>
-<summary><b>5. One LLM Layer, Safe Defaults and Reliability</b></summary>
-<p>
+### One LLM layer, safe defaults
 
-- **One LLM layer**: litellm is imported in exactly one module, `src/fsm_llm/llm/providers/litellm.py`. `LLMInterface.complete(CompletionRequest)` is the single primitive for tool calling, plain and structured completion, with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). Any litellm model string works.
+- **One LLM layer**: litellm is imported in exactly one module. `LLMInterface.complete(CompletionRequest)` is the single primitive for tool calling, plain and structured completion, with per-interface call and token counters (`usage()`) and an embedder (`LiteLLMEmbedder`). Any litellm model string works.
+- **Async at the model layer**: every `LLMInterface` method has an `a*` twin (`acomplete`, `agenerate_response`, `aextract_field` and so on), as do `LiteLLMEmbedder.aembed` and `Classifier.aclassify`. `LiteLLMInterface` is natively async, the sync names are thin wrappers over it, and a sync caller needs no event loop. `API` itself is synchronous. On main, for the next release.
 - **No hidden configuration**: there is no built-in default model (`model=`, then `LLM_MODEL`, else `ModelNotConfiguredError`), importing `fsm_llm` loads no `.env` file (you call `load_env()` or pass `--env-file`), and the library logs nothing until you ask.
-- **Cut-off replies are visible**: a reply that stops at `max_tokens` is flagged (`truncated`, a WARNING, a named cause in extraction errors) and never shown as an unreadable half envelope.
-- **Context security**: internal keys (prefixes `_`, `system_`, `internal_`, `__`) and secret-looking entries are kept out of prompts. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans for malicious `.pth` files.
+- **Context security**: internal keys (prefixes `_`, `system_`, `internal_`, `__`) and secret-looking entries are kept out of prompts; restores seed only public keys, so a tampered session file cannot forge an approval grant; file paths from bundles and skills are confined to their root. The compromised litellm 1.82.7 and 1.82.8 are below the required version, and `make audit` scans for malicious `.pth` files.
 - **Enforced layering**: a layer package imports only the layers below it, written as import contracts (`.importlinter`) that a test and CI run, so the architecture cannot drift unnoticed.
-- **Assured reliability**: an offline-by-default suite (a fake model, no network) covering the core, every subpackage, packaging, regressions, and the examples.
-</p>
-</details>
 
 ---
 
 ## Why FSM-LLM?
+
+A plain loop of "send history, get reply" is the right tool for open-ended chat. It gets harder to trust once the conversation has to do something specific:
+
+| Concern | A prompt-only loop | FSM-LLM |
+|---------|--------------------|---------|
+| "What happens next?" | Whatever the model decides this time | A rule you can read, test and diagram; the model breaks only an exact tie |
+| Required data | Hope the prompt makes the model ask | An edge guarded by a gate does not fire until the keys are present and the rule passes |
+| A failed model call | Half-applied state | The turn rolls back to its snapshot |
+| Risky actions | A sentence in the prompt | A grant the model cannot set, bound to one call |
+| Reproducing a bug | Re-run and hope | Fork the log at the turn that went wrong (on main) |
+| Testing | Needs a live model | A scripted model, a scripted user and path assertions |
+| Changing the flow | Edit and re-test a long prompt | Edit a JSON definition, validate it, diagram it |
 
 FSM-LLM splits the work three ways:
 
@@ -117,7 +229,7 @@ FSM-LLM splits the work three ways:
 
 Use it when the conversation has steps: forms and intake, onboarding, support triage, tutoring flows, anything where "what must happen next" is a rule.
 
-Do not use it for open-ended chat with no structure (a plain LLM call is simpler), or when you need a hosted, production-hardened agent platform. The project is young, and one subpackage is explicitly experimental (see [Status](#status)).
+Do not use it for open-ended chat with no structure (a plain LLM call is simpler), or when you need a hosted, production-hardened agent platform. The project is young, and one subpackage, synthesis, is explicitly experimental (see [Status](#status)).
 
 ---
 
@@ -140,7 +252,7 @@ Do not use it for open-ended chat with no structure (a plain LLM call is simpler
     | `monitor` | fastapi, uvicorn, jinja2 |
     | `mcp` | mcp |
     | `otel` | opentelemetry-api, opentelemetry-sdk |
-    | `a2a` | httpx |
+    | `a2a` | httpx (`AgentServer` also needs fastapi, which the `monitor` extra installs) |
     | `all` | Every extra above |
     | `dev` | The test, lint and type tools (for contributors, see [CONTRIBUTING](https://github.com/NikolasMarkou/fsm_llm/blob/main/CONTRIBUTING.md)) |
 
@@ -385,6 +497,8 @@ Every user message goes through two LLM passes:
 - The context is a dictionary of everything collected so far in one conversation.
 - Transition rules use JsonLogic, for example `{">=": [{"var": "age"}, 18]}`. If several transitions pass, the lowest `priority` number wins outright. The LLM is asked only when two or more tie at that lowest priority. If none pass, the conversation stays put.
 - Pass 2 runs after the transition, so the reply comes from the state the conversation is actually in. A state with empty `response_instructions` makes no LLM call, replies with `""` and adds nothing to the history.
+- The turn is atomic. If a pass fails, the context, history and state go back to the snapshot taken at the start of the turn. A concurrent or re-entrant `converse` on the same conversation raises `FSMError` instead of interleaving.
+- With an event log on, the exact request of every model call is written and fsynced before the call, so a run can be rebuilt, forked or resumed from the log.
 
 ### State kinds
 
@@ -406,6 +520,7 @@ The core is built in layers, and a layer imports only the rows below it (the con
   policy      approval vocabulary, HumanInTheLoop
   tools       ToolRegistry, @tool, timeouts
   context  okf  skills      independent siblings
+  runtime     event log, JSONL and blob stores, turn scope, usage fold (opt-in)
   llm         LLMInterface, LiteLLMInterface: the one litellm import
   core        definitions, JsonLogic expressions, validator, diagrams
   kernel      aio, constants, logging, security, text, env, frontmatter, memory
@@ -492,7 +607,9 @@ Contributions are welcome, from a typo fix to a new agent pattern. Setup, the te
 
 ## Status
 
-- Version 0.13.0. Most tests are offline and use a fake model, so they check logic and wiring, not model quality. Evaluation scores are a heuristic and overstate quality; the recorded runs in [EVALUATE.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/EVALUATE.md) used a 4B local model.
+- Version 0.13.0. The event log, `API.fork`, `API.resume`, turn budgets and the async twins described above are on main and ship in the next release; the badge and the PyPI package are 0.13.0.
+- Maturity: the core engine, handlers, stacking, validation and the test doubles are the settled part. Agents, reasoning and workflows are tested offline against scripted models, so live behavior depends on the model. Synthesis is experimental. The monitor is a development tool. MCP support is a client only, and human approval is enforced for `react`, `reflexion` and `reasoning_react`.
+- Most tests are offline and use a fake model, so they check logic and wiring, not model quality. Evaluation scores are a heuristic and overstate quality; the recorded runs in [EVALUATE.md](https://github.com/NikolasMarkou/fsm_llm/blob/main/EVALUATE.md) used a 4B local model.
 - The library logs nothing until you call `setup_logging()` or `enable_debug_logging()`; both also replace loguru's default handler, so a library record prints once.
 - One conversation handles one message at a time: a second `converse` on a conversation that is mid-turn raises `FSMError`.
 
