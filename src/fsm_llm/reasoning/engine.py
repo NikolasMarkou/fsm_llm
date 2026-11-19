@@ -81,7 +81,7 @@ class ReasoningEngine:
         # environment here by hand. An injected interface needs no model.
         injected = kwargs.get("llm_interface")
         if injected is not None:
-            self.model = model or interface_model(injected) or _INJECTED_MODEL_LABEL
+            self.model = interface_model(injected) or model or _INJECTED_MODEL_LABEL
         else:
             self.model = resolve_model(model)
         model = self.model

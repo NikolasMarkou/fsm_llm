@@ -91,7 +91,7 @@ class TimestampedModel(BaseModel):
         use_enum_values=True,
         # Validate assignment
         validate_assignment=True,
-        # Extra fields forbidden by default
+        # Unknown input fields are ignored
         extra="ignore",
         # Enable JSON schema generation
         json_schema_extra={"examples": []},
@@ -154,6 +154,14 @@ class ReasoningStep(TimestampedModel):
         ge=0.0,
         description="Time taken to execute this step in milliseconds",
     )
+
+    # Sets serialize as sorted lists in JSON (D-002 of plan 0051e159), so two
+    # processes with different hash seeds write the same bytes; python mode
+    # keeps the set.
+    @field_serializer("context_keys_used", when_used="json")
+    def _serialize_context_keys(self, value: set[str]) -> list[str]:
+        """Dump the context keys as a sorted list (JSON only)."""
+        return sorted(value)
 
     @field_validator("content")
     def validate_content_not_empty(cls, v: str) -> str:
@@ -538,6 +546,11 @@ class SolutionResult(TimestampedModel):
     used_context_keys: set[str] = Field(
         default_factory=set, description="Context keys that were used in the solution"
     )
+
+    @field_serializer("used_context_keys", when_used="json")
+    def _serialize_used_context_keys(self, value: set[str]) -> list[str]:
+        """Dump the used context keys as a sorted list (JSON only)."""
+        return sorted(value)
 
     @field_validator("solution")
     @classmethod

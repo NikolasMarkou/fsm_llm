@@ -373,6 +373,7 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.REASONING_TYPE_SELECTED,
     ContextKeys.CLASSIFIED_PROBLEM_TYPE,
     ContextKeys.REASONING_PUSH_PENDING,
+    ContextKeys.HYBRID_LOOP_COUNT,
 )
 
 # Keys only the engine's own handlers write to choose and push the strategy

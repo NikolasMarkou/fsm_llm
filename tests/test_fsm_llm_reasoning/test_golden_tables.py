@@ -8,6 +8,7 @@ order changed: update it only on purpose.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 
@@ -40,7 +41,10 @@ _ALIAS_PROBES = (
 )
 
 _GOLDEN_FSMS = {
-    "orchestrator": "0c07a006f8422ae033be38263f3c08919fd6aa661ee927db0852c9f19d558cd9",
+    # Re-baselined on purpose (F3): the only change is `hybrid_loop_count` added to
+    # `handler_only_keys`; `test_orchestrator_hash_moved_only_by_hybrid_loop_count`
+    # proves it by reproducing the previous hash without that one key.
+    "orchestrator": "890af39efa2cde911c7c89644cf5f5951994cbaeccdd198b7082813be3dc9b55",
     "classifier": "1ada9e1547adb115ae5ad902c4e612dd2290f355ed7b6d897679ef053465b6c7",
     "simple_calculator": "4277a46339b2373db1fbb2b802a339f1f096e7390a4b6b52031c34e911826bde",
     "analytical": "13fd110501336bf248d06cc4376c1fb0798fcc84713e0fb655f2cefc154f4a20",
@@ -176,3 +180,16 @@ class TestOneStrategyTable:
         assert ALL_REASONING_FSMS["orchestrator"]["states"]
         with pytest.raises(KeyError, match="FSM definition not found: nope"):
             get_reasoning_fsm("nope")
+
+
+_PREVIOUS_ORCHESTRATOR_HASH = (
+    "0c07a006f8422ae033be38263f3c08919fd6aa661ee927db0852c9f19d558cd9"
+)
+
+
+def test_orchestrator_hash_moved_only_by_hybrid_loop_count():
+    definition = copy.deepcopy(ALL_REASONING_FSMS["orchestrator"])
+    assert ContextKeys.HYBRID_LOOP_COUNT in definition["handler_only_keys"]
+    definition["handler_only_keys"].remove(ContextKeys.HYBRID_LOOP_COUNT)
+
+    assert _hash(definition) == _PREVIOUS_ORCHESTRATOR_HASH

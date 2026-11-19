@@ -165,6 +165,7 @@ class TestHandlerOnlyKeys:
             "reasoning_type_selected",
             "classified_problem_type",
             "reasoning_push_pending",
+            "hybrid_loop_count",  # F3: a model claim must not reach final_context
         }
 
     def test_the_fsm_definitions_carry_them(self):

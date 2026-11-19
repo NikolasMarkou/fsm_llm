@@ -266,3 +266,66 @@ class TestSolutionResult:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+_SORTED_KEYS = ["alpha", "beta", "gamma", "mid", "zeta"]
+_SET_PROBE = """
+import json
+from fsm_llm.reasoning.definitions import ReasoningStep, ReasoningTrace, SolutionResult
+keys = {"alpha", "mid", "beta", "zeta", "gamma"}
+step = ReasoningStep(step_type="analysis", content="a step", context_keys_used=keys)
+result = SolutionResult(
+    solution="an answer", reasoning_summary="a long enough summary",
+    trace=ReasoningTrace(), used_context_keys=keys,
+)
+print(json.dumps([
+    json.loads(step.model_dump_json())["context_keys_used"],
+    json.loads(result.model_dump_json())["used_context_keys"],
+    step.model_dump(mode="json")["context_keys_used"],
+    result.model_dump(mode="json")["used_context_keys"],
+]))
+"""
+
+
+class TestSetFieldsSerializeSortedInJson:
+    """F3 (reasoning audit 2.4c): a set of context keys is written to JSON as a
+    sorted list, so two processes (two hash seeds) write the same bytes."""
+
+    @pytest.mark.parametrize("seed", ["1", "2", "3"])
+    def test_every_hash_seed_gives_the_same_sorted_list(self, seed):
+        import os
+        import subprocess
+        import sys
+
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        done = subprocess.run(
+            [sys.executable, "-c", _SET_PROBE],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+
+        assert json.loads(done.stdout) == [_SORTED_KEYS] * 4
+
+    def test_python_mode_keeps_the_set(self):
+        from fsm_llm.reasoning.definitions import (
+            ReasoningStep,
+            ReasoningTrace,
+            SolutionResult,
+        )
+
+        keys = {"b", "a"}
+        step = ReasoningStep(
+            step_type="analysis", content="a step", context_keys_used=keys
+        )
+        result = SolutionResult(
+            solution="an answer",
+            reasoning_summary="a long enough summary",
+            trace=ReasoningTrace(),
+            used_context_keys=keys,
+        )
+
+        assert step.model_dump()["context_keys_used"] == keys
+        assert result.model_dump()["used_context_keys"] == keys

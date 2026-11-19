@@ -1171,3 +1171,46 @@ class TestAnEarlyVerdictWaitsForTheInsights:
             ]
             is True
         )
+
+
+class _StatedModelLLM(_ScriptedLLM):
+    """An injected interface that states its own model (as LiteLLMInterface does)."""
+
+    model = "model-b"
+
+
+class TestReportedModel:
+    """F3 (reasoning audit 2.1): ``engine.model`` reports the model the injected
+    interface really uses, never refuses a differing ``model=`` (D-038)."""
+
+    def test_the_interface_model_wins_over_a_differing_argument(self):
+        engine = ReasoningEngine(model="model-a", llm_interface=_StatedModelLLM({}))
+
+        assert engine.model == "model-b"
+        assert engine.orchestrator.llm_interface.model == "model-b"
+
+    def test_an_interface_that_states_no_model_keeps_the_argument(self):
+        engine = ReasoningEngine(model="model-a", llm_interface=_ScriptedLLM({}))
+
+        assert engine.model == "model-a"
+
+    def test_neither_gives_the_label(self):
+        engine = ReasoningEngine(llm_interface=_ScriptedLLM({}))
+
+        assert isinstance(engine.model, str) and engine.model
+
+
+class TestHybridLoopCountIsHandlerOnlyOnTheOrchestrator:
+    """F3 (reasoning audit section 3): a model bulk claim of ``hybrid_loop_count``
+    must not land in the orchestrator frame and the caller's final_context."""
+
+    def test_the_key_is_listed(self):
+        assert ContextKeys.HYBRID_LOOP_COUNT in ORCHESTRATOR_HANDLER_ONLY_KEYS
+
+    def test_a_bulk_claim_is_left_out_of_the_final_context(self):
+        llm = _ClaimingLLM(_HYBRID_SCRIPT, claims={ContextKeys.HYBRID_LOOP_COUNT: 99})
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM, {ContextKeys.PREFERRED_REASONING_TYPE: "hybrid"}
+        )
+
+        assert ContextKeys.HYBRID_LOOP_COUNT not in trace_info["final_context"]
