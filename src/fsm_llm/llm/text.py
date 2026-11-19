@@ -38,7 +38,7 @@ def resolve_reasoning_trace(message: Any) -> str | None:
     # `reasoning_content` is read FIRST; the legacy `thinking` string is kept so the D-023 divergence
     # tests stay green; `thinking_blocks` is a last-resort join of the provider's
     # typed reasoning segments. This is the SINGLE resolver shared by
-    # llm/providers/litellm.py::_extract_content_from_thinking and llm/interface.py::_completion_response
+    # llm/providers/call.py::_extract_content_from_thinking and llm/interface.py::_completion_response
     # (the reply reader of `complete`, which the classifier uses) so the
     # readers can never re-diverge (the NL1 bug was engine/classification.py holding
     # its own stale copy).

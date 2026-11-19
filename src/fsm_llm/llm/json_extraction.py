@@ -226,7 +226,7 @@ def extract_json_from_text(text: str) -> dict[str, Any] | None:
         # DECISION plan-2026-07-18T162030-a02151fe/D-023 [STALE]
         # This strategy is FIRST-wins: it returns on the first successful parse.
         # That disagrees with Strategy 4 below and with
-        # llm/providers/litellm.py::_extract_content_from_thinking, both of which prefer the LAST
+        # llm/providers/call.py::_extract_content_from_thinking, both of which prefer the LAST
         # object. The divergence is REAL and still OPEN — which helper you hit
         # depends only on whether the provider split the reasoning trace into a
         # separate `thinking` field.

@@ -1116,6 +1116,7 @@
     "fsm_llm.frontmatter",
     "fsm_llm.llm.observer",
     "fsm_llm.llm.providers",
+    "fsm_llm.llm.providers.call",
     "fsm_llm.logging",
     "fsm_llm.memory",
     "fsm_llm.monitor",
