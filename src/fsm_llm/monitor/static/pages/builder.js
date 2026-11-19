@@ -41,6 +41,7 @@ let _following = true;
 // Bumped on every start/reset: replies carrying an older token belong to a
 // session the user abandoned and are dropped.
 let _sessionToken = 0;
+let _gateToken = 0;
 
 const WORKFLOW_LAUNCH_NOTE = 'Workflows built here cannot be launched from the monitor: the server only launches '
     + 'its built-in workflow presets, not a JSON definition. Copy or download the definition and build it with '
@@ -310,8 +311,9 @@ function _syncLaunch(artifact, artifactType) {
 
 /** Disable Launch with a note when /api/capabilities does not list the agent class (the list is the server's `_AGENT_CLASSES`). */
 function _gateAgentLaunch(agentClass, token) {
+    const gate = ++_gateToken;  // a newer call (an Apply of Edit JSON) drops the reply of an older one
     fetchJson('/api/capabilities').then(caps => {
-        if (token !== _sessionToken || !Array.isArray(caps?.agent_types) || caps.agent_types.includes(agentClass)) return;
+        if (token !== _sessionToken || gate !== _gateToken || !Array.isArray(caps?.agent_types) || caps.agent_types.includes(agentClass)) return;
         const btn = $('builder-launch-btn');
         const note = $('builder-launch-note');
         if (btn) { btn.disabled = true; btn.setAttribute('aria-describedby', 'builder-launch-note'); btn.title = 'The monitor cannot launch this agent type'; }
@@ -326,7 +328,8 @@ function _gateAgentLaunch(agentClass, token) {
 /** The server class name of a built agent artifact (builder lowercase type -> class). */
 function _agentClass(artifact) {
     const raw = (artifact.agent_type || 'react').toLowerCase();
-    return AGENT_TYPE_MAP[raw] || artifact.agent_type || 'ReactAgent';
+    // an own key only: "constructor" or "__proto__" in an edited artifact is no type (D-058)
+    return (Object.hasOwn(AGENT_TYPE_MAP, raw) && AGENT_TYPE_MAP[raw]) || artifact.agent_type || 'ReactAgent';
 }
 
 function _buildResultSummary(artifact, artifactType) {

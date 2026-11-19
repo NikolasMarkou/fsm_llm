@@ -235,6 +235,19 @@ class TestBuilderAgentLaunchGate:
         stale = probe("builder_agent_gate")["staleAfterReset"]
         assert stale == {"disabled": False, "note": ""}
 
+    def test_an_inherited_key_is_no_agent_type_and_names_itself_in_the_note(
+        self, probe
+    ):
+        out = probe("builder_agent_gate")
+        assert out["inherited"]["disabled"] is True
+        assert out["inherited"]["note"].startswith("constructor cannot be launched")
+        assert out["protoKey"]["disabled"] is True
+        assert out["protoKey"]["note"].startswith("__proto__ cannot be launched")
+
+    def test_a_capabilities_reply_for_the_pre_edit_artifact_is_dropped(self, probe):
+        stale = probe("builder_agent_gate")["staleAfterEdit"]
+        assert stale == {"disabled": False, "note": ""}
+
     def test_a_missing_list_or_a_failed_lookup_leaves_launch_on(self, probe):
         out = probe("builder_agent_gate")
         assert out["noList"]["disabled"] is False

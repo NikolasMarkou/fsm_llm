@@ -934,11 +934,21 @@ class TestDisabledAgentTypes:
         with pytest.raises(ValueError, match="Unknown agent type"):
             mgr.launch_agent(agent_type="MakerCheckerAgent", task="x")
 
+    def test_orchestrator_not_launchable(self):
+        """D-058 of plan 51fde95b: with no worker_factory every subtask is a
+        placeholder with success False, so a dashboard run always ends failed."""
+        import pytest
+
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="Unknown agent type"):
+            mgr.launch_agent(agent_type="OrchestratorAgent", task="x")
+
     def test_supported_agent_types(self):
         from fsm_llm.monitor.instance_manager.agent import _AGENT_CLASSES
 
         assert "EvaluatorOptimizerAgent" not in _AGENT_CLASSES
         assert "MakerCheckerAgent" not in _AGENT_CLASSES
+        assert "OrchestratorAgent" not in _AGENT_CLASSES
         # core types still present
         assert "ReactAgent" in _AGENT_CLASSES
         assert "DebateAgent" in _AGENT_CLASSES
@@ -1065,7 +1075,7 @@ class TestLaunchConstructsEveryAgentClass:
 
         if not agent_mod._AGENT_CLASSES:
             pytest.skip("fsm_llm.agents not importable")
-        assert len(agent_mod._AGENT_CLASSES) == 8  # OrchestratorAgent: LLM-only
+        assert len(agent_mod._AGENT_CLASSES) == 7  # no OrchestratorAgent (D-058)
 
         constructed: dict[str, threading.Event] = {}
         for name, real_cls in list(agent_mod._AGENT_CLASSES.items()):

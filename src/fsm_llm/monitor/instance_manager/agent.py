@@ -15,7 +15,6 @@ from fsm_llm.agents import (
     ADaPTAgent,
     AgentConfig,
     DebateAgent,
-    OrchestratorAgent,
     PlanExecuteAgent,
     ReactAgent,
     ReflexionAgent,
@@ -63,8 +62,10 @@ _AGENT_CLASSES: dict[str, type] = {
     "ADaPTAgent": ADaPTAgent,
     "DebateAgent": DebateAgent,
     "SelfConsistencyAgent": SelfConsistencyAgent,
-    "OrchestratorAgent": OrchestratorAgent,  # worker_factory=None: the LLM answers subtasks inline
 }
+# OrchestratorAgent is not launchable either (D-058 of plan 51fde95b): without a
+# `worker_factory` (a Python callable) every subtask is a placeholder with
+# success False, so a dashboard run always ends `failed`.
 
 # Agent types that require a ToolRegistry
 _TOOL_BASED_AGENTS = {

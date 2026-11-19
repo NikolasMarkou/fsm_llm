@@ -85,6 +85,14 @@ class TestTheLaunchableAgentTypesAreOneList:
         mapping = _js_map(self._builder_js(), "AGENT_TYPE_MAP")
         assert set(agent_mod._AGENT_CLASSES) <= set(mapping.values())
 
+    def test_an_orchestrator_artifact_is_buildable_but_not_listed_as_launchable(self):
+        """D-058: the map still translates the Builder type; ``agent_types`` decides launch."""
+        mapping = _js_map(self._builder_js(), "AGENT_TYPE_MAP")
+        assert mapping["orchestrator"] == "OrchestratorAgent"
+        configure(manager=_manager())
+        listed = TestClient(app).get("/api/capabilities").json()["agent_types"]
+        assert "OrchestratorAgent" not in listed
+
     def test_the_launch_form_offers_exactly_the_launchable_classes(self):
         select = re.search(
             r'<select id="launch-agent-type"[^>]*>(.*?)</select>', _html(), re.S
