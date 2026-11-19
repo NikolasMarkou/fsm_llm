@@ -1052,10 +1052,11 @@ runner = ProcedureRunner(api, host_definition, synth, trace_sink=None)
 conv_id, _ = api.start_conversation({"venue": "Luna"})
 runner.run(conv_id, max_steps=40)                 # message-free; RunBudgetExceededError on a spent budget
 reply = runner.converse(conv_id, "four, Friday")  # or one user turn
+for chunk in runner.run_stream(conv_id, max_steps=40): ...  # the same run, reply text as it arrives
 runner.end_conversation(conv_id)
 ```
 
-`hook(conversation_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child whose frame spends `policy.max_turns` turns in total (the engine's lifetime turn budget, `max_steps=policy.max_turns` at the push) ends as `aborted` with reason `budget_spent` and nothing merges. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.runner`.
+`hook(conversation_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child whose frame spends `policy.max_turns` turns in total (the engine's lifetime turn budget, `max_steps=policy.max_turns` at the push) ends as `aborted` with reason `budget_spent` and nothing merges. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. `run_stream(conversation_id, *, max_steps, max_seconds=None)` and `converse_stream(conversation_id, message)` are the streaming forms of `run` and `converse` (thin wrappers over core's streams: the same text, end state and errors; closing `run_stream` early pops a child that has ended and starts nothing). One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.runner`.
 
 ### Agents (`fsm_llm.agents`)
 

@@ -1679,9 +1679,11 @@ fsm_llm.synthesis.ProcedureApprovalRequest class
 fsm_llm.synthesis.ProcedureRunner class
   def __init__(self, api: API, definition: FSMDefinition | dict[str, Any], synthesizer: FSMSynthesizer, *, trace_sink: Callable[[str, dict[str, Any]], None] | None = None) -> None
   def converse(self, conversation_id: str, message: str) -> str
+  def converse_stream(self, conversation_id: str, message: str) -> Iterator[str]
   def end_conversation(self, conversation_id: str) -> None
   def hook(self, conversation_id: str) -> Callable[[int], None]
   def run(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None) -> tuple[AdvanceResult, ...]
+  def run_stream(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None) -> Iterator[str]
 fsm_llm.synthesis.PromotionResult class
   def __init__(self, parent: str, code: str, child: str | None = None, parent_passes: tuple[int, ...] = (), child_passes: tuple[int, ...] = (), trials: int = 0, written: bool = False, deprecated: bool = False) -> None
   property promote

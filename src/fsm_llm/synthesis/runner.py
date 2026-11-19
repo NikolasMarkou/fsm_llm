@@ -21,7 +21,7 @@ seam.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -277,6 +277,48 @@ class ProcedureRunner:
         replies += self._settle(conversation_id)
         return "\n".join(r for r in replies if r)
 
+    def run_stream(
+        self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None
+    ) -> Iterator[str]:
+        """``run_until_terminal_stream`` with this runner's hook: the reply text
+        of each step, core's budgets and errors, its arguments checked at call
+        time. Closing the stream early also settles a child that has ended (pop,
+        result written) and starts nothing: a compile is no closing action."""
+        stream = self.api.run_until_terminal_stream(
+            conversation_id,
+            max_steps=max_steps,
+            max_seconds=max_seconds,
+            before_step=self.hook(conversation_id),
+        )
+        return self._settled_on_close(conversation_id, stream)
+
+    def _settled_on_close(
+        self, conversation_id: str, stream: Iterator[str]
+    ) -> Iterator[str]:
+        try:
+            yield from stream
+        except GeneratorExit:  # core's stream is already closed here
+            self._tick(conversation_id, None, start=False)
+            raise
+
+    def converse_stream(self, conversation_id: str, message: str) -> Iterator[str]:
+        """``converse`` as a stream: the settle replies, ``API.converse_stream``,
+        the settle replies. The text joined is ``converse``'s (a newline between
+        non-empty replies). Nothing runs before the first ``next()``; closing it
+        early leaves the child pushed, which the next call settles."""
+        gap = ""
+        for block in (
+            lambda: ["\n".join(r for r in self._settle(conversation_id) if r)],
+            lambda: self.api.converse_stream(message, conversation_id),
+            lambda: ["\n".join(r for r in self._settle(conversation_id) if r)],
+        ):
+            said = False
+            for chunk in block():
+                if chunk:
+                    yield gap + chunk
+                    gap, said = "", True
+            gap = "\n" if said or gap else ""
+
     def end_conversation(self, conversation_id: str) -> None:
         """End ``conversation_id`` (every frame) and drop the runner's entry for it."""
         self.api.end_conversation(conversation_id)
@@ -351,10 +393,13 @@ class ProcedureRunner:
             logger.warning(f"could not read the child for a trace: {type(e).__name__}")
             return {}
 
-    def _tick(self, conversation_id: str, step: int | None) -> list[str]:
+    def _tick(
+        self, conversation_id: str, step: int | None, *, start: bool = True
+    ) -> list[str]:
         """Trace the child's turns, pop an ended child, abort one whose budget is
-        spent, else start a pending synthesize state. ``step`` is core's next step
-        number (run mode) or ``None`` (converse mode); it only labels trace events."""
+        spent, else start a pending synthesize state (not with ``start=False``).
+        ``step`` is core's next step number (run mode) or ``None`` (converse
+        mode); it only labels trace events."""
         runs = self._runs_of(conversation_id)
         if runs is None:
             return []
@@ -393,6 +438,8 @@ class ProcedureRunner:
                 )
                 self._finish(conversation_id, run, step, aborted=True)
                 return []
+        if not start:
+            return []
         definition = runs[-1].procedure.definition if runs else self._definition
         state = definition.states.get(self.api.get_current_state(conversation_id))
         config = state.synthesize if state else None

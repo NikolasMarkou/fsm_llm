@@ -127,6 +127,7 @@ runner = ProcedureRunner(api, host_definition, synth)   # host_definition: the J
 conv_id, _ = api.start_conversation({"venue": "Luna"})
 runner.run(conv_id, max_steps=40)                       # message-free
 # or, with a user in the loop: runner.converse(conv_id, "four people, Friday")
+# streaming forms: runner.run_stream(conv_id, max_steps=40), runner.converse_stream(conv_id, message)
 ```
 
 Agent tools: `create_procedure_tools(synth, runner_llm=cheap_llm)` returns a `ToolRegistry` with `obtain_procedure(goal, return_keys, inputs)` and `run_procedure(procedure_id, inputs)`. Pass it to an agent such as `ReactAgent(tools=registry)`.
