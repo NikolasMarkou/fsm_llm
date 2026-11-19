@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm import API
-from fsm_llm.llm import resolve_model
+from fsm_llm.llm.interface import resolve_tool_model
 from fsm_llm.logging import logger
 
 from ..constants import (
@@ -42,7 +42,7 @@ class FsmMixin(_InstanceSurface):
             raise ValueError("Must provide either preset_id or fsm_json")
         instance_id = _new_instance_id()
         api = API.from_definition(
-            fsm_data, model=resolve_model(model), temperature=temperature
+            fsm_data, model=resolve_tool_model(model), temperature=temperature
         )
 
         # Per-instance collector, wired next to the global one

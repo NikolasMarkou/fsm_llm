@@ -125,7 +125,8 @@ def main_cli() -> None:
         sys.exit(CLI_EXIT_OK)
 
     # The dashboard starts without a model; a launch request resolves one then
-    # (400 when none). The file supplies LLM_MODEL (and keys) to those launches.
+    # (the request, then LLM_MODEL, then DEFAULT_TOOL_MODEL). The file supplies
+    # LLM_MODEL (and keys) to those launches.
     try:
         apply_env_file(args)
     except FileNotFoundError as e:

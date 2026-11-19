@@ -634,6 +634,11 @@
       "delta": 1,
       "reason": "step 6.1 of plan 51fde95b: D-007 is named once more as the superseding decision, in the marker of the 944e2692/D-005 comment of LiteLLMEmbedder (aembedding is a second binding of the same module, sent through the same aembed body); no other token was added or lost",
       "token": "plan-2026-11-19T025425-51fde95b/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "step 12.7 of plan 51fde95b: D-036 is anchored once in llm.interface.resolve_tool_model (the bonsai default belongs to fsm-llm-eval and the monitor launch routes; the fallback is not moved into llm.resolve_model); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-036"
     }
   ]
 }

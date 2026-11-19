@@ -1,11 +1,12 @@
-"""The default model is gone: reasoning, eval, monitor and the CLIs.
+"""The default model is gone from the core: reasoning, the CLIs and every library entry.
 
 Step 15 of plan d454fd62 (D-005): ``DEFAULT_LLM_MODEL`` and both
-``Defaults.MODEL`` are deleted. ``ReasoningEngine``, the eval model resolution
-and the monitor launch routes resolve the model only through
-``llm.resolve_model`` and raise ``ModelNotConfiguredError`` when nothing is
-set; every CLI that needs a model exits 1 with one stderr line naming the
-three ways to set it, never a traceback. The CLI tests run in a child process
+``Defaults.MODEL`` are deleted. ``ReasoningEngine`` and the other library
+entries resolve the model only through ``llm.resolve_model`` and raise
+``ModelNotConfiguredError`` when nothing is set; every CLI that needs a model
+exits 1 with one stderr line naming the three ways to set it, never a
+traceback. The one scoped exception is ``fsm-llm-eval`` and the monitor launch
+routes, which end on ``DEFAULT_TOOL_MODEL`` (plan 51fde95b D-036). The CLI tests run in a child process
 with a scrubbed environment (``LLM_MODEL`` blank, ``LITELLM_MODE=PRODUCTION``
 so no ``.env`` is read) and a temporary working directory.
 """
@@ -22,7 +23,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm import ModelNotConfiguredError
-from fsm_llm.constants import ENV_LLM_MODEL
+from fsm_llm.constants import DEFAULT_TOOL_MODEL, ENV_LLM_MODEL
 
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "src" / "fsm_llm"
@@ -109,12 +110,11 @@ class TestReasoningEngine:
 
 
 class TestEvalResolveModel:
-    def test_unset_raises(self, unset):
+    def test_unset_is_the_tool_default(self, unset):
         from fsm_llm.eval import EvalConfig
         from fsm_llm.eval.config import resolve_model
 
-        with pytest.raises(ModelNotConfiguredError):
-            resolve_model(EvalConfig())
+        assert resolve_model(EvalConfig()) == DEFAULT_TOOL_MODEL
 
     def test_config_beats_env(self, monkeypatch):
         from fsm_llm.eval import EvalConfig
@@ -157,11 +157,12 @@ class TestMonitorRequests:
         assert LaunchAgentRequest(task="x").model is None
         assert BuilderStartRequest().model is None
 
-    def test_manager_launch_fsm_unset_raises(self, unset):
+    def test_manager_launch_fsm_unset_uses_the_tool_default(self, unset):
+        from fsm_llm.llm import interface_model
         from fsm_llm.monitor.instance_manager import InstanceManager
 
-        with pytest.raises(ModelNotConfiguredError):
-            InstanceManager().launch_fsm(fsm_json=_FSM)
+        managed = InstanceManager().launch_fsm(fsm_json=_FSM)
+        assert interface_model(managed.api.llm_interface) == DEFAULT_TOOL_MODEL
 
     def test_manager_launch_fsm_uses_env(self, monkeypatch):
         from fsm_llm.monitor.instance_manager import InstanceManager
@@ -173,15 +174,25 @@ class TestMonitorRequests:
         finally:
             mgr.close() if hasattr(mgr, "close") else None
 
-    def test_manager_launch_agent_unset_raises(self, unset):
+    def test_manager_launch_agent_unset_uses_the_tool_default(self, unset, monkeypatch):
         from fsm_llm.monitor.definitions import StubToolConfig
-        from fsm_llm.monitor.instance_manager import InstanceManager
+        from fsm_llm.monitor.instance_manager import InstanceManager, agent
 
-        with pytest.raises(ModelNotConfiguredError):
-            InstanceManager().launch_agent(
-                task="x",
-                tools_config=[StubToolConfig(name="t", description="d")],
-            )
+        configs: list = []
+
+        class _Probe:
+            def __init__(self, **kwargs):
+                configs.append(kwargs["config"])
+
+            def run(self, *args, **kwargs):
+                raise RuntimeError("stop")
+
+        monkeypatch.setitem(agent._AGENT_CLASSES, "ReactAgent", _Probe)
+        managed = InstanceManager().launch_agent(
+            task="x", tools_config=[StubToolConfig(name="t", description="d")]
+        )
+        managed.thread.join(5)
+        assert [c.model for c in configs] == [DEFAULT_TOOL_MODEL]
 
 
 class TestMonitorRoutes:
@@ -195,38 +206,39 @@ class TestMonitorRoutes:
         configure(manager=InstanceManager())
         return TestClient(app)
 
-    def test_fsm_launch_without_a_model_is_400(self, unset):
-        resp = self._client().post("/api/fsm/launch", json={"fsm_json": _FSM})
-        assert resp.status_code == 400
-        assert resp.json()["detail"] == MESSAGE
-
-    def test_a_blank_model_in_the_body_is_400_too(self, unset):
-        resp = self._client().post(
-            "/api/fsm/launch", json={"fsm_json": _FSM, "model": ""}
-        )
-        assert resp.status_code == 400
-        assert resp.json()["detail"] == MESSAGE
+    def test_fsm_launch_without_a_model_uses_the_tool_default(self, unset):
+        client = self._client()
+        resp = client.post("/api/fsm/launch", json={"fsm_json": _FSM})
+        assert resp.status_code == 200, resp.text
+        blank = client.post("/api/fsm/launch", json={"fsm_json": _FSM, "model": " "})
+        assert blank.status_code == 200, blank.text
 
     def test_fsm_launch_with_the_env_model_works(self, monkeypatch):
         monkeypatch.setenv(ENV_LLM_MODEL, "env/model")
         resp = self._client().post("/api/fsm/launch", json={"fsm_json": _FSM})
         assert resp.status_code == 200, resp.text
 
-    def test_agent_launch_without_a_model_is_400(self, unset):
-        resp = self._client().post(
-            "/api/agent/launch",
-            json={
-                "task": "x",
-                "tools": [{"name": "t", "description": "d"}],
-            },
-        )
-        assert resp.status_code == 400
-        assert resp.json()["detail"] == MESSAGE
+    def test_builder_start_without_a_model_uses_the_tool_default(
+        self, unset, monkeypatch
+    ):
+        import fsm_llm.agents.meta_builder as meta
 
-    def test_builder_start_without_a_model_is_400(self, unset):
+        configs: list = []
+
+        class _Agent:
+            def __init__(self, config):
+                configs.append(config)
+
+            def start(self, message):
+                return "hi"
+
+            def is_complete(self):
+                return False
+
+        monkeypatch.setattr(meta, "MetaBuilderAgent", _Agent)
         resp = self._client().post("/api/builder/start", json={})
-        assert resp.status_code == 400
-        assert resp.json()["detail"] == MESSAGE
+        assert resp.status_code == 200, resp.text
+        assert [c.model for c in configs] == [DEFAULT_TOOL_MODEL]
 
 
 # --------------------------------------------------------------------------
@@ -273,24 +285,6 @@ class TestCliWithoutAModel:
 
     def test_reasoning(self, tmp_path):
         proc = _run(["-m", "fsm_llm.reasoning", "what is 2 + 2"], tmp_path)
-        _assert_one_line_exit_1(proc)
-
-    def test_eval_run(self, tmp_path):
-        dataset = REPO / "evaluation" / "datasets" / "simple_greeting_cases.json"
-        proc = _run(["-m", "fsm_llm.eval", "run", str(dataset)], tmp_path)
-        _assert_one_line_exit_1(proc)
-
-    def test_eval_examples(self, tmp_path):
-        proc = _run(
-            [
-                "-m",
-                "fsm_llm.eval",
-                "examples",
-                "--examples-dir",
-                str(REPO / "examples"),
-            ],
-            tmp_path,
-        )
         _assert_one_line_exit_1(proc)
 
     def test_meta(self, tmp_path):

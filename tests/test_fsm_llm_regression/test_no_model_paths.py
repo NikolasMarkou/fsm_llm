@@ -507,20 +507,6 @@ def _need_reasoning_engine(tmp_path: Path) -> None:
     ReasoningEngine()
 
 
-def _need_eval_run_cases(tmp_path: Path) -> None:
-    run_dir = tmp_path / "run"
-    run_dir.mkdir()
-    run_cases([], EvalConfig(trials=1, output_dir=str(run_dir)), run_dir)
-
-
-def _need_eval_run_dataset(tmp_path: Path) -> None:
-    run_dataset(_write_dataset(tmp_path), output_root=str(tmp_path / "out"))
-
-
-def _need_monitor_launch_fsm(tmp_path: Path) -> None:
-    InstanceManager().launch_fsm(fsm_json=_FSM)
-
-
 def _need_judge_without_backend(tmp_path: Path) -> None:
     default_llm_judge()
 
@@ -529,6 +515,9 @@ def _need_synthesizer_by_model(tmp_path: Path) -> None:
     FSMSynthesizer(model=resolve_model())
 
 
+# Not here: eval without a factory and the monitor launch routes. They end on
+# ``DEFAULT_TOOL_MODEL`` (plan 51fde95b D-036); their tests are in
+# ``test_default_model_removed.py`` and ``tests/test_fsm_llm_eval``.
 _MODEL_REQUIRED: dict[str, Any] = {
     "core: API.from_definition without an interface": _need_api,
     "core: Classifier without an interface": _need_classifier,
@@ -539,9 +528,6 @@ _MODEL_REQUIRED: dict[str, Any] = {
         _need_sop_config_outliving_its_interface
     ),
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
-    "eval: run_cases without a factory": _need_eval_run_cases,
-    "eval: run_dataset without a factory": _need_eval_run_dataset,
-    "monitor: InstanceManager.launch_fsm": _need_monitor_launch_fsm,
     "agents: default_llm_judge() without a backend": _need_judge_without_backend,
     "synthesis: FSMSynthesizer(model=resolve_model())": _need_synthesizer_by_model,
 }

@@ -10,14 +10,13 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from fsm_llm.core.definitions import ModelNotConfiguredError
-from fsm_llm.llm import resolve_model
+from fsm_llm.llm.interface import resolve_tool_model
 from fsm_llm.logging import logger
 
 from ..constants import MAX_BUILDER_SESSIONS
 from ..definitions import BuilderSendRequest, BuilderStartRequest
 from .application import app
-from .support import _GATED, _LLM_OPERATION_TIMEOUT, _raise_http
+from .support import _GATED, _LLM_OPERATION_TIMEOUT
 
 # Builder builds run a multi-step LLM loop — needs more time
 _BUILDER_OPERATION_TIMEOUT = 300.0
@@ -95,13 +94,8 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
             detail="fsm_llm.agents meta-builder not available",
         ) from None
 
-    try:
-        model = resolve_model(req.model)  # unset: ModelNotConfiguredError -> 400
-    except ModelNotConfiguredError as e:
-        _raise_http(e, "start builder session")
-
     config_kwargs: dict[str, Any] = {
-        "model": model,
+        "model": resolve_tool_model(req.model),  # unset: DEFAULT_TOOL_MODEL
         "temperature": req.temperature,
         "max_tokens": req.max_tokens,
     }

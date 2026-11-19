@@ -15,7 +15,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm import API, FSMError, ModelNotConfiguredError
-from fsm_llm.constants import ENV_LLM_MODEL
+from fsm_llm.constants import DEFAULT_TOOL_MODEL, ENV_LLM_MODEL
 from fsm_llm.llm import resolve_model
 from fsm_llm.testing import MockLLM2Interface
 
@@ -103,6 +103,29 @@ class TestResolveModelRaises:
 
     def test_explicit_works_with_nothing_in_the_environment(self, unset):
         assert resolve_model("given/model") == "given/model"
+
+
+class TestTheToolDefaultStaysOutOfTheCore:
+    """Plan 51fde95b D-036: ``DEFAULT_TOOL_MODEL`` is for eval and the monitor only."""
+
+    def test_the_core_resolver_still_raises_with_the_default_defined(self, unset):
+        assert DEFAULT_TOOL_MODEL
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model(None)
+
+    def test_the_tool_resolver_falls_back_and_blank_counts_as_unset(self, monkeypatch):
+        from fsm_llm.llm.interface import resolve_tool_model
+
+        monkeypatch.setenv(ENV_LLM_MODEL, "  ")
+        assert resolve_tool_model(None) == DEFAULT_TOOL_MODEL
+        assert resolve_tool_model("  ") == DEFAULT_TOOL_MODEL
+        monkeypatch.setenv(ENV_LLM_MODEL, "from-env")
+        assert resolve_tool_model("") == "from-env"
+        assert resolve_tool_model(" given ") == "given"
+
+    def test_api_still_refuses_an_unset_model(self, unset):
+        with pytest.raises(ModelNotConfiguredError):
+            API.from_definition(_FSM)
 
 
 class TestTheRootFixture:

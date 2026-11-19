@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from fsm_llm import ModelNotConfiguredError
-from fsm_llm.constants import ENV_LLM_MODEL
+from fsm_llm.constants import DEFAULT_TOOL_MODEL, ENV_LLM_MODEL
 from fsm_llm.eval import (
     EvalConfig,
     EvalConfigError,
@@ -120,13 +119,24 @@ class TestResolveModel:
         assert resolve_model(EvalConfig()) == "env-model"
         assert resolve_model(EvalConfig(model="  ")) == "env-model"
 
-    def test_raises_when_nothing_set(self, monkeypatch):
-        monkeypatch.setenv(ENV_LLM_MODEL, "")
-        with pytest.raises(ModelNotConfiguredError):
+    def test_the_default_model_is_the_last_tier(self, monkeypatch):
+        """Plan 51fde95b D-036: nothing named is the bonsai default, not an error."""
+        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
+        assert (
             resolve_model(EvalConfig())
-        monkeypatch.delenv(ENV_LLM_MODEL)
-        with pytest.raises(ModelNotConfiguredError):
-            resolve_model(EvalConfig())
+            == DEFAULT_TOOL_MODEL
+            == ("ollama_chat/bonsai-2:27b")
+        )
+
+    @pytest.mark.parametrize("env", ["", "   "])
+    def test_a_blank_env_counts_as_unset(self, monkeypatch, env):
+        monkeypatch.setenv(ENV_LLM_MODEL, env)
+        assert resolve_model(EvalConfig(model="  ")) == DEFAULT_TOOL_MODEL
+
+    def test_config_beats_env_beats_the_default(self, monkeypatch):
+        monkeypatch.setenv(ENV_LLM_MODEL, "env-model")
+        assert resolve_model(EvalConfig(model="cfg-model")) == "cfg-model"
+        assert resolve_model(EvalConfig()) == "env-model"
 
 
 class TestLLMSettings:

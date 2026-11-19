@@ -15,6 +15,7 @@ from typing import ClassVar
 
 import pytest
 
+from fsm_llm.constants import DEFAULT_TOOL_MODEL
 from fsm_llm.eval import (
     ConversationCase,
     EvalConfig,
@@ -665,9 +666,9 @@ class TestRunsNeedNoModelWithAFactory:
 
     The root autouse fixture sets ``LLM_MODEL`` for every test, so each test
     deletes it. ``run_cases`` and ``run_dataset`` label the run after the
-    factory's ``model`` attribute, else a named model, else ``injected``;
-    without a factory and without a model they raise ``ModelNotConfiguredError``
-    before anything is written.
+    factory's ``model`` attribute, else a named model, else ``injected`` (the
+    strict resolver: the bonsai default never labels an injected run); without a
+    factory and without a model they run on ``DEFAULT_TOOL_MODEL``.
     """
 
     @pytest.fixture(autouse=True)
@@ -732,23 +733,23 @@ class TestRunsNeedNoModelWithAFactory:
         )
         assert report.model == "file-model"
 
-    def test_run_cases_without_a_factory_or_a_model_raises_first(self, tmp_path: Path):
-        from fsm_llm import ModelNotConfiguredError
-
-        with pytest.raises(ModelNotConfiguredError):
-            run_cases([_case()], EvalConfig(trials=1, workers=1), tmp_path)
-        assert not (tmp_path / "rows.jsonl").exists()
-
-    def test_run_dataset_without_a_factory_or_a_model_makes_no_directory(
-        self, tmp_path: Path
+    def test_a_run_without_a_factory_or_a_model_uses_the_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        from fsm_llm import ModelNotConfiguredError
+        """Plan 51fde95b D-036: the bonsai default, not ModelNotConfiguredError."""
+        monkeypatch.setattr(cases_mod, "API", _CapturingAPI)
+        _CapturingAPI.seen = []
+        report = run_cases([_case()], EvalConfig(trials=1, workers=1), tmp_path)
+        assert report.model == DEFAULT_TOOL_MODEL
+        assert [kw["model"] for kw in _CapturingAPI.seen] == [DEFAULT_TOOL_MODEL]
 
+    def test_run_dataset_without_a_factory_or_a_model_names_the_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(cases_mod, "API", _CapturingAPI)
         dataset = _write(tmp_path / "d.json", [_case().model_dump()])
-        out = tmp_path / "out"
-        with pytest.raises(ModelNotConfiguredError):
-            run_dataset(dataset, output_root=str(out), trials=1)
-        assert not out.exists()
+        report = run_dataset(dataset, output_root=str(tmp_path / "out"), trials=1)
+        assert report.model == DEFAULT_TOOL_MODEL
 
 
 class _CapturingAPI:
@@ -800,6 +801,19 @@ class TestLLMSettingsReachTheAPI:
         text = (tmp_path / "results.json").read_text(encoding="utf-8")
         assert "sk-secret-value" not in text
         assert json.loads(text)["config"]["llm_kwargs"] == {"api_key": "<not recorded>"}
+
+    def test_cli_without_a_model_announces_the_tool_default_and_the_help_says_so(
+        self, tmp_path, offline_cli, capsys, monkeypatch
+    ):
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        offline_cli(_passing())
+        path = _write(tmp_path / "d.json", [_case().model_dump()])
+        argv = ["run", str(path), "--output-dir", str(tmp_path / "o"), "--trials", "1"]
+        assert cli.main_cli(argv) == 0
+        assert f"Model:    {DEFAULT_TOOL_MODEL}" in capsys.readouterr().out
+        with pytest.raises(SystemExit):
+            cli.main_cli(["run", "--help"])
+        assert DEFAULT_TOOL_MODEL in capsys.readouterr().out
 
     def test_cli_flags_set_temperature_and_max_tokens(self, tmp_path, offline_cli):
         offline_cli(_passing())

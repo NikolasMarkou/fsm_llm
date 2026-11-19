@@ -25,7 +25,7 @@ from pydantic import (
     field_validator,
 )
 
-from fsm_llm.llm import resolve_model as resolve_llm_model
+from fsm_llm.llm.interface import resolve_tool_model
 
 from .constants import (
     DEFAULT_EXAMPLES_DIR,
@@ -66,7 +66,7 @@ _RESERVED_LLM_KWARGS = frozenset(
 class EvalConfig(BaseModel):
     """Settings shared by the evaluation commands (all optional).
 
-    ``model`` ``None`` means ``$LLM_MODEL`` (none set: ``ModelNotConfiguredError``), read
+    ``model`` ``None`` means ``$LLM_MODEL``, else ``DEFAULT_TOOL_MODEL``, read
     when the run starts (:func:`resolve_model`). ``python`` ``None`` means the
     running interpreter. The three table fields add to or override the
     built-in repository tables in :mod:`fsm_llm.eval.constants`.
@@ -167,10 +167,11 @@ def merge_config(*layers: Mapping[str, Any] | None) -> EvalConfig:
 
 
 def resolve_model(config: EvalConfig) -> str:
-    """The model to evaluate: ``config.model``, then ``$LLM_MODEL``.
+    """The model to evaluate: ``config.model``, then ``$LLM_MODEL``, then the default.
 
     Read at call time, never at import. A blank value at either tier counts as
-    absent and falls through. Raises ``ModelNotConfiguredError`` when neither is
-    set: there is no built-in model (the eval CLI prints it and exits 1).
+    absent and falls through; the last tier is ``DEFAULT_TOOL_MODEL``, so this
+    never raises (``llm.resolve_model`` is the strict one; the eval CLI is the
+    scoped exception, plan 51fde95b D-036).
     """
-    return resolve_llm_model(config.model)
+    return resolve_tool_model(config.model)
