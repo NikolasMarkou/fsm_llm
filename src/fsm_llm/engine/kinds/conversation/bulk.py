@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import CONTEXT_KEY_AGENT_TRACE, is_forbidden_context_entry
 from fsm_llm.context.layout import sanitize_text_for_prompt
 from fsm_llm.core.definitions import BulkExtractionRequest, FSMInstance, State
@@ -42,6 +43,20 @@ class ConversationBulkMixin(_ConversationSurface):
     # ----------------------------------------------------------
 
     def _bulk_extract_from_instructions(
+        self,
+        instance: FSMInstance,
+        user_message: str | None,
+        state: State,
+        conversation_id: str,
+    ) -> dict[str, Any]:
+        """``run_sync`` over ``_abulk_extract_from_instructions``, the one body."""
+        return run_sync(
+            self._abulk_extract_from_instructions(
+                instance, user_message, state, conversation_id
+            )
+        )
+
+    async def _abulk_extract_from_instructions(
         self,
         instance: FSMInstance,
         user_message: str | None,
@@ -133,7 +148,7 @@ class ConversationBulkMixin(_ConversationSurface):
             )
             llm = self._services.llm_interface
             with llm_call(llm, "data_extraction", request) as call:
-                response = llm.extract_bulk_data(request)
+                response = await acall(llm, "extract_bulk_data", request)
                 call.response(response)
             # Filter out None/empty values — extract_bulk_data returns the
             # extraction verbatim; this merge-time filtering is this

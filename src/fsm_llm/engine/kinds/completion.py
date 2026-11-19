@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import COMPLETION_TOOL_CHOICE_KEYWORDS
 from fsm_llm.context import record_cut_off, was_cut_off
 from fsm_llm.core.definitions import (
@@ -53,6 +54,18 @@ class CompletionExecutor(StateExecutor):
         conversation_id: str,
         state: State,
     ) -> DataExtractionResponse:
+        return run_sync(
+            self.aextract(pipeline, instance, user_message, conversation_id, state)
+        )
+
+    async def aextract(
+        self,
+        pipeline: _PipelineServices,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        state: State,
+    ) -> DataExtractionResponse:
         # A completion state's Pass-1 work is its one completion call (D-003);
         # no field, bulk or classification extraction runs beside it.
         # An explicit error, never ``assert`` (stripped under ``python -O``): the
@@ -63,14 +76,31 @@ class CompletionExecutor(StateExecutor):
                 f"CompletionExecutor.extract needs a state with a completion "
                 f"config; state '{state.id}' has none"
             )
-        response = self.turn(
-            pipeline.llm_interface, instance, state.completion, conversation_id
+        response: DataExtractionResponse = await acall(
+            self,
+            "turn",
+            pipeline.llm_interface,
+            instance,
+            state.completion,
+            conversation_id,
         )
         instance.last_extraction_response = response
         return response
 
     @staticmethod
     def turn(
+        llm_interface: LLMInterface,
+        instance: FSMInstance,
+        config: CompletionStateConfig,
+        conversation_id: str,
+    ) -> DataExtractionResponse:
+        """``run_sync`` over ``aturn``, the one body."""
+        return run_sync(
+            CompletionExecutor.aturn(llm_interface, instance, config, conversation_id)
+        )
+
+    @staticmethod
+    async def aturn(
         llm_interface: LLMInterface,
         instance: FSMInstance,
         config: CompletionStateConfig,
@@ -169,7 +199,7 @@ class CompletionExecutor(StateExecutor):
             ) from e
         try:
             with llm_call(llm_interface, "completion", request) as call:
-                reply = llm_interface.complete(request)
+                reply = await acall(llm_interface, "complete", request)
                 call.response(reply)
         except NotImplementedError as e:
             raise LLMResponseError(

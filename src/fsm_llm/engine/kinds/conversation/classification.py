@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationExtractionConfig,
@@ -35,6 +36,26 @@ class ConversationClassificationMixin(_ConversationSurface):
     """Classification extraction of the conversation kind."""
 
     def _execute_classification_extractions(
+        self,
+        current_state: State,
+        user_message: str | None,
+        instance: FSMInstance,
+        conversation_id: str,
+        *,
+        configs_override: list[ClassificationExtractionConfig] | None = None,
+    ) -> dict[str, Any]:
+        """``run_sync`` over ``_aexecute_classification_extractions``, the one body."""
+        return run_sync(
+            self._aexecute_classification_extractions(
+                current_state,
+                user_message,
+                instance,
+                conversation_id,
+                configs_override=configs_override,
+            )
+        )
+
+    async def _aexecute_classification_extractions(
         self,
         current_state: State,
         user_message: str | None,
@@ -98,7 +119,9 @@ class ConversationClassificationMixin(_ConversationSurface):
                     schema, prompt_config, model=config.model
                 )
 
-                result: ClassificationResult = classifier.classify(
+                result: ClassificationResult = await acall(
+                    classifier,
+                    "classify",
                     user_message,
                     context=self._services._build_classifier_context(
                         instance,

@@ -35,7 +35,7 @@ class _ConversationSurface:
             state: State,
         ) -> list[FieldExtractionConfig]: ...
 
-        def _bulk_extract_from_instructions(
+        async def _abulk_extract_from_instructions(
             self,
             instance: FSMInstance,
             user_message: str | None,
@@ -47,7 +47,7 @@ class _ConversationSurface:
             self, state: State, instance: FSMInstance
         ) -> list[ClassificationExtractionConfig]: ...
 
-        def _execute_classification_extractions(
+        async def _aexecute_classification_extractions(
             self,
             current_state: State,
             user_message: str | None,
@@ -57,11 +57,11 @@ class _ConversationSurface:
             configs_override: list[ClassificationExtractionConfig] | None = None,
         ) -> dict[str, Any]: ...
 
-        def _execute_data_extraction(
+        async def _aexecute_data_extraction(
             self, instance: FSMInstance, user_message: str | None, conversation_id: str
         ) -> DataExtractionResponse: ...
 
-        def _execute_field_extractions(
+        async def _aexecute_field_extractions(
             self,
             instance: FSMInstance,
             user_message: str | None,

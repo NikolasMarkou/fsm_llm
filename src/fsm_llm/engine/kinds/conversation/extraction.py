@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from fsm_llm.aio import run_sync
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.core.definitions import (
     ClassificationExtractionConfig,
@@ -65,6 +66,14 @@ class ConversationExtractionMixin(_ConversationSurface):
     def _execute_data_extraction(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
     ) -> DataExtractionResponse:
+        """``run_sync`` over ``_aexecute_data_extraction``, the one body."""
+        return run_sync(
+            self._aexecute_data_extraction(instance, user_message, conversation_id)
+        )
+
+    async def _aexecute_data_extraction(
+        self, instance: FSMInstance, user_message: str | None, conversation_id: str
+    ) -> DataExtractionResponse:
         """Execute data extraction via per-field ``extract_field`` calls
         and classification extractions (the conversation executor's ``extract``).
 
@@ -107,7 +116,7 @@ class ConversationExtractionMixin(_ConversationSurface):
                     "No field configs but extraction_instructions present; "
                     "using bulk extraction fallback"
                 )
-                bulk_data = self._bulk_extract_from_instructions(
+                bulk_data = await self._abulk_extract_from_instructions(
                     instance, user_message, current_state, conversation_id
                 )
                 bulk_failed = isinstance(bulk_data, _BulkFailed)
@@ -168,7 +177,7 @@ class ConversationExtractionMixin(_ConversationSurface):
                 if existing.get(c.field_name) is None
                 or (agent_managed and existing[c.field_name] in ([], {}))
             ]
-            results = self._execute_field_extractions(
+            results = await self._aexecute_field_extractions(
                 instance, user_message, all_configs, conversation_id, memo
             )
             for result in results:
@@ -184,7 +193,7 @@ class ConversationExtractionMixin(_ConversationSurface):
 
         # --- Classification extractions ---
         if has_classification_configs:
-            classification_data = self._execute_classification_extractions(
+            classification_data = await self._aexecute_classification_extractions(
                 current_state, user_message, instance, conversation_id
             )
             extracted_data.update(classification_data)
@@ -235,7 +244,7 @@ class ConversationExtractionMixin(_ConversationSurface):
                 )
 
                 if missing_field_configs:
-                    retry_results = self._execute_field_extractions(
+                    retry_results = await self._aexecute_field_extractions(
                         instance,
                         user_message,
                         missing_field_configs,
@@ -248,7 +257,7 @@ class ConversationExtractionMixin(_ConversationSurface):
                             confidences.append(result.confidence)
 
                 if missing_class_configs:
-                    retry_class_data = self._execute_classification_extractions(
+                    retry_class_data = await self._aexecute_classification_extractions(
                         current_state,
                         user_message,
                         instance,
@@ -287,7 +296,7 @@ class ConversationExtractionMixin(_ConversationSurface):
         if has_extraction_instructions and (
             has_field_configs or has_classification_configs
         ):
-            bulk_data = self._bulk_extract_from_instructions(
+            bulk_data = await self._abulk_extract_from_instructions(
                 instance, user_message, current_state, conversation_id
             )
             bulk_failed = isinstance(bulk_data, _BulkFailed)

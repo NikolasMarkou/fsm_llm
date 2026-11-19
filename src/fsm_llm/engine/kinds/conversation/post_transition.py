@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from fsm_llm.aio import run_sync
 from fsm_llm.constants import PROVENANCE_METADATA_KEY
 from fsm_llm.context import clean_context_keys
 from fsm_llm.core.definitions import (
@@ -29,6 +30,27 @@ class ConversationPostTransitionMixin(_ConversationSurface):
     """The extraction the conversation executor runs after a transition."""
 
     def _extract_after_transition(
+        self,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        extraction_response: DataExtractionResponse,
+        previous_state: str | None,
+        new_state: State,
+    ) -> None:
+        """``run_sync`` over ``_aextract_after_transition``, the one body."""
+        run_sync(
+            self._aextract_after_transition(
+                instance,
+                user_message,
+                conversation_id,
+                extraction_response,
+                previous_state,
+                new_state,
+            )
+        )
+
+    async def _aextract_after_transition(
         self,
         instance: FSMInstance,
         user_message: str | None,
@@ -133,7 +155,7 @@ class ConversationPostTransitionMixin(_ConversationSurface):
             try:
                 post_data: dict[str, Any] = {}
                 if revisit:
-                    again = self._execute_data_extraction(
+                    again = await self._aexecute_data_extraction(
                         instance, user_message, conversation_id
                     )
                     post_data = dict(again.extracted_data)
@@ -144,7 +166,7 @@ class ConversationPostTransitionMixin(_ConversationSurface):
                     # the re-run overwrote the turn's response on the instance
                     instance.last_extraction_response = extraction_response
                 elif missing_configs:
-                    post_results = self._execute_field_extractions(
+                    post_results = await self._aexecute_field_extractions(
                         instance, user_message, missing_configs, conversation_id
                     )
                     for result in post_results:
@@ -153,7 +175,7 @@ class ConversationPostTransitionMixin(_ConversationSurface):
                 if class_configs:
                     # plan-2026-09-21T203800-8a03483a/D-006
                     post_data.update(
-                        self._execute_classification_extractions(
+                        await self._aexecute_classification_extractions(
                             new_state,
                             user_message,
                             instance,

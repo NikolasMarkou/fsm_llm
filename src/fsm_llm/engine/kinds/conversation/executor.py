@@ -89,3 +89,34 @@ class ConversationExecutor(StateExecutor):
             previous_state,
             new_state,
         )
+
+    async def aextract(
+        self,
+        pipeline: _PipelineServices,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        state: State,
+    ) -> DataExtractionResponse:
+        return await ConversationPass1(pipeline)._aexecute_data_extraction(
+            instance, user_message, conversation_id
+        )
+
+    async def aafter_transition(
+        self,
+        pipeline: _PipelineServices,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        extraction_response: DataExtractionResponse,
+        previous_state: str | None,
+        new_state: State,
+    ) -> None:
+        await ConversationPass1(pipeline)._aextract_after_transition(
+            instance,
+            user_message,
+            conversation_id,
+            extraction_response,
+            previous_state,
+            new_state,
+        )

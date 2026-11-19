@@ -15,6 +15,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.context import record_cut_off, was_cut_off
 from fsm_llm.core.coerce import coerce_float, coerce_int, parse_bool_word
 from fsm_llm.core.definitions import (
@@ -187,6 +188,21 @@ class ConversationFieldsMixin(_ConversationSurface):
         conversation_id: str,
         memo: dict[tuple[str, str], FieldExtractionResponse] | None = None,
     ) -> list[FieldExtractionResponse]:
+        """``run_sync`` over ``_aexecute_field_extractions``, the one body."""
+        return run_sync(
+            self._aexecute_field_extractions(
+                instance, user_message, field_configs, conversation_id, memo
+            )
+        )
+
+    async def _aexecute_field_extractions(
+        self,
+        instance: FSMInstance,
+        user_message: str | None,
+        field_configs: list[FieldExtractionConfig],
+        conversation_id: str,
+        memo: dict[tuple[str, str], FieldExtractionResponse] | None = None,
+    ) -> list[FieldExtractionResponse]:
         """Execute targeted field extractions for a list of configs.
 
         Runs one LLM call per field.  Each config specifies its own
@@ -265,7 +281,7 @@ class ConversationFieldsMixin(_ConversationSurface):
                 else:
                     llm = self._services.llm_interface
                     with llm_call(llm, "field_extraction", request) as call:
-                        response = llm.extract_field(request)
+                        response = await acall(llm, "extract_field", request)
                         call.response(response)
                     if memo is not None and response.value is None:
                         memo[memo_key] = response
