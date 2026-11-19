@@ -1,10 +1,11 @@
 """
 The synthesizer: a strong model compiles a goal into a gated FSM.
 
-``FSMSynthesizer.compile`` asks the strong model for one FSM v4.1 JSON object,
-runs the gates, and on a failure feeds the failures back, up to
-``policy.max_repair_rounds`` times. ``obtain`` adds the library (reuse a
-stored, re-verified procedure, else compile) and the approval gate G7.
+``FSMSynthesizer.compile`` asks the strong model for one FSM JSON object (the
+loader's default schema version), runs the gates, and on a failure feeds the
+failures back, up to ``policy.max_repair_rounds`` times. ``obtain`` adds the
+library (reuse a stored, re-verified procedure, else compile) and the approval
+gate G7.
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-005
 # A reply cut off at ``max_tokens`` is a failed round and is NEVER parsed (a cut

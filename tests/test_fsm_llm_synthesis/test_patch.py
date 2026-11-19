@@ -314,8 +314,8 @@ class TestScope:
 
     @pytest.mark.parametrize(
         "scope",
-        [None, 3, 1.5, [["a"]], object()],
-        ids=["none", "int", "float", "unhashable-item", "object"],
+        [None, 3, 1.5, [["a"]], object(), b"a", [1, 2]],
+        ids=["none", "int", "float", "unhashable-item", "object", "bytes", "ints"],
     )
     def test_a_scope_that_is_not_an_iterable_of_names_is_bad_scope(self, scope):
         """The scope is a caller argument but the docstring promises only
