@@ -724,6 +724,15 @@ class TestALiteralAFloatCannotStepBeyond:
         witness = dryrun.edge_witnesses(definition)["ask"][0]
         assert witness is not None and evaluate_logic(logic, witness)
 
+    @pytest.mark.parametrize("base", [10**400, -(10**400) - 10], ids=["pos", "neg"])
+    def test_a_band_between_two_huge_literals_is_not_a_false_reject(self, base):
+        """Review C R-C7: no float midpoint lies inside ``n > base and n < base + 10``."""
+        logic = {"and": [{">": [X, base]}, {"<": [X, base + 10]}]}
+        definition = _two(logic, requires=("x",))
+        assert _found(definition) == set()
+        witness = dryrun.edge_witnesses(definition)["ask"][0]
+        assert witness is not None and evaluate_logic(logic, witness)
+
     @pytest.mark.parametrize("lit", [10**400, -(10**400)], ids=["pos", "neg"])
     def test_an_int_no_float_can_hold_never_raises_in_the_pool(self, lit):
         gate = {"in": [X, [lit, 1]]}

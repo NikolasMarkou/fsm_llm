@@ -160,15 +160,20 @@ def _numbers(lits: list[Any]) -> list[float]:
     number), 0 and 1, the midpoint of every adjacent pair and one step beyond
     both ends. It decides every ``var <op> number`` the fragment allows. From
     ``2**53`` up ``x + 1`` is absorbed by a float, so a step beyond a large end
-    doubles it as an ``int`` (also for an ``int`` no float can hold)."""
+    doubles it as an ``int`` (also for an ``int`` no float can hold), and two such
+    ``int`` literals get the integer midpoint between them (R-C7, D-042)."""
     found = {0.0, 1.0}
     huge: list[int] = []
+    bigs: list[int] = []
     for value in lits:
         if _number(value) or isinstance(value, str):
             if _finite(value):
                 found.add(float(value))
             elif isinstance(value, int):
                 huge.append(value * 2)
+                bigs.append(value)
+    # a band between two such literals holds an integer no float midpoint reaches
+    huge += [(a + b) // 2 for a, b in itertools.pairwise(sorted(bigs))]
     points = sorted(found)
     mids = [a / 2 + b / 2 for a, b in itertools.pairwise(points)]
     below = points[0] - 1 if points[0] > -(2**53) else int(points[0]) * 2
@@ -363,6 +368,14 @@ def _states(
     }
 
 
+# DECISION plan-2026-11-19T025425-51fde95b/D-027
+# The fallback witness only gives the G6b happy path a value for an edge outside
+# the G6a fragment; it NEVER feeds the G6a verdict (the evaluator stays the oracle
+# of what is dead). Do NOT call it from ``analyze_dryrun`` or ``_states``, do NOT
+# turn a missing witness into a finding, do NOT widen the fragment with it
+# (D-042 of plan 2cefeb61), and keep its one assignment budget per definition
+# (``MAX_FALLBACK_ASSIGNMENTS``, D-050): a clock or a per-edge cap alone let a
+# hostile definition cost seconds before any trial.
 def fallback_witness(
     state: State,
     index: int,

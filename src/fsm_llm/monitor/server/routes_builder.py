@@ -76,8 +76,12 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     """Start a new builder session using the meta-agent."""
     await _cleanup_stale_builder_sessions()
     async with _get_builder_lock():
-        # A force-deleted build whose worker still runs stays counted until the
-        # thread ends (D-054): an id in _builder_busy with no live session.
+        # DECISION plan-2026-11-19T025425-51fde95b/D-054
+        # A force-deleted build whose worker still runs stays COUNTED until the
+        # thread ends (an id in _builder_busy with no live session), against the
+        # session cap and MAX_ABANDONED_BUILDERS. Do NOT stop counting it on the
+        # delete (hidden model loops starve the shared thread pool), and do NOT add
+        # an executor or a thread cancel for it (a model call cannot be stopped).
         abandoned = len(_builder_busy - _builder_sessions.keys())
         if len(_builder_sessions) + abandoned >= MAX_BUILDER_SESSIONS:
             raise HTTPException(

@@ -36,6 +36,12 @@ _OPERATORS = {
 }
 
 
+# DECISION plan-2026-11-19T025425-51fde95b/D-029
+# ``^`` is NOT translated to ``**``: it parses as xor and is refused with the
+# fixed message. Sixteen of sixteen model outputs wrote ``**`` when the prompt
+# shows ``2 ** 3``, so a silent rewrite of model text buys nothing; the refusal
+# is a bounded retry (D-052: a refused expression is no solution, never the
+# model's own arithmetic). Do NOT add the rewrite and do NOT widen the operators.
 def evaluate_expression(text: object) -> int | float:
     """The value of ``text``: numbers, ``+ - * / // % **`` and parentheses.
 

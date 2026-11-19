@@ -113,6 +113,11 @@ class _Stalled(Exception):
     """The message-free run stood still (private: raised by ``_stall_watch``)."""
 
 
+# DECISION plan-2026-11-19T025425-51fde95b/D-027
+# A run that stands still waits for a user: it stops with ``needs_user_input``
+# and counts NO run (``record_run`` is not called), so a procedure that needs a
+# person is not marked failing in the library. Do NOT judge it by the text of a
+# reply, do NOT count it as a failed run, and do NOT let it spend the turn budget.
 def _stall_watch(api: API, conversation_id: str, stays: int) -> Callable[[int], None]:
     """A ``before_step`` hook that raises ``_Stalled`` once ``stays`` steps in a
     row left the state and the public data exactly as they were: a procedure

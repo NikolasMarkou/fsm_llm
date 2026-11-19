@@ -152,6 +152,11 @@ def _declared(state: State, outside: frozenset[str] = frozenset()) -> dict[str, 
     return names
 
 
+# DECISION plan-2026-11-19T025425-51fde95b/D-049
+# A witness int the interpreter cannot print says the key's sample; the G6a pool
+# is NOT capped. Do NOT cap the doubled value in ``dryrun._numbers`` (a satisfiable
+# edge would turn dead, a false reject against D-042) and do NOT wrap
+# ``simulator.run`` in ``except ValueError`` (it would hide a real bug).
 def _sayable(value: Any) -> Any:
     """``value``, or the pool filler when the interpreter cannot print it (an
     ``int`` over its integer text limit): D-049, so ``str`` never raises here."""

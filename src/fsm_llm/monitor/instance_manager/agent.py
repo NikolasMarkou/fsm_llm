@@ -63,9 +63,11 @@ _AGENT_CLASSES: dict[str, type] = {
     "DebateAgent": DebateAgent,
     "SelfConsistencyAgent": SelfConsistencyAgent,
 }
-# OrchestratorAgent is not launchable either (D-058 of plan 51fde95b): without a
-# `worker_factory` (a Python callable) every subtask is a placeholder with
-# success False, so a dashboard run always ends `failed`.
+# DECISION plan-2026-11-19T025425-51fde95b/D-058
+# OrchestratorAgent is NOT launchable: without a `worker_factory` (a Python
+# callable) every subtask is a placeholder with success False, so a dashboard run
+# always ends `failed`. Do NOT re-add it without a monitor worker factory that
+# runs a real sub-agent and a scripted end-to-end row that asserts `success`.
 
 # Agent types that require a ToolRegistry
 _TOOL_BASED_AGENTS = {

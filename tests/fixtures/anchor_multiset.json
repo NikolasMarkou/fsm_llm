@@ -649,6 +649,46 @@
       "delta": 2,
       "reason": "step 15.2 of plan 51fde95b: D-008 is anchored once more in runtime/scope.py llm_call (a cancelled engine-fallback call writes provider/error and raises the cancel again; never narrowed to Exception) and once in LiteLLMEmbedder.aembed (a cancel counts as an error in async mode only; the sync arm keeps Exception only); no other token was added or lost",
       "token": "plan-2026-11-19T025425-51fde95b/D-008"
+    },
+    {
+      "delta": 2,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchors at dryrun.fallback_witness (the fallback never feeds G6a, one assignment budget) and tools._stall_watch (a stalled run counts no run), the two choices review C R-C10 found unanchored; no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-027"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at reasoning calculator.evaluate_expression (^ is refused, not translated); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-029"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at simulation._sayable (an unprintable witness int says the sample; the pool is not capped); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-049"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at prompts.reference_block (the near-miss record is valid JSON in a code fence, never defanged); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-051"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at ReasoningHandlers.finalize_calculation (a refused calculation is no solution, the fixed message is the answer); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-052"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at routes_builder.api_builder_start (an abandoned Builder worker stays counted); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-054"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at monitor/eventlog.py (the cached usage fold, one lstat per page, a damaged line ends the reading); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-056"
+    },
+    {
+      "delta": 1,
+      "reason": "step 15.11 of plan 51fde95b (review fix round, part 2): new anchor at monitor instance_manager _AGENT_CLASSES (OrchestratorAgent is not launchable); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-058"
     }
   ]
 }

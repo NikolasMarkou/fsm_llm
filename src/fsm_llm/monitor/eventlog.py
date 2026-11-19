@@ -39,6 +39,12 @@ from .constants import (
     MAX_EVENTLOG_USAGE_CACHE,
 )
 
+# DECISION plan-2026-11-19T025425-51fde95b/D-056
+# The usage fold is cached by (root, id) and validated by the file's mtime and size,
+# and a damaged line ends the reading there (``skipped``, ``corrupt_after_seq``).
+# Do NOT fold the whole log on every page, do NOT list or ``lstat`` the directory
+# per request, and do NOT write a lenient reader of the log format here (the
+# runtime's ``seq`` rule refuses every line after a bad one).
 # (log root, conversation id) -> ((st_mtime_ns, st_size), usage dict, corrupt_after_seq)
 _USAGE_CACHE: OrderedDict[
     tuple[str, str], tuple[tuple[int, int], dict[str, Any], int | None]

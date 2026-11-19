@@ -258,6 +258,13 @@ def patch_messages(
     ]
 
 
+# DECISION plan-2026-11-19T025425-51fde95b/D-051
+# The near-miss record is shown as VALID compact JSON (``ensure_ascii``, one line)
+# in a code fence longer than any backtick run in it, NOT through ``_fence`` and
+# ``safe_text``: the bracket look-alikes made ``{"\u203a=": ...}`` which a strong
+# model copied into its reply (D-099 of plan 2cefeb61) and failed G1. Do NOT
+# defang or cut it (a record over ``REFERENCE_CHARS`` is not shown at all), and
+# do NOT put it in the system prompt.
 def reference_block(record: dict[str, Any]) -> str | None:
     """The stored near miss ``record`` as VALID JSON in a code fence, between the
     ``REFERENCE_BEGIN`` and ``REFERENCE_END`` lines; ``None`` when its compact

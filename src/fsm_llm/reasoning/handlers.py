@@ -279,6 +279,13 @@ class ReasoningHandlers:
             ContextKeys.CALCULATION_ERROR: error,
         }
 
+    # DECISION plan-2026-11-19T025425-51fde95b/D-052
+    # A refused calculation (``calculation_error_details``) is NO solution and ends
+    # with the fixed ``ErrorMessages.CALCULATION_REFUSED``, never the model's own
+    # arithmetic; the result and error keys are orchestrator handler-only keys,
+    # cleared on every attempt. Do NOT accept ``proposed_solution`` or
+    # ``final_solution`` text beside an error, do NOT make the keys claimable again,
+    # and do NOT grow ``engine.py`` for it (799 lines, cap 800).
     @staticmethod
     def finalize_calculation(context: dict[str, Any]) -> dict[str, Any]:
         """On entry to ``final_answer``: a calculator run answers with its result.
