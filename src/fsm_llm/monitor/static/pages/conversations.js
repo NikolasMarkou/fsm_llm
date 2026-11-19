@@ -152,6 +152,9 @@ export async function showConversationDetail(convId) {
         if (chatInput) {
             chatInput.style.display = (!data.is_terminal && state.selectedConvInstanceId) ? 'block' : 'none';
         }
+        // Only the conversation being answered has a disabled input (the early returns above skip this line).
+        const msgInput = $('conv-message-input');
+        if (msgInput) msgInput.disabled = false;
 
         const titleEl = $('ctrl-drawer-title');
         if (titleEl) {
@@ -201,7 +204,7 @@ export { _addTypingIndicator as addTypingIndicator, _removeTypingIndicator as re
 
 export async function sendChatMessage() {
     if (!state.selectedConvId || !state.selectedConvInstanceId) return;
-    if (_sendingConvId) return;
+    if (_sendingConvId) { showToast('Another message is still being answered', 'error'); return; }
     const input = $('conv-message-input');
     const message = input.value.trim();
     if (!message) return;

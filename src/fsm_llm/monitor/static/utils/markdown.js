@@ -60,7 +60,9 @@ export function renderMarkdown(text) {
     s = s.replace(/<p>((?:<pre|<ul|<ol|<hr))/g, '$1');
     s = s.replace(/((?:<\/pre>|<\/ul>|<\/ol>|<hr[^>]*>))<\/p>/g, '$1');
     s = s.replace(/<br>\s*(<pre|<ul|<ol|<\/p>)/g, '$1');
-    s = s.replace(/(<\/pre>|<\/ul>|<\/ol>)\s*<br>/g, '$1');
+    s = s.replace(/(<\/pre>|<\/ul>|<\/ol>|<hr[^>]*>)\s*<br>/g, '$1');
+    // Text right after a block opens its own paragraph, so the closing </p> has a partner
+    s = s.replace(/(<\/pre>|<\/ul>|<\/ol>|<hr[^>]*>)(?!<\/?p>|<pre|<ul|<ol|<hr|$)/g, '$1<p>');
 
     return s;
 }

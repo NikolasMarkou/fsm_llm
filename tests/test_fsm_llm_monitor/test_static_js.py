@@ -172,3 +172,50 @@ class TestBuilderAgentLaunch:
             "disabled": False,
             "posts": 2,
         }
+
+
+class TestChatInputAndMarkdownBlocks:
+    """Plan 51fde95b step 12.1: the two quirks plan 52ce5464 carried."""
+
+    def test_the_input_is_disabled_only_for_the_conversation_being_answered(
+        self, probe
+    ):
+        out = probe("input_state")
+        assert out["sendingA"] is True
+        assert out["shownB"] is False
+        assert out["after"] is False
+
+    def test_a_send_in_another_conversation_is_refused_and_keeps_the_text(self, probe):
+        refused = probe("input_state")["refused"]
+        assert refused == {
+            "value": "typed in B",
+            "posts": 1,
+            "toast": "Another message is still being answered",
+        }
+
+    def test_text_after_a_block_opens_its_own_paragraph(self, probe):
+        out = probe("markdown_blocks")
+        assert out["html"]["list_then_text"] == (
+            "<ul><li>a</li><li>b</li></ul><p>After the list</p>"
+        )
+        assert out["html"]["ordered_then_text"].endswith("</ol><p>rest</p>")
+        assert out["html"]["code_then_text"].endswith("</pre><p>after</p>")
+        assert out["html"]["rule_then_text"] == '<hr class="md-hr"><p>foo</p>'
+        assert all(
+            out["balanced"][name]
+            for name in ("list_then_text", "ordered_then_text", "code_then_text")
+        )
+
+    def test_blocks_alone_and_plain_paragraphs_are_unchanged(self, probe):
+        out = probe("markdown_blocks")
+        assert out["html"]["list_only"] == "<ul><li>a</li></ul>"
+        assert out["html"]["plain_paragraphs"] == "<p>Para one</p><p>Para two</p>"
+
+    def test_no_paragraph_is_opened_where_one_is_open_or_a_block_follows(self, probe):
+        html = probe("markdown_blocks")["html"]
+        assert html["list_gap_text"] == "<ul><li>a</li></ul><p>After</p>"
+        assert html["block_run"] == (
+            '<pre class="md-code-block"><code>x</code></pre><ul><li>a</li></ul>'
+            '<ol><li>b</li></ol><hr class="md-hr">'
+            '<pre class="md-code-block"><code>y</code></pre>'
+        )

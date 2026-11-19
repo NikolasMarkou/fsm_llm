@@ -52,6 +52,12 @@ _requests_processed: int = 0
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage server startup/shutdown lifecycle."""
+    global _manager
+    if _manager is not None and _manager.closed:
+        # A second run in one process (a restart, a test): a closed manager has
+        # no log sink and no handlers, so it is never served again.
+        logger.warning("the configured manager was closed; serving a fresh one")
+        _manager = None
     yield
     # Shutdown: close the manager (ends what it runs, detaches its handlers,
     # removes the loguru sink); `close()` is idempotent, a caller may have

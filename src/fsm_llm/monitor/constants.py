@@ -45,6 +45,7 @@ MAX_AGENT_TIMEOUT_SECONDS = 3600.0
 MAX_STUB_TOOLS = 50
 MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MiB
 MAX_BUILDER_SESSIONS = 50
+MAX_WORKFLOW_RUNS_LISTED = 200  # the newest runs the instances route lists
 
 # Host header values the server answers to by default (DNS-rebinding defence);
 # these are also the loopback names the CLI recognises.

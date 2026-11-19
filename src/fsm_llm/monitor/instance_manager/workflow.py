@@ -26,6 +26,7 @@ from ..constants import (
     EVENT_WORKFLOW_EVENT_DELIVERED,
     EVENT_WORKFLOW_FAILED,
     EVENT_WORKFLOW_STARTED,
+    MAX_WORKFLOW_RUNS_LISTED,
     TERMINAL_STATUSES,
 )
 from ..definitions import (
@@ -350,11 +351,13 @@ class WorkflowsMixin(_InstanceSurface):
         """List every run of a managed workflow engine, finished ones included.
 
         Runs come in start order (``run_ids``), not only the active ones: a
-        preset that completes inside ``start`` is never in the active list.
+        preset that completes inside ``start`` is never in the active list. At
+        most the newest ``MAX_WORKFLOW_RUNS_LISTED`` are listed, each entry
+        carries its redacted context and history.
         """
         inst = self._get_workflow(instance_id)
         with self._lock:
-            run_ids = list(inst.run_ids)
+            run_ids = list(inst.run_ids)[-MAX_WORKFLOW_RUNS_LISTED:]
         results: list[dict[str, Any]] = []
         for wf_id in run_ids:
             try:

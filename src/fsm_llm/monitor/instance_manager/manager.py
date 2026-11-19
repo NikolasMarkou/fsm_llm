@@ -126,6 +126,12 @@ class InstanceManager(
             self._setup_loguru_sink()
 
     @property
+    def closed(self) -> bool:
+        """True once ``close()`` ran: the manager has no log sink and no handlers."""
+        with self._lock:
+            return self._closed
+
+    @property
     def global_collector(self) -> EventCollector:
         return self._global_collector
 

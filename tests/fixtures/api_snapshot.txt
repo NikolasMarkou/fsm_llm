@@ -1382,6 +1382,7 @@ fsm_llm.monitor.InstanceManager class
   def cancel_agent(self, instance_id: str) -> bool
   def cancel_workflow(self, instance_id: str, wf_instance_id: str, reason: str = '') -> bool
   def close(self) -> None
+  property closed
   property config
   property dashboard_config
   property dashboard_config_version

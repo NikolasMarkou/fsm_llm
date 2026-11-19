@@ -1834,7 +1834,8 @@ _MODULE_OF = {
     "validate_preset_id": "examples",
 }
 
-#: every method and property of the old single-module ``InstanceManager``
+#: every method and property of the old single-module ``InstanceManager``, plus the ones
+#: added since (a new one is added here and owned by one mixin or the shell)
 _OLD_MEMBERS = frozenset(
     {
         "__init__",
@@ -1866,6 +1867,7 @@ _OLD_MEMBERS = frozenset(
         "cancel_agent",
         "cancel_workflow",
         "close",
+        "closed",
         "config",
         "dashboard_config",
         "dashboard_config_version",
