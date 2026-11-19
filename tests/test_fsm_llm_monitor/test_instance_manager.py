@@ -832,6 +832,32 @@ class TestWorkflowPresets:
             mgr.get_workflow_status(managed.instance_id, wf_id)["status"] == "completed"
         )
 
+    async def test_finished_runs_stay_listed_in_run_order(self):
+        """F4 (monitor audit 1.1): the instances list names every run of the
+        engine, finished ones included, not only the active ones (it listed
+        nothing for a preset that completes inside ``start``)."""
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_linear")
+        first = await mgr.start_workflow_instance(
+            managed.instance_id, managed.workflow_id, {}
+        )
+        second = await mgr.start_workflow_instance(
+            managed.instance_id, managed.workflow_id, {}
+        )
+        assert managed.active_instance_ids == []
+
+        listed = mgr.get_workflow_instances(managed.instance_id)
+
+        assert [r["workflow_instance_id"] for r in listed] == [first, second]
+        assert [r["status"] for r in listed] == ["completed", "completed"]
+        assert all(r["history"] for r in listed)
+
+    def test_no_runs_lists_nothing(self):
+        mgr = self._make_manager()
+        managed = mgr.launch_workflow(preset_id="demo_linear")
+
+        assert mgr.get_workflow_instances(managed.instance_id) == []
+
     def test_definition_json_rejected(self):
         import pytest
 
@@ -2086,6 +2112,7 @@ class TestInstanceManagerPackageLayout:
             wf.engine = MagicMock()
             wf.engine.get_instance.return_value = None
             wf.active_instance_ids = ["run1"]
+            wf.run_ids = ["run1"]  # F4: the list walks every run, not the active ones
             mgr._instances["w1"] = wf
             mgr.get_workflow_instances("w1")
             # fsm: the conversation ends but its end is refused

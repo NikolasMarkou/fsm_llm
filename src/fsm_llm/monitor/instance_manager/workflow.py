@@ -347,10 +347,16 @@ class WorkflowsMixin(_InstanceSurface):
         }
 
     def get_workflow_instances(self, instance_id: str) -> list[dict[str, Any]]:
-        """List all workflow instances on a managed workflow engine."""
+        """List every run of a managed workflow engine, finished ones included.
+
+        Runs come in start order (``run_ids``), not only the active ones: a
+        preset that completes inside ``start`` is never in the active list.
+        """
         inst = self._get_workflow(instance_id)
+        with self._lock:
+            run_ids = list(inst.run_ids)
         results: list[dict[str, Any]] = []
-        for wf_id in inst.active_instance_ids:
+        for wf_id in run_ids:
             try:
                 status_data = self.get_workflow_status(instance_id, wf_id)
                 results.append(status_data)
