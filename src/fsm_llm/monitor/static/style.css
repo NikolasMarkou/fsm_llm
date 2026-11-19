@@ -80,6 +80,14 @@
     --text-tertiary: #565a6e;
     --text-on-color: #ffffff;
 
+    /* JSON syntax colours (utils/json_highlight.js): at least 4.5:1 on --bg through --surface-hover */
+    --json-key:    #7fb2ff;
+    --json-string: #86e0a3;
+    --json-number: #f2b872;
+    --json-bool:   #d4a5f7;
+    --json-null:   #f28ba8;
+    --json-punct:  #a0a4b8;
+
     /* Borders */
     --border:        #252836;
     --border-bright: #353948;
@@ -1622,6 +1630,14 @@ tr.clickable-row.selected td {
     border-radius: 2px;
     padding: 0 1px;
 }
+
+/* JSON text (utils/json_highlight.js): one colour per token class; the text itself is unchanged */
+.json-key    { color: var(--json-key); }
+.json-string { color: var(--json-string); }
+.json-number { color: var(--json-number); }
+.json-bool   { color: var(--json-bool); }
+.json-null   { color: var(--json-null); }
+.json-punct  { color: var(--json-punct); }
 
 /* === KBD ELEMENTS (settings shortcuts) === */
 

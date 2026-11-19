@@ -436,3 +436,26 @@ class TestJsonColouring:
         # the size cap, deep nesting, HTML stays text. json_surfaces: the event log, the conversation
         # drawer, the Builder result and state, the workflow and agent drawers.
         assert [k for k, v in probe(name).items() if v is not True] == []
+
+    def test_the_colours_have_4_5_to_1_contrast_on_every_surface(self):
+        # style.css has one (dark) theme: no prefers-color-scheme and no data-theme rule, so the six
+        # variables live in :root. A second theme must restate them, and this test must then cover it.
+        css = (_STATIC / "style.css").read_text(encoding="utf-8")
+        assert "prefers-color-scheme" not in css and "data-theme" not in css
+        root = css.split(":root {")[1].split("\n}")[0]
+
+        def colour(name: str) -> float:
+            hex_ = re.search(rf"--{name}:\s*#([0-9a-fA-F]{{6}})", root)[1]
+            rgb = [int(hex_[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+            lin = [
+                c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb
+            ]
+            return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+        surfaces = ("bg", "bg-secondary", "surface", "surface-alt", "surface-hover")
+        for kind in ("key", "string", "number", "bool", "null", "punct"):
+            assert f".json-{kind}" in css and f"color: var(--json-{kind})" in css
+            lum = colour(f"json-{kind}")
+            for surface in surfaces:
+                hi, lo = sorted((lum, colour(surface)), reverse=True)
+                assert (hi + 0.05) / (lo + 0.05) >= 4.5, (kind, surface)
