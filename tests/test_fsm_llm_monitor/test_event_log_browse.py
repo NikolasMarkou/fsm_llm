@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import sys
 from types import SimpleNamespace
@@ -16,6 +15,7 @@ from fsm_llm.monitor.server import app, configure
 from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.runtime.privacy import SHAPE_FIELDS
 from fsm_llm.runtime.usage import usage_from_events
+from tests.conftest import symlink_or_skip
 from tests.test_fsm_llm_monitor.support import _manager
 
 _ENVELOPE = {"seq", "ts", "type", "frame"}
@@ -74,8 +74,8 @@ def _client(tmp_path, *, api_key=None):
     # a log file that is a link to a file outside the root
     outside = tmp_path / "outside.jsonl"
     shutil.copy(tmp_path / "logs" / "abc.jsonl", outside)
-    os.symlink(outside, tmp_path / "logs" / "lnk.jsonl")
-    (tmp_path / "logs" / "Foreign Name.txt").write_text("x")
+    symlink_or_skip(tmp_path / "logs" / "lnk.jsonl", outside)
+    (tmp_path / "logs" / "Foreign Name.txt").write_text("x", encoding="utf-8")
     mgr = _manager()
     mgr.attach_event_log(EventLog(tmp_path))
     configure(manager=mgr, api_key=api_key)
