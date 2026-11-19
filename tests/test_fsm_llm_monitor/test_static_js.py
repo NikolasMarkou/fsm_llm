@@ -133,3 +133,24 @@ class TestLaunchModal:
         out = probe("launch_modal")
         for name in ("agent", "fsm", "workflow"):
             assert out[f"{name}_failed"]["returned"] is False
+
+
+class TestBuilderAgentLaunch:
+    def test_a_refused_launch_keeps_the_form_open_for_a_retry(self, probe):
+        out = probe("builder_launch")
+        assert out["opened"] == ["block", "Confirm Launch"]
+        assert out["failed"] == {
+            "form": "block",
+            "label": "Confirm Launch",
+            "disabled": False,
+            "posts": 1,
+        }
+
+    def test_an_accepted_launch_closes_the_form(self, probe):
+        retried = probe("builder_launch")["retried"]
+        assert retried == {
+            "form": "none",
+            "label": "Launch AGENT",
+            "disabled": False,
+            "posts": 2,
+        }

@@ -509,16 +509,18 @@ function _launchBuilderAgent() {
 
     postJson('/api/agent/launch', body)
         .then(() => {
+            form.style.display = 'none';
+            launchBtn.textContent = 'Launch AGENT';
             showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
             _refreshInstances?.();
             setTimeout(() => _showPage?.('control'), 500);
         })
-        .catch(e => showError('builder-status', `Launch failed: ${e.message}`))
-        .finally(() => {
-            launchBtn.disabled = false;
-            launchBtn.textContent = 'Launch AGENT';
-            form.style.display = 'none';
-        });
+        .catch(e => {
+            // Keep the form (task, stub responses) open so the user can retry.
+            launchBtn.textContent = 'Confirm Launch';
+            showError('builder-status', `Launch failed: ${e.message}`);
+        })
+        .finally(() => { launchBtn.disabled = false; });
 }
 
 function _populateAgentToolStubs() {
