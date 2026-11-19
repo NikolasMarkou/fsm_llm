@@ -14,7 +14,7 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
-from fsm_llm.aio import acall, run_sync
+from fsm_llm.aio import SYNC, acall, run_sync
 from fsm_llm.constants import RESERVED_EMBEDDING_CALL_KWARGS, USAGE_KIND_EMBED
 from fsm_llm.core.definitions import LLMResponseError
 from fsm_llm.llm.interface import DEFAULT_LLM_TIMEOUT_SECONDS
@@ -119,12 +119,17 @@ class LiteLLMEmbedder(_Metered):
         )
         params["input"] = batch
         meter = _meter_of(self)
+        # DECISION plan-2026-11-19T025425-51fde95b/D-008: in async mode a cancelled request
+        # was already sent (and may be billed), so it counts as an error and the cancel goes
+        # on unchanged; in sync mode only `Exception` counts, as in `_send` (a CancelledError
+        # out of the sync `embedding` is no cancel of ours). Do NOT widen the sync arm.
+        # See decisions.md D-046.
+        counted = Exception if SYNC.get() else (Exception, asyncio.CancelledError)
         try:
             response = await acall(self, "_send", params)
-        except (Exception, asyncio.CancelledError):
+        except counted:
             # Broad catch is intentional: count the failed request, re-raise
-            # it unchanged for the caller's own error boundary. A cancelled
-            # request was sent (and may be billed), so it counts as an error too.
+            # it unchanged for the caller's own error boundary.
             meter.record_error(USAGE_KIND_EMBED)
             raise
         meter.record(USAGE_KIND_EMBED, response)

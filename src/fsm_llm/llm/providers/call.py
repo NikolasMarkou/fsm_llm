@@ -11,7 +11,9 @@ imports neither litellm nor ``providers/litellm.py``.
 
 from __future__ import annotations
 
+import sys
 import warnings
+from types import FrameType
 from typing import TYPE_CHECKING, Any
 
 from fsm_llm.aio import acall, async_name, run_sync
@@ -32,27 +34,46 @@ _SYNC_TWINS = (
 )
 
 
+def _is_machinery(frame: FrameType) -> bool:
+    """A frame of this package, of ``abc`` or of an ``__init_subclass__`` hook: never the
+    class statement a user wrote."""
+    name = frame.f_globals.get("__name__", "")
+    return (
+        name == "fsm_llm"
+        or name.startswith("fsm_llm.")
+        or name == "abc"
+        or frame.f_code.co_name == "__init_subclass__"
+    )
+
+
 def warn_bypassed_twins(cls: type) -> None:
     """Warn once per sync twin that ``cls`` defines without its async twin.
 
     Interface contract: ``cls`` is a ``LiteLLMInterface`` subclass being created (call it
-    from ``__init_subclass__``: the stack level counts that frame and ``ABCMeta.__new__``).
-    A name of ``_SYNC_TWINS`` defined in the body of ``cls`` and not its ``async_name`` gets
-    one ``RuntimeWarning``; nothing else is read or changed.
+    from ``__init_subclass__``). A name of ``_SYNC_TWINS`` defined in the body of ``cls``
+    and not its ``async_name`` gets one ``RuntimeWarning`` attributed to the first frame
+    outside this package, ``abc`` and any ``__init_subclass__`` (the class statement, also
+    through an intermediate class with its own hook); nothing else is read or changed.
     """
     # DECISION plan-2026-11-19T025425-51fde95b/D-009: this only WARNS and changes no dispatch.
     # An async caller reaches the inherited native twin, so an override of the sync name alone
     # is bypassed; do NOT make `acall` MRO-aware to fix that here (a second rule inside the
     # hot helper that the engine part of the async core would have to carry and test).
+    # The reverse (an `a` twin overridden alone) is NOT warned (D-045): it is the normal way to
+    # wrap a twin with `await super()`, and a body that really suspends is a documented rule.
     # See decisions.md D-009.
     for name in _SYNC_TWINS:
         twin = async_name(name)
         if name in vars(cls) and twin not in vars(cls):
+            frame: FrameType | None = sys._getframe()
+            level = 1
+            while frame is not None and _is_machinery(frame):
+                frame, level = frame.f_back, level + 1
             warnings.warn(
                 f"{cls.__name__} overrides {name} but not {twin}: async callers reach the "
                 "inherited native twin and bypass the override",
                 RuntimeWarning,
-                stacklevel=4,  # this, __init_subclass__, ABCMeta.__new__, the class statement
+                stacklevel=level,
             )
 
 

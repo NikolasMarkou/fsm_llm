@@ -441,6 +441,35 @@ class TestEveryMethodGivesTheSameOnBothNames:
                 assert (sync.call_count, async_.call_count) == (1, 1)
 
 
+class TestAsyncRequestsOverlap:
+    @pytest.mark.parametrize("method", list(_METHODS))
+    async def test_every_concurrent_call_is_in_flight_at_once(
+        self, method: str
+    ) -> None:
+        n, inside, all_in, release = 20, 0, asyncio.Event(), asyncio.Event()
+
+        async def provider(**_: Any) -> Any:
+            nonlocal inside
+            inside += 1
+            if inside == n:
+                all_in.set()
+            await (
+                release.wait()
+            )  # a call that is serialised behind another never gets here
+            return _reply(_METHODS[method][1])
+
+        llm = _llm()
+        with _providers(_boom, provider):
+            calls = [
+                asyncio.ensure_future(_invoke(llm, f"a{method}", _METHODS[method][0]()))
+                for _ in range(n)
+            ]
+            await asyncio.wait_for(all_in.wait(), 2)
+            release.set()
+            await asyncio.gather(*calls)
+        assert llm.usage().calls == n
+
+
 class TestTheApologyRetryIsOneBody:
     """21cd7f8e/D-020: an empty reply is retried once, whichever name made the call."""
 
@@ -698,6 +727,22 @@ class TestTheSubclassGuard:
         _, nothing = _define()
         assert both == only_async == nothing == []
 
+    def test_the_warning_reaches_the_class_statement_through_an_init_subclass_hook(
+        self,
+    ) -> None:
+        class Mid(LiteLLMInterface):
+            def __init_subclass__(cls, **kwargs: Any) -> None:
+                super().__init_subclass__(**kwargs)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            line = inspect.currentframe().f_lineno + 2  # type: ignore[union-attr]
+
+            class Sub(Mid):
+                complete = lambda self, request: None  # noqa: E731
+
+        assert [(w.filename, w.lineno) for w in caught] == [(__file__, line)]
+
     async def test_it_warns_and_changes_no_dispatch(self) -> None:
         sub, _ = _define(generate_response=lambda self, request: "override")
         llm = sub(model="gpt-4o", api_base="http://127.0.0.1:9")
@@ -859,7 +904,7 @@ def _cancelled(**params: Any) -> Any:
 class TestTheEmbedderTwin:
     @pytest.mark.parametrize(
         ("script", "errors"),
-        [(_vectors, 0), (_one_vector_for_two_texts, 0), (_down, 1), (_cancelled, 1)],
+        [(_vectors, 0), (_one_vector_for_two_texts, 0), (_down, 1)],
     )
     async def test_both_names_give_one_result_one_request_and_one_count(
         self, script: Callable[..., Any], errors: int
@@ -894,6 +939,30 @@ class TestTheEmbedderTwin:
             call = sync.call_args if mode == "sync" else async_.call_args
             seen[mode] = (out, usage, call)
         assert seen["sync"] == seen["async"]
+
+    async def test_a_cancel_counts_as_an_error_in_async_mode_only(self) -> None:
+        started = asyncio.Event()
+
+        async def hang(**_: Any) -> Any:
+            started.set()
+            await asyncio.Event().wait()
+
+        for mode in ("sync", "async"):
+            embedder = LiteLLMEmbedder("text-embedding-3-small", api_key="sk-none")
+            with (
+                patch(f"{_EMBEDDER}.embedding", side_effect=_cancelled),
+                patch(f"{_EMBEDDER}.aembedding", new=hang),
+                pytest.raises(asyncio.CancelledError),
+            ):
+                if mode == "sync":
+                    embedder.embed(_TEXTS)  # a CancelledError out of the sync binding
+                else:
+                    task = asyncio.ensure_future(embedder.aembed(_TEXTS))
+                    await asyncio.wait_for(started.wait(), 5)
+                    task.cancel()
+                    await task
+            usage = embedder.usage()
+            assert (usage.calls, usage.errors) == ((0, 0) if mode == "sync" else (1, 1))
 
 
 # --- the classifier twins (step 6.2): one body per method ------------------------------

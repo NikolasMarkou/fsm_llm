@@ -31,7 +31,8 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
       (``is_observed``) is logged by the observer, so the call only adds the joined reply of a
       stream (and a mid-stream error). Any other interface (a double, a mock, a custom class, a
       wrapper) is logged here: the ``llm/request`` checkpoint BEFORE the call, ``llm/response``
-      after, ``provider/error`` when an ``Exception`` escapes (a stream that raised writes no
+      after, ``provider/error`` when an ``Exception`` escapes or the call is cancelled
+      (``asyncio.CancelledError``, raised again; D-008) (a stream that raised writes no
       ``llm/response``; a non-``Exception`` abort such as ``KeyboardInterrupt`` or ``SystemExit``
       mid-stream is no outage: it writes ``llm/response`` with ``abandoned`` and no
       ``provider/error``, and the turn ends ``interrupted``). The inner observer is switched
@@ -66,6 +67,7 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
@@ -528,7 +530,12 @@ def llm_call(
     token = None if stream else install_observer(None)
     try:
         yield call
-    except Exception as exc:
+    except (Exception, asyncio.CancelledError) as exc:
+        # DECISION plan-2026-11-19T025425-51fde95b/D-008: the same rule as `_asend`. A cancelled
+        # call was already requested (and may be billed), so the log gets its `provider/error`
+        # and the cancel goes on unchanged. Do NOT narrow this to `Exception` (a dangling
+        # `llm/request`). A stream whose pass already ran `stream_done` (its `finally`) stays
+        # `llm/response` with `abandoned`: `_failed` writes once. See decisions.md D-046.
         call._failed(exc)
         raise
     finally:

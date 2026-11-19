@@ -8,6 +8,7 @@ nothing here opens a file itself (the files are ``stores.jsonl``'s and ``blobs``
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import threading
 from pathlib import Path
@@ -433,6 +434,37 @@ class TestEngineFallback:
         assert error["error_type"] == "LLMResponseError"
         assert error["request_seq"] == request["seq"] and error["source"] == "engine"
         assert b"sk-LEAK" not in tree_bytes(log.root)
+
+    async def test_a_cancelled_call_is_a_provider_error_and_is_raised_again(
+        self, log: Any
+    ) -> None:
+        llm = ScriptedLLM(replies=[final_reply("x")])  # not observed: logged here
+        request = CompletionRequest(messages=[{"role": "user", "content": "hi"}])
+
+        async def call() -> None:
+            with llm_call(llm, "completion", request):
+                await asyncio.Event().wait()
+
+        with bind(log, ROOT):
+            task = asyncio.ensure_future(call())
+            await asyncio.sleep(0.01)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        sent, error = _events(log)
+        assert (sent["type"], error["type"]) == ("llm/request", "provider/error")
+        assert error["error_type"] == "CancelledError"
+        assert error["request_seq"] == sent["seq"]
+
+    def test_a_cancelled_stream_stays_abandoned_not_an_error(self, log: Any) -> None:
+        llm = ScriptedLLM(replies=[final_reply("x")])
+        with bind(log, ROOT), pytest.raises(asyncio.CancelledError):
+            with llm_call(llm, "response_stream", _request(), stream=True) as call:
+                try:
+                    raise asyncio.CancelledError
+                finally:
+                    call.stream_done("par")
+        assert [e["type"] for e in _events(log)] == ["llm/request", "llm/response"]
 
     def test_a_response_after_the_reply_is_written_once(self, log: Any) -> None:
         llm = ScriptedLLM(replies=[final_reply("x")])

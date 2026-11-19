@@ -644,6 +644,11 @@
       "delta": 1,
       "reason": "step 15.1 of plan 51fde95b: D-043 is anchored once in aio.aiterate (a sync source is closed through _Stepper, deferred while a worker step is inside it, so a cancel or timeout is never replaced by ValueError); no other token was added or lost",
       "token": "plan-2026-11-19T025425-51fde95b/D-043"
+    },
+    {
+      "delta": 2,
+      "reason": "step 15.2 of plan 51fde95b: D-008 is anchored once more in runtime/scope.py llm_call (a cancelled engine-fallback call writes provider/error and raises the cancel again; never narrowed to Exception) and once in LiteLLMEmbedder.aembed (a cancel counts as an error in async mode only; the sync arm keeps Exception only); no other token was added or lost",
+      "token": "plan-2026-11-19T025425-51fde95b/D-008"
     }
   ]
 }
