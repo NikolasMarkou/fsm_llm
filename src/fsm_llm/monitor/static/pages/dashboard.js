@@ -176,6 +176,15 @@ export function updateMetrics(m) {
     set('m-transitions', m.total_transitions);
     set('m-errors', m.total_errors);
 
+    // LLM usage tiles appear once an interface reports a meter (an object without one reports none).
+    const usageRow = $('m-usage-row');
+    if (usageRow) usageRow.style.display = m.usage ? '' : 'none';
+    if (m.usage) {
+        set('m-llm-calls', m.usage.calls);
+        set('m-llm-tokens', m.usage.total_tokens);
+        set('m-llm-errors', m.usage.errors);
+    }
+
     const errorsCard = $('m-errors-card');
     if (errorsCard) errorsCard.classList.toggle('has-errors', m.total_errors > 0);
 

@@ -24,7 +24,14 @@ from ..exceptions import (
     MonitorCapacityError,
 )
 from .handlers import unregister_monitor_handlers
-from .managed import ManagedAgent, ManagedFSM, ManagedInstance, ManagedWorkflow
+from .managed import (
+    ManagedAgent,
+    ManagedFSM,
+    ManagedInstance,
+    ManagedWorkflow,
+    add_usage,
+    api_usage,
+)
 from .surface import _InstanceSurface
 
 # Strong references to fire-and-forget tasks (the loop keeps only weak ones).
@@ -109,6 +116,15 @@ class LifecycleMixin(_InstanceSurface):
         if inst is None:
             raise KeyError(f"Instance not found: {instance_id}")
 
+        if isinstance(inst, ManagedFSM):
+            # Keep what its interface used (a read of its meter), so the
+            # dashboard total does not drop when the instance goes. A launched
+            # FSM builds its own interface, so this never repeats a live one;
+            # ``close`` keeps its instances listed and folds nothing.
+            found = api_usage(inst.api)
+            if found is not None:
+                with self._lock:
+                    self._ended_usage = add_usage(self._ended_usage, found[1])
         self._teardown(inst, join_agent=True)
         self._emit_event(
             EVENT_INSTANCE_DESTROYED,

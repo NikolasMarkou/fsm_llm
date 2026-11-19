@@ -219,3 +219,12 @@ class TestChatInputAndMarkdownBlocks:
             '<ol><li>b</li></ol><hr class="md-hr">'
             '<pre class="md-code-block"><code>y</code></pre>'
         )
+
+
+class TestUsageTiles:
+    """Plan 51fde95b step 12.2: the LLM usage row of the dashboard."""
+
+    def test_the_tiles_show_once_a_meter_reports_and_hide_when_none_does(self, probe):
+        out = probe("usage_tiles")
+        assert out["withUsage"] == {"display": "", "tiles": ["7", "12", "2"]}
+        assert out["without"]["display"] == "none"

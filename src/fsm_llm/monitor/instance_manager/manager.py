@@ -11,7 +11,7 @@ import collections
 import threading
 from typing import Any, TypeVar
 
-from fsm_llm import API
+from fsm_llm import API, LLMUsage
 from fsm_llm.logging import logger
 
 from ..collector import EventCollector
@@ -31,7 +31,14 @@ from .agent import AgentsMixin
 from .fsm import FsmMixin
 from .handlers import register_monitor_handlers, unregister_monitor_handlers
 from .lifecycle import LifecycleMixin
-from .managed import ManagedAgent, ManagedFSM, ManagedInstance, ManagedWorkflow
+from .managed import (
+    ManagedAgent,
+    ManagedFSM,
+    ManagedInstance,
+    ManagedWorkflow,
+    add_usage,
+    api_usage,
+)
 from .snapshots import SnapshotsMixin
 from .workflow import WorkflowsMixin
 
@@ -71,6 +78,8 @@ class InstanceManager(
 
         # An API created by the caller and attached with attach_api()
         self._attached_api: API | None = None
+        # What the interfaces of torn-down FSM instances used (see _fold_usage)
+        self._ended_usage: LLMUsage | None = None
 
         # Custom dashboard configuration from MonitorBuilder
         self._dashboard_config: DashboardConfig | None = None
@@ -239,7 +248,29 @@ class InstanceManager(
                 for inst in self._instances.values()
                 if isinstance(inst, ManagedWorkflow) and inst.status == "running"
             )
+        metrics.usage = self._usage_total()
         return metrics
+
+    def _usage_total(self) -> LLMUsage | None:
+        """The LLM usage of the managed FSMs and the attached API plus what
+        ended instances used, from the interfaces' read-only ``usage()`` (one
+        count per interface, however many APIs share it); None when no
+        interface reports one. A host that resets an attached interface's meter
+        lowers the total: the meter is the host's, never reset from here."""
+        with self._lock:
+            apis = [
+                i.api for i in self._instances.values() if isinstance(i, ManagedFSM)
+            ]
+            if self._attached_api is not None:
+                apis.append(self._attached_api)
+            total = self._ended_usage
+        seen: set[int] = set()
+        for api in apis:
+            found = api_usage(api)
+            if found is not None and found[0] not in seen:
+                seen.add(found[0])
+                total = add_usage(total, found[1])
+        return total
 
     def get_events(self, limit: int = 50) -> list[MonitorEvent]:
         return self._global_collector.get_events(limit=limit)

@@ -24,8 +24,10 @@ from .constants import (
     EVENT_POST_PROCESSING,
     EVENT_PRE_PROCESSING,
     EVENT_STATE_TRANSITION,
+    EVENT_WORKFLOW_ADVANCED,
     EVENT_WORKFLOW_CANCELLED,
     EVENT_WORKFLOW_COMPLETED,
+    EVENT_WORKFLOW_EVENT_DELIVERED,
     EVENT_WORKFLOW_FAILED,
     EVENT_WORKFLOW_STARTED,
     MAX_ERROR_TEXT,
@@ -223,6 +225,8 @@ class OTELExporter:
             EVENT_AGENT_COMPLETED,
             EVENT_AGENT_FAILED,
             EVENT_WORKFLOW_STARTED,
+            EVENT_WORKFLOW_ADVANCED,
+            EVENT_WORKFLOW_EVENT_DELIVERED,
             EVENT_WORKFLOW_COMPLETED,
             EVENT_WORKFLOW_FAILED,
             EVENT_WORKFLOW_CANCELLED,
@@ -337,13 +341,14 @@ class OTELExporter:
 
     def _on_lifecycle_event(self, event: MonitorEvent) -> None:
         """Record agent/workflow lifecycle events."""
-        # Only ids and the event type: messages can carry agent task text or
-        # provider error text.
+        # Only ids (instance, run, step) and the event type: messages can carry
+        # agent task text or provider error text, and the event type of a
+        # delivered workflow event is caller text.
         attrs: dict[str, Any] = {
             "fsm_llm.event_type": event.event_type,
             "fsm_llm.conversation_id": event.conversation_id or "",
         }
-        for key in ("instance_id", "workflow_instance_id"):
+        for key in ("instance_id", "workflow_instance_id", "step_id"):
             value = event.data.get(key)
             if isinstance(value, str) and value:
                 attrs[f"fsm_llm.{key}"] = value

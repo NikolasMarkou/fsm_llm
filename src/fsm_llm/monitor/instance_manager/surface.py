@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     import collections
     import threading
 
-    from fsm_llm import API
+    from fsm_llm import API, LLMUsage
 
     from ..collector import EventCollector
     from ..definitions import ConversationSnapshot, MonitorConfig, MonitorEvent
@@ -34,6 +34,7 @@ class _InstanceSurface:
         _ended_conversations: collections.OrderedDict[str, ConversationSnapshot]
         _max_ended_conversations: int
         _attached_api: API | None
+        _ended_usage: LLMUsage | None
 
         @property
         def config(self) -> MonitorConfig: ...

@@ -2,9 +2,9 @@
 
 ``ManagedFSM``, ``ManagedWorkflow`` and ``ManagedAgent`` over one private base (``_ManagedBase``: the id, label,
 status and creation time every instance shares, and ``_info``), the ``ManagedInstance`` union and
-``_new_instance_id``, the id a launch gives. The three classes and their base stay in ONE module: each
-``__init__`` calls ``super().__init__`` and ``_info`` is the one place an ``InstanceInfo`` is built. Imports no
-other module of the package.
+``_new_instance_id``, the id a launch gives, and ``api_usage`` / ``add_usage``, the read-only usage reads of the
+manager. The three classes and their base stay in ONE module: each ``__init__`` calls ``super().__init__`` and
+``_info`` is the one place an ``InstanceInfo`` is built. Imports no other module of the package.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fsm_llm import API
+from fsm_llm import API, LLMCallCounts, LLMUsage
 
 from ..constants import (
     DEFAULT_AGENT_MAX_ITERATIONS,
@@ -141,3 +141,34 @@ ManagedInstance = ManagedFSM | ManagedWorkflow | ManagedAgent
 
 def _new_instance_id() -> str:
     return str(uuid.uuid4())[:12]
+
+
+def api_usage(api: Any) -> tuple[int, LLMUsage] | None:
+    """``(id of the interface, its usage())`` for an API, or None.
+
+    Read-only: only ``usage()`` is called, never ``reset_usage()`` (that moves
+    the host's marker). An interface with no ``usage`` (a double) or a
+    ``usage()`` that is not an ``LLMUsage`` reports none; never raises.
+    """
+    try:
+        llm = api.get_llm_interface()
+        usage = llm.usage()
+    except Exception:
+        return None
+    return (id(llm), usage) if isinstance(usage, LLMUsage) else None
+
+
+def add_usage(total: LLMUsage | None, more: LLMUsage) -> LLMUsage:
+    """``total + more``, field by field and kind by kind (``None`` is zero)."""
+    if total is None:
+        return more
+    names, zero = tuple(LLMCallCounts.model_fields), LLMCallCounts()
+
+    def _sum(a: LLMCallCounts, b: LLMCallCounts) -> dict[str, int]:
+        return {n: getattr(a, n) + getattr(b, n) for n in names}
+
+    kinds = {
+        k: LLMCallCounts(**_sum(total.by_kind.get(k, zero), more.by_kind.get(k, zero)))
+        for k in total.by_kind.keys() | more.by_kind.keys()
+    }
+    return LLMUsage(**_sum(total, more), by_kind=kinds)

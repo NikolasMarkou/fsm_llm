@@ -12,6 +12,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from fsm_llm import LLMUsage
+
 from .constants import (
     DEFAULT_AGENT_MAX_ITERATIONS,
     DEFAULT_AGENT_TIMEOUT_SECONDS,
@@ -81,6 +83,9 @@ class MetricSnapshot(BaseModel):
     total_agent_iterations: int = 0
     total_tool_calls: int = 0
     total_workflow_steps: int = 0
+    # LLM calls and tokens of the managed FSMs and the attached API, read from
+    # their interfaces' read-only ``usage()``; None when none reports one.
+    usage: LLMUsage | None = None
 
 
 def normalize_message_history(

@@ -1455,6 +1455,7 @@ fsm_llm.monitor.MetricSnapshot class(BaseModel)
   field total_agent_iterations: int = 0
   field total_tool_calls: int = 0
   field total_workflow_steps: int = 0
+  field usage: LLMUsage | None = None
 fsm_llm.monitor.MonitorCapacityError class(MonitorError)
 fsm_llm.monitor.MonitorConfig class(BaseModel)
   field refresh_interval: float = 1.0

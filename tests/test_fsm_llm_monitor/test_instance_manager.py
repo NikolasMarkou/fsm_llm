@@ -1860,6 +1860,7 @@ _OLD_MEMBERS = frozenset(
         "_setup_loguru_sink",
         "_snapshot_from_api",
         "_teardown",
+        "_usage_total",
         "_validate_workflow_instance_id",
         "_workflow_hook",
         "advance_workflow",
