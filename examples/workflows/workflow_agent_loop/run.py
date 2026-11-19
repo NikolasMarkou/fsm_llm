@@ -14,7 +14,7 @@ The quality gate is implemented inside the agent step, which
 internally retries up to 2 times before passing output forward.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/workflows/workflow_agent_loop/run.py
 """
 
@@ -266,7 +266,7 @@ async def run():
     model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     print("=" * 60)

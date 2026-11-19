@@ -29,7 +29,7 @@ load_dotenv()
 
 
 def main():
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL") or "ollama_chat/bonsai-2:27b"
 
     print(f"Using model: {model}")
     print("=" * 60)

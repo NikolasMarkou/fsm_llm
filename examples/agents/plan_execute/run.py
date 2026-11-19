@@ -75,7 +75,7 @@ def main() -> None:
     if not api_key and "ollama" not in model.lower():
         print("Please set your OPENAI_API_KEY environment variable")
         print("Example: export OPENAI_API_KEY=your-api-key-here")
-        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     # Register tools

@@ -7,7 +7,7 @@ audit across network scanning, vulnerability assessment, log
 analysis, patch verification, and report generation.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/agents/security_audit/run.py
 """
 
@@ -254,7 +254,7 @@ def main() -> None:
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     # Register tools

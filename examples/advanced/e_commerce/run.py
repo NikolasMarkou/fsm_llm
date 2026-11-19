@@ -496,7 +496,7 @@ if __name__ == "__main__":
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Warning: OPENAI_API_KEY not set.")
         print("Set your API key: export OPENAI_API_KEY='your-key-here'")
-        print("Or use Ollama: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         exit(1)
 
     run_stacking_example()

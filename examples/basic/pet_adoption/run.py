@@ -6,7 +6,7 @@ Tests FSM extraction for a pet adoption application process with
 detailed shelter context, animal information, and screening.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/basic/pet_adoption/run.py
 """
 
@@ -103,7 +103,7 @@ def main():
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     print("=" * 60)

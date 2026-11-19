@@ -10,7 +10,7 @@ This is useful for automated pipelines where FSM/workflow/agent
 definitions need to be generated from structured requirements.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/meta/meta_from_spec/run.py
 """
 
@@ -22,7 +22,7 @@ load_dotenv()
 
 
 def main():
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL") or "ollama_chat/bonsai-2:27b"
 
     print(f"Using model: {model}")
     print("=" * 60)

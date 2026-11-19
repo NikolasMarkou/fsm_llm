@@ -15,7 +15,7 @@ The key advantage of REWOO is that all planning happens in one LLM call,
 then execution is pure tool invocation — token-efficient for complex plans.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/agents/rewoo_multi_step/run.py
 """
 
@@ -115,7 +115,7 @@ def main() -> None:
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     registry = ToolRegistry()

@@ -7,7 +7,7 @@ and how ContextCompactor mechanisms (transient keys, pruning)
 help manage memory. Also tests context_length JsonLogic operator.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/advanced/context_compactor/run.py
 """
 
@@ -79,7 +79,7 @@ def main():
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     print("=" * 60)

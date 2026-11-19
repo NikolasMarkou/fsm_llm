@@ -28,7 +28,7 @@ Usage:
     python run.py
 
     # Or with a local Ollama model:
-    export LLM_MODEL="ollama_chat/qwen3.5:4b"
+    export LLM_MODEL="ollama_chat/bonsai-2:27b"
     python run.py
 """
 
@@ -549,7 +549,7 @@ async def run():
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Error: OPENAI_API_KEY not set. Export it or use Ollama.")
-        print("       export LLM_MODEL='ollama_chat/qwen3.5:4b'")
+        print("       export LLM_MODEL='ollama_chat/bonsai-2:27b'")
         return
 
     print("=" * 60)

@@ -7,7 +7,7 @@ customer service FSM pushes a product specialist, which
 pushes a warranty sub-specialist, creating a 3-deep stack.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/advanced/multi_level_stack/run.py
 """
 
@@ -181,7 +181,7 @@ def main():
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     print("=" * 60)

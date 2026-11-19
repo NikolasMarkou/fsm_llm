@@ -6,7 +6,7 @@ Demonstrates register_agent() to wrap one agent as a tool
 callable by another agent, enabling hierarchical agent composition.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/agents/agent_as_tool/run.py
 """
 
@@ -47,7 +47,7 @@ def main():
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/qwen3.5:4b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
         return
 
     # Create a specialist "research agent" with weather/events tools

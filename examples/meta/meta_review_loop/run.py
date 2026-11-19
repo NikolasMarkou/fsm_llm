@@ -14,7 +14,7 @@ This shows how to use the programmatic (non-interactive) meta builder
 API combined with quality assurance patterns.
 
 Run:
-    export LLM_MODEL=ollama_chat/qwen3.5:4b
+    export LLM_MODEL=ollama_chat/bonsai-2:27b
     python examples/meta/meta_review_loop/run.py
 """
 
@@ -40,7 +40,7 @@ def main():
         print("This example requires the agents extra: pip install fsm-llm[agents]")
         return
 
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL") or "ollama_chat/bonsai-2:27b"
 
     print("=" * 60)
     print("Meta-Builder + MakerChecker Quality Review")

@@ -540,3 +540,48 @@ class TestModelStillRequired:
     def test_raises_model_not_configured(self, name: str, tmp_path: Path) -> None:
         with pytest.raises(ModelNotConfiguredError):
             _MODEL_REQUIRED[name](tmp_path)
+
+
+class TestTheToolModelFallbackStaysInEvalAndTheMonitor:
+    """D-036 of plan 51fde95b was held by review only (review D, R-D7): the bonsai
+    fallback is for ``fsm-llm-eval`` and the monitor launch routes. A core, agents,
+    reasoning or synthesis module that reads ``resolve_tool_model`` or
+    ``DEFAULT_TOOL_MODEL`` in code (not in a docstring or a comment) fails here."""
+
+    _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
+    _NAMES = frozenset({"resolve_tool_model", "DEFAULT_TOOL_MODEL"})
+    _DEFINITIONS = frozenset({"constants.py", "llm/interface.py"})
+    _USERS = frozenset(
+        {
+            "eval/config.py",
+            "eval/__main__.py",
+            "monitor/instance_manager/fsm.py",
+            "monitor/instance_manager/agent.py",
+            "monitor/server/routes_builder.py",
+        }
+    )
+
+    def _readers(self) -> set[str]:
+        import ast
+
+        found = set()
+        for path in self._SRC.rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                named = (
+                    (isinstance(node, ast.Name) and node.id in self._NAMES)
+                    or (isinstance(node, ast.alias) and node.name in self._NAMES)
+                    or (isinstance(node, ast.Attribute) and node.attr in self._NAMES)
+                )
+                if named:
+                    found.add(path.relative_to(self._SRC).as_posix())
+        return found
+
+    def test_only_eval_and_the_monitor_read_the_fallback(self) -> None:
+        assert self._readers() == self._DEFINITIONS | self._USERS
+
+    def test_resolve_model_still_raises_with_nothing_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
+        with pytest.raises(ModelNotConfiguredError):
+            resolve_model()
