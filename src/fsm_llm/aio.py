@@ -7,14 +7,17 @@ SYNC method of an object (so a patch of that method still intercepts); in async 
 awaits the ``a`` twin, else runs the sync method on a worker thread. A coroutine that really
 suspends in sync mode is a bug and raises :class:`SuspendedInSyncModeError`.
 
-Known limit: a thread started while ``SYNC`` is set copies the flag, so an ``asyncio.run``
-inside it takes the sync path (it works, and blocks that loop).
+Known limit: ``SYNC`` is a ``ContextVar``, so whatever copies the current Context while it is
+set takes the sync path: ``asyncio.run`` or ``create_task`` called inside a sync-mode step and
+``copy_context().run`` do (it works, and blocks that loop). A plain thread starts with an
+empty Context (probed on 3.11, 3.14 and 3.15), so it does not.
 """
 
 from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
@@ -135,8 +138,48 @@ def iterate_sync(agen: AsyncGenerator[T, None] | Iterator[T]) -> Iterator[T]:
         _drive(agen.aclose())
 
 
-def _next(it: Iterator[Any]) -> Any:
-    return next(it, _DONE)
+class _Stepper:
+    """Steps a sync iterator and closes it once no worker step is inside it.
+
+    Interface contract: ``step()`` returns the next item or the ``_DONE`` marker (it raises
+    what the iterator raises) and may run inline or on a worker thread; ``close()`` runs on
+    any thread, once, and never raises ``ValueError``: a generator cannot be closed while a
+    worker is inside it, so a ``close()`` during a step is deferred to the end of that step.
+    """
+
+    def __init__(self, it: Iterator[Any]) -> None:
+        self._it = it
+        self._lock = threading.Lock()
+        self._running = False
+        self._closing = False
+        self._closed = False
+
+    def step(self) -> Any:
+        with self._lock:
+            if self._closed:
+                return _DONE
+            self._running = True
+        try:
+            return next(self._it, _DONE)
+        finally:
+            with self._lock:
+                self._running = False
+                deferred = self._closing
+            if deferred:
+                self._close_iterator()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._running:
+                self._closing = True
+                return
+            self._closed = True
+        self._close_iterator()
+
+    def _close_iterator(self) -> None:
+        close = getattr(self._it, "close", None)
+        if close is not None:
+            close()
 
 
 async def aiterate(source: Iterable[T] | AsyncIterable[T]) -> AsyncGenerator[T, None]:
@@ -145,7 +188,9 @@ async def aiterate(source: Iterable[T] | AsyncIterable[T]) -> AsyncGenerator[T, 
     An async iterable is iterated natively and ``aclose``d on exit. A sync one is stepped
     inline in sync mode and one ``next`` per worker thread in async mode, so the loop is
     never blocked. A source that is both (litellm's stream wrapper) follows the mode: its
-    sync side in sync mode, where there is no loop to run its async side on.
+    sync side in sync mode, where there is no loop to run its async side on. A cancel or a
+    timeout during a worker step stays that exception at once; the sync source is closed
+    when that step ends (a worker is not stopped, as for any ``to_thread`` call).
     """
     if isinstance(source, AsyncIterable) and not (
         SYNC.get() and isinstance(source, Iterable)
@@ -159,14 +204,18 @@ async def aiterate(source: Iterable[T] | AsyncIterable[T]) -> AsyncGenerator[T, 
             if aclose is not None:
                 await aclose()
         return
-    it = iter(source)
+    # DECISION plan-2026-11-19T025425-51fde95b/D-043: never close a sync source from the loop
+    # thread while a worker step is inside it (ValueError "generator already executing" would
+    # replace the cancel), and never await that step to end it (a cancel would wait for the
+    # source). `_Stepper` defers the close to the end of the step. See decisions.md D-043.
+    stepper = _Stepper(iter(source))
     try:
         while True:
-            step = _next(it) if SYNC.get() else await asyncio.to_thread(_next, it)
+            step = (
+                stepper.step() if SYNC.get() else await asyncio.to_thread(stepper.step)
+            )
             if step is _DONE:
                 return
             yield cast(T, step)
     finally:
-        close = getattr(it, "close", None)
-        if close is not None:
-            close()
+        stepper.close()

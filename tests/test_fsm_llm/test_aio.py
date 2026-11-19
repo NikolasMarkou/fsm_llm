@@ -395,6 +395,45 @@ class TestAiterate:
         assert drive[1](drain(held, stop=2)) == [0, 1]
         assert log == ["closed"]
 
+    def test_a_cancel_during_a_worker_step_stays_a_cancel_and_the_source_closes_after_it(
+        self,
+    ):
+        started, release, log = threading.Event(), threading.Event(), []
+
+        def source():
+            try:
+                yield 1
+                started.set()
+                release.wait(5)  # a worker is inside this step when the cancel lands
+                yield 2
+            finally:
+                log.append(threading.get_ident())
+
+        held = source()  # held here, so only an explicit close() can end it
+
+        async def main():
+            task = asyncio.ensure_future(drain(held))
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):  # never ValueError
+                await task
+            assert log == []  # not closed under the worker
+            release.set()
+            for _ in range(200):
+                if log:
+                    break
+                await asyncio.sleep(0.01)
+
+        asyncio.run(main())
+        assert len(log) == 1  # closed once, when the step ended, off the loop thread
+        assert log[0] != threading.get_ident()
+
+    def test_a_stepper_closed_before_its_step_starts_never_steps(self):
+        stepper = aio._Stepper(iter([1, 2]))
+        stepper.close()
+        assert stepper.step() is aio._DONE
+
     def test_a_source_that_is_both_follows_the_mode(self, drive):
         used: list[str] = []
 

@@ -26,6 +26,7 @@ import pytest
 import fsm_llm.testing as public
 import tests.conftest as conftest
 from fsm_llm import API
+from fsm_llm.aio import iterate_sync, run_sync
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -539,6 +540,53 @@ class _SyncOnly(LLMInterface):
             self.closed.set()
 
 
+class _Blocking(_SyncOnly):
+    """Every sync method blocks until ``release`` is set (the stream blocks in its second step)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered, self.release = threading.Event(), threading.Event()
+        self.finished = threading.Event()
+        self.inside = 0
+        self.held: Iterator[str] | None = None
+
+    def _block(self) -> None:
+        self.inside += 1
+        self.entered.set()
+        self.release.wait(5)
+        self.finished.set()
+
+    def complete(self, request: CompletionRequest) -> Any:
+        self._block()
+        return super().complete(request)
+
+    def generate_response(self, request: ResponseGenerationRequest) -> Any:
+        self._block()
+        return super().generate_response(request)
+
+    def extract_field(self, request: FieldExtractionRequest) -> Any:
+        self._block()
+        return super().extract_field(request)
+
+    def extract_bulk_data(self, request: BulkExtractionRequest) -> Any:
+        self._block()
+        return super().extract_bulk_data(request)
+
+    def generate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> Iterator[str]:
+        self.held = self._stream()  # held here, so only an explicit close() ends it
+        return self.held
+
+    def _stream(self) -> Iterator[str]:
+        try:
+            yield "a"
+            self._block()
+            yield "b"
+        finally:
+            self.closed.set()
+
+
 def _outcome(call: Any) -> tuple[Any, ...]:
     try:
         return ("ok", call())
@@ -569,6 +617,92 @@ class TestAsyncDefaults:
         assert not llm.closed.is_set()
         await stream.aclose()
         assert llm.closed.is_set()  # the sync generator ran its finally
+
+    @pytest.mark.parametrize("name", sorted(_TWINS))
+    def test_in_sync_mode_a_default_runs_the_sync_method_inline(
+        self, name: str
+    ) -> None:
+        llm, request = _SyncOnly(), _TWINS[name]()
+        result = run_sync(getattr(llm, f"a{name}")(request))  # no event loop here
+        assert llm.threads[name] == threading.get_ident()
+        assert result == getattr(_SyncOnly(), name)(request)
+
+    def test_in_sync_mode_the_stream_default_is_read_inline_and_closed(self) -> None:
+        llm = _SyncOnly()
+        assert list(iterate_sync(llm.agenerate_response_stream(_reply()))) == list(
+            "abc"
+        )
+        assert llm.threads["stream"] == threading.get_ident()
+        assert llm.closed.is_set()
+
+    async def test_sync_mode_on_a_loop_thread_starts_no_worker_and_runs_once(
+        self,
+    ) -> None:
+        runs: list[int] = []
+
+        class Counting(_SyncOnly):
+            def generate_response(self, request: ResponseGenerationRequest) -> Any:
+                runs.append(threading.get_ident())
+                return super().generate_response(request)
+
+        run_sync(Counting().agenerate_response(_reply()))  # a sync helper on the loop
+        await asyncio.sleep(0.05)  # a stray worker would have run by now
+        assert runs == [threading.get_ident()]
+
+    @pytest.mark.parametrize("name", sorted(_TWINS))
+    async def test_a_cancelled_default_returns_at_once_and_the_worker_runs_on(
+        self, name: str
+    ) -> None:
+        llm = _Blocking()
+        task = asyncio.ensure_future(getattr(llm, f"a{name}")(_TWINS[name]()))
+        assert await asyncio.to_thread(llm.entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert (
+            not llm.finished.is_set()
+        )  # the documented hazard: the call is not stopped
+        llm.release.set()
+        assert await asyncio.to_thread(llm.finished.wait, 5)  # a late result lands
+
+    @pytest.mark.parametrize("how", ["cancel", "timeout"])
+    async def test_a_cancel_or_timeout_during_a_stream_step_is_not_a_value_error(
+        self, how: str
+    ) -> None:
+        llm = _Blocking()
+
+        async def read() -> None:
+            async for _ in llm.agenerate_response_stream(_reply()):
+                pass
+
+        if how == "cancel":
+            task = asyncio.ensure_future(read())
+            assert await asyncio.to_thread(llm.entered.wait, 5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            with pytest.raises(TimeoutError):
+                async with asyncio.timeout(0.2):
+                    await read()
+        assert not llm.closed.is_set()  # a worker is still inside the generator
+        llm.release.set()
+        assert await asyncio.to_thread(llm.closed.wait, 5)  # closed when the step ended
+
+    async def test_concurrent_awaits_run_the_sync_method_on_several_threads(
+        self,
+    ) -> None:
+        llm = _Blocking()
+        calls = [
+            asyncio.ensure_future(llm.agenerate_response(_reply())) for _ in range(3)
+        ]
+        for _ in range(200):  # all three are inside the sync method at once
+            if llm.inside == 3:
+                break
+            await asyncio.sleep(0.01)
+        assert llm.inside == 3
+        llm.release.set()
+        await asyncio.gather(*calls)
 
     async def test_the_unimplemented_sync_methods_still_raise_through_the_twins(
         self,

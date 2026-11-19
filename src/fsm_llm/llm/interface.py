@@ -10,11 +10,11 @@ import abc
 import asyncio
 import json
 import os
-from collections.abc import AsyncGenerator, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from contextlib import aclosing
-from typing import Any
+from typing import Any, TypeVar
 
-from fsm_llm.aio import aiterate
+from fsm_llm.aio import SYNC, aiterate
 from fsm_llm.constants import (
     DEFAULT_TOOL_MODEL,
     ENV_LLM_MODEL,
@@ -470,6 +470,18 @@ def _completion_response(response: Any) -> CompletionResponse:
     return CompletionResponse(kind="final", text=text, finish_reason=finish_reason)
 
 
+_R = TypeVar("_R")
+
+
+async def _on_worker(call: Callable[..., _R], request: Any) -> _R:
+    """Run a sync interface method for its default ``a`` twin: on a worker thread in async
+    mode, inline in sync mode (``SYNC`` set by ``run_sync``: there is no loop to hop to, and
+    a worker started from a loop thread would run the method a second time elsewhere)."""
+    if SYNC.get():
+        return call(request)
+    return await asyncio.to_thread(call, request)
+
+
 class LLMInterface(abc.ABC):
     """
     Abstract interface for LLM communication supporting the 2-pass architecture.
@@ -487,8 +499,12 @@ class LLMInterface(abc.ABC):
     late result can land after the caller gave up. An interface that implements only the
     ``a*`` methods cannot serve sync callers: the sync methods stay the abstract or
     ``NotImplementedError`` ones. ``LiteLLMInterface`` and the ``fsm_llm.testing`` doubles
-    override the twins natively. A ``Mock(spec=LLMInterface)`` needs an ``AsyncMock`` for
-    each ``a*`` method it should answer.
+    override the twins natively. In sync mode (inside ``run_sync`` or ``iterate_sync``) a
+    default runs the sync method inline, so no loop is needed. Concurrent awaits on one
+    instance run its sync method on several worker threads at once: a sync-only interface
+    must tolerate that. A ``Mock(spec=LLMInterface)`` makes every ``a*`` an ``AsyncMock``
+    whose awaited result is a child mock that ignores ``complete.return_value``: set the
+    return value of the ``a*`` method you await, or use a real double.
     """
 
     @abc.abstractmethod
@@ -627,23 +643,24 @@ class LLMInterface(abc.ABC):
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
         """The async twin of ``complete``: the default runs it on a worker thread."""
-        return await asyncio.to_thread(self.complete, request)
+        return await _on_worker(self.complete, request)
 
     async def agenerate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
         """The async twin of ``generate_response``: the default runs it on a worker thread."""
-        return await asyncio.to_thread(self.generate_response, request)
+        return await _on_worker(self.generate_response, request)
 
     async def agenerate_response_stream(
         self, request: ResponseGenerationRequest
     ) -> AsyncGenerator[str, None]:
         """The async twin of ``generate_response_stream``.
 
-        The default steps the sync generator one ``next`` per worker-thread call and
-        closes it when the consumer stops early (``aclose``) or the stream ends.
+        The default steps the sync generator one ``next`` per worker-thread call (inline
+        in sync mode) and closes it when the stream ends, fails or the consumer stops
+        early (``aclose``, a cancel or a timeout; then once the step in flight ends).
         """
-        chunks = await asyncio.to_thread(self.generate_response_stream, request)
+        chunks = await _on_worker(self.generate_response_stream, request)
         async with aclosing(aiterate(chunks)) as steps:
             async for chunk in steps:
                 yield chunk
@@ -652,10 +669,10 @@ class LLMInterface(abc.ABC):
         self, request: FieldExtractionRequest
     ) -> FieldExtractionResponse:
         """The async twin of ``extract_field``: the default runs it on a worker thread."""
-        return await asyncio.to_thread(self.extract_field, request)
+        return await _on_worker(self.extract_field, request)
 
     async def aextract_bulk_data(
         self, request: BulkExtractionRequest
     ) -> DataExtractionResponse:
         """The async twin of ``extract_bulk_data``: the default runs it on a worker thread."""
-        return await asyncio.to_thread(self.extract_bulk_data, request)
+        return await _on_worker(self.extract_bulk_data, request)
