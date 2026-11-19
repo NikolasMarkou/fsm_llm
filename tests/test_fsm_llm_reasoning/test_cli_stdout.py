@@ -128,7 +128,7 @@ class TestEveryErrorIsOneStderrLine:
         # A parent that is a regular file cannot be a directory on any platform
         # (``/dev/null/x`` is a writable path on Windows).
         blocker = tmp_path / "blocker"
-        blocker.write_text("x")
+        blocker.write_text("x", encoding="utf-8")
         completed = self._run("ok", "--save", str(blocker / "x" / "out.txt"))
         lines = [ln for ln in completed.stderr.splitlines() if ln.strip()]
         assert completed.returncode == 1, completed.stderr
