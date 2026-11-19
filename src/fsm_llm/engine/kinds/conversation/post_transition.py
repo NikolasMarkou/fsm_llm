@@ -17,7 +17,6 @@ from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FSMInstance,
     State,
-    result_key_names,
 )
 from fsm_llm.handlers import HandlerExecutionError, HandlerTiming
 from fsm_llm.logging import logger
@@ -115,13 +114,11 @@ class ConversationPostTransitionMixin(_ConversationSurface):
         # Pass 1 and this pass disagree) and do NOT drop the result-key filter
         # (a classified `completion_result` starves the completion call). The
         # same rule filters Pass 1: `_classification_configs` in extraction.py.
-        closed = result_key_names(self._services.fsm_resolver(instance.fsm_id))
         class_configs = (
             [
                 c
-                for c in new_state.classification_extractions or []
-                if c.field_name not in closed
-                and instance.context.data.get(c.field_name) is None
+                for c in self._classification_configs(new_state, instance)
+                if instance.context.data.get(c.field_name) is None
             ]
             if previous_state != instance.current_state
             else []
