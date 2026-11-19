@@ -205,6 +205,52 @@ async def no_cache_static(request: Request, call_next):
     return response
 
 
+class _BodyCapMiddleware:
+    """Pure ASGI: refuse a request body past ``MAX_REQUEST_BODY_BYTES`` that
+    declares no ``Content-Length`` (a chunked body), before any route or the
+    API-key dependency reads it.
+
+    Contract: an http scope with a ``content-length`` header, and any other
+    scope type, passes through (``_security_guard`` judges the declared
+    length). Otherwise the body messages are buffered up to the cap plus one
+    chunk; past the cap the 413 refusal (with the security headers) is sent
+    and the rest is never read; within it, the buffered messages are replayed
+    to the app and the live ``receive`` takes over. Never raises for a body.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http" or any(
+            name == b"content-length" for name, _ in scope["headers"]
+        ):
+            await self.app(scope, receive, send)
+            return
+        buffered: list[Any] = []
+        size = 0
+        while True:
+            message = await receive()
+            buffered.append(message)
+            if message["type"] != "http.request":
+                break  # a disconnect: the app sees it replayed
+            size += len(message.get("body", b""))
+            if size > MAX_REQUEST_BODY_BYTES:
+                await _refusal(413, "request body too large")(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        async def replay() -> Any:
+            return buffered.pop(0) if buffered else await receive()
+
+        await self.app(scope, replay, send)
+
+
+# Added last, so it is the OUTERMOST layer: the body is judged before the Host
+# check, the API-key dependency or any route reads a byte of it.
+app.add_middleware(_BodyCapMiddleware)
+
 # Global instance manager — set via configure()
 _manager: InstanceManager | None = None
 

@@ -254,6 +254,7 @@ class TestRegistrationOrder:
             names.append(dispatch.__name__ if dispatch else m.cls.__name__)
         # user_middleware[0] is the outermost: the last one registered
         assert names == [
+            "_BodyCapMiddleware",  # F5: outermost, judges a chunked body first
             "no_cache_static",
             "_count_requests",
             "_security_guard",

@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from fsm_llm.constants import CLI_EXIT_INTERRUPTED
 from fsm_llm.monitor import server as server_module
+from fsm_llm.monitor.constants import MAX_REQUEST_BODY_BYTES
 from fsm_llm.monitor.definitions import DashboardConfig, InstanceInfo, MonitorConfig
 from fsm_llm.monitor.exceptions import MetricCollectionError
 from fsm_llm.monitor.instance_manager import InstanceManager
@@ -443,3 +444,126 @@ class TestRouteLaunchedWorkflowIsStopped:
             mgr.close()
             self._wait(stopped, timing_factor)
         assert stopped == [1]
+
+
+_CHUNK = b"x" * 65_536
+_JSON = {"content-type": "application/json"}
+
+
+def _chunks(count: int, seen: list[int] | None = None):
+    """A request body of ``count`` chunks with no Content-Length (chunked)."""
+    for index in range(count):
+        if seen is not None:
+            seen.append(index)
+        yield _CHUNK
+
+
+async def _drive_raw(chunks: int, headers: list[tuple[bytes, bytes]] | None = None):
+    """Run one POST through the ASGI app with ``chunks`` body messages and no
+    content-length; return ``(status, response headers, receive calls)``."""
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "path": "/api/config",
+        "raw_path": b"/api/config",
+        "query_string": b"",
+        "root_path": "",
+        "scheme": "http",
+        "client": ("testclient", 1234),
+        "server": ("testserver", 80),
+        "headers": [(b"host", b"testserver"), *(headers or [])],
+    }
+    calls = 0
+    sent: list[dict] = []
+
+    async def receive():
+        nonlocal calls
+        calls += 1
+        if calls <= chunks:
+            return {
+                "type": "http.request",
+                "body": _CHUNK,
+                "more_body": calls < chunks,
+            }
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        sent.append(message)
+
+    await app(scope, receive, send)
+    start = next(m for m in sent if m["type"] == "http.response.start")
+    return start["status"], dict(start["headers"]), calls
+
+
+class TestChunkedBodyIsCapped:
+    """F5 (monitor audit 2.3): the 1 MiB body cap holds for a body with no
+    Content-Length too (chunked), before auth, without reading the rest."""
+
+    def test_a_chunked_body_over_the_cap_is_refused_with_security_headers(self):
+        client, _ = _client()
+        seen: list[int] = []
+
+        resp = client.post("/api/config", content=_chunks(32, seen), headers=_JSON)
+
+        assert resp.status_code == 413
+        for name in TestGuardRefusalsCarrySecurityHeaders._NAMES:
+            assert name in resp.headers, name
+
+    def test_the_app_pulls_at_most_the_cap_and_one_chunk(self):
+        _client()
+        cap_chunks = MAX_REQUEST_BODY_BYTES // len(_CHUNK)
+
+        status, headers, calls = asyncio.run(_drive_raw(chunks=1024))
+
+        assert status == 413
+        assert b"content-security-policy" in {k.lower() for k in headers}
+        assert calls <= cap_chunks + 2
+
+    def test_a_wrong_key_with_a_chunked_body_is_still_413_first(self):
+        client, _ = _client()
+        configure(manager=InstanceManager(), api_key="right")
+        wrong = {**_JSON, "X-API-Key": "wrong"}
+
+        # the gate is armed: a small body with the wrong key is 401
+        small = client.post("/api/workflow/launch", json={}, headers=wrong)
+        assert small.status_code == 401
+        # a body over the cap is refused before the key is looked at
+        big = client.post("/api/workflow/launch", content=_chunks(32), headers=wrong)
+        assert big.status_code == 413
+
+    def test_a_small_chunked_body_is_replayed_whole(self):
+        client, _ = _client()
+
+        def small():
+            yield b"{"
+            yield b"}"
+
+        resp = client.post("/api/config", content=small(), headers=_JSON)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"status": "ok"}
+
+    def test_a_body_at_the_cap_passes(self):
+        client, _ = _client()
+        cap = MAX_REQUEST_BODY_BYTES
+        padding = b" " * (cap - 2)
+
+        def at_cap():
+            yield b"{"
+            yield padding
+            yield b"}"
+
+        resp = client.post("/api/config", content=at_cap(), headers=_JSON)
+
+        assert resp.status_code == 200, resp.text
+
+    def test_a_declared_length_is_still_refused_by_the_guard(self):
+        client, _ = _client()
+
+        resp = client.post(
+            "/api/config", content=b"x", headers={"Content-Length": str(10**9)}
+        )
+
+        assert resp.status_code == 413
