@@ -1303,6 +1303,26 @@ class TestNesting:
         assert (rig.state, rig.depth) == ("booked", 1)
         assert rig.result["status"] == "ok"
 
+    def test_converse_pops_every_ended_child_in_the_same_turn(
+        self, valid_fsm, monkeypatch
+    ):
+        """A child that a refused nested start leaves on a terminal state used to
+        stay on the stack (one raising user turn per level, final reply lost)."""
+        policy = SynthesisPolicy(max_synthesis_depth=2)
+        rig = _rig(valid_fsm, policy=policy, config={"return_keys": ["topic"]})
+        _serve(
+            rig,
+            monkeypatch,
+            _procedure(_nesting(), policy=policy, return_keys=("topic",)),
+        )
+
+        reply = rig.runner.converse(rig.conv, "hello")
+
+        assert reply == "Booked!"  # the final reply is not lost
+        assert rig.names[-3:] == ["failed", "popped", "popped"]
+        assert (rig.state, rig.depth) == ("booked", 1)
+        assert rig.result["status"] == "ok"
+
 
 class TestTraceSink:
     def test_fields_are_small_plain_values(self, valid_fsm):

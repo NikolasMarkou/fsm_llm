@@ -406,17 +406,24 @@ class ProcedureRunner:
         """converse mode: tick, then step the parent once after a pop (an ended or an
         aborted child) or a start refused before any push (the failed result is
         written and the depth is unchanged) so it leaves its synthesize state, as
-        ``run`` does; a bare turn there would only be eaten by that state."""
+        ``run`` does; a bare turn there would only be eaten by that state. A frame
+        that step leaves ended is a child to pop too, so the pass repeats (a pass
+        that pops nothing returns, so it is bounded by the stack depth)."""
         api = self.api
-        depth = api.get_stack_depth(conversation_id)
-        replies = self._tick(conversation_id, None)
-        refused = conversation_id in self._refused
-        self._refused.discard(conversation_id)
-        if (
-            refused or api.get_stack_depth(conversation_id) < depth
-        ) and not api.has_conversation_ended(conversation_id):
+        replies: list[str] = []
+        while True:
+            depth = api.get_stack_depth(conversation_id)
+            replies += self._tick(conversation_id, None)
+            refused = conversation_id in self._refused
+            self._refused.discard(conversation_id)
+            if not (
+                (refused or api.get_stack_depth(conversation_id) < depth)
+                and not api.has_conversation_ended(conversation_id)
+            ):
+                return replies
             replies.append(api.advance(conversation_id).response or "")
-        return replies
+            if not api.has_conversation_ended(conversation_id):
+                return replies
 
     # --- start and finish a run -------------------------------------------
 
