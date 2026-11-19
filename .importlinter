@@ -370,6 +370,7 @@ name = fsm_llm.engine classification and session import no engine peer
 type = forbidden
 source_modules =
     fsm_llm.engine.classification
+    fsm_llm.engine.intent_router
     fsm_llm.engine.session
 forbidden_modules =
     fsm_llm.engine.api
@@ -392,6 +393,7 @@ forbidden_modules =
     fsm_llm.engine.builders
     fsm_llm.engine.classification
     fsm_llm.engine.fsm
+    fsm_llm.engine.intent_router
     fsm_llm.engine.kinds
     fsm_llm.engine.session
     fsm_llm.engine.turn
@@ -404,6 +406,7 @@ source_modules =
     fsm_llm.engine.builders
     fsm_llm.engine.classification
     fsm_llm.engine.fsm
+    fsm_llm.engine.intent_router
     fsm_llm.engine.kinds
     fsm_llm.engine.session
     fsm_llm.engine.turn

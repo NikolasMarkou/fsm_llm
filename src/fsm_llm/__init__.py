@@ -144,9 +144,9 @@ from .engine.classification import (
     Classifier,
     HandlerFn,
     HierarchicalClassifier,
-    IntentRouter,
 )
 from .engine.fsm.manager import FSMManager
+from .engine.intent_router import IntentRouter
 
 # --------------------------------------------------------------
 # Session Persistence

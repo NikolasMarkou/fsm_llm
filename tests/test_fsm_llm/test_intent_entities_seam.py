@@ -31,7 +31,7 @@ from fsm_llm.core.definitions import (
     IntentScore,
     MultiClassificationResult,
 )
-from fsm_llm.engine.classification import IntentRouter
+from fsm_llm.engine.intent_router import IntentRouter
 
 # ---------------------------------------------------------------------------
 # Helpers
