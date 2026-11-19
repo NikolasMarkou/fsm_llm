@@ -15,8 +15,10 @@ import ast
 import inspect
 import subprocess
 import sys
+import threading
+from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
@@ -26,10 +28,13 @@ from fsm_llm import API
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
+    DataExtractionResponse,
     FieldExtractionRequest,
+    FieldExtractionResponse,
     FSMDefinition,
     LLMResponseError,
     ResponseGenerationRequest,
+    ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.testing import MockLLM2Interface, PromptGroundedLLM
@@ -487,3 +492,83 @@ class TestNoNetworkNoPytest:
 
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "ok"
+
+
+# --- the async twins (plan 51fde95b, step 5) --------------------------------------
+
+_TWINS = {  # sync name -> a request that every double below can take
+    "complete": lambda: CompletionRequest(messages=[{"role": "user", "content": "hi"}]),
+    "generate_response": lambda: _reply(),
+    "extract_field": lambda: _field(),
+    "extract_bulk_data": lambda: _bulk('"city"'),
+}
+
+
+class _SyncOnly(LLMInterface):
+    """Implements the sync methods only, and notes the thread each one ran on."""
+
+    def __init__(self) -> None:
+        self.threads: dict[str, int] = {}
+        self.closed = threading.Event()
+
+    def complete(self, request: CompletionRequest) -> Any:
+        self.threads["complete"] = threading.get_ident()
+        return "completed"
+
+    def generate_response(self, request: ResponseGenerationRequest) -> Any:
+        self.threads["generate_response"] = threading.get_ident()
+        return ResponseGenerationResponse(message="m", message_type="response")
+
+    def extract_field(self, request: FieldExtractionRequest) -> Any:
+        self.threads["extract_field"] = threading.get_ident()
+        return FieldExtractionResponse(field_name=request.field_name, value="v")
+
+    def extract_bulk_data(self, request: BulkExtractionRequest) -> Any:
+        self.threads["extract_bulk_data"] = threading.get_ident()
+        return DataExtractionResponse(extracted_data={"k": 1})
+
+    def generate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> Iterator[str]:
+        try:
+            for chunk in "abc":
+                self.threads["stream"] = threading.get_ident()
+                yield chunk
+        finally:
+            self.closed.set()
+
+
+class TestAsyncDefaults:
+    @pytest.mark.parametrize("name", sorted(_TWINS))
+    async def test_a_sync_only_interface_runs_on_a_worker_thread(
+        self, name: str
+    ) -> None:
+        llm, request = _SyncOnly(), _TWINS[name]()
+        result = await getattr(llm, f"a{name}")(request)
+        assert llm.threads[name] != threading.get_ident()
+        assert result == getattr(_SyncOnly(), name)(request)
+
+    async def test_the_stream_default_steps_on_workers_and_closes_on_early_exit(
+        self,
+    ) -> None:
+        llm, request = _SyncOnly(), _reply()
+        assert [c async for c in llm.agenerate_response_stream(request)] == list("abc")
+        assert llm.threads["stream"] != threading.get_ident()
+        assert llm.closed.is_set()
+        llm = _SyncOnly()
+        stream = llm.agenerate_response_stream(request)
+        assert await anext(stream) == "a"
+        assert not llm.closed.is_set()
+        await stream.aclose()
+        assert llm.closed.is_set()  # the sync generator ran its finally
+
+    async def test_the_unimplemented_sync_methods_still_raise_through_the_twins(
+        self,
+    ) -> None:
+        class Bare(LLMInterface):
+            def generate_response(self, request: Any) -> Any:
+                raise AssertionError("unused")
+
+        for name in ("complete", "extract_field", "extract_bulk_data"):
+            with pytest.raises(NotImplementedError):
+                await getattr(Bare(), f"a{name}")(_TWINS[name]())

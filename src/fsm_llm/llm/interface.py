@@ -7,11 +7,14 @@ Layer ``llm`` (plan d454fd62, step 73): split out of the old ``fsm_llm/llm/__ini
 from __future__ import annotations
 
 import abc
+import asyncio
 import json
 import os
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Iterator, Mapping, Sequence
+from contextlib import aclosing
 from typing import Any
 
+from fsm_llm.aio import aiterate
 from fsm_llm.constants import ENV_LLM_MODEL, MALFORMED_TOOL_CALL_MARKERS
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
@@ -451,6 +454,17 @@ class LLMInterface(abc.ABC):
     ``complete`` request primitive (tool calling, plain and structured completion),
     allowing implementations to optimize for different use cases. Transitions are
     decided by rules, never by a method here.
+
+    Async twins (``acomplete``, ``agenerate_response``, ``agenerate_response_stream``,
+    ``aextract_field``, ``aextract_bulk_data``) are not abstract: the default of each runs
+    the sync method on a worker thread (``asyncio.to_thread``; the stream steps its
+    generator one ``next`` per worker call and closes it on early exit). A cancelled await
+    returns at once but does NOT stop that thread, which runs the call to its end, so a
+    late result can land after the caller gave up. An interface that implements only the
+    ``a*`` methods cannot serve sync callers: the sync methods stay the abstract or
+    ``NotImplementedError`` ones. ``LiteLLMInterface`` and the ``fsm_llm.testing`` doubles
+    override the twins natively. A ``Mock(spec=LLMInterface)`` needs an ``AsyncMock`` for
+    each ``a*`` method it should answer.
     """
 
     @abc.abstractmethod
@@ -586,3 +600,38 @@ class LLMInterface(abc.ABC):
             f"{type(self).__name__} does not implement complete. "
             "Override this method to support completion requests."
         )
+
+    async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
+        """The async twin of ``complete``: the default runs it on a worker thread."""
+        return await asyncio.to_thread(self.complete, request)
+
+    async def agenerate_response(
+        self, request: ResponseGenerationRequest
+    ) -> ResponseGenerationResponse:
+        """The async twin of ``generate_response``: the default runs it on a worker thread."""
+        return await asyncio.to_thread(self.generate_response, request)
+
+    async def agenerate_response_stream(
+        self, request: ResponseGenerationRequest
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``generate_response_stream``.
+
+        The default steps the sync generator one ``next`` per worker-thread call and
+        closes it when the consumer stops early (``aclose``) or the stream ends.
+        """
+        chunks = await asyncio.to_thread(self.generate_response_stream, request)
+        async with aclosing(aiterate(chunks)) as steps:
+            async for chunk in steps:
+                yield chunk
+
+    async def aextract_field(
+        self, request: FieldExtractionRequest
+    ) -> FieldExtractionResponse:
+        """The async twin of ``extract_field``: the default runs it on a worker thread."""
+        return await asyncio.to_thread(self.extract_field, request)
+
+    async def aextract_bulk_data(
+        self, request: BulkExtractionRequest
+    ) -> DataExtractionResponse:
+        """The async twin of ``extract_bulk_data``: the default runs it on a worker thread."""
+        return await asyncio.to_thread(self.extract_bulk_data, request)

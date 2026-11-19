@@ -371,6 +371,11 @@ fsm_llm.LLMCallCounts class(BaseModel)
   field completion_tokens: int = 0
   field total_tokens: int = 0
 fsm_llm.LLMInterface class(ABC)
+  def acomplete(self, request: CompletionRequest) -> CompletionResponse
+  def aextract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
+  def aextract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
+  def agenerate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse
+  def agenerate_response_stream(self, request: ResponseGenerationRequest) -> AsyncGenerator[str, None]
   def complete(self, request: CompletionRequest) -> CompletionResponse
   def extract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse
   def extract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse
