@@ -125,6 +125,16 @@ export async function showConversationDetail(convId) {
             html += '<div class="panel-title panel-title-spaced">Last Response Generation (Pass 2)</div>';
             html += `<div class="llm-data-panel response">${renderLLMData(data.last_response)}</div>`;
         }
+        if (data.cut_off) {
+            const cut = [data.cut_off.reply ? 'reply' : '', ...(data.cut_off.fields || [])].filter(Boolean);
+            html += `<div class="ended-indicator text-error">Cut off at max_tokens: ${esc(cut.join(', '))}</div>`;
+        }
+        for (const [key, title] of [['classification_results', 'Classification Results'], ['transition_classification', 'Transition Classifier (tie)']]) {
+            if (data[key] && Object.keys(data[key]).length > 0) {
+                html += `<div class="panel-title panel-title-spaced">${title}</div>`;
+                html += `<div class="llm-data-panel transition">${renderLLMData(data[key])}</div>`;
+            }
+        }
 
         // Always render the chat log so a send has somewhere to append to,
         // even before the first message.

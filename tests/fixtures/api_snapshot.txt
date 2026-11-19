@@ -1292,6 +1292,9 @@ fsm_llm.monitor.ConversationSnapshot class(BaseModel)
   field last_extraction: dict[str, Any] | None = None
   field last_transition: dict[str, Any] | None = None
   field last_response: dict[str, Any] | None = None
+  field classification_results: dict[str, Any] | None = None
+  field transition_classification: dict[str, Any] | None = None
+  field cut_off: dict[str, Any] | None = None
 fsm_llm.monitor.DEFAULT_LOG_LEVEL = 'INFO'
 fsm_llm.monitor.DEFAULT_MAX_EVENTS = 1000
 fsm_llm.monitor.DEFAULT_MAX_LOG_LINES = 5000

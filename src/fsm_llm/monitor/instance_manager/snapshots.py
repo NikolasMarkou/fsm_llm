@@ -11,6 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.constants import (
+    METADATA_KEY_CLASSIFICATION_RESULTS,
+    METADATA_KEY_TRANSITION_CLASSIFICATION,
+)
+from fsm_llm.core.definitions import CONTEXT_KEY_CUT_OFF
 from fsm_llm.logging import logger
 
 from ..collector import redact_context
@@ -25,6 +30,22 @@ from ..definitions import (
 )
 from .managed import ManagedAgent, ManagedFSM, ManagedWorkflow
 from .surface import _InstanceSurface
+
+
+def _cut_off(raw_context: dict[str, Any]) -> dict[str, Any] | None:
+    """The last turn's cut-off record as ``{reply, fields}`` (names capped), or
+    None. Read from the RAW context: the key is internal, so ``redact_context``
+    would drop it."""
+    record = raw_context.get(CONTEXT_KEY_CUT_OFF)
+    if not isinstance(record, dict):
+        return None
+    fields = record.get("fields")
+    return {
+        "reply": record.get("reply") is True,
+        "fields": [str(f)[:100] for f in fields[:20]]
+        if isinstance(fields, list)
+        else [],
+    }
 
 
 def snapshot_from_api(
@@ -47,6 +68,8 @@ def snapshot_from_api(
             return None
         current_state = complete.get("current_state", {})
         context_data = complete.get("collected_data", {})
+        cut_off = _cut_off(context_data)
+        metadata = complete.get("metadata") or {}
         # DECISION plan-2026-07-20T040150-876e7164/D-003 [STALE]
         # This is the CONFIRMED leak: `show_internal_keys=False` is the
         # dashboard's "hide it" knob, and the old `k.startswith("_")` here
@@ -77,6 +100,13 @@ def snapshot_from_api(
             last_extraction=_redacted(complete.get("last_extraction_response")),
             last_transition=_redacted(complete.get("last_transition_decision")),
             last_response=_redacted(complete.get("last_response_generation")),
+            classification_results=_redacted(
+                metadata.get(METADATA_KEY_CLASSIFICATION_RESULTS)
+            ),
+            transition_classification=_redacted(
+                metadata.get(METADATA_KEY_TRANSITION_CLASSIFICATION)
+            ),
+            cut_off=cut_off,
         )
     except Exception as e:
         logger.debug(f"Failed to get conversation snapshot for {conversation_id}: {e}")

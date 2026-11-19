@@ -228,3 +228,13 @@ class TestUsageTiles:
         out = probe("usage_tiles")
         assert out["withUsage"] == {"display": "", "tiles": ["7", "12", "2"]}
         assert out["without"]["display"] == "none"
+
+
+class TestConversationSignals:
+    """Plan 51fde95b step 12.3a: the drawer shows the cut-off flag and the classifier records."""
+
+    def test_the_drawer_shows_them_escaped_and_only_when_present(self, probe):
+        out = probe("conv_signals")
+        assert out["none"] == [False, False, False]
+        assert out["some"] == [True, True, True, True]
+        assert out["raw_tags"] is False

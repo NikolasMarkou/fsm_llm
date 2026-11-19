@@ -125,6 +125,14 @@ class ConversationSnapshot(BaseModel):
     last_extraction: dict[str, Any] | None = None
     last_transition: dict[str, Any] | None = None
     last_response: dict[str, Any] | None = None
+    # Latest classification record per field, and the ambiguous-transition
+    # classifier record of the last turn (both through ``redact_context``)
+    classification_results: dict[str, Any] | None = None
+    transition_classification: dict[str, Any] | None = None
+    # ``{reply: bool, fields: [name]}`` when the last turn's reply or an
+    # extraction was cut at ``max_tokens`` (the internal ``_cut_off`` key,
+    # read before the internal keys are dropped); None when nothing was cut
+    cut_off: dict[str, Any] | None = None
 
 
 class ActivityItem(BaseModel):
