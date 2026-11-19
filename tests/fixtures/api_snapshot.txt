@@ -1635,6 +1635,7 @@ fsm_llm.synthesis.FSMLibrary class
   static def clean_scenarios(value: object) -> list[dict[str, Any]]
   def count_lineage(self, digest: str) -> int
   def deprecate(self, digest: str, *, keep_trusted: bool = False) -> LibraryRecord
+  def ensure_verified(self, digest: str) -> LibraryRecord
   def get_definition(self, digest: str) -> FSMDefinition
   def get_record(self, digest: str) -> LibraryRecord
   def put(self, definition: FSMDefinition, *, goal: str, inputs_required: Sequence[str], return_keys: Sequence[str], synthesizing_model: str = '', gates_passed: Sequence[str] = (), approved_by: str | None = None, lifecycle: str = 'draft', parent: str | None = None, parent_run: str | None = None, repair: str | None = None, replay: str | None = None) -> LibraryRecord
