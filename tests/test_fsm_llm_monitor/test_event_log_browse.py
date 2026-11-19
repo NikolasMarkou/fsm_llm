@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from types import SimpleNamespace
@@ -309,7 +310,7 @@ class TestNoWholeDirectoryWorkPerPage:
             eventlog.os, "lstat", lambda p, *a, **k: (lstats.append(str(p)), real(p))[1]
         )
         assert client.get("/api/eventlog/aa").status_code == 200
-        assert [p.rsplit("/", 1)[1] for p in lstats] == ["aa.jsonl"]
+        assert [os.path.basename(p) for p in lstats] == ["aa.jsonl"]
 
     def test_the_list_stops_checking_at_its_cap(self, tmp_path, monkeypatch):
         log = _long_log(tmp_path, count=1, name="aa")

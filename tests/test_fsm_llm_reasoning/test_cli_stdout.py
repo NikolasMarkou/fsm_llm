@@ -113,9 +113,8 @@ class TestEveryErrorIsOneStderrLine:
         [
             ("fail", (), "error: engine exploded"),
             ("interrupt", (), "interrupted by user"),
-            ("ok", ("--save", "/dev/null/x/out.txt"), "error:"),
         ],
-        ids=["failed-solve", "ctrl-c", "failed-save"],
+        ids=["failed-solve", "ctrl-c"],
     )
     def test_one_line_and_no_logger_record(self, mode, argv, text) -> None:
         completed = self._run(mode, *argv)
@@ -124,3 +123,15 @@ class TestEveryErrorIsOneStderrLine:
         assert len(lines) == 1, completed.stderr
         assert lines[0].startswith("python -m fsm_llm.reasoning: ")
         assert text in lines[0] and "ERROR" not in lines[0] and "|" not in lines[0]
+
+    def test_a_failed_save_is_one_line_too(self, tmp_path) -> None:
+        # A parent that is a regular file cannot be a directory on any platform
+        # (``/dev/null/x`` is a writable path on Windows).
+        blocker = tmp_path / "blocker"
+        blocker.write_text("x")
+        completed = self._run("ok", "--save", str(blocker / "x" / "out.txt"))
+        lines = [ln for ln in completed.stderr.splitlines() if ln.strip()]
+        assert completed.returncode == 1, completed.stderr
+        assert len(lines) == 1, completed.stderr
+        assert lines[0].startswith("python -m fsm_llm.reasoning: ")
+        assert "error:" in lines[0] and "ERROR" not in lines[0] and "|" not in lines[0]
