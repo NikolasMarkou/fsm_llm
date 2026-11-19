@@ -12,6 +12,7 @@ import itertools
 import json
 import re
 import sys
+import threading
 import types
 from pathlib import Path
 from typing import Any
@@ -740,6 +741,56 @@ class TestObtainLibrary:
             synth.obtain(GOAL, return_keys=RET)
         assert err.value.code == "lifecycle_too_low" and len(llm.requests) == 2
         assert synth.library.get_record(digest).lifecycle == "deprecated"
+
+    def test_a_deprecated_digest_is_refused_before_the_reviewer_and_stays_as_stored(
+        self, tmp_path, valid_fsm
+    ):
+        asked: list[Any] = []
+        first, _ = _obtainer(tmp_path, [_text(valid_fsm)])
+        digest = first.obtain(GOAL, return_keys=RET).digest
+        first.library.deprecate(digest)
+        path = first.library._path("records", digest)
+        before = path.read_bytes()
+        policy = SynthesisPolicy(require_approval=True)
+        synth, _ = _obtainer(
+            tmp_path,
+            [_text(valid_fsm)],
+            library=first.library,
+            policy=policy,
+            reviewer=lambda request: asked.append(request) or True,
+        )
+        with pytest.raises(SynthesisRefusedError) as err:
+            synth.obtain(GOAL, return_keys=RET)
+        assert err.value.code == "lifecycle_too_low" and asked == []
+        assert path.read_bytes() == before
+
+    @pytest.mark.parametrize("move", ["verify", "deprecate"])
+    def test_a_concurrent_move_after_put_is_not_an_illegal_edge(
+        self, tmp_path, valid_fsm, move
+    ):
+        """draft -> verified is one lock hold: a writer that moves the record
+        between `put` and the promotion changes the outcome, never raises."""
+        first, _ = _obtainer(tmp_path / "a", [_text(valid_fsm)])
+        definition = first.obtain(GOAL, return_keys=RET).definition
+        synth, _ = _obtainer(tmp_path / "b", [_text(valid_fsm)])
+        lib, real_put = synth.library, synth.library.put
+        lib.put(definition, goal=GOAL, inputs_required=[], return_keys=RET)
+
+        def put_then_race(*args: Any, **kwargs: Any) -> Any:
+            record = real_put(*args, **kwargs)
+            worker = threading.Thread(target=getattr(lib, move), args=(record.digest,))
+            worker.start()
+            worker.join()
+            return record
+
+        lib.put = put_then_race  # type: ignore[method-assign]
+        if move == "deprecate":
+            with pytest.raises(SynthesisRefusedError) as err:
+                synth.obtain(GOAL, return_keys=RET)
+            assert err.value.code == "lifecycle_too_low"
+        else:
+            proc = synth.obtain(GOAL, return_keys=RET)
+            assert proc.record is not None and proc.record.lifecycle == "verified"
 
     @pytest.mark.parametrize(
         "kw",

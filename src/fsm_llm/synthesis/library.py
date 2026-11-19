@@ -345,7 +345,8 @@ class FSMLibrary:
 
         Idempotent: the same digest returns the existing record unchanged
         (``approved_by`` is only added when the record has no approver, and
-        ``gates_passed`` only gains gates it lacks). A
+        ``gates_passed`` only gains gates it lacks; a ``deprecated`` record is
+        history and is returned as stored, byte for byte). A
         different digest is a new entry; with ``parent`` (the digest of the
         definition it repairs, which must exist) the minor version is parent's
         plus one, else ``1.0``. ``repair`` (a patch digest) and ``replay``
@@ -362,6 +363,8 @@ class FSMLibrary:
             if self._read_definition(digest) is None:
                 self._write(self._path("definitions", digest), text)
             who = approved_by and capped_line(approved_by, _LABEL_CHARS)
+            if old is not None and old.lifecycle == LIFECYCLE_DEPRECATED:
+                return old
             if old is not None:
                 added: dict[str, str | list[str] | None] = {}
                 if who and not old.provenance["approved_by"]:
@@ -430,6 +433,19 @@ class FSMLibrary:
     def verify(self, digest: str) -> LibraryRecord:
         """``draft -> verified``."""
         return self._update(digest, lambda r: self._moved(r, LIFECYCLE_VERIFIED))
+
+    def ensure_verified(self, digest: str) -> LibraryRecord:
+        """The record, a ``draft`` moved to ``verified`` inside ONE lock hold and
+        any other lifecycle returned unchanged, so a concurrent ``verify``,
+        ``approve`` or ``deprecate`` never makes it raise an illegal edge."""
+        return self._update(
+            digest,
+            lambda r: (
+                self._moved(r, LIFECYCLE_VERIFIED)
+                if r.lifecycle == LIFECYCLE_DRAFT
+                else r
+            ),
+        )
 
     def approve(self, digest: str, by: str) -> LibraryRecord:
         """``verified -> trusted``, recording who approved (a non-blank name)."""

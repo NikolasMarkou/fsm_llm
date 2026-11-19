@@ -62,14 +62,13 @@ from .constants import (
     CODE_SIMULATION_INCOMPLETE,
     GATE_SIMULATION,
     LIFECYCLE_DEPRECATED,
-    LIFECYCLE_DRAFT,
     LIFECYCLE_VERIFIED,
     REASON_APPROVAL_DENIED,
     REASON_APPROVAL_REQUIRED,
     REASON_LIFECYCLE_TOO_LOW,
     REASON_REVIEWER_ERROR,
 )
-from .exceptions import SynthesisError, SynthesisRefusedError
+from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import (
     GATES,
     GateFinding,
@@ -185,6 +184,14 @@ def _spent(after: LLMUsage | None, before: LLMUsage) -> LLMUsage:
             for name in LLMCallCounts.model_fields
         }
     )
+
+
+def _refuse_deprecated(record: LibraryRecord) -> None:
+    """``lifecycle_too_low`` for a stored ``deprecated`` record (nothing leaves it)."""
+    if record.lifecycle == LIFECYCLE_DEPRECATED:
+        raise SynthesisRefusedError(
+            "the compile reproduced a deprecated procedure", REASON_LIFECYCLE_TOO_LOW
+        )
 
 
 def _approval_request(
@@ -469,6 +476,13 @@ class FSMSynthesizer:
                     )
         result = self.compile(goal, inputs=ins, return_keys=keys)
         digest = digest_of(result.definition)
+        if library is not None:
+            # a deprecated digest is refused BEFORE the reviewer is asked and
+            # before `put` could touch the record
+            try:
+                _refuse_deprecated(library.get_record(digest))
+            except LibraryError:
+                pass  # absent (or corrupt: `put` raises it below)
         approver = self.approval(goal, keys, result)
         saved: LibraryRecord | None = None
         if library is not None:
@@ -486,15 +500,11 @@ class FSMSynthesizer:
             )
             # `put` is idempotent: a digest stored earlier keeps its lifecycle,
             # so the record may be older than this compile. A draft is verified
-            # (the compile just passed every gate), a deprecated one stays
-            # deprecated and is refused, never returned as a ready procedure.
-            if saved.lifecycle == LIFECYCLE_DEPRECATED:
-                raise SynthesisRefusedError(
-                    "the compile reproduced a deprecated procedure",
-                    REASON_LIFECYCLE_TOO_LOW,
-                )
-            if saved.lifecycle == LIFECYCLE_DRAFT:
-                saved = library.verify(digest)
+            # in one lock hold (the compile just passed every gate), a
+            # deprecated one stays deprecated and is refused, never returned as
+            # a ready procedure (also when it was deprecated since the check).
+            saved = library.ensure_verified(digest)
+            _refuse_deprecated(saved)
             if result.simulation is not None and result.simulation.scenarios:
                 library.add_scenarios(digest, result.simulation.scenarios)
         return Procedure(

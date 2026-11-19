@@ -133,6 +133,35 @@ class TestPut:
         assert lib.get_record(first.digest) == more
         assert _put(lib, gates_passed=["G1"]) == more  # nothing to add, unchanged
 
+    def test_a_deprecated_record_is_history_and_put_leaves_it_byte_identical(
+        self, lib: FSMLibrary
+    ):
+        first = _put(lib, lifecycle="verified", gates_passed=["G1"])
+        lib.deprecate(first.digest)
+        path = lib._path("records", first.digest)
+        before = path.read_bytes()
+        again = _put(lib, approved_by="late", gates_passed=["G1", "G2"])
+        assert (
+            again.lifecycle == "deprecated" and again.provenance["approved_by"] is None
+        )
+        assert path.read_bytes() == before
+
+    @pytest.mark.parametrize(
+        ("start", "end"),
+        [("draft", "verified"), ("verified", "verified"), ("trusted", "trusted")],
+    )
+    def test_ensure_verified_moves_only_a_draft(
+        self, lib: FSMLibrary, start: str, end: str
+    ):
+        digest = _put(lib).digest
+        if start != "draft":
+            lib.verify(digest)
+        if start == "trusted":
+            lib.approve(digest, "someone")
+        assert lib.ensure_verified(digest).lifecycle == end
+        lib.deprecate(digest)
+        assert lib.ensure_verified(digest).lifecycle == "deprecated"
+
     def test_parent_bumps_minor_and_must_exist(self, lib: FSMLibrary):
         parent = _put(lib)
         child = _put(lib, "Fixed", parent=parent.digest)
