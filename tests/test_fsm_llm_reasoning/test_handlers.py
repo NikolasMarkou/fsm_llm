@@ -133,6 +133,26 @@ class TestValidateSolution:
         assert result[ContextKeys.VALIDATION_CHECKS]["addresses_problem"] is True
 
 
+class TestNonStrProblemStatement:
+    """A non-str problem_statement reads as empty (the validator is critical,
+    D-058, so a raise would stop the solve), as a non-str problem_type does."""
+
+    @pytest.mark.parametrize("statement", [42, 3.5, None, ["a b"], {"a": 1}])
+    def test_the_validator_reads_it_as_empty(self, statement):
+        context = {
+            ContextKeys.PROPOSED_SOLUTION: "x" * 50,
+            ContextKeys.KEY_INSIGHTS: ["i"],
+        }
+        expected = ReasoningHandlers.validate_solution(
+            {**context, ContextKeys.PROBLEM_STATEMENT: ""}
+        )
+        result = ReasoningHandlers.validate_solution(
+            {**context, ContextKeys.PROBLEM_STATEMENT: statement}
+        )
+        assert result == expected
+        assert result[ContextKeys.VALIDATION_CHECKS]["addresses_problem"] is True
+
+
 class TestCountHybridLoop:
     """ReasoningHandlers.count_hybrid_loop counts critical_evaluation exits."""
 

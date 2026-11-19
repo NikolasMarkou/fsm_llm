@@ -196,6 +196,8 @@ class ReasoningHandlers:
         # words like "the", "is", "a" cause near-universal overlap.
         addresses_problem: bool
         problem_statement = context.get(ContextKeys.PROBLEM_STATEMENT, "")
+        if not isinstance(problem_statement, str):  # reads as "", as D-061 above
+            problem_statement = ""
         if has_solution and problem_statement and not is_simple_problem:
 
             def _content_words(text: str) -> set[str]:

@@ -96,6 +96,7 @@ Findings of six external audits of the engine, core, runtime, synthesis, monitor
 - `apply_patch(..., scope_states=)` answers `bad-scope`, as for a bare string, for `bytes` and for any iterable with a name that is not a `str` (they were reported `out-of-scope`, still refused); the `FSMSynthesizer` module docstring no longer names schema version 4.1 (plan 51fde95b, second synthesis audit).
 - `--verb`, an argparse abbreviation of `--verbose`, now also prints the traceback of an unexpected failure of the reasoning CLI: the decision read `sys.argv` for the exact spelling and ignored the parsed flag (plan 51fde95b, reasoning audit X1).
 - `ReasoningHandlers.prune_context` keeps the first 5 and the last 5 steps of `reasoning_trace` (the rule `update_reasoning_trace` already used past 50 steps) instead of the last 10: with a context over 8000 characters a retried solve lost its first step, which lowered `total_steps` and the reasoning types read from the trace. The other pruned lists keep their last 10 (plan 51fde95b, reasoning audit R2).
+- `ReasoningHandlers.validate_solution` reads a non-`str` `problem_statement` (a number, a list, a dict in the context) as empty, as it already did for `problem_type`, instead of raising `AttributeError` from the critical validator and failing the solve after its model calls (plan 51fde95b, reasoning audit R4).
 
 ## [0.13.0] - 2026-11-16
 
