@@ -408,7 +408,7 @@ The core is built in layers, and a layer imports only the rows below it (the con
   context  okf  skills      independent siblings
   llm         LLMInterface, LiteLLMInterface: the one litellm import
   core        definitions, JsonLogic expressions, validator, diagrams
-  kernel      constants, logging, security, text, env, frontmatter, memory
+  kernel      aio, constants, logging, security, text, env, frontmatter, memory
 ```
 
 Maturity differs by subpackage: reasoning, agents and synthesis are tested offline against scripted models, so live behavior depends on the model; the `eval` scores are a heuristic that overstates quality; `monitor` needs the `monitor` extra. Each [per-package README](#in-depth-documentation) lists its known limits.

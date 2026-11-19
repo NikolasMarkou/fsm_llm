@@ -299,7 +299,17 @@ class LLMInterface(ABC):
 
     # Same default (NotImplementedError). Needed for classification and completion states.
     def complete(self, request: CompletionRequest) -> CompletionResponse: ...
+
+    # Async twins (the async twin of `x` is `ax`), none abstract. The default runs the sync
+    # method on a worker thread; LiteLLMInterface and the fsm_llm.testing doubles override them.
+    async def acomplete(self, request: CompletionRequest) -> CompletionResponse: ...
+    async def agenerate_response(self, request: ResponseGenerationRequest) -> ResponseGenerationResponse: ...
+    async def agenerate_response_stream(self, request: ResponseGenerationRequest) -> AsyncGenerator[str, None]: ...  # an async generator
+    async def aextract_field(self, request: FieldExtractionRequest) -> FieldExtractionResponse: ...
+    async def aextract_bulk_data(self, request: BulkExtractionRequest) -> DataExtractionResponse: ...
 ```
+
+The default twin of a sync-only interface runs the sync method on a worker thread (`asyncio.to_thread`; the stream steps its generator one `next` per worker call and closes it when the reader stops early). A cancelled await returns at once but does not stop that thread, so a late result can land after the caller gave up (the cancel hazard); an interface that implements only the `a*` methods cannot serve sync callers. `LiteLLMInterface` implements the twins natively over `acompletion`: the async body is the one body and the sync name is the thin `fsm_llm.aio.run_sync` wrapper over it (a stream: `iterate_sync`), so a sync caller needs no event loop and a patch of `fsm_llm.llm.providers.litellm.completion` still intercepts the sync names. A request cancelled in flight is reported to the request observer and counted on the meter as an error. A `LiteLLMInterface` subclass that overrides a sync twin without its async twin gets a `RuntimeWarning` (an async caller reaches the inherited native twin). A `Mock(spec=LLMInterface)` has the twins too: use an `AsyncMock` for one that is awaited. `fsm_llm.aio` (a kernel module, loaded by `import fsm_llm`) is for interface authors: `run_sync(coroutine)`, `iterate_sync(async_generator)`, `aiterate(source)`, `acall(obj, "name", *args)` (calls the sync method in sync mode, awaits the `a` twin in async mode) and the `SYNC` flag; a coroutine that really suspends under `run_sync` raises `SuspendedInSyncModeError`.
 
 `CompletionRequest{messages, tools=None, tool_choice=None, response_format=None, temperature=None, max_tokens=None, call_type="completion"}` (frozen, unknown fields refused): `tools` (OpenAI function schemas) and `response_format` never together, `tool_choice` only with `tools`; `None` temperature/max_tokens keep the interface's. `CompletionResponse{kind, text, calls, finish_reason=None}` (frozen): `kind` is `"calls"`, `"final"` or `"malformed"`, `calls` a tuple of `ModelToolCall{id, name, arguments: dict}`, `finish_reason` the provider's own reason the reply ended (`stop`, `length`, `tool_calls`, ... or `None` when it sent none) and `truncated` a property, true when it is `"length"` (the reply was cut off at `max_tokens`; `text` and the call arguments may be a fragment, a cut call may come back `malformed`). A non-streamed cut reply is logged as one WARNING by `LiteLLMInterface` (model, call type, the `max_tokens` in force); a streamed reply is not read. The completion-state result written to `result_key` stays `{kind, text, calls}`. A tool call without an id or name, or whose arguments are not a JSON object, and a provider "malformed tool call" error, give `kind="malformed"` with no calls. Every other failure raises `LLMResponseError`.
 
@@ -319,6 +329,7 @@ llm.usage()          # LLMUsage{calls, errors, usage_missing, prompt/completion/
 llm.reset_usage()    # returns the snapshot and starts counting from zero (a marker moves, history is kept)
 
 vectors = LiteLLMEmbedder("ollama/embeddinggemma-2:740m").embed(["a", "b"])  # one request
+# in async code: vectors = await embedder.aembed(["a", "b"])  (embed is the run_sync wrapper over it)
 ```
 
 Usage counters count every provider call of that instance once, per kind (`generate`, `extract`, `classify`, `stream`, `complete`; `embed` for the embedder): a raising call counts as a call and an error, a streamed call with usage missing. `LiteLLMEmbedder(model, *, api_key=None, timeout=120.0, retries=0, **kwargs)` has its own model, credentials and counters; no texts means no request and `[]`; a missing, uneven or non-finite vector raises `LLMResponseError`. The default embedder (`DEFAULT_EMBEDDING_MODEL`, `ollama/embeddinggemma-2:740m`) returns 768-dimensional vectors; a legacy `SemanticMemoryStore` file with no recorded `embedding_model` therefore loads with it and `search`/`recall` silently stop matching by meaning (older vectors all score 0.0; only substring matches rank): re-embed it, or pass `embedding_model=` of the model that produced them to `SemanticMemoryStore.from_dict`.
@@ -441,6 +452,10 @@ The `ClassificationResult.is_below_default_threshold` property compares against 
 ```python
 # Multi-intent
 result = classifier.classify_multi("Check order and update billing")
+
+# Async: aclassify, aclassify_multi (and HierarchicalClassifier.aclassify) are the one bodies;
+# the sync names are run_sync wrappers, so a patched `_call_llm` or `complete` still intercepts them
+result = await classifier.aclassify("I want to buy a laptop")
 
 # Hierarchical (two-stage domain -> intent, for >15 intents)
 from fsm_llm import HierarchicalClassifier, HierarchicalSchema
