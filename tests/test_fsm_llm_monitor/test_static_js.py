@@ -30,7 +30,7 @@ def probe(tmp_path_factory):
     if _NODE is None:
         pytest.skip("node is not installed")
     root = tmp_path_factory.mktemp("monitor_js")
-    (root / "package.json").write_text('{"type": "module"}')
+    (root / "package.json").write_text('{"type": "module"}', encoding="utf-8")
     shutil.copytree(
         _STATIC,
         root / "static",
@@ -46,7 +46,7 @@ def probe(tmp_path_factory):
         done = subprocess.run(
             [_NODE, "--no-warnings", str(root / "probes" / f"{name}.mjs")],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=60,
             cwd=root,
         )
