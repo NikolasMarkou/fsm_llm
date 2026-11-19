@@ -3,9 +3,11 @@
 Layer ``engine`` (plan d454fd62, step 81): the old top-level ``fsm_llm.api``, split into this
 package; the old dotted path is gone. Modules:
 
-- ``conversation.py``: ``API``, the shell (constructor, factories, ``start_conversation``, the
-  turn entries ``converse`` and ``advance`` with their streams, handler registration, ``close``),
-  composed of the four mixins below.
+- ``conversation.py``: ``API``, the shell (constructor, factories, ``close``), composed of the
+  mixins below.
+- ``turn_entries.py``: ``TurnEntriesMixin``, ``start_conversation``, the turn entries
+  ``converse`` and ``advance`` with their streams, and the two helpers every entry shares
+  (``_turn_errors``, ``_auto_save_session``).
 - ``run.py``: ``RunMixin``, ``run_until_terminal`` and its stream, the budgets and the
   ``before_step`` hook rounds.
 - ``stack.py``: ``StackMixin``, ``push_fsm``, ``pop_fsm``, the context merge, the top-of-stack

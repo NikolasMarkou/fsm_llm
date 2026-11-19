@@ -267,7 +267,7 @@
       "FSMStackFrame": "fsm_llm.engine.api.stack",
       "MAX_ENDED_CONVERSATIONS_CACHE": "fsm_llm.engine.api.lifecycle",
       "_ReadT": "fsm_llm.engine.api.helpers",
-      "_auto_save_session": "fsm_llm.engine.api.conversation",
+      "_auto_save_session": "fsm_llm.engine.api.turn_entries",
       "_check_exempt_states": "fsm_llm.engine.api.run",
       "_check_run_budgets": "fsm_llm.engine.fsm.budget",
       "_closed_conversation_ends_run": "fsm_llm.engine.api.run",
@@ -277,7 +277,7 @@
       "_run_rounds": "fsm_llm.engine.api.run",
       "_seconds_exempt_set": "fsm_llm.engine.api.run",
       "_stack_depth": "fsm_llm.engine.api.run",
-      "_turn_errors": "fsm_llm.engine.api.conversation",
+      "_turn_errors": "fsm_llm.engine.api.turn_entries",
       "_unexpected_error": "fsm_llm.engine.api.helpers",
       "handle_conversation_errors": "fsm_llm.engine.api.helpers",
       "llm_settings_for": "fsm_llm.engine.api.helpers"

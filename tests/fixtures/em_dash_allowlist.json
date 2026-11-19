@@ -49,7 +49,7 @@
  "src/fsm_llm/core/visualize/ascii_layout.py": 8,
  "src/fsm_llm/core/visualize/ascii_render.py": 2,
  "src/fsm_llm/core/visualize/shapes.py": 1,
- "src/fsm_llm/engine/api/conversation.py": 3,
+ "src/fsm_llm/engine/api/conversation.py": 1,
  "src/fsm_llm/engine/api/sessions.py": 3,
  "src/fsm_llm/engine/api/stack.py": 6,
  "src/fsm_llm/engine/fsm/snapshots.py": 1,
