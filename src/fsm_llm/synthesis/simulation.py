@@ -152,6 +152,16 @@ def _declared(state: State, outside: frozenset[str] = frozenset()) -> dict[str, 
     return names
 
 
+def _sayable(value: Any) -> Any:
+    """``value``, or the pool filler when the interpreter cannot print it (an
+    ``int`` over its integer text limit): D-049, so ``str`` never raises here."""
+    try:
+        str(value)
+    except ValueError:
+        return FILLER
+    return value
+
+
 def _say(value: Any, sample: str) -> str:
     """``value`` as a user says it: the pool filler is the key's sample."""
     if value == FILLER:
@@ -218,7 +228,7 @@ def happy_path(
         if edge is None:  # outside the fragment: say the state's samples
             edge = {k: FILLER for k in _declared(definition.states[sid], outside)}
         for key, value in edge.items():
-            values.setdefault(key, value)
+            values.setdefault(key, _sayable(value))
     turns: list[str] = []
     said: set[str] = set()
     for sid, i in route:

@@ -150,6 +150,8 @@ MAX_TOOL_NAMES = 20
 
 # --- G6a: the most value assignments one state's dead-edge search tries ---
 MAX_ASSIGNMENTS = 2048
+# --- the best-effort witness search: assignments tried over ALL edges of one definition ---
+MAX_FALLBACK_ASSIGNMENTS = 2 * MAX_ASSIGNMENTS
 
 # --- Library lifecycle, in order: draft -> verified -> trusted -> deprecated ---
 LIFECYCLE_DRAFT = "draft"

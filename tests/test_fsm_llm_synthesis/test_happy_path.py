@@ -535,3 +535,37 @@ class TestKeysAStateMintsWithoutAFieldExtraction:
         definition = FSMDefinition(**inject_abort(fsm))
         turns, given = simulation.happy_path(definition, 12, ("seats",))
         assert given == {} and set(turns) == {"answer is sample"}
+
+
+class TestAnIntegerNoSpeechCanHold:
+    """Plan 51fde95b D-049: a witness the interpreter cannot print never raises."""
+
+    @staticmethod
+    def _huge(digits: int) -> dict[str, Any]:
+        gate = {">": [{"var": "n"}, int("9" * digits)]}
+        return _fsm(
+            "ask",
+            ask=_step("ask", [("n", "int")], [_go("done", ["n"], gate)]),
+            done=_step("done"),
+        )
+
+    def test_the_happy_path_says_the_sample_for_a_value_too_long_to_print(self):
+        definition = _compiled(self._huge(4300), ("n",))
+        turns, given = simulation.happy_path(definition, 6)
+        assert turns == [f"n is {simulation._SAMPLES['int']}"] and given == {}
+
+    def test_only_a_value_the_interpreter_refuses_to_print_becomes_the_filler(self):
+        assert simulation._sayable(10**400) == 10**400
+        assert simulation._sayable(10**5000) == simulation.FILLER
+        assert simulation._sayable("x") == "x"
+
+    def test_compile_answers_with_a_typed_error_never_a_value_error(self):
+        from fsm_llm.synthesis import FSMSynthesizer, SynthesisError
+
+        text = json.dumps(self._huge(4300))
+        sim = Simulator(ByTurn(), NoWriter())
+        synth = FSMSynthesizer(
+            ScriptedLLM([text] * 4), policy=SynthesisPolicy(), simulator=sim
+        )
+        with pytest.raises(SynthesisError):
+            synth.compile("collect a number", return_keys=["n"])

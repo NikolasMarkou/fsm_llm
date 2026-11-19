@@ -5,7 +5,8 @@ G3 and G4 count every value test as satisfiable, so a compile can pass them
 and still hold an edge no context ever opens (a bool field gated on ``== "yes"``).
 This gate searches a small, type-aware pool of values per key through
 ``TransitionEvaluator`` itself and reports what no assignment fires. It is
-model-free and costs milliseconds. Nothing here raises on a loaded definition,
+model-free and bounded (``MAX_ASSIGNMENTS`` per state, and ``MAX_FALLBACK_ASSIGNMENTS``
+for the whole best-effort witness search of one definition). Nothing here raises on a loaded definition,
 logs or does I/O.
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-042
@@ -42,7 +43,7 @@ from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.core.verify.flow import FlowFinding
 
-from .constants import MAX_ASSIGNMENTS
+from .constants import MAX_ASSIGNMENTS, MAX_FALLBACK_ASSIGNMENTS
 
 _ABSENT: Any = object()  # a key left out of the context
 _ORDER = frozenset({">", ">=", "<", "<="})
@@ -246,13 +247,17 @@ def _first_fires(
     pools: list[list[Any]],
     evaluator: TransitionEvaluator,
     limit: int | None = None,
+    spent: list[int] | None = None,
 ) -> dict[int, dict[str, Any]] | None:
     """Edge index -> the context (present keys only) of the FIRST assignment of
     ``pools`` (at most ``limit`` of them, in product order) under which the
     evaluator, run on ``state``, takes that edge's target and the edge passes,
-    for the ``wanted`` edges that have one; ``None`` on an evaluator error."""
+    for the ``wanted`` edges that have one; ``None`` on an evaluator error.
+    ``spent`` (one counter shared by many calls) gains one per assignment tried."""
     found: dict[int, dict[str, Any]] = {}
     for values in itertools.islice(itertools.product(*pools), limit):
+        if spent is not None:
+            spent[0] += 1
         data = {k: v for k, v in zip(keys, values, strict=True) if v is not _ABSENT}
         try:
             result = evaluator.evaluate_transitions(state, FSMContext(data=data))
@@ -363,6 +368,7 @@ def fallback_witness(
     index: int,
     narrow: dict[str, tuple[str, tuple[str, ...]]],
     evaluator: TransitionEvaluator,
+    spent: list[int] | None = None,
 ) -> dict[str, Any] | None:
     """A best-effort context under which the evaluator takes edge ``index`` of
     ``state``, for an edge outside the fragment (arithmetic, a key against a
@@ -372,7 +378,9 @@ def fallback_witness(
     the ones the edge reads (``var``); the pool is ``_pool`` over the scalar
     literals at any depth plus sums and differences of the first
     ``FALLBACK_LITERALS`` numbers, narrowed as for G6a. At most
-    ``MAX_ASSIGNMENTS`` assignments are tried, judged by the whole state.
+    ``MAX_ASSIGNMENTS`` assignments are tried, judged by the whole state, and
+    none once the shared counter ``spent`` (one per assignment tried, across
+    every edge of one ``edge_witnesses`` call) reaches ``MAX_FALLBACK_ASSIGNMENTS``.
     Returns the present keys of the first that opens the edge, else None (also
     for a dotted read or a computed name). Never raises.
     """
@@ -401,9 +409,9 @@ def fallback_witness(
     pool = lits + [f(a, b) for a in nums for b in nums for f in (add, sub)]
     names = sorted(keys)
     pools = [_pool(narrow.get(k), pool) for k in names]
-    found = _first_fires(
-        state, edges, [index], names, pools, evaluator, MAX_ASSIGNMENTS
-    )
+    room = MAX_FALLBACK_ASSIGNMENTS - spent[0] if spent is not None else None
+    limit = MAX_ASSIGNMENTS if room is None else max(0, min(MAX_ASSIGNMENTS, room))
+    found = _first_fires(state, edges, [index], names, pools, evaluator, limit, spent)
     return (found or {}).get(index)
 
 
@@ -438,11 +446,12 @@ def edge_witnesses(
         outside = frozenset(inputs) | handler_only_names(definition)
         mentions = _mentions(definition)
         evaluator = TransitionEvaluator()
+        spent = [0]  # one budget for the whole definition (D-050)
         for sid, edges in found.items():
             narrow = _narrowing(definition.states[sid], sid, mentions, outside)
             for i in [i for i, w in edges.items() if w is None]:
                 edges[i] = fallback_witness(
-                    definition.states[sid], i, narrow, evaluator
+                    definition.states[sid], i, narrow, evaluator, spent
                 )
     return found
 

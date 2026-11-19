@@ -12,6 +12,7 @@ from fsm_llm.core.definitions import FSMContext, FSMDefinition
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.synthesis import dryrun
 from fsm_llm.synthesis.dryrun import analyze_dryrun, edge_witnesses
+from tests.conftest import cpu_timer
 
 from .test_dryrun import _edge, _field, _fsm, _fuzz_case, _state, _var
 from .test_happy_path import _fsm as _plain_fsm
@@ -184,3 +185,56 @@ class TestTheHappyPathUsesIt:
         )
         report, _ = _simulate(fsm, ("a", "b"))
         assert report.passed, report.repair_text()
+
+
+class TestTheSearchIsBoundedAsAWhole:
+    """Plan 51fde95b D-050: one evaluation budget per call, never a clock."""
+
+    @staticmethod
+    def _hostile(states: int = 12, edges: int = 5):
+        names = [f"s{i}" for i in range(states)] + ["done"]
+        out = []
+        for i in range(states):
+            keys = [_var(f"k{i}_{j}") for j in range(3)]
+            never = {
+                "and": [
+                    {">": [{"*": [{"+": [*keys, 7, 11, 13]}, 0]}, 10]},
+                    {"<": [keys[0], keys[1]]},
+                ]
+            }
+            out.append(
+                _state(
+                    names[i],
+                    [_edge(names[i + 1], never, priority=100 + n) for n in range(edges)]
+                    + [_edge(names[i + 1], None, priority=900)],
+                    field_extractions=[_field(f"k{i}_{j}", "int") for j in range(3)],
+                )
+            )
+        return _fsm(*out, _state("done"))
+
+    def test_a_hostile_definition_spends_at_most_the_budget(self, monkeypatch):
+        tried = []
+        real = dryrun.TransitionEvaluator.evaluate_transitions
+
+        def count(self, state, context):
+            tried.append(1)
+            return real(self, state, context)
+
+        monkeypatch.setattr(dryrun.TransitionEvaluator, "evaluate_transitions", count)
+        definition = self._hostile()
+        tried.clear()
+        edge_witnesses(definition)
+        plain = len(tried)
+        tried.clear()
+        edge_witnesses(definition, best_effort=True)
+        assert len(tried) - plain <= 2 * dryrun.MAX_ASSIGNMENTS
+
+    def test_it_finishes_in_well_under_a_second(self, timing_factor):
+        definition = self._hostile()
+        with cpu_timer() as timer:
+            edge_witnesses(definition, best_effort=True)
+        assert timer.elapsed < 1.0 * timing_factor
+
+    def test_an_honest_sum_edge_still_finds_its_witness(self):
+        found = edge_witnesses(_ask(SUM), best_effort=True)["ask"][0]
+        assert found is not None and _opens(_ask(SUM), found)

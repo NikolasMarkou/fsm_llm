@@ -1227,6 +1227,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/handlers/__init__.py": "the engine's handlers (facade, read through what the pinned files import; step 77 of plan d454fd62 made it a package)",
     "src/fsm_llm/llm/__init__.py": "the one LLM layer",
     "src/fsm_llm/llm/providers/litellm.py": "the one module that imports litellm: `wire_spy` of the bench script wraps its `completion` binding (step 73 of plan d454fd62 moved it out of `llm/__init__.py`)",
+    "src/fsm_llm/llm/interface.py": "resolve_tool_model, the tier fallback the pinned eval/config.py calls (D-036 of plan 51fde95b: a tool model for eval and the monitor; an llm module with no bench verdict logic, D-048)",
     "src/fsm_llm/logging.py": "library logging",
     "src/fsm_llm/core/transition_evaluator.py": "the engine's transition rules",
     "src/fsm_llm/okf/__init__.py": "text caps and the OKF helpers shared with every package (facade, read through what the pinned files import; step 83 of plan d454fd62 made it a package, D-032)",
