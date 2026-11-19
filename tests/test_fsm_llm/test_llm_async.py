@@ -791,6 +791,43 @@ class TestOneBodyPerMethod:
             assert all(calls.count(helper) == 1 for helper in family), sender
 
 
+_SRC = Path(__file__).resolve().parents[2] / "src/fsm_llm"
+
+
+@pytest.mark.parametrize(
+    ("file", "cls", "name"),
+    [
+        ("llm/providers/embedder.py", "LiteLLMEmbedder", "embed"),
+        ("engine/classification.py", "Classifier", "classify"),
+        ("engine/classification.py", "Classifier", "classify_multi"),
+        ("engine/classification.py", "Classifier", "_call_llm"),
+        ("engine/classification.py", "HierarchicalClassifier", "classify"),
+    ],
+)
+def test_an_embedder_or_classifier_sync_name_is_only_a_run_sync_wrapper(
+    file: str, cls: str, name: str
+) -> None:
+    tree = ast.parse((_SRC / file).read_text(encoding="utf-8"))
+    owner = next(
+        n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == cls
+    )
+    defs = {
+        n.name: n
+        for n in owner.body
+        if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    twin = async_name(name)
+    assert isinstance(defs[twin], ast.AsyncFunctionDef)
+    body = [
+        n
+        for n in defs[name].body
+        if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))
+    ]
+    assert len(body) == 1 and isinstance(body[0], ast.Return)
+    assert [c for c in _calls(body[0]) if c != twin] == ["run_sync"]
+    assert twin in _calls(body[0])
+
+
 # --- the embedder twin (step 6.1): one body, two transports ----------------------------
 
 _EMBEDDER = "fsm_llm.llm.providers.embedder"
