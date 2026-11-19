@@ -129,4 +129,4 @@ Dispatch handler names: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `
 - New debounced refresh: use a distinct `scheduleRefresh` key, and cancel it with `cancelRefresh` wherever the selection it depends on is cleared.
 - Keep the `detail` error convention: the Python server raises `HTTPException(detail=...)`.
 - Do not persist the API key anywhere other than `sessionStorage` or log it.
-- No automated JS tests exist for these files. Verify manually by running `fsm-llm-monitor` and watching the browser console.
+- No automated JS test targets these files directly (the node probes of `tests/test_fsm_llm_monitor/test_static_js.py` load `state.js` through the pages). Verify manually by running `fsm-llm-monitor` and watching the browser console.

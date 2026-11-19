@@ -31,6 +31,7 @@ flowchart LR
 - `test_collector.py` - `EventCollector` buffers, metrics, log filtering, handler callbacks, loguru sink, cursors, thread safety.
 - `test_definitions.py` - Pydantic models and helpers in `definitions.py`.
 - `test_otel.py` - `OTELExporter` enable, disable, shutdown and event routing.
+- `test_static_js.py` - runs the node probes in `static_probes/*.mjs` against a copy of the monitor's JavaScript on a small DOM stand-in (the Markdown renderer, the chat switch, the Send Event targets, the custom panels, the launch modal, the builder launch retry). It skips when `node` 18 or newer is not on PATH, and a test fails on a Linux GitHub Actions leg without it.
 - `test_server_package.py` - the `monitor/server/` package (plan d454fd62 step 94): the static and template directories the server really uses, route and middleware registration order, one home for each global `configure()` rebinds, the package layout.
 - `test_server_consistency.py` - the 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17): the `/ws` tick, visualize routes, guard headers, worker-thread launch, Ctrl-C exit, string-level SPA pins, preset JSON read as UTF-8 under an ASCII locale (subprocess), the route-launched workflow engine stopped by `end_instance` and `close`.
 

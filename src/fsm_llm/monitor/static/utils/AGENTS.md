@@ -64,7 +64,7 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 - `formatNumber(n)` - null/NaN -> `'0'`; `>=1e9` B, `>=1e6` M, `>=1e4` K (one decimal, trailing `.0` stripped), `>=1000` `en-US` commas, else `String(n)`.
 
 `markdown.js`
-- `renderMarkdown(text): string` - falsy -> `''`. Order: `esc` -> fenced code to `pre.md-code-block` -> inline code to `code.md-code-inline` -> `###`/`##`/`#` to `<strong class="md-h3|md-h2|md-h1">` -> `**`/`__` bold -> `*`/`_` italic -> `-`/`*` items wrapped in `<ul>` -> `1.` items as bare `<li>` (no `<ol>`) -> `---`/`***` to `<hr class="md-hr">` -> blank lines to `</p><p>`, newlines to `<br>` -> wrap in `<p>` -> cleanup of empty `<p>` and `<p>`/`<br>` around `pre`, `ul`, `hr`.
+- `renderMarkdown(text): string` - falsy -> `''`. Order: `esc` (and NULs dropped) -> fenced code to `pre.md-code-block` and inline code to `code.md-code-inline`, both stashed behind NUL placeholders so no later pass touches them -> `###`/`##`/`#` to `<strong class="md-h3|md-h2|md-h1">` -> `**`/`__` bold -> `*`/`_` italic -> `-`/`*` items wrapped in `<ul>` -> `1.` runs as `<ol>` (a distinct `<oli>` marker keeps them out of the `<ul>` pass) -> `---`/`***` to `<hr class="md-hr">` -> blank lines to `</p><p>`, newlines to `<br>` -> wrap in `<p>` -> restore the stashed code -> cleanup of empty `<p>` and `<p>`/`<br>` around `pre`, `ul`, `ol`, `hr`.
 
 `graph.js`
 - `renderGraph(svgId, data, opts = {})` - no-op if the SVG element is missing. Replaces the SVG's `innerHTML` and sets its `width`/`height` to `100%`, `viewBox`, and `style.minWidth`/`minHeight`. Returns nothing. Shapes of `data` and `opts` are under Data shapes.
@@ -132,5 +132,5 @@ Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `t
 - Changing node box size: update `W`/`H` in `graph.js` and the matching CSS.
 - Adding a new file here: `pyproject.toml` package data (`"fsm_llm.monitor" = ["static/**/*", "templates/*"]`) already ships it; `tests/test_packaging.py` checks every static file is covered.
 - Renaming or removing a file breaks `tests/test_fsm_llm_monitor/test_app.py`, which lists `utils/dom.js`, `utils/format.js`, `utils/markdown.js`, `utils/graph.js` for serving and existence checks.
-- No JavaScript unit tests. Check visually in the Visualizer and Builder pages of `fsm-llm-monitor` (default `http://127.0.0.1:8420`).
+- Only `markdown.js` has a node probe (`tests/test_fsm_llm_monitor/test_static_js.py`). Check the other files visually in the Visualizer and Builder pages of `fsm-llm-monitor` (default `http://127.0.0.1:8420`).
 - Style: 4-space indent, ES module named exports, JSDoc one-liners.

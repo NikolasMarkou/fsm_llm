@@ -7,7 +7,7 @@ Purpose: pytest suite for `fsm_llm.monitor`, the FastAPI dashboard package in `s
 
 - Unit and HTTP-level tests for `server/` (a package), `instance_manager/`, `collector.py`, `definitions.py`, `otel.py`, `__main__.py` (`_browser_url` only) and the package `__init__.py` exports.
 - No real LLM calls, no network, no browser. The FSM `API` is a `MagicMock` or a small fake; HTTP goes through `fastapi.testclient.TestClient`.
-- Not here: the monitor source itself (`src/fsm_llm/monitor/`) and the JS SPA logic (only static file presence, HTTP 200, and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked).
+- Not here: the monitor source itself (`src/fsm_llm/monitor/`) and most of the JS SPA logic: static file presence, HTTP 200 and the HTML/CSS limits in `TestUiMatchesServerLimits` are checked, and `test_static_js.py` runs node probes (`static_probes/*.mjs`, a DOM stand-in in `stub.mjs`) for the Markdown renderer and five page behaviours.
 
 ## Architecture
 
@@ -37,6 +37,7 @@ Manager test pattern: `InstanceManager(config=MonitorConfig())`, then `mgr.globa
 | `test_definitions.py` | models, `normalize_message_history`, `model_to_dict` | - |
 | `test_otel.py` | `OTELExporter` | autouse `_mock_otel` fixture |
 | `test_server_consistency.py` | 2026-11-05 server and SPA fixes (plan 5980fbb7 step 17), preset UTF-8 read, route-launched workflow stop | autouse `_reset_key` |
+| `test_static_js.py` | node probes of the frontend ES modules (plan 52ce5464, D-009) | skips when `node` 18 or newer is not on PATH; `test_node_is_present_on_linux_ci` fails when `GITHUB_ACTIONS=true` on Linux and no usable node, so CI cannot skip them silently; the probes live in `static_probes/` |
 | `test_server_package.py` | the old `monitor/server.py` became the package `monitor/server/` (plan d454fd62 step 94): the static and template directories the server itself uses (the mount, the Jinja search path, the served bytes, `flows.json`), the registration order of routes and middleware (a pinned list of the entries of `app.routes`, the OpenAPI path order), one home for each global that `configure()` rebinds and `configure()` seen through every router module and the WebSocket, the package layout (facade `__all__`, sibling imports, log record names) | autouse `_reset_key` |
 
 ## Public interface

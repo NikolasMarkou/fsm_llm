@@ -45,9 +45,9 @@ renderGraph('viz-svg', {
 
 ## Things to know
 
-- `renderMarkdown` supports fenced and inline code, `#`/`##`/`###` headings (rendered as bold text, not real headings), bold (`**x**` or `__x__`), italic (`*x*` or `_x_`), `-`/`*` bullet lists, numbered items, and horizontal rules. Numbered items become `<li>` elements but are not wrapped in an `<ol>`. Links and tables are not supported.
+- `renderMarkdown` supports fenced and inline code, `#`/`##`/`###` headings (rendered as bold text, not real headings), bold (`**x**` or `__x__`), italic (`*x*` or `_x_`), `-`/`*` bullet lists, numbered lists (`<ol>`), and horizontal rules. The inside of a code block or inline code is left as typed. Links and tables are not supported.
 - `renderGraph(svgId, data, opts)`: nodes take `id`, optional `label`, `is_initial`, `is_terminal`, `step_type` and `description`; edges take `from`, `to` and optional `label`. `opts` may set `colorVar`, `arrowColor`, `rx` and `nodeClass`. The initial node (else the first one) starts the layout, and layouts of more than 5 layers wrap into rows. It changes the node objects you pass in: it writes `x` and `y` onto each one.
 - Nodes the layout cannot reach from the initial node all go in one extra layer at the end.
 - `showToast` shows a success style only when the type is exactly `'success'`; any other type gets the error style. It also copies the text into the `#toast-live` element so screen readers announce it.
 - `copyToClipboard` falls back to the old `document.execCommand('copy')` path and always resolves to `true`.
-- There are no JavaScript unit tests. Python tests only check that the files exist and are served.
+- Only `markdown.js` has a node probe (`tests/test_fsm_llm_monitor/test_static_js.py`); for the other files Python tests only check that they exist and are served.

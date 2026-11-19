@@ -60,4 +60,4 @@ await postJson('/api/fsm/launch', { preset_id: 'basic/simple_greeting/fsm.json' 
 - If the user cancels the key modal, later 401s stop reopening it until a key is saved or a forced prompt is made.
 - `state` only fires an event when the new value is not strictly equal (`!==`) to the old one. Mutating a nested object in place (for example `state.refreshTimers[key] = ...`) does not fire an event.
 - `scheduleRefresh` is a "run once after a delay" guard: a second call with the same key is ignored until the first one has fired.
-- There are no automated JavaScript tests for these files.
+- No automated JavaScript test targets these files directly; the node probes of `tests/test_fsm_llm_monitor/test_static_js.py` load `state.js` through the pages.

@@ -59,4 +59,4 @@ Every page is reachable from the sidebar. To launch something, open the Launch m
 - While logs are paused, up to 5,000 new entries are buffered and older ones are dropped. The visible stream keeps at most 1,000 entries.
 - Custom dashboard panels only appear when a dashboard config has been set on the server (`POST /api/dashboard/config`).
 - The API key entered in Settings is kept in the browser tab's sessionStorage only.
-- There are no JavaScript unit tests; check changes by running `fsm-llm-monitor` and using the page.
+- A few node probes cover the chat switch, the Send Event targets, the custom panels, the launch modal and the builder launch retry (`tests/test_fsm_llm_monitor/test_static_js.py`); the rest of these pages has no automated test, so check changes by running `fsm-llm-monitor` and using the page.

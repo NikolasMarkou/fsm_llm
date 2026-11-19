@@ -57,4 +57,4 @@ Keyboard shortcuts (the number keys and `?` work only when you are not typing in
 - Workflows made in the Builder cannot be launched from the monitor; only the server's built-in workflow presets can.
 - Agents that need tools (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`) can only be launched with stub tools that return a fixed string you type.
 - Element ids and `data-action` names are shared between `templates/index.html`, `app.js`, and `pages/`. Renaming one side breaks the feature silently.
-- There are no JavaScript unit tests. Python tests only check that the files exist, ship in the package, and are served. Check changes by running `fsm-llm-monitor` and using the page.
+- Python tests check that the files exist, ship in the package and are served, and a few node probes (`tests/test_fsm_llm_monitor/test_static_js.py`) run the Markdown renderer and five page behaviours on a DOM stand-in. Check everything else by running `fsm-llm-monitor` and using the page.
