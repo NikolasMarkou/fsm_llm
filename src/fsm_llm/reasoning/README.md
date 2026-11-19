@@ -94,5 +94,5 @@ The command line also takes `--context '{"audience": "child"}'` (extra context a
 - `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy.
 - If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.
-- `--list-types` prints its table through the logger, so it goes to stderr with log prefixes (not stdout); `--verbose` also turns on the engine's own log records. Solutions print on stdout.
+- `--list-types` prints its table and solutions print on stdout; an error is one line `python -m fsm_llm.reasoning: error: ...` on stderr. `--verbose` turns on the engine's own log records.
 - In `--output json` and in `.json` save files, `reasoning_types_used` is a sorted list of type names.

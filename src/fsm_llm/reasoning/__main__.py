@@ -213,15 +213,17 @@ def parse_context_json(context_str: str | None) -> dict[str, Any]:
     try:
         context = json.loads(context_str)
         if not isinstance(context, dict):
-            logger.error(
-                "Context must be a JSON object (dictionary), not array or primitive"
+            report_error(
+                _PROG, "error: context must be a JSON object, not an array or a value"
             )
             sys.exit(1)
         return context
     except json.JSONDecodeError as e:
-        logger.error(f"Invalid JSON context: {e}")
-        logger.error(f"Provided: {context_str}")
-        logger.error('Example: \'{"key": "value", "number": 42}\'')
+        report_error(
+            _PROG,
+            f"error: invalid JSON context: {e} "
+            '(example: \'{"key": "value", "number": 42}\')',
+        )
         sys.exit(1)
 
 
@@ -387,9 +389,11 @@ def _save_as_text(
 
 
 def display_available_reasoning_types() -> None:
-    """Display all available reasoning types with descriptions."""
-    logger.info("Available Reasoning Types")
-    logger.info(CLIDefaults.SECTION_SEPARATOR)
+    """Print all available reasoning types with descriptions to stdout."""
+    # Product output: print(), never the logger (the `fsm_llm` disable would
+    # drop it when main() is called in-process). Same rule as runner.py D-018.
+    print("Available Reasoning Types")
+    print(CLIDefaults.SECTION_SEPARATOR)
 
     reasoning_types = get_available_reasoning_types()
 
@@ -397,10 +401,10 @@ def display_available_reasoning_types() -> None:
     max_name_length = max(len(name) for name in reasoning_types.keys())
 
     for type_name, description in reasoning_types.items():
-        logger.info(f"  {type_name:<{max_name_length}} - {description}")
+        print(f"  {type_name:<{max_name_length}} - {description}")
 
-    logger.info(CLIDefaults.SECTION_SEPARATOR)
-    logger.info(f"Total: {len(reasoning_types)} reasoning types available")
+    print(CLIDefaults.SECTION_SEPARATOR)
+    print(f"Total: {len(reasoning_types)} reasoning types available")
 
 
 # ============================================================================
@@ -462,10 +466,12 @@ def main() -> int:
     """
     # An unencodable character is written as \uXXXX, never ends a finished solve.
     escape_unencodable_output()
+    verbose = False  # argparse accepts a prefix (--verb): read the parsed flag
     try:
         # Parse and validate arguments
         parser = setup_argument_parser()
         args = parser.parse_args()
+        verbose = args.verbose
 
         validate_arguments(args)
         apply_env_file(args)  # before the model is resolved
@@ -517,7 +523,7 @@ def main() -> int:
         return 1
 
     except argparse.ArgumentError as e:
-        logger.error(f"Argument error: {e}")
+        report_error(_PROG, f"error: {e}")
         return 1
 
     except (ModelNotConfiguredError, FileNotFoundError) as e:
@@ -527,14 +533,13 @@ def main() -> int:
         return 1
 
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        if "--verbose" in sys.argv or "-v" in sys.argv:
+        report_error(_PROG, f"error: {e}")
+        if verbose:
             import traceback
 
-            logger.error("Full traceback:")
             traceback.print_exc()
         else:
-            logger.error("Use --verbose for detailed error information")
+            report_error(_PROG, "use --verbose for detailed error information")
         return 1
 
 
