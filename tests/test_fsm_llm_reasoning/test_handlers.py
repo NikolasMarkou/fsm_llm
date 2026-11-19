@@ -238,6 +238,10 @@ class TestUpdateReasoningTrace:
         trace = result[ContextKeys.REASONING_TRACE]
         # Should be pruned to MAX_TRACE_STEPS (first 5 + last N) + 1 new step
         assert len(trace) <= Defaults.MAX_TRACE_STEPS + 1
+        assert (
+            trace[: Defaults.TRACE_KEEP_START]
+            == long_trace[: Defaults.TRACE_KEEP_START]
+        )
 
     def test_snapshot_only_includes_specific_keys(self):
         """Only specific context keys should be in the snapshot."""
@@ -307,6 +311,25 @@ class TestPruneContext:
         # Preserve keys should not be in pruned updates
         assert ContextKeys.PROBLEM_STATEMENT not in result
         assert ContextKeys.PROPOSED_SOLUTION not in result
+
+    def test_a_pruned_trace_keeps_the_start_of_the_run(self):
+        """The trace keeps its oldest steps and newest ones, as
+        update_reasoning_trace does; other lists keep the newest only."""
+        pad = "z" * (Defaults.CONTEXT_PRUNE_THRESHOLD + 1000)
+        steps = [{"from": f"s{i}", "to": f"s{i + 1}"} for i in range(15)]
+        result = ReasoningHandlers.prune_context(
+            {
+                ContextKeys.REASONING_TRACE: steps,
+                ContextKeys.OBSERVATIONS: [f"o{i}" for i in range(15)],
+                "_padding": pad,
+            }
+        )
+        kept = result[ContextKeys.REASONING_TRACE]
+        keep = Defaults.TRACE_KEEP_START
+        assert len(kept) == Defaults.PRUNE_LIST_MAX_LENGTH
+        assert kept[:keep] == steps[:keep]
+        assert kept[keep:] == steps[-(len(kept) - keep) :]
+        assert result[ContextKeys.OBSERVATIONS] == [f"o{i}" for i in range(5, 15)]
 
 
 class TestContextManager:

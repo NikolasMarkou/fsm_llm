@@ -131,6 +131,18 @@ _SOLUTION_KEYS: tuple[str, ...] = (
 )
 
 
+def _head_and_tail(trace: list[Any], limit: int) -> list[Any]:
+    """The oldest ``Defaults.TRACE_KEEP_START`` and the newest steps, at most
+    ``limit`` in all: how the run started is what ``total_steps`` and the
+    reasoning types read, so both prune rules of the trace key keep it."""
+    if len(trace) <= limit:
+        return trace
+    return (
+        trace[: Defaults.TRACE_KEEP_START]
+        + trace[len(trace) - (limit - Defaults.TRACE_KEEP_START) :]
+    )
+
+
 class ReasoningHandlers:
     """Collection of handlers for the reasoning engine."""
 
@@ -296,9 +308,7 @@ class ReasoningHandlers:
 
         # Prune old traces if getting too long
         if len(trace) > Defaults.MAX_TRACE_STEPS:
-            # Keep first few and last many
-            keep_end = Defaults.MAX_TRACE_STEPS - Defaults.TRACE_KEEP_START
-            trace = trace[: Defaults.TRACE_KEEP_START] + trace[-keep_end:]
+            trace = _head_and_tail(trace, Defaults.MAX_TRACE_STEPS)
             logger.debug(f"Pruned reasoning trace to {len(trace)} steps")
 
         if previous_state and current_state:
@@ -363,7 +373,11 @@ class ReasoningHandlers:
                     f"Pruning context key '{key}': list truncated from "
                     f"{len(value)} to {Defaults.PRUNE_LIST_MAX_LENGTH} items"
                 )
-                pruned_updates[key] = value[-Defaults.PRUNE_LIST_MAX_LENGTH :]
+                pruned_updates[key] = (
+                    _head_and_tail(value, Defaults.PRUNE_LIST_MAX_LENGTH)
+                    if key == ContextKeys.REASONING_TRACE
+                    else value[-Defaults.PRUNE_LIST_MAX_LENGTH :]
+                )
             elif (
                 isinstance(value, str) and len(value) > Defaults.PRUNE_STRING_MAX_LENGTH
             ):
