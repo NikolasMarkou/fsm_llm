@@ -19,6 +19,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.core.definitions import AdvanceResult, FSMError
 from fsm_llm.logging import logger
 
@@ -113,7 +114,29 @@ class TurnEntriesMixin(_ApiSurface):
                 start failed (any other unexpected error is wrapped in it).
             ValueError: an invalid ``max_steps`` or ``max_seconds``; passes through
                 unchanged, as at ``push_fsm`` and ``pop_fsm``.
+
+        ``run_sync`` over ``astart_conversation``, the one body.
         """
+        return run_sync(
+            self.astart_conversation(
+                initial_context,
+                max_steps=max_steps,
+                max_seconds=max_seconds,
+                _suppress_start=_suppress_start,
+                _conversation_id=_conversation_id,
+            )
+        )
+
+    async def astart_conversation(
+        self,
+        initial_context: dict[str, Any] | None = None,
+        *,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
+        _suppress_start: bool = False,
+        _conversation_id: str | None = None,
+    ) -> tuple[str, str]:
+        """The async twin of ``start_conversation``: the greeting awaits its model call."""
         try:
             # Start conversation using enhanced FSM manager
             kept_id: dict[str, Any] = (
@@ -121,7 +144,9 @@ class TurnEntriesMixin(_ApiSurface):
                 if _conversation_id is None
                 else {"conversation_id": _conversation_id}
             )
-            conversation_id, response = self.fsm_manager.start_conversation(
+            conversation_id, response = await acall(
+                self.fsm_manager,
+                "start_conversation",
                 self.fsm_id,
                 initial_context=initial_context,
                 suppress_start=_suppress_start,
@@ -163,13 +188,20 @@ class TurnEntriesMixin(_ApiSurface):
             System response; the empty string when the turn ended on a silent
             state (empty ``response_instructions``), which makes no Pass-2
             call and records the user message only.
+
+        ``run_sync`` over ``aconverse``, the one body.
         """
+        return run_sync(self.aconverse(user_message, conversation_id))
+
+    async def aconverse(self, user_message: str, conversation_id: str) -> str:
+        """The async twin of ``converse``: the event loop runs other tasks while the model
+        calls are awaited. A second turn on a busy conversation is refused, never waited for."""
         with _turn_errors("processing", "process"):
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with event_scope(self, conversation_id):
-                response: str = self.fsm_manager.process_message(
-                    current_fsm_id, user_message
+                response: str = await acall(
+                    self.fsm_manager, "process_message", current_fsm_id, user_message
                 )
             # Auto-save session if store is configured
             _auto_save_session(self, conversation_id)
@@ -202,11 +234,19 @@ class TurnEntriesMixin(_ApiSurface):
                 (CONTEXT_UPDATE, PRE_TRANSITION, POST_TRANSITION) follows the
                 same partial-commit rules as ``converse`` (keys extracted
                 before the failure can stay).
+
+        ``run_sync`` over ``aadvance``, the one body.
         """
+        return run_sync(self.aadvance(conversation_id))
+
+    async def aadvance(self, conversation_id: str) -> AdvanceResult:
+        """The async twin of ``advance`` (see ``aconverse``)."""
         with _turn_errors("advancing without a", "advance without a"):
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with event_scope(self, conversation_id):
-                result: AdvanceResult = self.fsm_manager.advance(current_fsm_id)
+                result: AdvanceResult = await acall(
+                    self.fsm_manager, "advance", current_fsm_id
+                )
             _auto_save_session(self, conversation_id)
             return result
 

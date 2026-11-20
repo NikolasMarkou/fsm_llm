@@ -23,11 +23,12 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm import API
+from fsm_llm import API, FileSessionStore
 from fsm_llm.aio import run_sync
-from fsm_llm.core.definitions import DataExtractionResponse
+from fsm_llm.core.definitions import DataExtractionResponse, FSMError
 from fsm_llm.engine.kinds import CompletionExecutor, ConversationExecutor, StateExecutor
 from fsm_llm.handlers import HandlerTiming, create_handler
+from fsm_llm.runtime import EventLog
 from fsm_llm.testing import ScriptedLLM, final_reply
 from tests.test_fsm_llm import kind_corpus as kc
 
@@ -418,3 +419,225 @@ class TestTurns:
         call that skips its ``a`` twin or takes it in sync mode, an async-only difference in
         what a failed turn leaves behind (the failure rows)."""
         await _parity(name, _play, _aplay)
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 3.1: the API entries (aconverse, aadvance, astart_conversation) over the manager gate
+# ----------------------------------------------------------------------------------------------
+
+_CID = (
+    "conv-1"  # a fixed id (the internal restore seam) so two logs compare line by line
+)
+_CHAT = _fsm(
+    kc._state(
+        "chat",
+        response_instructions="Reply.",
+        transitions=[
+            kc._go("bye", conditions=kc._when("done", {"==": [{"var": "done"}, True]}))
+        ],
+    ),
+    kc._state("bye", response_instructions="Bye."),
+    initial="chat",
+)
+
+
+class _Gated(_Suspending):
+    """After ``arm()`` the first ``agenerate_response`` parks on ``release`` (``entered`` is set)."""
+
+    armed = False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.entered, self.release = asyncio.Event(), asyncio.Event()
+
+    def arm(self) -> None:
+        self.armed = True
+
+    async def agenerate_response(self, request):
+        if self.armed:
+            self.armed = False
+            self.entered.set()
+            await self.release.wait()
+        return await super().agenerate_response(request)
+
+
+def _events(log: EventLog) -> list[tuple]:
+    """The log of ``_CID`` as comparable rows: every field but the clock and the blob refs."""
+    return [
+        tuple(
+            sorted((k, repr(v)) for k, v in e.items() if k != "ts" and "_ref" not in k)
+        )
+        for e in log.read(_CID)
+    ]
+
+
+def _build_api(name: str, cls: type[ScriptedLLM], **api_kwargs):
+    scenario = _SCENARIOS[name]
+    llm = scenario.llm(cls)
+    api = API.from_definition(scenario.fsm(), llm_interface=llm, **api_kwargs)
+    for handler in scenario.handlers:
+        api.register_handler(handler)
+    return api, llm, scenario
+
+
+def _sync_work(api, scenario):
+    cid, greeting = api.start_conversation(scenario.context, _conversation_id=_CID)
+    out = [greeting]
+    for message in scenario.turns:
+        call = (
+            partial(api.advance, cid)
+            if message is None
+            else partial(api.converse, message, cid)
+        )
+        out.append(_outcome(call, repr))
+    return out
+
+
+async def _async_work(api, scenario):
+    cid, greeting = await api.astart_conversation(
+        scenario.context, _conversation_id=_CID
+    )
+    out = [greeting]
+    for message in scenario.turns:
+        call = api.aadvance(cid) if message is None else api.aconverse(message, cid)
+        out.append(await _aoutcome(call, repr))
+    return out
+
+
+def _api_seen(api, llm, out):
+    return {
+        "out": out,
+        "data": api.get_data(_CID),
+        "history": api.get_conversation_history(_CID),
+        "state": api.get_current_state(_CID),
+        "requests": _requests(llm),
+        "usage": llm.usage(),
+    }
+
+
+class TestApiEntries:
+    @pytest.mark.parametrize("name", sorted(_SCENARIOS))
+    @pytest.mark.parametrize("logged", [False, True])
+    async def test_the_async_entries_answer_like_the_sync_ones(
+        self, name, logged, tmp_path
+    ):
+        """``astart_conversation``, ``aconverse`` and ``aadvance`` per kind of turn, with the
+        event log off and on: replies or error types, data, history, state, request bytes, usage
+        and, logged, every event but its clock and blob refs. Kills: a hop that takes a sync name
+        in async mode (suspensions), an entry that skips ``event_scope`` (the log is empty)."""
+        logs = [EventLog(tmp_path / "sync"), EventLog(tmp_path / "async")]
+        opts = [{"event_log": log} if logged else {} for log in logs]
+        api, llm, scenario = _build_api(name, ScriptedLLM, **opts[0])
+        want = _api_seen(api, llm, _sync_work(api, scenario))
+        api2, llm2, _ = _build_api(name, _Suspending, **opts[1])
+        got = _api_seen(api2, llm2, await _async_work(api2, scenario))
+        assert got == want
+        assert llm2.suspensions == len(llm2.call_history)
+        if logged:
+            assert _events(logs[1]) == _events(logs[0]) != []
+
+    async def test_a_failed_async_turn_leaves_the_pre_turn_conversation_and_the_gate_free(
+        self,
+    ):
+        """Absolute (both names run one body, so parity cannot see a lost rollback). Kills: the
+        user message left in the history, a claim that is not released."""
+        llm = ScriptedLLM(default_response="ok")  # no extraction script: Pass 2 only
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        cid, _ = await api.astart_conversation()
+        before = api.get_conversation_history(cid)
+        with patch.object(llm, "generate_response", side_effect=RuntimeError("down")):
+            with pytest.raises(FSMError):
+                await api.aconverse("hi", cid)
+        assert api.get_conversation_history(cid) == before
+        assert await api.aconverse("again", cid) == "ok"  # the gate was released
+
+    async def test_a_session_store_saves_after_a_successful_async_turn_only(
+        self, tmp_path
+    ):
+        """Kills: ``aconverse`` or ``aadvance`` without ``_auto_save_session``, a save after a
+        failed turn."""
+        store = FileSessionStore(tmp_path)
+        llm = ScriptedLLM(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm, session_store=store)
+        cid, _ = await api.astart_conversation()
+        assert store.load(cid) is None
+        await api.aconverse("hi", cid)
+        first = store.load(cid)
+        assert first is not None and len(first.conversation_history) == 3
+        await api.aadvance(cid)
+        second = store.load(cid)
+        assert second is not None and len(second.conversation_history) == 4
+        with patch.object(llm, "generate_response", side_effect=RuntimeError("down")):
+            with pytest.raises(FSMError):
+                await api.aconverse("hi", cid)
+        assert store.load(cid) == second
+
+    async def test_a_failing_greeting_leaves_nothing_registered(self):
+        """``astart_conversation`` with no reply scripted for the greeting: the same error type
+        as the sync name and no instance left behind. Kills: a failure arm that does not run
+        in the async body."""
+        api = API.from_definition(_CHAT(), llm_interface=ScriptedLLM())
+        want = _outcome(api.start_conversation)
+        assert await _aoutcome(api.astart_conversation()) == want == "FSMError"
+        assert api.fsm_manager.instances == {}
+
+
+class TestInterleaveAndRefusal:
+    async def test_a_second_conversation_runs_while_the_first_model_call_is_suspended(
+        self,
+    ):
+        """One API, one loop: B's whole turn completes and a heartbeat task runs while A's model
+        call is parked. Kills: a model call that blocks the loop thread instead of awaiting, a
+        conversation lock held across the whole API."""
+        llm = _Gated(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        (a, _), (b, _) = (
+            await api.astart_conversation(),
+            await api.astart_conversation(),
+        )
+        llm.arm()
+        ticks = 0
+
+        async def beat():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0)
+
+        first = asyncio.create_task(api.aconverse("one", a))
+        await llm.entered.wait()
+        heart = asyncio.create_task(beat())
+        assert await api.aconverse("two", b) == "ok"
+        heart.cancel()
+        assert not first.done() and ticks > 0
+        llm.release.set()
+        assert await first == "ok"
+
+    async def test_a_second_turn_on_a_busy_conversation_is_refused_and_the_first_finishes(
+        self,
+    ):
+        """Another task (async or sync name, a step too) is refused with the existing text and
+        waits for nothing; the first turn ends intact and the gate is free afterwards. Kills: a
+        claim that is skipped in the async body (no refusal), a turn that does not release."""
+        llm = _Gated(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        cid, _ = await api.astart_conversation()
+        llm.arm()
+        first = asyncio.create_task(api.aconverse("one", cid))
+        await llm.entered.wait()
+        for refused in (
+            api.aconverse("two", cid),
+            api.aadvance(cid),
+        ):
+            with pytest.raises(FSMError, match="already being processed"):
+                await refused
+        with pytest.raises(FSMError, match="already being processed"):
+            api.converse("two", cid)  # the sync name on the loop thread
+        llm.release.set()
+        assert await first == "ok"
+        assert [list(e) for e in api.get_conversation_history(cid)] == [
+            ["system"],
+            ["user"],
+            ["system"],
+        ]
+        assert await api.aconverse("three", cid) == "ok"

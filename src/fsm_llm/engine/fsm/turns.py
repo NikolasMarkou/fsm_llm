@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import threading
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.core.definitions import (
     AdvanceResult,
     FSMError,
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
     from .gate import GateTicket, TurnGate
 
 
-# Return type of one sync turn: ``str`` for a message, ``AdvanceResult`` for a step.
+# Return type of one turn: ``str`` for a message, ``AdvanceResult`` for a step.
 _TurnT = TypeVar("_TurnT")
 
 
@@ -168,12 +169,28 @@ class TurnsMixin:
 
         Pass 1: Data extraction + transition evaluation + transition execution
         Pass 2: Response generation based on final state
+
+        ``run_sync`` over ``aprocess_message``, the one body.
         """
-        return self._run_locked_turn(
+        reply: str = run_sync(self.aprocess_message(conversation_id, message, log=log))
+        return reply
+
+    @with_conversation_context
+    async def aprocess_message(
+        self, conversation_id: str, message: str, log: Any = None
+    ) -> str:
+        """The async twin of ``process_message``: the same turn, awaiting every model call.
+
+        The pipeline entry goes through ``acall`` so a patch of ``process`` still intercepts
+        in sync mode.
+        """
+        return await self._run_locked_turn(
             conversation_id,
             message,
             log,
-            lambda instance: self._pipeline.process(instance, message, conversation_id),
+            lambda instance: acall(
+                self._pipeline, "process", instance, message, conversation_id
+            ),
         )
 
     @with_conversation_context
@@ -195,21 +212,30 @@ class TurnsMixin:
                 (re-entrant or concurrent), a terminal current state
                 ("Conversation has ended ..."), or a failed step.
         """
-        return self._run_locked_turn(
+        step: AdvanceResult = run_sync(self.aadvance(conversation_id, log=log))
+        return step
+
+    @with_conversation_context
+    async def aadvance(self, conversation_id: str, log: Any = None) -> AdvanceResult:
+        """The async twin of ``advance``: the same locked turn with no user message."""
+        return await self._run_locked_turn(
             conversation_id,
             None,
             log,
-            lambda instance: self._pipeline.advance(instance, conversation_id),
+            lambda instance: acall(
+                self._pipeline, "advance", instance, conversation_id
+            ),
         )
 
-    def _run_locked_turn(
+    async def _run_locked_turn(
         self,
         conversation_id: str,
         message: str | None,
         log: Any,
-        run: Callable[[FSMInstance], _TurnT],
+        run: Callable[[FSMInstance], Awaitable[_TurnT]],
     ) -> _TurnT:
-        """Claim the conversation, run one sync turn, release it.
+        """Claim the conversation, run one turn (an ``async def``: ``process_message`` and
+        ``advance`` drive it through ``run_sync``), release it.
 
         Contract: ``message`` is the user's text, or ``None`` for a turn with
         no user message; ``run`` is the pipeline entry for that turn and its
@@ -238,7 +264,9 @@ class TurnsMixin:
         error: type[BaseException] | None = None
         try:
             turn = begin_turn(self, conversation_id, message)
-            return self._process_message_locked(conversation_id, message, log, run)
+            return await self._process_message_locked(
+                conversation_id, message, log, run
+            )
         except BaseException as exc:
             error = type(exc)
             raise
@@ -405,12 +433,12 @@ class TurnsMixin:
 
         return _stream()
 
-    def _process_message_locked(
+    async def _process_message_locked(
         self,
         conversation_id: str,
         message: str | None,
         log: Any,
-        run: Callable[[FSMInstance], _TurnT],
+        run: Callable[[FSMInstance], Awaitable[_TurnT]],
     ) -> _TurnT:
         """Run one turn while holding the per-conversation lock.
 
@@ -430,7 +458,7 @@ class TurnsMixin:
             instance.context.conversation.add_user_message(message)
 
         try:
-            return run(instance)
+            return await run(instance)
 
         except FSMError as e:
             self._rollback_user_message(instance, message, log)

@@ -24,6 +24,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import (
     DEFAULT_MAX_FSM_CACHE_SIZE,
     DEFAULT_MAX_HISTORY_SIZE,
@@ -311,7 +312,30 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         max_steps: int | None = None,
         max_seconds: float | None = None,
     ) -> tuple[str, str]:
-        """Start new conversation.
+        """Start new conversation: ``run_sync`` over ``astart_conversation``, the one body
+        (its docstring has the arguments)."""
+        return run_sync(
+            self.astart_conversation(
+                fsm_id,
+                initial_context,
+                suppress_start=suppress_start,
+                conversation_id=conversation_id,
+                max_steps=max_steps,
+                max_seconds=max_seconds,
+            )
+        )
+
+    async def astart_conversation(
+        self,
+        fsm_id: str,
+        initial_context: dict[str, Any] | None = None,
+        *,
+        suppress_start: bool = False,
+        conversation_id: str | None = None,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
+    ) -> tuple[str, str]:
+        """Start new conversation (the async body; the greeting awaits its model call).
 
         Args:
             fsm_id: FSM definition id to instantiate.
@@ -420,8 +444,8 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
 
         # Generate initial response
         try:
-            response = self._pipeline.generate_initial_response(
-                instance, conversation_id
+            response = await acall(
+                self._pipeline, "generate_initial_response", instance, conversation_id
             )
             return conversation_id, response
 

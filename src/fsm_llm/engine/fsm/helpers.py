@@ -79,15 +79,19 @@ def _strip_internal_mapping(source: dict[Any, Any]) -> dict[Any, Any]:
 
 
 def with_conversation_context(func):
-    """Bind ``conversation_id`` to a contextual logger passed as ``log=``."""
+    """Bind ``conversation_id`` to a contextual logger passed as ``log=``.
+
+    A caller that passes ``log=`` itself keeps it (a sync name that hands its own logger to
+    the async body it drives).
+    """
 
     @wraps(func)  # Preserve function metadata
     def wrapper(self, conversation_id, *args, **kwargs):
         # Bind the conversation ID to the logger
-        log = logger.bind(conversation_id=conversation_id)
+        kwargs.setdefault("log", logger.bind(conversation_id=conversation_id))
 
         # Call the original function with the contextual logger
-        return func(self, conversation_id, *args, log=log, **kwargs)
+        return func(self, conversation_id, *args, **kwargs)
 
     return wrapper
 
