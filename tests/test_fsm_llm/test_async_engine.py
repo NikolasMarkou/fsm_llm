@@ -541,7 +541,10 @@ class TestApiEntries:
         assert got == want
         assert llm2.suspensions == len(llm2.call_history)
         if logged:
-            assert _events(logs[1]) == _events(logs[0]) != []
+            assert _events(logs[1]) == _events(logs[0])
+            kinds = {dict(row)["type"] for row in _events(logs[1])}
+            # absolute: the turn boundary was written (a lost event scope writes none)
+            assert {"'turn/start'", "'turn/end'"} <= kinds
 
     async def test_a_failed_async_turn_leaves_the_pre_turn_conversation_and_the_gate_free(
         self,
@@ -579,13 +582,16 @@ class TestApiEntries:
                 await api.aconverse("hi", cid)
         assert store.load(cid) == second
 
-    async def test_a_failing_greeting_leaves_nothing_registered(self):
-        """``astart_conversation`` with no reply scripted for the greeting: the same error type
-        as the sync name and no instance left behind. Kills: a failure arm that does not run
-        in the async body."""
-        api = API.from_definition(_CHAT(), llm_interface=ScriptedLLM())
-        want = _outcome(api.start_conversation)
-        assert await _aoutcome(api.astart_conversation()) == want == "FSMError"
+    @pytest.mark.parametrize("error", [RuntimeError("down"), FSMError("down")])
+    async def test_a_failing_greeting_leaves_nothing_registered(self, error):
+        """The greeting fails with a plain error and with an ``FSMError`` (the two failure
+        arms): the same error type as the sync name and no instance left behind. Kills: a
+        failure arm of the async body that does not clean up."""
+        llm = ScriptedLLM(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        with patch.object(llm, "generate_response", side_effect=error):
+            want = _outcome(api.start_conversation)
+            assert await _aoutcome(api.astart_conversation()) == want == "FSMError"
         assert api.fsm_manager.instances == {}
 
 
@@ -612,7 +618,7 @@ class TestInterleaveAndRefusal:
                 await asyncio.sleep(0)
 
         first = asyncio.create_task(api.aconverse("one", a))
-        await llm.entered.wait()
+        await asyncio.wait_for(llm.entered.wait(), 10)  # a bound: a hang fails the row
         heart = asyncio.create_task(beat())
         assert await api.aconverse("two", b) == "ok"
         heart.cancel()
@@ -631,7 +637,7 @@ class TestInterleaveAndRefusal:
         cid, _ = await api.astart_conversation()
         llm.arm()
         first = asyncio.create_task(api.aconverse("one", cid))
-        await llm.entered.wait()
+        await asyncio.wait_for(llm.entered.wait(), 10)  # a bound: a hang fails the row
         for refused in (
             api.aconverse("two", cid),
             api.aadvance(cid),
@@ -721,7 +727,10 @@ class TestStreams:
             got_llm.suspensions == 10
         )  # per stream: two field extractions, three chunks
         if logged:
-            assert _events(logs[1]) == _events(logs[0]) != []
+            assert _events(logs[1]) == _events(logs[0])
+            kinds = {dict(row)["type"] for row in _events(logs[1])}
+            # absolute: the turn boundary was written (a lost event scope writes none)
+            assert {"'turn/start'", "'turn/end'"} <= kinds
 
     async def test_a_stream_that_is_never_iterated_holds_nothing(self):
         """The id is checked at call time and the claim waits for the first step. Kills: a claim
