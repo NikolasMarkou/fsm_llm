@@ -1,8 +1,6 @@
 """The identity recipe of an FSM definition is ONE core function (plan ace7a8c8, F1).
 
-``fsm_id_of``, ``definition_digest`` and ``definition_canonical`` live in
-``fsm_llm.core.definitions``; the recipe once stood inline in ``API`` and in
-``FSMLibrary``. ``_literal`` below writes it out on purpose: the independent
+``_literal`` writes the old inline recipe out on purpose: the independent
 reference every row compares with.
 """
 
@@ -31,12 +29,13 @@ _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
 _CORPUS = corpus.fsm_cases()
 
 
-def _two_states(name: str, **first: Any) -> dict[str, Any]:
+def _two_states(name: str, **definition_fields: Any) -> dict[str, Any]:
     return kc._fsm(
         name,
         "a",
-        kc._state("a", transitions=[kc._go("b")], **first),
+        kc._state("a", transitions=[kc._go("b")]),
         kc._state("b", response_instructions="Bye."),
+        **definition_fields,
     )
 
 
@@ -47,6 +46,12 @@ _DEFINITIONS = {
     "synthesize": kc._synth_fsm(),
     "handler_only_keys": _two_states("HandlerOnly", handler_only_keys=["note"]),
 }
+_FEATURE = {
+    "classification": "classification_extractions",
+    "completion": "completion",
+    "synthesize": "synthesize",
+    "handler_only_keys": "handler_only_keys",
+}
 
 
 def _literal(definition: FSMDefinition) -> tuple[str, str]:
@@ -55,18 +60,24 @@ def _literal(definition: FSMDefinition) -> tuple[str, str]:
     return hashlib.sha256(text.encode()).hexdigest(), text
 
 
-@pytest.mark.parametrize("name", sorted(_DEFINITIONS))
+_ALL = {**_DEFINITIONS, **_CORPUS}  # the five shapes, then every built-in
+
+
+@pytest.mark.parametrize("name", sorted(_ALL))
 class TestTheRecipe:
+    def test_the_definition_really_carries_its_feature(self, name):
+        text = definition_canonical(FSMDefinition(**_ALL[name]))[1]
+        assert f'"{_FEATURE.get(name, "states")}"' in text
+
     def test_the_pair_and_the_id_are_the_literal_recipe(self, name):
-        definition = FSMDefinition(**_DEFINITIONS[name])
+        definition = FSMDefinition(**_ALL[name])
         digest, text = _literal(definition)
         assert definition_canonical(definition) == (digest, text)
         assert definition_digest(definition) == digest
         assert fsm_id_of(definition) == f"fsm_{definition.name}_{digest[:8]}"
-        assert len(digest) == 64
 
     def test_api_gives_one_id_for_a_dict_an_object_and_a_file(self, name, tmp_path):
-        data = _DEFINITIONS[name]
+        data = _ALL[name]
         path = tmp_path / "fsm.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         definition = FSMDefinition(**data)
@@ -76,7 +87,7 @@ class TestTheRecipe:
         assert got == {fsm_id_of(definition)}
 
     def test_the_library_keys_and_stores_the_core_digest_and_text(self, name, tmp_path):
-        definition = FSMDefinition(**_DEFINITIONS[name])
+        definition = FSMDefinition(**_ALL[name])
         digest, text = definition_canonical(definition)
         record = FSMLibrary(tmp_path).put(
             definition, goal="g", inputs_required=[], return_keys=[]
@@ -84,14 +95,6 @@ class TestTheRecipe:
         stored = tmp_path / "definitions" / f"{digest}.json"
         assert (digest_of(definition), record.digest) == (digest, digest)
         assert stored.read_bytes() == text.encode()
-
-
-@pytest.mark.parametrize("case", sorted(_CORPUS))
-def test_the_core_recipe_is_the_literal_recipe_over_every_builtin(case):
-    definition = FSMDefinition(**_CORPUS[case])
-    digest, text = _literal(definition)
-    assert definition_canonical(definition) == (digest, text)
-    assert fsm_id_of(definition) == f"fsm_{definition.name}_{digest[:8]}"
 
 
 class TestDefaultsAreNotHashed:

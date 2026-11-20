@@ -299,7 +299,7 @@ def definition_canonical(definition: FSMDefinition) -> tuple[str, str]:
 
     The text is ``json.dumps`` of ``model_dump(exclude_defaults=True)`` with
     sorted keys and the digest is the 64-hex sha256 of that very text. Takes a
-    loaded definition; never raises for a valid model.
+    loaded definition.
     """
     # DECISION plan-2026-10-01T093600-944e2692/D-030 (refines D-016): the
     # hash covers `model_dump(exclude_defaults=True)`, so a field left at
