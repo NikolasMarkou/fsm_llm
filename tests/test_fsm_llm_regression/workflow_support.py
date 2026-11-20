@@ -1,8 +1,8 @@
 """Helpers shared by the workflow tests: read a workflow, find its steps, mutate its text.
 
-Imported by `test_docs_workflow.py`, `test_ci_workflow.py`, `test_refresh_workflow.py`,
-`test_release_workflow.py` and `test_supply_chain.py`, which used to carry a copy each (final
-REFLECT hygiene items 7 and 8, step 121.2). Not collected (no `test_` prefix). Every name keeps
+Imported by `test_ci_workflow.py` and `test_supply_chain.py` (and `passthrough_env` by the
+testing suite and `test_packaging.py`), which used to carry a copy each (final REFLECT hygiene
+items 7 and 8, step 121.2; the other workflow tests were dropped, plan ace7a8c8 step 4). Not collected (no `test_` prefix). Every name keeps
 the underscore of the copies it replaced, so the call sites did not change.
 
 Interface contract. Everything under "Reading", "Mutating" and "Asserting" is pure: it reads no

@@ -74,7 +74,7 @@ make test        # python -m pytest tests/ -v
 make coverage    # same run with --cov=fsm_llm --cov-branch (branch coverage; the baseline gate is scripts/coverage_ratchet.py)
 ```
 
-`make` uses `python` from the active environment, so activate `.venv` first. The pre-push hook and CI use narrower runs, see `.pre-commit-config.yaml` and `.github/workflows/python-package.yml` (CI skips the `slow`, `real_llm` and `integration` tests).
+`make` uses `python` from the active environment, so activate `.venv` first. The pre-push hook runs the lean push gate (`scripts/gate.sh push`, `.pre-commit-config.yaml`); `make gate-step` is the same script for a step before a commit; the wide run is CI (`.github/workflows/python-package.yml`, which skips the `slow`, `real_llm` and `integration` tests).
 
 ## Things to know
 
