@@ -300,6 +300,142 @@ class TestPerKindRefusals:
         assert ex.identity_of(envelope).template_identity
 
 
+# The identity of a document must not depend on the stack or the serializer depth guard of the
+# platform (plan ace7a8c8 D-056: Windows refused a 150-level metadata that Linux dumped).
+_SMALL_STACK_SCRIPT = """
+import json, sys, threading
+from fsm_llm.core.definitions import executable as ex
+depth = int(sys.argv[1])
+document = json.loads(sys.argv[2])
+nested = "x"
+for _ in range(depth):
+    nested = {"a": nested}
+failures = []
+
+def run():
+    try:
+        deep_meta = dict(document, metadata=nested)
+        envelope = ex.parse_executable(deep_meta)
+        assert len(ex.identity_of(envelope).template_identity) == 64
+        deep_body = dict(document, body={"fsm": nested})
+        assert len(ex.identity_of(ex.parse_executable(deep_body)).template_identity) == 64
+        envelope = ex.parse_executable(dict(document, metadata=nested))
+        definition, record = ex.instantiate_envelope(envelope)
+        identity = ex.identity_of(envelope, definition)
+        ex.rebuild_instance(envelope, record, identity.instance_identity)
+    except BaseException as error:
+        failures.append(f"{type(error).__name__}: {str(error)[:100]}")
+
+threading.stack_size(256 * 1024)
+thread = threading.Thread(target=run)
+thread.start()
+thread.join()
+print(json.dumps(failures))
+"""
+
+
+def _old_template_dump(envelope: ex.ExecutableEnvelope) -> dict[str, Any]:
+    return envelope.model_dump(mode="json", by_alias=True, exclude_defaults=True)
+
+
+class TestTheIdentityIsPlatformIndependent:
+    def test_a_256_kb_stack_reads_the_deepest_document_in_every_step(self):
+        # a small-stack thread mimics the stack of a Windows leg: pydantic's own dump of this
+        # depth dies there (a crash, not an exception), so run it in a child process
+        done = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                _SMALL_STACK_SCRIPT,
+                str(ex.MAX_DOCUMENT_DEPTH - 12),
+                json.dumps(_doc()),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert done.returncode == 0, done.stderr[-300:]
+        assert json.loads(done.stdout.splitlines()[-1]) == []
+
+    @pytest.mark.parametrize("case", sorted(_CASES))
+    def test_a_built_in_keeps_its_template_identity_byte_for_byte(self, case):
+        envelope = ex.parse_executable(corpus.wrap(case, _CASES[case]))
+
+        assert ex.identity_of(envelope).template_identity == ex.canonical_digest(
+            _old_template_dump(envelope)
+        )
+
+    def test_odd_free_form_values_dump_as_pydantic_dumped_them(self):
+        metadata = {
+            "tuple": (1, (2, 3)),
+            "list": [None, True, 1.5, "s", {"k": []}],
+            "int_key": {1: "a", 2: {3: "b"}},
+            "set": {5},
+            "empty": {},
+            "unicode": "caf\u00e9",
+        }
+        envelope = ex.parse_executable(_doc(metadata=metadata))
+
+        assert ex.identity_of(envelope).template_identity == ex.canonical_digest(
+            _old_template_dump(envelope)
+        )
+        bare = ex.parse_executable(_doc())
+        assert ex.identity_of(bare).template_identity == ex.canonical_digest(
+            _old_template_dump(bare)
+        )
+        # a read-only mapping (which pydantic's own dump refuses) identifies as its dict form
+        as_proxy = ex.parse_executable(
+            _doc(metadata=types.MappingProxyType({"k": [1]}))
+        )
+        as_dict = ex.parse_executable(_doc(metadata={"k": [1]}))
+        assert (
+            ex.identity_of(as_proxy).template_identity
+            == ex.identity_of(as_dict).template_identity
+        )
+
+    def test_a_cyclic_envelope_is_refused_and_never_walked_forever(self):
+        envelope = ex.parse_executable(_doc(metadata={"a": 1}))
+        envelope.metadata["self"] = envelope.metadata
+
+        with pytest.raises(ex.ExecutableDocumentError, match="nests deeper"):
+            ex.identity_of(envelope)
+
+    def test_every_free_form_field_of_the_envelope_is_kept_out_of_the_pydantic_dump(
+        self,
+    ):
+        free = {
+            f"{model.__name__}.{name}"
+            for model in (
+                ex.ExecutableEnvelope,
+                ex.FsmEnvelope,
+                ex.StrategyEnvelope,
+                ex.ProcedureEnvelope,
+                ex.FsmBody,
+                ex.StrategyBody,
+                ex.ProcedureBody,
+                ex.Contract,
+                ex.Requires,
+                ex.StrategyDecl,
+            )
+            for name, field in model.model_fields.items()
+            if "Any" in repr(field.annotation)
+        }
+
+        # `metadata` (the base and, inherited, the three kinds) and `fsm` (the body, inherited
+        # by the other two bodies) are the two `identity_of` excludes
+        assert free == {
+            "ExecutableEnvelope.metadata",
+            "FsmEnvelope.metadata",
+            "StrategyEnvelope.metadata",
+            "ProcedureEnvelope.metadata",
+            "FsmBody.fsm",
+            "StrategyBody.fsm",
+            "ProcedureBody.fsm",
+        }
+
+
 class TestHeaderFields:
     def test_the_defaults_and_the_alias(self):
         envelope = ex.parse_executable(_doc())

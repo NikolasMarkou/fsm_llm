@@ -59,6 +59,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import to_jsonable_python
 
 from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.results import Identity
@@ -109,8 +110,9 @@ __all__ = [
 ENVELOPE_SCHEMA_VERSION_DEFAULT = "1.0"
 ENVELOPE_SCHEMA_VERSION_OLDEST = "1.0"
 
-#: Deepest container nesting a document may have. A valid FSM body nests about 108 levels
-#: (a JsonLogic maximum) below the header; pydantic stops serialising at about 255.
+#: Deepest container nesting a document may have. A valid FSM body nests about 100 levels
+#: (a JsonLogic maximum of 50 operators) below the header. The identity walks the free-form
+#: body itself (``_json_tree``), so no serializer depth guard of the platform applies (D-056).
 MAX_DOCUMENT_DEPTH = 200
 
 #: Longest problem line of a refused document (and of every ``load_executable`` message), and
@@ -496,6 +498,45 @@ def _instance_digest(instance: FSMDefinition | Mapping[str, Any]) -> str:
         return canonical_digest({str(k): v for k, v in instance.items()})
 
 
+def _json_tree(value: Any) -> Any:
+    """A JSON-safe copy of a free-form tree, walked with an explicit stack (no recursion).
+
+    A ``Mapping`` becomes a dict with str keys, a non-text ``Sequence`` a list; a leaf goes
+    through ``to_jsonable_python`` (what ``model_dump(mode="json")`` does to it) and sees no
+    container. Raises ``ExecutableDocumentError`` below ``MAX_DOCUMENT_DEPTH`` levels, which
+    also stops a cyclic structure.
+    """
+    holder: list[Any] = [None]
+    stack: list[tuple[Any, Any, Any, int]] = [(value, holder, 0, 1)]
+    while stack:
+        node, parent, slot, level = stack.pop()
+        if isinstance(node, Mapping):
+            children: Any = node.items()
+        elif isinstance(node, Sequence) and not isinstance(
+            node, (str, bytes, bytearray)
+        ):
+            children = enumerate(node)
+        else:
+            parent[slot] = to_jsonable_python(node)
+            continue
+        if level > MAX_DOCUMENT_DEPTH:
+            line = f"document: nests deeper than {MAX_DOCUMENT_DEPTH} levels"
+            raise ExecutableDocumentError(line, problems=(line,))
+        target: Any
+        if isinstance(node, Mapping):
+            target = parent[slot] = {}
+            for key, child in children:
+                name = next(iter(to_jsonable_python({key: None})))
+                target[name] = None
+                stack.append((child, target, name, level + 1))
+        else:
+            target = parent[slot] = []
+            for index, child in children:
+                target.append(None)
+                stack.append((child, target, index, level + 1))
+    return holder[0]
+
+
 def identity_of(
     template: ExecutableEnvelope,
     instance: FSMDefinition | Mapping[str, Any] | None = None,
@@ -508,7 +549,20 @@ def identity_of(
     (the workflow body) is hashed as written by ``canonical_digest``; ``None`` when no instance is
     given. Never raises on a mapping.
     """
-    dump = template.model_dump(mode="json", by_alias=True, exclude_defaults=True)
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-056: pydantic dumps only the shallow header;
+    # `metadata` and `body.fsm` (free-form `dict[str, Any]`) go through `_json_tree`. Do NOT dump
+    # them with `model_dump`: its recursion guard is a per-platform constant (Windows refuses
+    # what Linux dumps, and a small stack crashes the process), so an identity would depend on
+    # the machine. The result is byte equal to the old whole-model dump.
+    dump = template.model_dump(
+        mode="json",
+        by_alias=True,
+        exclude_defaults=True,
+        exclude={"metadata": True, "body": {"fsm": True}},
+    )
+    dump.setdefault("body", {})["fsm"] = _json_tree(template.body.fsm)
+    if template.metadata:
+        dump["metadata"] = _json_tree(template.metadata)
     digest = None if instance is None else _instance_digest(instance)
     return Identity(template_identity=canonical_digest(dump), instance_identity=digest)
 

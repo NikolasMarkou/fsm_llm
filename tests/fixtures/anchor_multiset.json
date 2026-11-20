@@ -739,6 +739,11 @@
       "delta": -1,
       "reason": "step 14 of plan ace7a8c8, D-048 (roadmap 0.15): llm.interface.resolve_tool_model and its D-036 anchor of plan 51fde95b are removed with the bonsai default; resolve_model is the only resolver and the rule is held by tests/test_fsm_llm_regression/test_no_model_paths.py",
       "token": "plan-2026-11-19T025425-51fde95b/D-036"
+    },
+    {
+      "delta": 1,
+      "reason": "step 19.1 of plan ace7a8c8, D-056: new anchor on identity_of (the free-form body is walked by _json_tree, never dumped by pydantic, whose depth guard is per platform)",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-056"
     }
   ]
 }
