@@ -568,26 +568,57 @@ class TestInstantiation:
         assert (leaves, keys) == ({"v", "u_2"}, {"k"})
 
     def test_a_caller_input_is_never_a_variable_and_never_in_an_identity(self):
-        envelope = ex.parse_executable(
-            _doc(
-                contract={"inputs": ["task"]},
-                variables=["tone"],
-            )
-        )
-        before = ex.identity_of(
-            envelope, ex.instantiate_envelope(envelope, variables={"tone": "a"})[0]
-        )
+        """Principle 14 as a behaviour: a caller's task, passed as an input through the real
+        calls the loader and instantiation offer, is refused each time, is never echoed in an
+        error, and moves neither identity."""
+        from fsm_llm.core.verify.executable import load_executable
+
+        document = _doc(contract={"inputs": ["task"]}, variables=["tone"])
+        envelope = ex.parse_executable(document)
+        definition, record = ex.instantiate_envelope(envelope, variables={"tone": "a"})
+        before = ex.identity_of(envelope, definition)
 
         for i in range(10_000):
-            with pytest.raises(ex.InstantiationError):
-                ex.instantiate_envelope(
-                    envelope, variables={"tone": "a", "task": f"caller input {i}"}
+            task = f"caller input {i} sk-SECRET-{i}"
+            with pytest.raises(ex.InstantiationError) as info:
+                ex.instantiate_envelope(envelope, variables={"tone": "a", "task": task})
+            assert "task" in str(info.value) and task not in str(info.value)
+            if i % 1_000 == 0:  # the loader is the heavier call
+                loaded, result = load_executable(
+                    document, variables={"tone": "a", "task": task}
                 )
+                assert loaded is None and not result.is_valid
+                assert any("task" in m for m in result.errors)
+                assert not any(task in m for m in (*result.errors, *result.warnings))
+                with pytest.raises(ex.InstantiationError):
+                    ex.rebuild_instance(
+                        envelope,
+                        {"options": {}, "variables": {"tone": "a", "task": task}},
+                        before.instance_identity or "",
+                    )
 
-        after = ex.identity_of(
-            envelope, ex.instantiate_envelope(envelope, variables={"tone": "a"})[0]
+        after_definition, after_record = ex.instantiate_envelope(
+            envelope, variables={"tone": "a"}
         )
-        assert before == after
+        assert (ex.identity_of(envelope, after_definition), after_record) == (
+            before,
+            record,
+        )
+        assert "task" not in json.dumps(after_record)
+
+    def test_a_refused_body_names_error_types_and_never_a_variable_value(self):
+        fsm = _fsm()
+        fsm["initial_state"] = "{{first}}"
+        envelope = ex.parse_executable(_doc(fsm, variables=["first"]))
+        value = "sk-SECRET-123\x1b[31m\u202e"
+
+        with pytest.raises(ex.InstantiationError) as info:
+            ex.instantiate_envelope(envelope, variables={"first": value})
+
+        text = str(info.value)
+        assert "not a valid FSM definition" in text and "value_error" in text
+        assert "SECRET" not in text and "\x1b" not in text and "\u202e" not in text
+        assert len(text) < 400
 
     def test_rebuild_matches_and_a_tampered_record_fails(self):
         envelope = self._templated()

@@ -62,12 +62,12 @@ A=tests/test_fsm_llm_agents
 F=tests/test_fsm_llm
 R=tests/test_fsm_llm_regression
 GUARD_ROWS=(
-  "D1 HITL grant: $A/test_hitl_security.py $A/test_trust_boundary.py $A/test_hitl.py $A/test_tool_timeouts.py $A/test_policy_layer.py"
+  "D1 HITL grant: $A/test_hitl_security.py $A/test_trust_boundary.py $A/test_hitl.py $A/test_tool_timeouts.py $A/test_policy_layer.py $A/test_tool_registry_names.py"
   "D2 secret filter and internal prefix: $F/test_context_unit.py $F/fixtures/context_key_corpus.py $F/fixtures/census_key_corpus.py $F/fixtures/holdout_key_corpus.py $A/test_secret_hygiene.py $R/test_bugs.py"
   "D3 handler-only keys, forged seed: $F/test_advance.py $F/test_completion_state.py $F/test_synthesize_field.py $F/test_event_log_restore_trust.py $F/test_internal_key_seeding_log.py"
   "D4 litellm, layering, laziness: $R/test_import_contract.py $R/test_string_imports.py $R/test_import_laziness.py $F/test_llm_provider_banner.py $F/test_embedder.py $F/test_no_implicit_env.py"
   "D5 request bytes: $F/test_kind_equality.py $A/test_native_fc_golden.py $F/test_llm_request_path.py $F/test_llm_complete.py"
-  "D6 untrusted text, paths: $F/test_okf.py $F/test_agent_skills.py $A/test_okf.py tests/test_fsm_llm_synthesis/test_policy.py tests/test_fsm_llm_synthesis/test_gates.py tests/test_fsm_llm_synthesis/test_dryrun.py tests/test_fsm_llm_synthesis/test_synthesizer.py"
+  "D6 untrusted text, paths: $F/test_okf.py $F/test_agent_skills.py $A/test_okf.py tests/test_fsm_llm_synthesis/test_policy.py tests/test_fsm_llm_synthesis/test_gates.py tests/test_fsm_llm_synthesis/test_dryrun.py tests/test_fsm_llm_synthesis/test_synthesizer.py $F/test_executable_load.py $F/test_executable_models.py"
   "D7 one turn, cancel, lock order, budgets: $F/test_turn_gate.py $F/test_async_cancel.py $F/test_fsm_lock_order.py $F/test_turn_guard_deterministic.py $F/test_run_until_terminal.py $F/test_turn_budgets.py"
   "D8 event log: $F/test_event_log_crash.py $F/test_event_log_stack_crash.py $F/test_event_log_jsonl.py $F/test_event_log_privacy.py $F/test_event_log_retention.py"
   "D9 server auth: tests/test_fsm_llm_monitor/test_server_security.py $F/test_api_key_compare_sites.py $A/test_remote.py"

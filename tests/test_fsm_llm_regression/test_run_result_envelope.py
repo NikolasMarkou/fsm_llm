@@ -106,6 +106,36 @@ class TestWorkflowInstanceRunResult:
         assert result.outputs == {"answer": 42, "nested": {"_kept": 1}}
         assert not any(has_internal_prefix(k) for k in result.outputs)
 
+    def test_secret_looking_entries_never_reach_outputs_at_any_depth(self):
+        context = {
+            "answer": 42,
+            "api_key": "sk-abcdefghijklmnop123",
+            "password": "hunter2",
+            "nested": {"token": "abc", "ok": 1, "deeper": [{"secret": "s", "n": 2}]},
+        }
+        result = _instance(WorkflowStatus.COMPLETED, context=context).run_result()
+
+        assert result.outputs == {
+            "answer": 42,
+            "nested": {"ok": 1, "deeper": [{"n": 2}]},
+        }
+        assert "hunter2" not in repr(result) and "sk-abc" not in repr(result)
+
+    def test_a_context_the_filter_refuses_gives_empty_outputs_and_a_note(
+        self, monkeypatch
+    ):
+        from fsm_llm.context.filtering import ContextFilterError
+
+        def refuse(*args, **kwargs):
+            raise ContextFilterError("too aliased")
+
+        monkeypatch.setattr("fsm_llm.workflows.models.filter_context_tree", refuse)
+
+        result = _instance(WorkflowStatus.COMPLETED, context={"a": 1}).run_result()
+
+        assert result.outputs == {}
+        assert result.detail["outputs_withheld"] == "unfilterable"
+
     def test_outputs_are_a_copy_of_the_context(self):
         instance = _instance(WorkflowStatus.COMPLETED, context={"a": 1})
         before = copy.deepcopy(instance.context)

@@ -2,7 +2,7 @@
 
 > Covers FSM-LLM v0.13.0
 
-Four small pieces of the core that every part of the library builds on: the closed vocabularies of how a run ended, the one envelope a run reports, the one registry for names, and a generic JSON patch applier. The last section says how the model is chosen. Each is imported by name; `import fsm_llm` loads none of the first three.
+Four small pieces of the core that every part of the library builds on: the closed vocabularies of how a run ended, the one envelope a run reports, the one registry for names, and a generic JSON patch applier. The last section says how the model is chosen. Each is imported by name; `import fsm_llm` loads `core.names` (one small module, through the engine's state-kind table) and neither `core.codes` nor `core.results`.
 
 ## Codes and the result envelope
 
@@ -33,7 +33,7 @@ result.identity.instance_identity   # None: the identity is always an Identity, 
 The result types of the runners project onto the envelope:
 
 - `AgentResult.run_result()`. `AgentResult` has `status` and `reason`, and its `success` is a read-only property (`status is Status.OK`). You give a `stop_reason` and `status` and `reason` follow from it (`StopReason.ANSWERED` is `ok`; a forced stop such as `MAX_ITERATIONS` is `aborted` with `budget_spent`); `AgentResult(success=...)` is refused. `StopReason` is a `str` Enum with UPPER members and the old wire strings, so `StopReason.ANSWERED == "answered"` holds and a dump still emits `answered`.
-- `WorkflowInstance.run_result()`. A pending, running or waiting instance reads `running` (the workflow status stays in `detail["workflow_status"]`), `completed` is `ok`, `failed` is `failed` with no reason (the error text rides in `detail["error"]`), `cancelled` is `aborted` with `Reason.CANCELLED`. `handle` is the instance id and `outputs` is the context without the keys with an internal prefix.
+- `WorkflowInstance.run_result()`. A pending, running or waiting instance reads `running` (the workflow status stays in `detail["workflow_status"]`), `completed` is `ok`, `failed` is `failed` with no reason (the error text rides in `detail["error"]`), `cancelled` is `aborted` with `Reason.CANCELLED`. `handle` is the instance id and `outputs` is the public non-secret context: a copy without the top-level keys that have an internal prefix and without any entry the secret filter (`is_forbidden_context_entry`) flags, at any depth. A workflow declares no output keys, so this is not a declared-key list. A context the filter cannot walk gives empty `outputs` and `detail["outputs_withheld"] = "unfilterable"`.
 - `fsm_llm.synthesis.synthesis_run_result(result)` over the `synthesis_result` dict a `ProcedureRunner` writes. The dict stays the wire contract; the procedure id becomes the instance identity.
 
 ## Name registries

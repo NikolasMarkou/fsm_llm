@@ -186,7 +186,7 @@ def resolve_model(model: str | None = None) -> str:
 
     Interface contract (callers: ``API`` and ``Classifier`` (each only when no
     ``llm_interface`` is injected), ``ReasoningEngine``, ``agents.resolve_agent_model``,
-    ``eval.resolve_model``, the ``fsm-llm`` runner and the monitor launch routes):
+    the ``fsm-llm`` runner and the monitor launch routes):
         - *model*: an explicit name or ``None``.
         - Returns the first usable candidate, stripped: *model*, then
           ``$LLM_MODEL`` (read now, never at import). A blank value (``""`` or

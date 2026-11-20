@@ -329,6 +329,12 @@ ExecutableDocument = Annotated[
 _ADAPTER: TypeAdapter[ExecutableEnvelope] = TypeAdapter(ExecutableDocument)
 
 
+def _error_where(loc: Sequence[Any]) -> str:
+    """The path of an error as plain text: each part control-stripped and capped."""
+    parts = (capped_line(str(part), _PROBLEM_PART_CHARS) for part in loc)
+    return ".".join(parts) or "document"
+
+
 def _problems(error: ValidationError) -> tuple[str, ...]:
     """One line per refusal. Key names and messages come from the document (the discriminator
     error echoes the ``kind`` value), so each part and each line is control-stripped and capped."""
@@ -339,10 +345,7 @@ def _problems(error: ValidationError) -> tuple[str, ...]:
         loc = item["loc"]
         if loc and loc[0] in _KINDS:  # the union's tag, not a path
             loc = loc[1:]
-        where = (
-            ".".join(capped_line(str(part), _PROBLEM_PART_CHARS) for part in loc)
-            or "document"
-        )
+        where = _error_where(loc)
         message = item["msg"].removeprefix("Value error, ")
         lines.append(capped_line(f"{where}: {message}", PROBLEM_LINE_CHARS))
     return tuple(lines)
@@ -587,10 +590,21 @@ def instantiate_envelope(
     body = substitute_variables(envelope.body.fsm, values)
     try:
         definition = FSMDefinition(**body)
-    except (ValueError, TypeError, RecursionError) as error:
-        first = " ".join(str(error).split())[:160]
+    except ValidationError as error:
+        # locations and error types only: a message or an input value can carry a variable VALUE
+        items = error.errors(
+            include_url=False, include_context=False, include_input=False
+        )
+        shown = "; ".join(
+            _error_where(item["loc"]) + f": {item['type']}" for item in items[:5]
+        )
         raise InstantiationError(
-            f"the instantiated body is not a valid FSM definition ({first})"
+            f"the instantiated body is not a valid FSM definition ({shown})"
+        ) from None
+    except (ValueError, TypeError, RecursionError) as error:
+        raise InstantiationError(
+            "the instantiated body is not a valid FSM definition "
+            f"({type(error).__name__})"
         ) from None
     return definition, {"options": {}, "variables": dict(sorted(values.items()))}
 

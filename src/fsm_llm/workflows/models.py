@@ -11,9 +11,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import MAX_CONTEXT_FILTER_DEPTH, has_internal_prefix
+from fsm_llm.context.filtering import ContextFilterError, filter_context_tree
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.results import RunResult
+from fsm_llm.security import is_forbidden_context_entry
 
 from .constants import DEFAULT_MAX_HISTORY_ENTRIES
 from .exceptions import WorkflowStateError
@@ -249,8 +251,13 @@ class WorkflowInstance(BaseModel):
         ``status`` and ``reason`` come from ``_RUN_STATUS`` (a failed instance
         has no reason: ``error`` is message text and is never branched on, it
         only rides in ``detail["error"]``); ``handle`` is ``instance_id``;
-        ``outputs`` is a shallow copy of ``context`` without the top-level
-        internal-prefixed keys; ``identity`` is empty.
+        ``outputs`` is the PUBLIC NON-SECRET context (a workflow declares no
+        output keys, so there is no declared list to restrict to): a copy of
+        ``context`` without the top-level internal-prefixed keys and without
+        every entry ``is_forbidden_context_entry`` flags, at any depth (D-055). A
+        context the shared filter refuses (``ContextFilterError``) gives empty
+        ``outputs`` and ``detail["outputs_withheld"] == "unfilterable"``;
+        ``identity`` is empty.
         """
         status, reason = _RUN_STATUS[self.status]
         detail: dict[str, Any] = {
@@ -260,14 +267,26 @@ class WorkflowInstance(BaseModel):
         }
         if self.error is not None:
             detail["error"] = self.error
+        public = {
+            key: value
+            for key, value in self.context.items()
+            if not has_internal_prefix(key)
+        }
+        try:
+            outputs = filter_context_tree(
+                public,
+                MAX_CONTEXT_FILTER_DEPTH,
+                lambda key, value, path: (
+                    "secret" if is_forbidden_context_entry(key, value) else None
+                ),
+            )
+        except ContextFilterError:
+            outputs = {}
+            detail["outputs_withheld"] = "unfilterable"
         return RunResult(
             status=status,
             reason=reason,
-            outputs={
-                key: value
-                for key, value in self.context.items()
-                if not has_internal_prefix(key)
-            },
+            outputs=outputs,
             detail=detail,
             handle=self.instance_id,
         )
