@@ -85,6 +85,17 @@ Three-outcome evaluation:
 
 Uses JsonLogic conditions (`core/expressions/`) and required context key checks.
 
+### Executables, results, names and patches (`core/`)
+
+These core modules are imported by name. `import fsm_llm` loads only `core/names.py` and, through `fsm_llm.core.definitions`, the patch applier:
+
+- `core/definitions/executable.py` is the executable envelope (a header around an FSM body, two identities, the variable rules) and `core/verify/executable.py` is its load sequence, `load_executable`. `fsm-llm-validate` imports the loader inside a function, only for a file whose header says it is an executable. See [Executables](executables.md).
+- `core/results.py` is the `RunResult` and `Identity` envelope; `core/codes.py` holds the closed vocabularies (`Status`, `Reason`, `Lifecycle`, `MessageSource`, `CompletionKind`).
+- `core/names.py` is `NameRegistry`. The engine builds its state-kind table from it at import, which is why it is loaded with the package.
+- `core/definitions/patch.py` is the JSON patch applier, re-exported by `fsm_llm.core.definitions`.
+
+See [Runs, results and names](results_and_names.md) for the rules of each.
+
 ## Data Flow
 
 ### Message Processing
@@ -165,6 +176,8 @@ The extension point has two halves, and a new kind needs both:
 - **Execution** (engine). A `StateExecutor` in `fsm_llm.engine.kinds` says what the kind does in Pass 1: `extract(...)` produces the turn's extraction result, `cleans_extracted` says whether the data goes through `clean_context_keys`, and `after_transition(...)` runs when a transition lands in a state of the kind. The pipeline picks the executor with `executor_for(state, executors)` at the one Pass-1 seam that the sync and the stream path share. The executor table is per instance: `API(..., executors={kind_name: executor})`, passed down to `FSMManager` and `MessagePipeline`, is validated, copied read-only and visible to that `API` only. A kind with no executor (`synthesize`, which is passive, or a runtime kind nobody registered) runs as conversation, resolved through that `API`'s own `conversation` entry first and the module's second, so an `executors={"conversation": X}` override covers it too (a bare `converse` on a synthesize state stays in it, as before).
 
 What the engine guarantees to an executor: `process()` takes the one snapshot of the turn and restores it on a failure (see Turn atomicity in `src/fsm_llm/AGENTS.md`), so an executor takes none of its own; handler-only keys (a kind's `result_key`) are never minted as extraction targets; Pass 2 stays shared and kind-agnostic. What it does not: the conversation Pass-1 methods (`_extract_after_transition`, `_execute_data_extraction` and their field, bulk and classification helpers) still live on `MessagePipeline` and the conversation executor calls them; they move with the module layout split (roadmap 0.4), they were not deleted. A test-only kind registered at runtime runs a full conversation with no edit in core (`tests/test_fsm_llm/test_executor_map.py`).
+
+The module-level table of registered executors is a `NameRegistry` named `state_kinds` (`engine/kinds/registry.py`, see [Runs, results and names](results_and_names.md#name-registries)): `register_executor` replaces an entry on purpose, one executor instance cannot serve two kind names, and the registry declares no entry-point group yet.
 
 Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both packages (`core.state_kinds` and `engine.kinds`) are internal. The `executors` keyword of `API`, `FSMManager` and `MessagePipeline` shows in the API snapshot fixture (`tests/fixtures/api_snapshot.txt`) as `Mapping[str, StateExecutor] | None`: `StateExecutor` is imported from `fsm_llm.engine.kinds` (not from `fsm_llm`) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.
 
@@ -251,7 +264,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the ext
 | Independent siblings | `context`, `okf`, `skills`, `tools` | Context compaction and prompt builders (`context.layout`); Open Knowledge Format; Agent Skills; the tool registry and tool models |
 | `runtime` | `fsm_llm.runtime` | The opt-in durable event log: `EventLog` (`runtime/log.py`), the JSONL store (`runtime/stores/jsonl.py`), `BlobStore` (`runtime/blobs.py`), the format (`runtime/events.py`), the turn scope (`runtime/scope.py`), the session and stack projections (`runtime/stores/session.py`, `runtime/stores/stack.py`: the folds `restore_session`, `API.fork` and `API.resume` read), privacy levels and the redaction hook (`runtime/privacy.py`), explicit retention (`runtime/retention.py`) and the usage fold (`runtime/usage.py`); imports `core`, `llm` and the kernel only; the log directory is as private as a session directory |
 | `llm` | `fsm_llm.llm` | `LLMInterface`, `LiteLLMInterface` (the one litellm import), the embedder, reply parsing |
-| `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses), `core.visualize` |
+| `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses, the executable load sequence), `core.visualize`, `core.results`, `core.names`, `core.codes`, the executable envelope and the JSON patch applier in `core.definitions` |
 | Kernel | `constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`, `cli_support` | Small modules any layer may import; they import no layer |
 
 `import fsm_llm` loads the `core`, `engine`, `handlers`, `context`, `llm`, `runtime` and `security` packages and a few kernel modules, and nothing else: no subpackage and none of `okf`, `skills`, `tools` or `policy` (pinned by `tests/test_fsm_llm_regression/test_import_laziness.py`). A few edges break the order on purpose and are named in `.importlinter`: `agents` imports `reasoning` (for `ReasoningReactAgent`), and `synthesis` imports `agents.semantic_tools` and `eval` (the simulator reuses the scripted-trial code).
@@ -336,4 +349,5 @@ A new state kind is a `KindSpec` in `fsm_llm.core.state_kinds` plus a `StateExec
 - [Concepts](concepts.md) is the shorter tour of the same ideas.
 - [Handler Development](handlers.md) covers the extension points of a turn.
 - [Runtime FSM synthesis](synthesis.md) covers the `synthesize` state kind.
+- [Executables](executables.md) and [Runs, results and names](results_and_names.md) cover the core contracts above.
 - The [API Reference](api_reference.md) lists the public names of every package.

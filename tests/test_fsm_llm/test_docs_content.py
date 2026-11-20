@@ -70,6 +70,8 @@ _LANDING_LINKS = [
     "quickstart.md",
     "concepts.md",
     "fsm_design.md",
+    "executables.md",
+    "results_and_names.md",
     "handlers.md",
     "synthesis.md",
     "testing.md",

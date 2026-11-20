@@ -44,6 +44,8 @@ nav:
       - Examples: examples.md
   - Guides:
       - FSM Design: fsm_design.md
+      - Executables: executables.md
+      - Runs, results and names: results_and_names.md
       - Handlers: handlers.md
       - Runtime FSM synthesis: synthesis.md
       - Testing: testing.md

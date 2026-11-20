@@ -120,7 +120,7 @@ ollama list  # for Ollama models
 # or set OPENAI_API_KEY for cloud models
 ```
 
-**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`; with neither set the run uses `ollama_chat/bonsai-2:27b` (`DEFAULT_TOOL_MODEL`, a default of `fsm-llm-eval` and the monitor only; the library core has none). Importing `fsm_llm` loads no `.env` file (`fsm_llm.llm` sets `LITELLM_MODE=PRODUCTION` around its `import litellm`), so only the process environment fills `LLM_MODEL`. The scorecard and `results.json` name the model that really ran, so read them.
+**Which model runs.** The model is `--model`, then the process environment `LLM_MODEL`, then the file named by `--env-file`; with none of them set the command exits 1 with the `ModelNotConfiguredError` message, because the library has no built-in model (a machine that wants one keeps `LLM_MODEL` in its own `.env`, and `make eval-examples` passes `--env-file .env`). Importing `fsm_llm` loads no `.env` file (`fsm_llm.llm` sets `LITELLM_MODE=PRODUCTION` around its `import litellm`), so only the process environment or `--env-file` fills `LLM_MODEL`. The scorecard and `results.json` name the model that really ran, so read them.
 
 ### Manual (single example)
 

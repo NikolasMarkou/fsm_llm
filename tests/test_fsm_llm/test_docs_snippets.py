@@ -38,8 +38,10 @@ _FULL_FSM_DOCS = [
 _REFERENCE_DOCS = [
     "docs/api_reference.md",
     "docs/architecture.md",
+    "docs/executables.md",
     "docs/fsm_design.md",
     "docs/handlers.md",
+    "docs/results_and_names.md",
     "docs/synthesis.md",
     "docs/testing.md",
 ]
@@ -71,7 +73,17 @@ def _snippets() -> list[tuple[str, dict]]:
     return found
 
 
-_SNIPPETS = _snippets()
+_FOUND = _snippets()
+_SNIPPETS = [
+    # an executable envelope wraps the FSM: the FSM is its `body.fsm`
+    (label, data["body"]["fsm"] if data.get("schema") == "fsm-llm/executable" else data)
+    for label, data in _FOUND
+]
+_ENVELOPES = [
+    (label, data)
+    for label, data in _FOUND
+    if data.get("schema") == "fsm-llm/executable"
+]
 
 
 def test_the_extractor_found_the_first_touch_snippets():
@@ -89,3 +101,13 @@ def test_the_extractor_found_the_first_touch_snippets():
 )
 def test_doc_fsm_snippet_loads(label, definition):
     FSMDefinition(**definition)
+
+
+def test_the_executables_guide_has_an_envelope_example_and_it_loads():
+    from fsm_llm.core.verify.executable import load_executable
+
+    assert [label.split("#")[0] for label, _ in _ENVELOPES] == ["docs/executables.md"]
+    for label, document in _ENVELOPES:
+        envelope, result = load_executable(document, variables={"company": "Acme"})
+        assert envelope is not None, (label, result.errors)
+        assert result.errors == [] and result.warnings == []

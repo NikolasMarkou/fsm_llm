@@ -48,9 +48,14 @@ Other options: `--mode {run,validate,visualize}`, `--style {full,compact,minimal
 
 Entry point: `fsm_llm.core.verify.cli:main_cli`.
 
-Validates an FSM definition file. `--upgrade` validates first and then rewrites a definition
-that declares version 4.0 up to below the current one to the current version; it exits 1 when the
-upgrade is refused or fails. Calls no model.
+Validates an FSM definition file, or an [executable](executables.md) document: the command reads
+the file and routes on its `schema` header (`fsm-llm/executable`), never on the extension. The
+report is JSON on stdout and the exit code is 0 for a valid file and 1 otherwise. For an
+executable the report is the whole load sequence at once, each line tagged by its step, and no
+names are resolved. `--upgrade` validates first and then rewrites a definition that declares
+version 4.0 up to below the current one to the current version; it exits 1 when the upgrade is
+refused or fails, and it never rewrites an executable (it prints the report, warns and exits 1).
+Calls no model.
 
 ```bash
 fsm-llm-validate --fsm <path.json> [--upgrade]

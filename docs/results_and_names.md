@@ -1,0 +1,93 @@
+# Runs, results and names
+
+> Covers FSM-LLM v0.13.0
+
+Four small pieces of the core that every part of the library builds on: the closed vocabularies of how a run ended, the one envelope a run reports, the one registry for names, and a generic JSON patch applier. The last section says how the model is chosen. Each is imported by name; `import fsm_llm` loads none of the first three.
+
+## Codes and the result envelope
+
+`fsm_llm.core.codes` holds the closed vocabularies. Each is a `str` Enum with UPPER member names, the same lower case wire strings as before, and a `from_string` that raises `ValueError` for anything else:
+
+| Enum | Members (values) |
+|---|---|
+| `Status` | `ok`, `failed`, `aborted`, `running`, `abstained` |
+| `Reason` | `inputs_missing`, `return_keys_missing`, `provider_error`, `library_error`, `compile_failed`, `push_failed`, `approval_required`, `approval_denied`, `reviewer_error`, `depth_refused`, `completion_unsupported`, `lifecycle_too_low`, `not_simulated`, `budget_spent`, `unexpected_error`, `needs_user_input`, `cancelled` |
+| `Lifecycle` | `draft`, `verified`, `trusted`, `deprecated`, `builtin` |
+| `MessageSource` | `user`, `run`, `remote_client`, `simulator` |
+
+`Reason.CANCELLED` is a run stopped from outside: its status is `aborted`. `Lifecycle.BUILTIN` marks something that ships in code. Both `Lifecycle` and `MessageSource` are claims or labels, never authorization, and `MessageSource` is vocabulary only: no event or run input records it yet. In a message use `.value`, not an f-string of a member, because the formatting of a `str` Enum differs between Python versions.
+
+`fsm_llm.core.results` defines what a run reports:
+
+```python
+from fsm_llm.core.codes import Reason, Status
+from fsm_llm.core.results import Identity, RunResult
+
+result = RunResult(status=Status.ABORTED, reason=Reason.CANCELLED, handle="conv-1")
+result.success                      # False: derived from status, never stored or passed
+result.identity.instance_identity   # None: the identity is always an Identity, its digests may be None
+```
+
+`RunResult(status, reason, outputs, answer, detail, identity, handle)` is frozen and refuses an unknown keyword, so `RunResult(success=True)` raises. `status` and `reason` come from the vocabularies above; `outputs` holds the result values (the declared keys, for a kind that declares them); `answer` is the text, if any; `detail` carries kind-specific facts that library code never branches on; `handle` is an id to resume or inspect the run. `Identity(template_identity, instance_identity)` carries the two digests of an [executable](executables.md#two-identities); either may be `None`, meaning not known or not static for this run.
+
+The result types of the runners project onto the envelope:
+
+- `AgentResult.run_result()`. `AgentResult` has `status` and `reason`, and its `success` is a read-only property (`status is Status.OK`). You give a `stop_reason` and `status` and `reason` follow from it (`StopReason.ANSWERED` is `ok`; a forced stop such as `MAX_ITERATIONS` is `aborted` with `budget_spent`); `AgentResult(success=...)` is refused. `StopReason` is a `str` Enum with UPPER members and the old wire strings, so `StopReason.ANSWERED == "answered"` holds and a dump still emits `answered`.
+- `WorkflowInstance.run_result()`. A pending, running or waiting instance reads `running` (the workflow status stays in `detail["workflow_status"]`), `completed` is `ok`, `failed` is `failed` with no reason (the error text rides in `detail["error"]`), `cancelled` is `aborted` with `Reason.CANCELLED`. `handle` is the instance id and `outputs` is the context without the keys with an internal prefix.
+- `fsm_llm.synthesis.synthesis_run_result(result)` over the `synthesis_result` dict a `ProcedureRunner` writes. The dict stays the wire contract; the procedure id becomes the instance identity.
+
+## Name registries
+
+An FSM definition refers to code by name only, never by object. `fsm_llm.core.names.NameRegistry[T](namespace, *, entry_point_group=None)` is the one place a name becomes an object, inside a namespace:
+
+```python
+from fsm_llm.core.names import NameRegistry
+
+kinds: NameRegistry[object] = NameRegistry("state_kinds")
+kinds.register("conversation", executor)
+kinds.resolve("conversation") is executor   # True; a miss raises NameNotFoundError
+kinds.name_of(executor)                     # "conversation" (by identity), or None
+kinds.register("conversation", other)       # NameCollisionError: pass override=True to replace
+kinds.freeze()                              # a later register raises RegistryFrozenError
+```
+
+The rules:
+
+- A taken name is refused with `NameCollisionError` unless `override=True`. One object under a second name is always refused, so `name_of` has one answer. A name must be a non-blank string.
+- `get(name, default=None)`, `resolve(name)`, `name in registry`, `list()` (sorted names), `items()` (name and object pairs in registration order; a replaced name keeps its first position), `frozen` and `namespace`.
+- With `entry_point_group` set, the group is read once, on the first miss of `get`, `resolve` or `in`, or by `load_entry_points()` or `freeze()`. Each entry `name = module:attr` registers its object without overriding: an existing name wins, and a failing or colliding entry is warned and skipped. A later miss never reloads. A package installed after the process started is therefore not seen until the process restarts. The default `None` loads nothing.
+- One leaf lock guards the tables. No loader, logger or callback runs under it, and a thread that misses while another loads waits for the load.
+- A registry is a plain object: a module constant when global, a local when per run. There is no registry of registries.
+
+Today the engine's state-kind table (`state_kinds`) is a `NameRegistry` with no entry-point group, and each `ToolRegistry` holds a `NameRegistry` named `tools`. `ToolRegistry.register` refuses a name that is already taken, where it once let the last registration win: pass `replace=True` (also accepted by `register_function`, `register_python_tool` and `register_agent`) to replace on purpose; a replaced tool keeps its position, which is the order of the tool list the model sees. Some private name tables remain (the agent pattern table, the SOP registry, the monitor's agent classes and workflow presets, the reasoning strategy tables and the meta-builder schemas); each is retired by a named roadmap row, and a test fails on a new one.
+
+## Patching a JSON document
+
+`fsm_llm.core.definitions.apply_json_patch(document, ops, *, max_ops, max_chars, check_path=None)` applies a patch of the subset of RFC 6902 that a model can safely write, to a trusted document, and returns a new dict (the argument is never changed):
+
+```python
+from fsm_llm.core.definitions import apply_json_patch, JsonPatchError
+
+new = apply_json_patch(
+    {"states": {"a": {"purpose": "old"}}},
+    [{"op": "test", "path": "/states/a/purpose", "value": "old"},
+     {"op": "replace", "path": "/states/a/purpose", "value": "new"}],
+    max_ops=8, max_chars=2000,
+)
+```
+
+- The ops are `add`, `remove`, `replace` and `test`. `move`, `copy` and any extra key are refused.
+- A path is an RFC 6901 pointer of at most 12 tokens. `add` needs an existing parent and an index up to the list length, or `-`. The other ops need an existing target. `test` is strict equality: `1` is not `1.0` and `True` is not `1`.
+- The bounds come first: `max_ops`, `max_chars` (an estimate taken in one iterative walk before any op is read) and a nesting depth of 16 for a value. A refusal raises `JsonPatchError` with a `code` (`too-many-ops`, `too-large`, `too-deep`, `bad-value`, `bad-document`, `op-shape`, `op-not-allowed`, `bad-pointer`, `bad-index`, `out-of-scope`, `no-target` or `test-failed`) and the index `op` of the op at fault. The message holds the code and the index only, never text of the patch, and nothing is applied.
+- `check_path` is how a caller narrows where ops may land: a function called once per op with the unescaped tokens of the path, returning whether it may be touched. A false answer refuses the patch with `out-of-scope`. Runtime synthesis uses it to confine a repair to the states.
+- The applier does not validate the result. The caller runs its own checks on the returned document.
+
+## Choosing the model
+
+There is one resolver, `fsm_llm.llm.resolve_model(model=None)`: the explicit name, then the environment variable `LLM_MODEL`, and otherwise `ModelNotConfiguredError`. A blank value counts as unset. The library has no built-in model anywhere: not in the core, the agents, the reasoning engine, `fsm-llm-eval` or the monitor. A caller that injects its own `llm_interface` needs no model. How each command line takes `--model` and `--env-file`, and what a monitor launch answers, is on the [Command line](cli.md) page; a machine that wants a default keeps `LLM_MODEL` in its own `.env`, never in code.
+
+## Next steps
+
+- [Executables](executables.md) for the envelope that carries the two identities.
+- [API Reference](api_reference.md) for the signatures.
+- [Architecture](architecture.md) for where these modules sit in the layers.

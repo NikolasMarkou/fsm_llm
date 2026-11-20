@@ -79,6 +79,8 @@ The conversation starts in `ask_name`, the extraction fills `name`, the transiti
 | Run a first conversation against a model | [Quick Start](quickstart.md) |
 | Understand the idea, the two passes and what each subpackage adds | [Concepts](concepts.md) |
 | Design states, transitions, priorities, context and classification | [FSM Design Guide](fsm_design.md) |
+| Package an FSM as a document with a contract, variables and two identities | [Executables](executables.md) |
+| Read a run's outcome, register names, patch a JSON document, set the model | [Runs, results and names](results_and_names.md) |
 | Run your own code at the points of a turn | [Handler Development](handlers.md) |
 | Let a model write a sub-conversation at run time | [Runtime FSM synthesis](synthesis.md) |
 | Test a bot, an agent or a workflow without a model | [Testing](testing.md) |

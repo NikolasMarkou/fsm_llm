@@ -110,6 +110,13 @@ The library is organized into these groups of features.
   `WorkingMemory` buffers.
 * **Diagrams**: `build_fsm_graph()`, `to_mermaid()`, `to_dot()` and the `fsm-llm-visualize`
   command.
+* **Executables**: a JSON document that wraps an FSM with a contract, operator variables and two
+  identities (of the template and of the instantiated FSM), checked by one load sequence that
+  `fsm-llm-validate` runs. It is a format and a loader today, not yet a way to run an agent. See
+  [Executables](executables.md).
+* **One vocabulary for outcomes and names**: `Status` and `Reason` codes, the `RunResult`
+  envelope that agent, workflow and synthesis runs project onto, a `NameRegistry` for names,
+  and a JSON patch applier. See [Runs, results and names](results_and_names.md).
 
 ### Reasoning, workflows and agents
 

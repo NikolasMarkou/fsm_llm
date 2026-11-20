@@ -1,7 +1,7 @@
 # docs
 
 Path: `docs/`
-Purpose: Markdown documentation for FSM-LLM v0.13.0 (landing page, quickstart, concepts, FSM design, handlers, synthesis, testing, API reference, command line, architecture, examples), the wrapper pages of the root project files and the published roadmaps. It is also the source of the documentation site.
+Purpose: Markdown documentation for FSM-LLM v0.13.0 (landing page, quickstart, concepts, FSM design, executables, results and names, handlers, synthesis, testing, API reference, command line, architecture, examples), the wrapper pages of the root project files and the published roadmaps. It is also the source of the documentation site.
 
 ## Scope
 
@@ -16,7 +16,7 @@ The files by kind:
 
 | Group | Files | Header | Status |
 | --- | --- | --- | --- |
-| Current pages | `index.md`, `quickstart.md`, `concepts.md`, `fsm_design.md`, `handlers.md`, `synthesis.md`, `testing.md`, `api_reference.md`, `cli.md`, `architecture.md`, `examples.md` | `> Covers FSM-LLM v0.13.0` (matches `src/fsm_llm/__version__.py`; the form `v<version>` is pinned by `tests/test_fsm_llm_regression/test_release_version.py`) | Must match the code |
+| Current pages | `index.md`, `quickstart.md`, `concepts.md`, `fsm_design.md`, `executables.md`, `results_and_names.md`, `handlers.md`, `synthesis.md`, `testing.md`, `api_reference.md`, `cli.md`, `architecture.md`, `examples.md` | `> Covers FSM-LLM v0.13.0` (matches `src/fsm_llm/__version__.py`; the form `v<version>` is pinned by `tests/test_fsm_llm_regression/test_release_version.py`) | Must match the code |
 | Wrappers | `contributing.md`, `security.md`, `evaluate.md`, `changelog.md` | none | One `include-markdown` line each of the root file; never edit the wrapper |
 | Roadmaps | `2026_roadmap.md`, and any other `*_roadmap.md` | none | Published as written: no front matter, no directive. `2026_roadmap.md` is user-owned: editable by an agent to keep a status line true or when asked, in the same published-as-written form |
 
@@ -30,6 +30,8 @@ Every page is in the `nav` of `mkdocs.yml` or in its `exclude_docs` (`AGENTS.md`
 | `quickstart.md` | First-run tutorial | Env var table (`LLM_MODEL`, `LLM_TEMPERATURE` default `0.5`, `LLM_MAX_TOKENS` default `1000`, `FSM_PATH`). Full FSM `friendly_greeter` in a Python block. Handler at `CONTEXT_UPDATE`, `converse_stream`, `FileSessionStore`. Section 6 "More Ways to Build": builders, an agent, a workflow, the reasoning engine; fences are plain `python` |
 | `concepts.md` | Why, how it works, features, status, references | The mermaid diagrams, the subpackage table linking the READMEs on GitHub |
 | `fsm_design.md` | Design guide | Only state-level JSON fragments, no full FSM. The priority rule, `evaluation_priority` (default 100, range 0-1000), `llm_description` (max 300 chars), `context_scope`, `handler_only_keys`, stacking merge strategies |
+| `executables.md` | Guide | The executable envelope of `core/definitions/executable.py`: the header fields, the two identities, the caller-input rule, `instantiate_envelope`, `load_executable` (V1 to V5 and V7, the step tags, `origin="model"`), `fsm-llm-validate` on a document and its known limits. One JSON document; the blocks are not run, so re-run the `load_executable` example by hand after a code change |
+| `results_and_names.md` | Guide | The `Status`, `Reason`, `Lifecycle`, `MessageSource` vocabularies, `RunResult` and `Identity` and their projections, `NameRegistry` and `ToolRegistry` collisions, `apply_json_patch` (codes, bounds, hook) and how the model is chosen (the rule only; the per-command flags live in `cli.md`) |
 | `handlers.md` | Handler guide | The handler timings, `HandlerBuilder` table including `.critical()`, `handler_error_mode`, ERROR-handler rules (return dict not merged, re-entry raises `FSMError`) |
 | `synthesis.md` | Guide | Runtime FSM synthesis. Holds the one full JSON FSM of the guides (loaded by the snippet test) and the live results of the bench blocks s0 to s2 (all INCONCLUSIVE, one model); update it together with `src/fsm_llm/synthesis/*.md` and `scripts/bench_data/README.md` when the bench runs |
 | `testing.md` | Guide | `fsm_llm.testing` for users. Every `python` block is executed in order, in one namespace, offline, by `tests/test_fsm_llm_testing/test_guide.py`; a block that must not run is fenced `python notest` |
@@ -58,6 +60,7 @@ Facts the pages state that must stay in step with the code:
 
 - `API.__init__` defaults: `max_history_size=5`, `max_message_length=1000`, `handler_error_mode="continue"`, `max_fsm_cache_size=64`, keyword-only `executors=None` (internal, no builder setter).
 - `DEFAULT_MAX_STACK_DEPTH = 10`; there is no default model anywhere: a missing model raises `ModelNotConfiguredError` (`fsm-llm-eval` exits 1, a monitor launch answers 400).
+- Executable envelope: `schema` is `fsm-llm/executable`, `schema_version` default `1.0` (reads `1.x`), kinds `fsm`, `strategy`, `procedure` (`pattern` and `workflow` refused), `MAX_DOCUMENT_DEPTH = 200`; `load_executable` tags `[schema]`, `[body]`, `[variables]`, `[inputs]`, `[contract]`, `[names]`, `[model]`.
 - Core step driver: `API.advance`, `advance_stream`, `run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None, seconds_exempt_states=())`, `run_until_terminal_stream`, `AdvanceResult`, `RunBudgetExceededError`.
 - Console scripts (`pyproject.toml`): `fsm-llm`, `fsm-llm-visualize`, `fsm-llm-validate`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm-eval`, `fsm-llm-okf`, `fsm-llm-skills`.
 
