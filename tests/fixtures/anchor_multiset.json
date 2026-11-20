@@ -724,6 +724,11 @@
       "delta": 1,
       "reason": "step 7.6 of plan f150ec28: the anchor of the TurnGate hand-over rule (D-015 was recorded at step 3 with no anchor; review A warning 4); no other token was added or lost for it",
       "token": "plan-2026-11-19T193704-f150ec28/D-015"
+    },
+    {
+      "delta": 1,
+      "reason": "plan ace7a8c8 D-043: the engine half of 2cefeb61 D-051 moves to core/definitions/patch.py under a new anchor of its own; the scope half keeps D-051 in synthesis/patch.py",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-043"
     }
   ]
 }

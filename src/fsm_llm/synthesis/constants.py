@@ -9,6 +9,7 @@ read from there, never copied.
 from __future__ import annotations
 
 from fsm_llm.core.definitions import DEFAULT_SYNTHESIS_RESULT_KEY
+from fsm_llm.core.definitions import MAX_PATCH_DEPTH as MAX_PATCH_DEPTH
 
 # --- Reserved names (a compiled procedure may never declare or write these) ---
 ABORT_STATE_ID = "abort"
@@ -101,12 +102,10 @@ CODE_SIMULATION_INCOMPLETE = "simulation-incomplete"
 HAPPY_KIND = "happy"
 GENERATED_KINDS = ("missing_info", "correction", "off_topic", "adversarial")
 
-# --- Patches (D-051): the four ops, the fixed limits, and every refusal code ---
-PATCH_OPS = ("add", "remove", "replace", "test")
-MAX_PATCH_DEPTH = 16  # nesting of a value below its op object
-MAX_POINTER_TOKENS = 12
-MAX_POINTER_TOKEN_CHARS = 100
-MAX_INDEX_DIGITS = 9
+# --- Patches (D-051): the four ops and the fixed limits live in core (the generic
+# applier, plan ace7a8c8 D-043; ``MAX_PATCH_DEPTH`` is re-exported here, the one
+# name ``test_patch.py`` imports from this module); here are the reply cap and every
+# refusal code ---
 PATCH_MAX_TOKENS = 2048  # the reply cap of one patch request (D-052)
 PATCH_CODES = (
     "too-many-ops",

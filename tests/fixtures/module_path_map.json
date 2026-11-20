@@ -1072,6 +1072,7 @@
     "fsm_llm.context.layout",
     "fsm_llm.core",
     "fsm_llm.core.definitions",
+    "fsm_llm.core.definitions.patch",
     "fsm_llm.core.expressions",
     "fsm_llm.core.verify",
     "fsm_llm.core.verify.graph",

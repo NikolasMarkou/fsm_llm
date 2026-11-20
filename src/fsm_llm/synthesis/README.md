@@ -55,7 +55,7 @@ A compile after a miss may carry one near miss in its request: the stored proced
 - `tools.py` - `create_procedure_tools`: the agent tools `obtain_procedure` and `run_procedure`.
 - `traces.py` - `RunTrace`, `TraceRecorder`.
 - `diagnose.py` - `diagnose`, `Diagnosis`.
-- `patch.py` - `apply_patch`, an RFC 6902 subset (`add`, `remove`, `replace`, `test`).
+- `patch.py` - `apply_patch`: the state scope around `fsm_llm.core.definitions.apply_json_patch`, the RFC 6902 subset (`add`, `remove`, `replace`, `test`).
 - `repair.py` - `propose_patch`, `repair_procedure`, `PromotionResult`.
 - `constants.py` - reserved names, status and reason codes, lifecycle names, caps.
 - `exceptions.py` - the `SynthesisError` family.
