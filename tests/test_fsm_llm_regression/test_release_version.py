@@ -11,8 +11,7 @@ text from the working tree (no import of the package for the file-level checks, 
 editable install cannot hide a stale file) and compared with it. The release section of the
 CHANGELOG also opens with a short "Highlights" preamble that survives the cut of the GitHub
 release body (`release.yml` cuts a body at 120,000 characters; the section is much longer);
-`TestTheHighlights` pins its shape and its size, and the replay of the workflow's own extract
-and cut steps is in `test_release_workflow.py::TestTheRealReleaseNotes`.
+`TestTheHighlights` pins its shape and its size.
 """
 
 from __future__ import annotations

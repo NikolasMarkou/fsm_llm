@@ -83,9 +83,9 @@ _WRITE_ALLOWED: dict[tuple[str, str], set[str]] = {
     ("python-package.yml", "dependency-review"): {"pull-requests"},
     # the weekly pin refresh pushes a branch and opens a pull request, in the `propose` job that
     # runs only after the `test` job (read-only, no credentials) passed every gate; `propose`
-    # installs nothing (step 110, split at step 121.1; test_refresh_workflow.py pins both jobs).
+    # installs nothing (step 110, split at step 121.1).
     ("refresh-pins.yml", "propose"): {"contents", "pull-requests"},
-    # the release workflow (step 112; test_release_workflow.py pins the shape): the OIDC token that
+    # the release workflow (step 112): the OIDC token that
     # PyPI trusted publishing exchanges, on the `publish` job only, and the GitHub release that
     # a pushed tag creates, on the `github-release` job only.
     ("release.yml", "publish"): {"id-token"},
@@ -395,7 +395,7 @@ _KEYWORDS = frozenset({"if", "then", "else", "elif", "fi", "do", "done", "while"
 def runs_code(script: str) -> bool:
     """True when a shell `script` names an installer, an interpreter or a project script.
 
-    Best effort, copied from `test_refresh_workflow.py` (a test module never imports another):
+    Best effort (a test module never imports another):
     heredoc bodies, single-quoted and plain double-quoted strings are dropped, the rest is cut at
     `; & | ( ) { } $(` and newlines, and the first word of each piece (after keywords, wrappers
     such as `nice` or `sudo` with their options, and `NAME=value` assignments) is judged.

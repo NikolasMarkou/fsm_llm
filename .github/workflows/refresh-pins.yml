@@ -30,7 +30,7 @@
 # The owner must allow Actions to create pull requests (Settings, Actions, General, Workflow
 # permissions: "Allow GitHub Actions to create and approve pull requests"); see CONTRIBUTING.md.
 #
-# Policy (pinned by tests/test_fsm_llm_regression/test_refresh_workflow.py and test_supply_chain.py):
+# Policy (the CI lint job runs actionlint and zizmor over it; test_supply_chain.py pins it):
 #   * triggers are `schedule` and `workflow_dispatch` only, never a pull request or a push;
 #   * the token is read-only at the top and on `test`; only `propose` holds `contents: write` (push
 #     the branch) and `pull-requests: write` (open the pull request), and no job that holds a

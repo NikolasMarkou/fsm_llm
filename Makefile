@@ -56,7 +56,7 @@ decision-check: ## Fail when a decision anchor has no line in plans/ANCHORS.md o
 	python scripts/decision_index.py --check
 
 # Green on the real CHANGELOG.md: the form of every heading and BREAKING bullet. CI runs the same
-# command in the lint job and tests/test_packaging.py::TestTheRealChangelog runs it on every pytest run.
+# command in the lint job, scripts/gate.sh push runs it and test_changelog_check.py runs it on every pytest run.
 changelog-check: ## Check the CHANGELOG form: ### headings, compare links, the BREAKING marker spelling
 	python scripts/changelog_check.py check
 

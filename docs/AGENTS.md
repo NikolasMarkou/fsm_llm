@@ -47,7 +47,6 @@ Other files read or point to these docs:
 - `tests/test_fsm_llm/test_docs_site.py`, `test_docs_content.py`, `test_docs_links.py`: the site configuration, the page set and the nav groups, the wrappers, the roadmaps, the CLI page, the landing example, and every relative link and anchor.
 - `tests/test_fsm_llm_testing/test_guide.py`: executes every `python` block of `testing.md`.
 - `tests/test_fsm_llm_regression/test_regression_cli_and_exports.py` (`TestQuickstartReferences`): `quickstart.md` must not contain `examples/basic/quiz`, `examples/intermediate/customer_service` or `python main.py`.
-- `tests/test_fsm_llm_regression/test_docs_layout_paths.py`: no page names a module path that the layout no longer has (the roadmap and the CHANGELOG are history).
 - `src/fsm_llm/engine/fsm/manager.py` points to `docs/architecture.md`; a comment in `engine/fsm/turns.py` quotes `docs/handlers.md` on ERROR handlers.
 
 ## Data shapes
@@ -66,7 +65,7 @@ Facts the pages state that must stay in step with the code:
 - `required_context_keys` never blocks a transition. Every page gates with a condition. New examples must do the same.
 - Among passing transitions, the single lowest `priority` wins. Only a tie at the lowest priority is AMBIGUOUS and goes to the LLM classifier.
 - Keep the `> Covers FSM-LLM v<version>` header on every current page and update it on release (`test_release_version.py` compares it with `pyproject.toml`).
-- No plan id and no step number in a page, no emoji, no em dash (a ratchet test counts them), no stale path, no count of tests, files, modules, lines, contracts or examples (`tests/test_fsm_llm_regression/test_doc_count_ratchet.py` fails when a page gains one).
+- No plan id and no step number in a page, no emoji, no em dash (a ratchet test counts them), no stale path, no count of tests, files, modules, lines, contracts or examples (a review rule; `mkdocs build --strict` catches a broken link).
 - A page has a title, a one-line purpose, the `Covers` line, sections and a `Next steps` section. No topic is written twice: link instead.
 - `2026_roadmap.md` is the maintainer's: edit it only to keep a status line true or when asked, never move or rename it.
 

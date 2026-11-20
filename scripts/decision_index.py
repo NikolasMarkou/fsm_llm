@@ -41,8 +41,8 @@ of `docs/` quote anchors as examples, and `examples/` are frozen baselines, so w
 roots would judge text that is not a decision. The price is that a real anchor written outside the roots would be checked by
 the planner and never by CI. `outside_scope(root, tracked)` closes that: it reads every
 TRACKED file `scan` does not read with this same grammar (a file with no known suffix is
-read in every comment family), and `tests/test_fsm_llm_regression/test_decision_scan_scope.py`
-fails with the list, so such an anchor is never silently ignored. Citations of a decision
+read in every comment family) and lists them, so such an anchor is never silently ignored
+(no test runs it since plan ace7a8c8 step 4). Citations of a decision
 in prose or in a docstring (no comment marker) are outside both grammars and stay prose.
 
 Interface (the contract the generator of step 100 builds on):
@@ -977,9 +977,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for message in found:
             print(f"error: {message}", file=sys.stderr)
         return 1
-    print(
-        f"ok: {len(anchors)} anchors, all resolved or retired"
-    )
+    print(f"ok: {len(anchors)} anchors, all resolved or retired")
     return 0
 
 

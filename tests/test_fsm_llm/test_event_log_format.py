@@ -581,8 +581,7 @@ def _violations(source: str) -> list[str]:
     gigabytes on 3.14 and 3.15), ``default=str`` (hides an object's ``str`` in the log),
     a text-mode builtin ``open`` (newline translation and the locale codec on Windows),
     ``Path.read_text`` and ``write_text`` (the same), ``splitlines`` (it splits on U+2028
-    and U+0085, which would cut one event into three) and ``perf_counter`` (the cpu_timer
-    scan of ``test_cpu_timer.py`` bans it outside its list).
+    and U+0085, which would cut one event into three) and ``perf_counter``.
     """
     found: list[str] = []
     for node in ast.walk(ast.parse(source)):

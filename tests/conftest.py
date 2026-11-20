@@ -211,8 +211,7 @@ def current_timing_factor() -> float:
           per-character times over a doubling sweep, a speed-up) is never
           multiplied by it: a uniform slowdown cancels in a ratio, so scaling
           the bound only lets a quadratic pattern through. Retry a noisy
-          ratio instead (``tests/test_fsm_llm/test_timing_factor.py`` scans
-          every test file for a scaled ratio name).
+          ratio instead.
     """
     traced = (
         sys.gettrace() is not None
@@ -640,7 +639,7 @@ def _describe(value: object) -> str:
 def huge_operand_explanation(op: str, left: object, right: object) -> list[str] | None:
     """Explain a failed ``==`` on huge operands without ``difflib``, else ``None``.
 
-    Interface contract (``tests/test_fsm_llm/test_conftest_guards.py`` pins it):
+    Interface contract:
         - Returns ``None`` (pytest explains the comparison as usual) unless *op* is
           ``==`` and an operand is a string or bytes of more than
           ``MAX_COMPARE_CHARS`` characters, or both are texts whose line counts

@@ -4,7 +4,7 @@
 # broken link, a missing nav entry or an include of a deleted file fails the check. A tag `v*`
 # then deploys the site to the `gh-pages` branch with mike, under the version of the tag.
 #
-# Policy (pinned by tests/test_fsm_llm_regression/test_docs_workflow.py):
+# Policy (the CI lint job runs actionlint and zizmor over it; test_supply_chain.py pins the SHAs):
 #   * the token is read-only except in the `deploy` job, which runs on a tag push only;
 #   * no `pull_request_target`, no secret, no event field written into a script (they go through
 #     `env:`);

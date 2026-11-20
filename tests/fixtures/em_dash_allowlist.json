@@ -162,7 +162,6 @@
  "tests/test_fsm_llm_monitor/test_app.py": 4,
  "tests/test_fsm_llm_monitor/test_otel.py": 1,
  "tests/test_fsm_llm_regression/test_bugs.py": 6,
- "tests/test_fsm_llm_regression/test_decision_index_gate.py": 2,
  "tests/test_fsm_llm_regression/test_engine_integration.py": 6,
  "tests/test_fsm_llm_regression/test_functional.py": 4,
  "tests/test_fsm_llm_regression/test_regression_core_bugs.py": 1,

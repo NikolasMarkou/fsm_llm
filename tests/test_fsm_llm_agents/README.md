@@ -78,7 +78,6 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_prompts.py` - prompt builder functions.
 - `test_public_api.py` - `create_agent` (pattern first, `system_prompt=` keyword fills `instructions`), `AgentConfig` strict fields, `LLM_MODEL`, static `__all__`, core owning typed fields and key clearing, and `TestConfiguredAgentBuilder` (`ConfiguredAgentBuilder`: mutators return the same builder, a default build equals `create_agent`, config isolation and independent builds, shared callables, named-option refusal, tool registration).
 - `test_removed_timeout_keyword.py` - the removed `timeout_s` spelling raises on `ToolDefinition` (any unknown keyword does), `PythonToolDefinition` and `@tool`, and a tool file still using it lands in `PythonToolLoadReport.errors`.
-- `test_removed_legacy.py` - absence pins for removed agents names: a positional system prompt now raises listing the patterns, shim helpers and unraised exceptions are gone, native_fc has no private loop, terminal agent states extract nothing, the meta builders are artifact builders.
 - `test_react.py` - ReactAgent creation, HITL gating, concurrent runs, single-use approval, the ReAct family's shared run skeleton.
 - `test_reasoning_react.py` - ReasoningReactAgent export, `reason` tool (interception), per-run handlers.
 - `test_reflexion.py` - ReflexionAgent, its FSM, models, conclude needs evidence, every budget ends, a user `evaluation_fn` is called.

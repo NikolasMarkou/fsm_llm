@@ -59,9 +59,8 @@ def cpu_timer(*, thread: bool = False) -> Iterator[CpuTimer]:
           computation that sleeps or waits on I/O has CPU time near zero: never
           use this timer to bound a wait.
         - A ratio of two timings (a quadratic-versus-linear sweep) is scale-free
-          and stays on whatever clock the sweep uses; ``tests/test_fsm_llm/
-          test_cpu_timer.py`` lists the only files that may still call
-          ``time.perf_counter``.
+          and stays on whatever clock the sweep uses (``time.perf_counter`` stays
+          legitimate there).
     """
     read_clock = time.thread_time if thread else time.process_time
     timer = CpuTimer(read_clock)

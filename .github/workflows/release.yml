@@ -2,7 +2,7 @@
 # package once, writes an SBOM, publishes to PyPI with PEP 740 attestations and cuts the GitHub
 # release. Nothing else starts it: no manual dispatch, no pull request, no branch push.
 #
-# Policy (pinned by tests/test_fsm_llm_regression/test_release_workflow.py):
+# Policy (the CI lint job runs actionlint and zizmor over it; test_supply_chain.py pins the write scopes):
 #   * PyPI trusted publishing only: no API token, no password, no `twine upload`. The publisher
 #     registered on PyPI names owner `NikolasMarkou`, repository `fsm_llm`, workflow `release.yml`
 #     and environment `pypi` (the environment holds a required reviewer; the owner approves the

@@ -72,7 +72,7 @@ from tests.test_fsm_llm.support import (
 #: A RATIO bound: it is never multiplied by ``timing_factor``. A tracer or a
 #: loaded machine slows every size alike, so the ratio does not move, and a
 #: scaled bound only lets a quadratic pattern through (review gate 1, plan
-#: d454fd62 step 58.1; ``test_timing_factor.py`` scans for it). Noise is handled
+#: d454fd62 step 58.1). Noise is handled
 #: by retrying the sweep, never by widening the bound.
 _LINEAR_SPREAD = 2.5
 
