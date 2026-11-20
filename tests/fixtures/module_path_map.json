@@ -1200,6 +1200,7 @@
     "fsm_llm.workflows.engine.surface",
     "fsm_llm.workflows.engine.timers",
     "fsm_llm.workflows.exceptions",
-    "fsm_llm.workflows.models"
+    "fsm_llm.workflows.models",
+    "fsm_llm.workflows.step_factories"
   ]
 }

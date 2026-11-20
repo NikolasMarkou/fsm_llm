@@ -594,7 +594,7 @@ class TestNewDSLFunctions:
     """Test DSL factory functions for new step types."""
 
     def test_agent_step_factory(self):
-        from fsm_llm.workflows.dsl import agent_step
+        from fsm_llm.workflows.step_factories import agent_step
 
         mock_agent = MagicMock()
         step = agent_step(
@@ -608,7 +608,7 @@ class TestNewDSLFunctions:
         assert step.step_id == "research"
 
     def test_retry_step_factory(self):
-        from fsm_llm.workflows.dsl import retry_step
+        from fsm_llm.workflows.step_factories import retry_step
 
         inner = AutoStep(step_id="inner", name="Inner", next_step_id="done")
         step = retry_step("retry", "Retry", inner, max_retries=5)
@@ -616,7 +616,7 @@ class TestNewDSLFunctions:
         assert step.max_retries == 5
 
     def test_switch_step_factory(self):
-        from fsm_llm.workflows.dsl import switch_step
+        from fsm_llm.workflows.step_factories import switch_step
 
         step = switch_step(
             "route",

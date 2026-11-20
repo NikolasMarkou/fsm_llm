@@ -29,7 +29,6 @@ from .dependency_resolver import DependencyResolver
 # DSL and builder functions
 from .dsl import (
     WorkflowBuilder,
-    agent_step,
     api_step,
     auto_step,
     condition_step,
@@ -41,8 +40,6 @@ from .dsl import (
     create_workflow_builder,
     llm_step,
     parallel_step,
-    retry_step,
-    switch_step,
     timer_step,
     wait_event_step,
 )
@@ -72,6 +69,9 @@ from .models import (
     WorkflowStatus,
     WorkflowStepResult,
 )
+
+# Factories of the agent, retry and switch steps
+from .step_factories import agent_step, retry_step, switch_step
 
 # Step implementations
 from .steps import (
