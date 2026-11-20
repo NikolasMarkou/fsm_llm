@@ -258,7 +258,9 @@ class TestCodes:
 
 class TestPlacement:
     def test_core_imports_nothing_of_synthesis_or_the_layers_above(self):
-        tree = ast.parse((_SRC / "core" / "definitions" / "patch.py").read_text())
+        tree = ast.parse(
+            (_SRC / "core" / "definitions" / "patch.py").read_text(encoding="utf-8")
+        )
         imported = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -269,7 +271,9 @@ class TestPlacement:
         assert not [
             m for m in imported if m.startswith(("fsm_llm.engine", "fsm_llm.llm"))
         ]
-        assert "logger" not in (_SRC / "core" / "definitions" / "patch.py").read_text()
+        assert "logger" not in (_SRC / "core" / "definitions" / "patch.py").read_text(
+            encoding="utf-8"
+        )
 
     def test_synthesis_reads_the_depth_limit_from_core(self):
         from fsm_llm.core.definitions import patch as core_patch
