@@ -343,7 +343,7 @@ class StackMixin(_ApiSurface):
         # DECISION plan_2026-05-29_d9092060/D-001 [STALE]
         # Narrow lock scope: snapshot frame references under _stack_lock, then release
         # the lock before calling fsm_manager methods (which acquire per-conversation
-        # RLocks and can block). Re-acquire _stack_lock only to pop the stack entry.
+        # ``TurnGate``s and can block). Re-acquire _stack_lock only to pop the stack entry.
         # Do NOT revert to a single wide `with self._stack_lock:` covering the whole
         # method — that blocks list_active_conversations/push_fsm on other conversations
         # for the full duration of FSM teardown I/O.
@@ -361,7 +361,7 @@ class StackMixin(_ApiSurface):
             previous_frame = stack[-2]
             merge_strategy_enum = ContextMergeStrategy.from_string(merge_strategy)
 
-        # FSM manager operations outside the lock (they acquire per-conversation RLocks)
+        # FSM manager operations outside the lock (they acquire per-conversation ``TurnGate``s)
         try:
             current_fsm_context = self._get_frame_context(current_frame)
             context_to_merge = self._collect_pop_context(

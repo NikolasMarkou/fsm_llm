@@ -1,5 +1,6 @@
-"""The turn drivers of ``MessagePipeline`` (``DriverMixin``): one sync or streamed turn, for a
-message (``process``) or without one (``advance``).
+"""The turn drivers of ``MessagePipeline`` (``DriverMixin``): one turn or streamed turn (each an
+async body, the sync names are wrappers over it), for a message (``process``) or without one
+(``advance``).
 
 Layer ``engine`` (plan d454fd62, step 79): split out of the old ``fsm_llm.pipeline``; the
 method and function bodies are unchanged.
@@ -41,7 +42,7 @@ def _logged_as(
 
 
 class DriverMixin(_PipelineSurface):
-    """The sync and stream turn drivers."""
+    """The turn and stream turn drivers: async bodies with their sync wrappers."""
 
     # ----------------------------------------------------------
     # Full 2-pass processing

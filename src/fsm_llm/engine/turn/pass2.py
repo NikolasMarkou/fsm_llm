@@ -273,10 +273,10 @@ class Pass2Mixin(_PipelineSurface):
         *,
         stream: bool = False,
     ) -> ResponseGenerationRequest:
-        """Build the Pass-2 request of the sync turn, the stream turn or the greeting.
+        """Build the Pass-2 request of the turn, the stream turn or the greeting.
 
         Interface contract (private; three callers: ``_execute_response_generation_pass``,
-        ``_stream_response_generation_pass``, ``generate_initial_response``):
+        ``_stream_response_generation_pass``, ``agenerate_initial_response``):
         the caller has already ruled out a silent state. ``user_message`` is the
         turn's text, ``None`` for a step without one. ``extraction_response`` is
         the Pass-1 result, or ``None`` for the greeting, which then has no

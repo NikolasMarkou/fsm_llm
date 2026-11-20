@@ -233,6 +233,10 @@ async def acall_stream(
     Sync mode: the SYNC method (a patch of it still intercepts), iterated inline. Async mode:
     the ``a`` twin iterated natively, else the sync method on a worker thread, stepped one
     ``next`` per worker call (:func:`aiterate`). Lazy: the call itself runs at the first step.
+
+    Failure: an error the source raises propagates unwrapped, as from ``obj.<name>`` itself.
+    A ``break``, a cancel or a close of this generator closes the source (``aclosing``), so a
+    provider stream is released; nothing is swallowed.
     """
     if SYNC.get():
         source = getattr(obj, name)(*args, **kwargs)

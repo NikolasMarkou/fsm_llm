@@ -1,5 +1,6 @@
-"""The turn path of ``FSMManager`` (``TurnsMixin``): the turn guard, the locked sync
-turn, the lazy locked stream and the ERROR handlers.
+"""The turn path of ``FSMManager`` (``TurnsMixin``): the turn guard, the locked turn
+(an ``async def`` body, the sync names drive it through ``run_sync``), the lazy locked stream
+and the ERROR handlers.
 
 Layer ``engine`` (plan d454fd62, step 78): split out of the old ``fsm_llm.fsm``; the
 method bodies are unchanged. The ``_lock`` then ``conv_lock`` order and the lazy
@@ -48,7 +49,7 @@ def _claim_turn(
 ) -> tuple[TurnGate, GateTicket | None]:
     """Claim ``conversation_id`` for one turn under ``manager._lock``; return ``(conv_lock, ticket)``.
 
-    Contract: the one claim of a sync turn and of a stream's first ``next()``; it holds
+    Contract: the one claim of a turn (sync or async) and of a stream's first step; it holds
     ``_lock`` for the claim only (``_enter_turn``) and lets go of it BEFORE anything else runs.
     The ticket is what the claim bound to this Context (``None`` for a lock that is not a
     ``TurnGate``): the turn keeps it and gives the pair to ``_release_turn``, which releases by
