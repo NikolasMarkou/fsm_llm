@@ -604,6 +604,13 @@ def _group(
     return a, b, registry
 
 
+def _wait_finished(thread: threading.Thread, seconds: float) -> None:
+    """Wait until *thread* ends or *seconds* pass, without a timed join (D-057)."""
+    deadline = time.monotonic() + seconds
+    while thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
 def _interleave(
     registry: _HookedRegistry,
     armed: tuple[type, str],
@@ -612,9 +619,12 @@ def _interleave(
 ) -> None:
     """Run *first* and make *second* start on another thread at the hooked point.
 
-    Without a lock *second* runs to its end inside the hook (the join returns at
-    once); with one it blocks until *first* is done (the join times out and *first*
-    goes on). Either way both are finished when this returns."""
+    Without a lock *second* runs to its end inside the hook (it is not alive after
+    the sleep); with one it blocks until *first* is done (it is still alive after
+    the sleep and *first* goes on). Either way both are finished when this returns.
+    No timed Thread.join is issued here: the competitor can be blocked on a lock
+    this thread holds, and on CPython 3.15 Windows such a join hung a CI leg for 45
+    minutes (plan ace7a8c8 D-057). The waits are a sleep and a bounded poll."""
     other: list[threading.Thread] = []
 
     def compete() -> None:
@@ -628,11 +638,11 @@ def _interleave(
         other.append(thread)
         thread.start()
         assert started.wait(5)
-        thread.join(0.3)
+        time.sleep(0.3)
 
     registry.armed, registry.callback = armed, compete
     first()
-    other[0].join(5)
+    _wait_finished(other[0], 5)
     assert not other[0].is_alive(), "the competing write never finished"
 
 
