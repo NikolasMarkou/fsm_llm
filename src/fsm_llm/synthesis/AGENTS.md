@@ -70,6 +70,7 @@ Repair (`repair.py`): `repair_procedure` checks in order `parent-not-live`, `par
 | `diagnose.py` | `diagnose`, `Diagnosis`, `RULES` | D-050 (positive evidence only) |
 | `patch.py` | `apply_patch` (the scope wrapper of core's `apply_json_patch`) | D-051 (scope by tokens, never `abort`); the engine half (bounds before the walk) is core's anchor D-043 of plan ace7a8c8 in `core/definitions/patch.py` |
 | `repair.py` | `propose_patch`, `repair_procedure`, `PromotionResult`, `decide` | D-052, D-053, D-063 |
+| `results.py` | `synthesis_run_result` (the `synthesis_result` dict as a core `RunResult`; the dict stays the wire contract) | D-047 of plan ace7a8c8; reads the dict, never writes it |
 | `constants.py` | reserved names, `STATUS_*`, `REASON_*`, `REASONS`, `DIAGNOSIS_CODES`, `PATCH_CODES`, `PROMOTION_CODES`, `LIFECYCLES`, caps, labels | Imports only `DEFAULT_SYNTHESIS_RESULT_KEY` from `core.definitions` |
 | `exceptions.py` | `SynthesisError`, `SynthesisRefusedError`, `PatchError`, `LibraryError` | Rooted at `FSMError` |
 | `__init__.py`, `__version__.py` | static `__all__`, version | |

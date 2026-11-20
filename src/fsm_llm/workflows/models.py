@@ -11,6 +11,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from fsm_llm.constants import has_internal_prefix
+from fsm_llm.core.codes import Reason, Status
+from fsm_llm.core.results import RunResult
+
 from .constants import DEFAULT_MAX_HISTORY_ENTRIES
 from .exceptions import WorkflowStateError
 
@@ -30,6 +34,18 @@ class WorkflowStatus(str, Enum):
 _TERMINAL_STATUSES = frozenset(
     {WorkflowStatus.COMPLETED, WorkflowStatus.FAILED, WorkflowStatus.CANCELLED}
 )
+
+#: How each workflow status reads on the shared ``RunResult`` envelope (D-047).
+#: ``Status`` has no waiting or pending member: both read ``running`` and the
+#: workflow status itself stays in ``RunResult.detail["workflow_status"]``.
+_RUN_STATUS: dict[WorkflowStatus, tuple[Status, Reason | None]] = {
+    WorkflowStatus.PENDING: (Status.RUNNING, None),
+    WorkflowStatus.RUNNING: (Status.RUNNING, None),
+    WorkflowStatus.WAITING: (Status.RUNNING, None),
+    WorkflowStatus.COMPLETED: (Status.OK, None),
+    WorkflowStatus.FAILED: (Status.FAILED, None),
+    WorkflowStatus.CANCELLED: (Status.ABORTED, Reason.CANCELLED),
+}
 
 # Valid status transitions — prevents illegal state changes like COMPLETED→RUNNING
 _VALID_STATUS_TRANSITIONS: dict[WorkflowStatus, set[WorkflowStatus]] = {
@@ -226,6 +242,35 @@ class WorkflowInstance(BaseModel):
     def is_terminal(self) -> bool:
         """Check if the workflow is in a terminal state."""
         return self.status in _TERMINAL_STATUSES
+
+    def run_result(self) -> RunResult:
+        """This instance as the core ``RunResult`` envelope (D-047).
+
+        ``status`` and ``reason`` come from ``_RUN_STATUS`` (a failed instance
+        has no reason: ``error`` is message text and is never branched on, it
+        only rides in ``detail["error"]``); ``handle`` is ``instance_id``;
+        ``outputs`` is a shallow copy of ``context`` without the top-level
+        internal-prefixed keys; ``identity`` is empty.
+        """
+        status, reason = _RUN_STATUS[self.status]
+        detail: dict[str, Any] = {
+            "workflow_id": self.workflow_id,
+            "current_step_id": self.current_step_id,
+            "workflow_status": self.status.value,
+        }
+        if self.error is not None:
+            detail["error"] = self.error
+        return RunResult(
+            status=status,
+            reason=reason,
+            outputs={
+                key: value
+                for key, value in self.context.items()
+                if not has_internal_prefix(key)
+            },
+            detail=detail,
+            handle=self.instance_id,
+        )
 
 
 class EventListener(BaseModel):

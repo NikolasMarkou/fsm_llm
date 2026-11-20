@@ -1776,6 +1776,7 @@ fsm_llm.synthesis.repair_procedure def(parent_digest: str, ops: Sequence[dict[st
 fsm_llm.synthesis.reviewer_from_hitl def(hitl: HumanInTheLoop) -> Callable[[ProcedureApprovalRequest], bool]
 fsm_llm.synthesis.run_gates def(data: Any, policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
 fsm_llm.synthesis.strip_abort def(data: object) -> dict[str, Any] | None
+fsm_llm.synthesis.synthesis_run_result def(result: Mapping[str, Any]) -> RunResult
 fsm_llm.synthesis.verify_stored def(definition: FSMDefinition | dict[str, Any], policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
 # fsm_llm.testing
 fsm_llm.testing.ConversationRun class
@@ -2068,6 +2069,7 @@ fsm_llm.workflows.WorkflowInstance class(BaseModel)
   def add_history_entry(self, step_id: str, message: str, data: dict[str, Any] | None = None, error: str | None = None) -> None
   def is_active(self) -> bool
   def is_terminal(self) -> bool
+  def run_result(self) -> RunResult
   def update_status(self, status: WorkflowStatus, error: Exception | None = None) -> None
 fsm_llm.workflows.WorkflowInstanceError class(WorkflowError)
   def __init__(self, message: str, *, instance_id: str | None = None, details: dict[str, Any] | None = None)

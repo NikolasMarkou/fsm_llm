@@ -47,6 +47,7 @@ from .policy import (
     strip_abort,
 )
 from .repair import PromotionResult, propose_patch, repair_procedure
+from .results import synthesis_run_result
 from .runner import ProcedureRunner
 from .simulation import SimulationReport, Simulator
 from .synthesizer import (
@@ -95,5 +96,6 @@ __all__ = [
     "reviewer_from_hitl",
     "run_gates",
     "strip_abort",
+    "synthesis_run_result",
     "verify_stored",
 ]
