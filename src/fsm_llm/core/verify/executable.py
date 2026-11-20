@@ -53,6 +53,7 @@ from typing import Any
 
 from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.definitions.executable import (
+    PROBLEM_LINE_CHARS,
     ExecutableDocumentError,
     ExecutableEnvelope,
     parse_executable,
@@ -75,7 +76,6 @@ Resolver = Callable[[str, str], bool]
 
 _TAGS = ("schema", "body", "variables", "inputs", "contract", "names", "model")
 _CATEGORIES = ("tools", "handlers", "callables", "executables")
-_LINE_CHARS = 300  # one message, whatever the document put in it
 _NAME_CHARS = 60  # one model-authored name inside a message
 
 
@@ -220,7 +220,9 @@ def load_executable(
     notes: dict[str, list[tuple[str, str]]] = {tag: [] for tag in _TAGS}
 
     def note(tag: str, severity: str, text: str) -> None:
-        notes[tag].append((severity, f"[{tag}] {capped_line(text, _LINE_CHARS)}"))
+        notes[tag].append(
+            (severity, f"[{tag}] {capped_line(text, PROBLEM_LINE_CHARS)}")
+        )
 
     def finish(
         envelope: ExecutableEnvelope | None,

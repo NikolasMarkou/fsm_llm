@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import types
 import typing
 from typing import Any
 
@@ -24,7 +25,7 @@ import pytest
 from pydantic import BaseModel
 
 from fsm_llm.core.codes import Lifecycle
-from fsm_llm.core.definitions import FSMDefinition, definition_digest
+from fsm_llm.core.definitions import FSMDefinition, definition_digest, limits
 from fsm_llm.core.definitions import executable as ex
 from fsm_llm.core.definitions.schema import (
     EXECUTABLE_SCHEMA_ID,
@@ -164,6 +165,29 @@ class TestTheTemplateIdentity:
             template_identity=ex.identity_of(envelope).template_identity
         )
 
+    def test_one_instance_has_one_identity_as_a_definition_or_as_a_dict(self):
+        # D-054: a dict body that loads as an FSM is normalised through definition_digest
+        envelope = ex.parse_executable(_doc())
+        definition = FSMDefinition(**_fsm())
+        spelled_out = definition.model_dump(mode="json")  # every default written
+        as_written = _fsm()
+
+        by_definition = ex.identity_of(envelope, definition)
+        assert spelled_out != as_written
+        assert ex.identity_of(envelope, spelled_out) == by_definition
+        assert ex.identity_of(envelope, as_written) == by_definition
+        assert by_definition.instance_identity == definition_digest(definition)
+
+    def test_a_dict_that_is_no_fsm_is_hashed_as_written_and_never_raises(self):
+        envelope = ex.parse_executable(_doc())
+
+        for body in ({"steps": []}, {"name": "x"}, {1: "a"}, {}):
+            assert ex.identity_of(
+                envelope, body
+            ).instance_identity == ex.canonical_digest(
+                {str(k): v for k, v in body.items()}
+            )
+
     def test_the_canonical_digest_of_an_fsm_dump_is_the_fsm_recipe(self):
         definition = FSMDefinition(**_fsm())
 
@@ -231,6 +255,41 @@ class TestPerKindRefusals:
         problems = _refused(_doc(metadata=deep)).problems
 
         assert problems and "deep" in problems[0]
+
+    def test_a_problem_line_never_carries_raw_document_text(self):
+        # D-054: key names, the kind value and messages are capped and stripped
+        evil_key = "evil\nkey\u202e\x1b[31m" + "k" * 500
+        long_kind = "x" * 600 + "\n\u202eend"
+
+        for data in (_doc(**{evil_key: 1}), _doc(kind=long_kind)):
+            error = _refused(data)
+            texts = [*error.problems, str(error)]
+            assert error.problems
+            for text in texts:
+                assert "\n" not in text and "\u202e" not in text and "\x1b" not in text
+                assert all(ch.isprintable() for ch in text)
+            assert all(len(line) <= ex.PROBLEM_LINE_CHARS for line in error.problems)
+            assert len(str(error)) < ex.PROBLEM_LINE_CHARS + 100
+
+    def test_a_non_dict_mapping_or_a_tuple_document_is_bounded_too(self):
+        # a Mapping root and tuples skipped the depth bound and hit RecursionError
+        deep: Any = "x"
+        for _ in range(5_000):
+            deep = [deep]
+        as_tuples: Any = "x"
+        for _ in range(5_000):
+            as_tuples = (as_tuples,)
+
+        for fsm_value in (deep, as_tuples):
+            data = types.MappingProxyType(_doc(metadata={"v": fsm_value}))
+            assert "deep" in _refused(data).problems[0]
+        assert limits.nests_deeper_than((((1,),),), 2)
+        assert not limits.nests_deeper_than((((1,),),), 3)
+        assert limits.nests_deeper_than(
+            types.MappingProxyType({"a": types.MappingProxyType({"b": [1]})}), 2
+        )
+        assert not limits.nests_deeper_than("a" * 10_000, 1)
+        assert not limits.nests_deeper_than(b"abc", 1)
 
     def test_a_document_as_deep_as_a_real_fsm_body_is_read(self):
         value: Any = "x"
@@ -441,6 +500,31 @@ class TestInstantiation:
         ia, ib = ex.identity_of(envelope, a), ex.identity_of(envelope, b)
         assert ia.instance_identity != ib.instance_identity
         assert ia.template_identity == ib.template_identity
+
+    def test_a_directly_built_envelope_with_a_deep_body_is_refused_not_a_crash(self):
+        deep: Any = "x"
+        for _ in range(5_000):
+            deep = [deep]
+        envelope = ex.FsmEnvelope(
+            schema="fsm-llm/executable",
+            kind="fsm",
+            id="deep",
+            body=ex.FsmBody(fsm={"initial_state": deep}),
+        )
+
+        with pytest.raises(ex.InstantiationError, match="deep"):
+            ex.instantiate_envelope(envelope)
+
+    def test_substitution_and_scan_read_tuples_and_mappings(self):
+        node = {
+            "a": ("Hi {{v}}", types.MappingProxyType({"k": "{{v}}"})),
+            "b": ["{{v}}"],
+        }
+
+        out = ex.substitute_variables(node, {"v": "X"})
+
+        assert out == {"a": ("Hi X", {"k": "X"}), "b": ["X"]}
+        assert ex.scan_placeholders(node) == ({"v"}, set())
 
     def test_a_declared_variable_without_a_value_is_refused(self):
         with pytest.raises(ex.InstantiationError, match="tone"):

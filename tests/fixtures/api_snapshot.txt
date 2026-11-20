@@ -822,6 +822,7 @@ fsm_llm.core.definitions.executable.InstanceIdentityMismatchError class(Instanti
   def __init__(self, message: str, *, expected: str | None = None, actual: str | None = None, details: dict[str, Any] | None = None)
 fsm_llm.core.definitions.executable.InstantiationError class(ExecutableError, ValueError)
 fsm_llm.core.definitions.executable.MAX_DOCUMENT_DEPTH = 200
+fsm_llm.core.definitions.executable.PROBLEM_LINE_CHARS = 300
 fsm_llm.core.definitions.executable.ProcedureBody class(FsmBody)
   field fsm: dict[str, Any] required
   field provenance: dict[str, str | list[str] | None] = factory

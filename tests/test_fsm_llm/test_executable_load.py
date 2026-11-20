@@ -13,6 +13,7 @@ import copy
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -325,6 +326,27 @@ class TestNeverRaises:
         envelope, result = load_executable(_doc(metadata=deep))
 
         assert envelope is None and not result.is_valid
+
+    def test_a_non_dict_mapping_root_with_a_deep_body_is_invalid_not_a_crash(self):
+        deep: Any = "x"
+        for _ in range(5_000):
+            deep = [deep]
+        data = types.MappingProxyType(_doc(_fsm(notes=deep)))
+
+        envelope, result = load_executable(data, variables={})
+
+        assert envelope is None and not result.is_valid
+        assert all(m.startswith("[schema] ") for m in result.errors)
+
+    def test_a_document_that_breaks_v1_shows_no_raw_text(self):
+        data = _doc(**{"evil\nkey\u202e": 1}, kind="y" * 600 + "\u202e")
+
+        _, result = load_executable(data)
+
+        assert result.errors
+        for message in result.errors:
+            assert len(message) <= 320 and "\u202e" not in message
+            assert all(ch.isprintable() for ch in message)
 
     def test_an_unknown_origin_is_a_programming_error(self):
         with pytest.raises(ValueError, match="origin"):

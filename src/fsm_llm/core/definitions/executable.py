@@ -62,6 +62,7 @@ from pydantic import (
 
 from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.results import Identity
+from fsm_llm.text import capped_line
 
 from .errors import FSMError
 from .fsm import FSMDefinition, definition_digest
@@ -73,6 +74,7 @@ __all__ = [
     "ENVELOPE_SCHEMA_VERSION_DEFAULT",
     "ENVELOPE_SCHEMA_VERSION_OLDEST",
     "MAX_DOCUMENT_DEPTH",
+    "PROBLEM_LINE_CHARS",
     "Capability",
     "Contract",
     "ExecutableDocument",
@@ -110,6 +112,11 @@ ENVELOPE_SCHEMA_VERSION_OLDEST = "1.0"
 #: Deepest container nesting a document may have. A valid FSM body nests about 108 levels
 #: (a JsonLogic maximum) below the header; pydantic stops serialising at about 255.
 MAX_DOCUMENT_DEPTH = 200
+
+#: Longest problem line of a refused document (and of every ``load_executable`` message), and
+#: the longest key or path part inside one: a line carries document text, so it is bounded.
+PROBLEM_LINE_CHARS = 300
+_PROBLEM_PART_CHARS = 60
 
 #: The shipped JSON Schema, generated from the models (package data).
 SCHEMA_PATH = Path(__file__).with_name("schemas") / "executable.schema.json"
@@ -323,6 +330,8 @@ _ADAPTER: TypeAdapter[ExecutableEnvelope] = TypeAdapter(ExecutableDocument)
 
 
 def _problems(error: ValidationError) -> tuple[str, ...]:
+    """One line per refusal. Key names and messages come from the document (the discriminator
+    error echoes the ``kind`` value), so each part and each line is control-stripped and capped."""
     lines = []
     for item in error.errors(
         include_url=False, include_context=False, include_input=False
@@ -330,8 +339,12 @@ def _problems(error: ValidationError) -> tuple[str, ...]:
         loc = item["loc"]
         if loc and loc[0] in _KINDS:  # the union's tag, not a path
             loc = loc[1:]
-        where = ".".join(str(part) for part in loc) or "document"
-        lines.append(f"{where}: {item['msg'].removeprefix('Value error, ')}")
+        where = (
+            ".".join(capped_line(str(part), _PROBLEM_PART_CHARS) for part in loc)
+            or "document"
+        )
+        message = item["msg"].removeprefix("Value error, ")
+        lines.append(capped_line(f"{where}: {message}", PROBLEM_LINE_CHARS))
     return tuple(lines)
 
 
@@ -471,22 +484,29 @@ def canonical_digest(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+def _instance_digest(instance: FSMDefinition | Mapping[str, Any]) -> str:
+    if isinstance(instance, FSMDefinition):
+        return definition_digest(instance)
+    try:
+        return definition_digest(FSMDefinition(**instance))
+    except (ValueError, TypeError, RecursionError):  # not an FSM: hash it as written
+        return canonical_digest({str(k): v for k, v in instance.items()})
+
+
 def identity_of(
     template: ExecutableEnvelope,
     instance: FSMDefinition | Mapping[str, Any] | None = None,
 ) -> Identity:
     """Both identities: of *template* (its canonical dump) and, when given, of *instance*.
 
-    The instance identity is ``definition_digest`` of an ``FSMDefinition`` and
-    ``canonical_digest`` of a mapping body (a workflow); ``None`` when no instance is given.
+    The instance identity of an FSM body is ``definition_digest`` of its ``FSMDefinition``
+    whether the caller holds the definition or a dict that loads as one (D-054: one instance, one
+    identity, so a log keyed by either form matches). Only a mapping that does not load as an FSM
+    (the workflow body) is hashed as written by ``canonical_digest``; ``None`` when no instance is
+    given. Never raises on a mapping.
     """
     dump = template.model_dump(mode="json", by_alias=True, exclude_defaults=True)
-    if instance is None:
-        digest = None
-    elif isinstance(instance, FSMDefinition):
-        digest = definition_digest(instance)
-    else:
-        digest = canonical_digest(instance)
+    digest = None if instance is None else _instance_digest(instance)
     return Identity(template_identity=canonical_digest(dump), instance_identity=digest)
 
 
@@ -494,14 +514,15 @@ def substitute_variables(node: Any, values: Mapping[str, str]) -> Any:
     """A copy of *node* with ``{{name}}`` replaced by ``values[name]`` in every string LEAF.
 
     Keys are left alone, an unknown ``{{name}}`` stays as text and a replacement is never
-    rescanned. Recursive: the caller bounds the depth (``MAX_DOCUMENT_DEPTH``).
+    rescanned. A Mapping becomes a dict, a list stays a list and a tuple a tuple. Recursive: the
+    caller bounds the depth (``MAX_DOCUMENT_DEPTH``).
     """
     if isinstance(node, str):
         return _PLACEHOLDER.sub(lambda m: values.get(m[1], m[0]), node)
-    if isinstance(node, dict):
+    if isinstance(node, Mapping):
         return {key: substitute_variables(item, values) for key, item in node.items()}
-    if isinstance(node, list):
-        return [substitute_variables(item, values) for item in node]
+    if isinstance(node, (list, tuple)):
+        return type(node)(substitute_variables(item, values) for item in node)
     return node
 
 
@@ -514,12 +535,12 @@ def scan_placeholders(node: Any) -> tuple[set[str], set[str]]:
         current = stack.pop()
         if isinstance(current, str):
             leaves.update(_PLACEHOLDER.findall(current))
-        elif isinstance(current, dict):
+        elif isinstance(current, Mapping):
             for key, item in current.items():
                 if isinstance(key, str):
                     keys.update(_PLACEHOLDER.findall(key))
                 stack.append(item)
-        elif isinstance(current, list):
+        elif isinstance(current, (list, tuple)):
             stack.extend(current)
     return leaves, keys
 
@@ -559,6 +580,10 @@ def instantiate_envelope(
         )
     if problems := variable_problems(envelope, values):
         raise InstantiationError("; ".join(problems))
+    if nests_deeper_than(envelope.body.fsm, MAX_DOCUMENT_DEPTH):
+        raise InstantiationError(
+            f"the body nests deeper than {MAX_DOCUMENT_DEPTH} levels"
+        )
     body = substitute_variables(envelope.body.fsm, values)
     try:
         definition = FSMDefinition(**body)

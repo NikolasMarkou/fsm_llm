@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 # The single source of truth for every identifier-shaped field in this module:
@@ -44,16 +44,20 @@ SYNTHESIZE_KEY_MAX_LENGTH = 100
 def nests_deeper_than(value: Any, limit: int) -> bool:
     """True when a container of `value` sits deeper than `limit` (the root is 1).
 
-    Iterative (an explicit stack): a recursive walk would hit the very limit it
-    guards against. `value` is what `json.load` returned: dicts, lists, scalars.
+    A container is any ``Mapping`` or any ``Sequence`` that is not text or bytes (a tuple
+    counts), so a caller's ``MappingProxyType`` or tuple cannot slip under the bound.
+    Iterative (an explicit stack): a recursive walk would hit the very limit it guards
+    against.
     """
     stack = [(value, 1)]
     while stack:
         node, level = stack.pop()
         children: Iterable[Any]
-        if isinstance(node, dict):
+        if isinstance(node, Mapping):
             children = node.values()
-        elif isinstance(node, list):
+        elif isinstance(node, Sequence) and not isinstance(
+            node, (str, bytes, bytearray)
+        ):
             children = node
         else:
             continue
