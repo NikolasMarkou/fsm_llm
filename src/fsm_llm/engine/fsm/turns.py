@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import threading
 import traceback
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from fsm_llm.aio import acall, run_sync
+from fsm_llm.aio import acall, acall_stream, iterate_sync, run_sync
 from fsm_llm.core.definitions import (
     AdvanceResult,
     FSMError,
@@ -287,17 +288,25 @@ class TurnsMixin:
 
         This is a thin NON-generator wrapper: it runs the EAGER, lock-free
         existence check at CALL time (so a created-but-not-yet-iterated stream
-        cannot skip validation) and returns a lazy nested-closure generator that
-        does the actual Pass-1/Pass-2 work.  Because this is a plain function (no
-        ``yield`` in its body), ``@with_conversation_context`` runs the prologue
-        eagerly, which is exactly what call-time validation requires.
+        cannot skip validation) and returns a lazy iterator (``iterate_sync`` over
+        ``aprocess_message_stream``) that does the actual Pass-1/Pass-2 work.
         """
+        return iterate_sync(
+            self.aprocess_message_stream(conversation_id, message, log=log)
+        )
+
+    @with_conversation_context
+    def aprocess_message_stream(
+        self, conversation_id: str, message: str, log: Any = None
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``process_message_stream``: the same eager existence check,
+        a lazy async generator, the claim at its first step."""
         return self._open_locked_stream(
             conversation_id,
             message,
             log,
-            lambda instance: self._pipeline.process_stream(
-                instance, message, conversation_id
+            lambda instance: acall_stream(
+                self._pipeline, "process_stream", instance, message, conversation_id
             ),
         )
 
@@ -323,11 +332,20 @@ class TurnsMixin:
                 concurrent), a terminal current state ("Conversation has
                 ended ..."), or a failed step.
         """
+        return iterate_sync(self.aadvance_stream(conversation_id, log=log))
+
+    @with_conversation_context
+    def aadvance_stream(
+        self, conversation_id: str, log: Any = None
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``advance_stream`` (see ``aprocess_message_stream``)."""
         return self._open_locked_stream(
             conversation_id,
             None,
             log,
-            lambda instance: self._pipeline.advance_stream(instance, conversation_id),
+            lambda instance: acall_stream(
+                self._pipeline, "advance_stream", instance, conversation_id
+            ),
         )
 
     def _open_locked_stream(
@@ -335,9 +353,9 @@ class TurnsMixin:
         conversation_id: str,
         message: str | None,
         log: Any,
-        run: Callable[[FSMInstance], Iterator[str]],
-    ) -> Iterator[str]:
-        """Validate the conversation now, return the lazy locked stream turn.
+        run: Callable[[FSMInstance], AsyncGenerator[str, None]],
+    ) -> AsyncGenerator[str, None]:
+        """Validate the conversation now, return the lazy locked stream turn (an async generator).
 
         Contract: ``message`` is the user's text, or ``None`` for a turn with
         no user message; ``run`` is the pipeline stream entry for that turn.
@@ -371,7 +389,7 @@ class TurnsMixin:
         # unbound-self tests (D-003/CF1).  Do NOT hoist ``conv_lock.acquire``
         # into the wrapper and do NOT reintroduce a ``self.``-attribute inner
         # generator.
-        def _stream() -> Iterator[str]:
+        async def _stream() -> AsyncGenerator[str, None]:
             # conv_lock is acquired non-blocking at the FIRST ``next()`` (lazy),
             # preserving the no-leak-on-abandonment property.  The existence
             # check runs again implicitly when this grabs
@@ -393,7 +411,9 @@ class TurnsMixin:
                 if message is not None:
                     instance.context.conversation.add_user_message(message)
                 try:
-                    yield from run(instance)
+                    async with aclosing(run(instance)) as chunks:
+                        async for chunk in chunks:
+                            yield chunk
                 except FSMError as e:
                     self._rollback_user_message(instance, message, log)
                     # DECISION plan-2026-09-19T175721-21cd7f8e/D-009

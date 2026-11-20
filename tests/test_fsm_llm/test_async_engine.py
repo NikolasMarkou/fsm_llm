@@ -12,6 +12,7 @@ mutants each row kills are named in its docstring.
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import threading
 from collections.abc import Callable
@@ -641,3 +642,141 @@ class TestInterleaveAndRefusal:
             ["system"],
         ]
         assert await api.aconverse("three", cid) == "ok"
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 3.2: streams (aconverse_stream, aadvance_stream and the sync names over them)
+# ----------------------------------------------------------------------------------------------
+
+
+class _Streaming(_Gated):
+    """``_Gated`` whose async stream suspends once per chunk, so a consumer can be parked."""
+
+    async def agenerate_response_stream(self, request):
+        async for chunk in super().agenerate_response_stream(request):
+            await self._hop()
+            yield chunk
+
+
+def _stream_api(cls=_Streaming, **kwargs):
+    llm = cls(stream_chunks=["a", "b", "c"], default_response="abc")
+    return API.from_definition(_CHAT(), llm_interface=llm, **kwargs), llm
+
+
+async def _collect(stream) -> list[str]:
+    return [chunk async for chunk in stream]
+
+
+def _loop_errors() -> list[dict]:
+    """Install a recorder on the running loop's exception handler (what an asyncgen
+    finalizer that could not reset a ContextVar token reports)."""
+    seen: list[dict] = []
+    asyncio.get_running_loop().set_exception_handler(
+        lambda _loop, ctx: seen.append(ctx)
+    )
+    return seen
+
+
+async def _settle(done) -> None:
+    """Let the loop run until ``done()`` (a finalizer task), bounded by turns, no sleeps."""
+    for _ in range(200):
+        if done():
+            return
+        await asyncio.sleep(0)
+
+
+class TestStreams:
+    @pytest.mark.parametrize("logged", [False, True])
+    async def test_the_async_streams_yield_what_the_sync_streams_yield(
+        self, logged, tmp_path
+    ):
+        """Chunks, history, data, state, request bytes, usage and (logged) every event but its
+        clock and blob refs, for a message stream and a message-free step stream, sync names
+        against async names on a double whose chunks really suspend. Kills: a stream that skips
+        its ``a`` twin (suspensions), a lost event scope on the stream (the log is empty)."""
+        logs = [EventLog(tmp_path / "sync"), EventLog(tmp_path / "async")]
+        want_api, want_llm = _stream_api(
+            ScriptedLLM, **({"event_log": logs[0]} if logged else {})
+        )
+        got_api, got_llm = _stream_api(**({"event_log": logs[1]} if logged else {}))
+        for api in (want_api, got_api):
+            api.start_conversation(_conversation_id=_CID)
+        want = [
+            list(want_api.converse_stream("hi", _CID)),
+            list(want_api.advance_stream(_CID)),
+        ]
+        got = [
+            await _collect(got_api.aconverse_stream("hi", _CID)),
+            await _collect(got_api.aadvance_stream(_CID)),
+        ]
+        assert got == want == [["a", "b", "c"], ["a", "b", "c"]]
+        assert _api_seen(got_api, got_llm, got) == _api_seen(want_api, want_llm, want)
+        assert (
+            got_llm.suspensions == 10
+        )  # per stream: two field extractions, three chunks
+        if logged:
+            assert _events(logs[1]) == _events(logs[0]) != []
+
+    async def test_a_stream_that_is_never_iterated_holds_nothing(self):
+        """The id is checked at call time and the claim waits for the first step. Kills: a claim
+        taken at call time (the next turn is refused)."""
+        api, _ = _stream_api()
+        cid, _ = await api.astart_conversation()
+        unused = api.aconverse_stream("hi", cid)
+        assert await api.aconverse("again", cid) == "abc"
+        with pytest.raises(ValueError):
+            api.aconverse_stream("hi", "no-such-conversation")
+        await unused.aclose()
+
+    async def test_a_stream_first_iterated_in_another_task_finishes_and_releases(self):
+        """Steps may hop tasks (each its own Context): the claim of the first step is released
+        by ticket in the last one. Kills: a release that needs the Context of the claim."""
+        api, _ = _stream_api()
+        cid, _ = await api.astart_conversation()
+        stream = api.aconverse_stream("hi", cid)
+        first = await asyncio.create_task(stream.__anext__())
+        assert [first, *await _collect(stream)] == ["a", "b", "c"]
+        assert await api.aconverse("again", cid) == "abc"
+
+    async def test_a_consumer_that_breaks_without_aclose_leaves_no_loop_error_and_no_claim(
+        self,
+    ):
+        """The probe p7 shape: the finalizer runs ``aclose`` in a new task (another Context) and
+        no ContextVar token may be reset there; the abandoned turn keeps the partial reply and
+        releases the conversation. Kills: a ContextVar bound across a ``yield`` (the loop's
+        exception handler sees a ``ValueError``), a release that stays unreached."""
+        errors = _loop_errors()
+        api, _ = _stream_api()
+        cid, _ = await api.astart_conversation()
+        stream = api.aconverse_stream("hi", cid)
+        async for _chunk in stream:
+            break
+        del stream
+        gc.collect()
+        await _settle(lambda: not api.fsm_manager._active_turns)
+        assert not api.fsm_manager._active_turns and errors == []
+        assert api.get_conversation_history(cid)[-2:] == [
+            {"user": "hi"},
+            {"system": "a"},
+        ]
+        assert await api.aconverse("again", cid) == "abc"
+
+    async def test_aclose_keeps_the_partial_reply_and_a_busy_stream_refuses_a_second_turn(
+        self,
+    ):
+        """While the stream is parked mid-reply a second turn is refused; ``aclose`` then keeps
+        the user message and the partial reply (today's abandonment rule) and frees the
+        conversation. Kills: a GeneratorExit that drops the partial reply, a release outside the
+        ``finally``."""
+        api, _ = _stream_api()
+        cid, _ = await api.astart_conversation()
+        stream = api.aconverse_stream("hi", cid)
+        assert await stream.__anext__() == "a"
+        with pytest.raises(FSMError, match="already being processed"):
+            await api.aconverse("again", cid)
+        await stream.aclose()
+        assert api.get_conversation_history(cid)[-2:] == [
+            {"user": "hi"},
+            {"system": "a"},
+        ]
+        assert await api.aconverse("again", cid) == "abc"

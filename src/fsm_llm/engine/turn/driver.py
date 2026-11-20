@@ -7,9 +7,10 @@ method and function bodies are unchanged.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing
 
-from fsm_llm.aio import run_sync
+from fsm_llm.aio import asteps, iterate_sync, run_sync
 from fsm_llm.constants import METADATA_KEY_TRANSITION_CLASSIFICATION
 from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
@@ -22,6 +23,20 @@ from fsm_llm.logging import logger
 
 from .records import _TurnRecord, _TurnSnapshot
 from .surface import _PipelineSurface
+
+
+def _logged_as(
+    conversation_id: str, steps: AsyncGenerator[str, None]
+) -> AsyncGenerator[str, None]:
+    """``steps`` with the turn's logger context (``conversation_id``, ``package``) bound only
+    WHILE a step runs: loguru resets its token in the Context that set it, and a stream may be
+    closed in another one (the asyncgen finalizer)."""
+    return asteps(
+        lambda: logger.contextualize(
+            conversation_id=conversation_id, package="fsm_llm"
+        ),
+        steps,
+    )
 
 
 class DriverMixin(_PipelineSurface):
@@ -275,7 +290,8 @@ class DriverMixin(_PipelineSurface):
         """Execute 2-pass processing, streaming Pass 2 tokens.
 
         Pass 1 runs fully (extraction + transition). Pass 2 yields
-        response tokens as they arrive from the LLM.
+        response tokens as they arrive from the LLM. ``iterate_sync`` over
+        ``aprocess_stream``, the one body.
 
         Args:
             instance: The FSM instance (already validated as non-terminal).
@@ -285,7 +301,15 @@ class DriverMixin(_PipelineSurface):
         Yields:
             String chunks of the response as they arrive.
         """
-        yield from self._stream_turn(instance, message, conversation_id)
+        return iterate_sync(self.aprocess_stream(instance, message, conversation_id))
+
+    def aprocess_stream(
+        self, instance: FSMInstance, message: str, conversation_id: str
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``process_stream``: an async generator over the stream turn body."""
+        return _logged_as(
+            conversation_id, self._stream_turn(instance, message, conversation_id)
+        )
 
     def advance_stream(
         self, instance: FSMInstance, conversation_id: str
@@ -295,7 +319,8 @@ class DriverMixin(_PipelineSurface):
         The same stream turn body as ``process_stream``. Differences: the
         prompts carry no user message, and a silent state (empty
         ``response_instructions``) yields no chunk, makes no Pass-2 LLM call
-        and appends nothing to the history.
+        and appends nothing to the history. ``iterate_sync`` over
+        ``aadvance_stream``.
 
         Args:
             instance: The FSM instance.
@@ -309,20 +334,33 @@ class DriverMixin(_PipelineSurface):
             FSMError: at the first ``next()`` when the current state is
                 terminal, or anything the turn body raises, after its rollback.
         """
-        self._require_non_terminal(instance, conversation_id)
-        yield from self._stream_turn(instance, None, conversation_id)
+        return iterate_sync(self.aadvance_stream(instance, conversation_id))
 
-    def _stream_turn(
+    async def aadvance_stream(
+        self, instance: FSMInstance, conversation_id: str
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``advance_stream`` (the terminal check runs at the first step)."""
+        self._require_non_terminal(instance, conversation_id)
+        async with aclosing(
+            _logged_as(
+                conversation_id, self._stream_turn(instance, None, conversation_id)
+            )
+        ) as chunks:
+            async for chunk in chunks:
+                yield chunk
+
+    async def _stream_turn(
         self, instance: FSMInstance, user_message: str | None, conversation_id: str
-    ) -> Iterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Run one turn of the current state, streaming Pass 2: the single
-        stream turn body.
+        stream turn body (an async generator; the sync stream is ``iterate_sync`` over it).
 
         Contract: ``user_message`` is the user's text, or ``None`` for a turn
         with no user message. ``process_stream`` is the entry for a message,
         ``advance_stream`` the entry for ``None``. Yields the reply chunks. On
         an ``Exception`` the pre-turn snapshot is restored as described below
-        and the exception propagates; ``GeneratorExit`` restores nothing.
+        and the exception propagates; ``GeneratorExit`` restores nothing. The
+        entries wrap it in ``_logged_as`` (the logger context is bound per step).
         """
         # DECISION plan-2026-09-30T062855-07ad3f8c/D-025
         # One STREAM turn body for a message turn and a message-free step,
@@ -330,95 +368,97 @@ class DriverMixin(_PipelineSurface):
         # generator that repeats this sequence for the no-message case, and do
         # NOT fold this body into `_run_turn`: e3131cc2/D-004 below keeps the
         # sync and the stream guards as two separate bodies.
-        with logger.contextualize(conversation_id=conversation_id, package="fsm_llm"):
-            # DECISION plan-2026-07-21T072826-e3131cc2/D-004
-            # Turn-level atomicity snapshot for the STREAMING path — the exact
-            # mirror of process()'s H2 guard (plan-2026-07-21T045419-9925aa3a/
-            # D-012/D-013). process_stream is a SEPARATE entry point; a Pass-2
-            # failure here must not leave a committed Pass-1 transition +
-            # extraction visible to a retry any more than it may in process().
-            # Snapshot ALL four handler-mutable fields before Pass 1 (deepcopy:
-            # Pass 1 mutates context.data values in place; working_memory may be
-            # None and deepcopy handles that).
+        # DECISION plan-2026-07-21T072826-e3131cc2/D-004
+        # Turn-level atomicity snapshot for the STREAMING path — the exact
+        # mirror of process()'s H2 guard (plan-2026-07-21T045419-9925aa3a/
+        # D-012/D-013). process_stream is a SEPARATE entry point; a Pass-2
+        # failure here must not leave a committed Pass-1 transition +
+        # extraction visible to a retry any more than it may in process().
+        # Snapshot ALL four handler-mutable fields before Pass 1 (deepcopy:
+        # Pass 1 mutates context.data values in place; working_memory may be
+        # None and deepcopy handles that).
+        #
+        # Why this generator try/except is NOT redundant:
+        #  (a) NOT redundant with process(): that guard lives in a different
+        #      method and never runs for the streaming caller. Do NOT delete
+        #      this as "already covered by process()".
+        #  (b) NOT redundant with _stream_response_generation_pass's
+        #      `persist=False` path: that flag ONLY suppresses appending the
+        #      accumulated assistant message to conversation history — it
+        #      never restores current_state / context.data / working_memory /
+        #      metadata. Those four survive a mid-stream failure uncorrupted
+        #      without this block.
+        #  (c) `except Exception` (NOT BaseException) is deliberate, matching
+        #      process() and the D-015 streaming-abandonment contract:
+        #      GeneratorExit / KeyboardInterrupt from a consumer that stopped
+        #      iterating must NOT trigger rollback — the partial reply the
+        #      user already saw is kept (documented boundary; a yielded chunk
+        #      cannot be un-yielded, same as H2's "external side effects not
+        #      undone").
+        snapshot = _TurnSnapshot.capture(instance)
+
+        # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
+        # mirror of the per-turn clear in process(); after the snapshot.
+        instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
+        # D-025: the cut-off record, like the classification record, belongs
+        # to the turn that produced it (after the snapshot: a rolled-back
+        # turn restores the prior one).
+        instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
+
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-002
+        # Widened turn-atomicity, streaming mirror of process()'s guard
+        # above (same D-002 rationale: two separate try/except blocks,
+        # Pass 1 stays unwrapped). See the comment in process() for the
+        # full explanation; not repeated here to avoid drift between the
+        # two copies.
+        #
+        # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
+        # the two blocks below are NOT symmetric in scope -- see the D-017
+        # comment in process() (same file, above) for the full rationale.
+        # In short: PRE_PROCESSING (immediately below) is its own separate
+        # try/except; POST_PROCESSING (further down) is deliberately
+        # folded into the SAME try as Pass 2's streaming call
+        # (_stream_response_generation_pass), so a POST_PROCESSING
+        # handler failure here also rolls back Pass 1's already-committed
+        # transition + extracted data, not just its own partial merge.
+        try:
+            # Execute pre-processing handlers
+            self.execute_handlers(
+                instance,
+                HandlerTiming.PRE_PROCESSING,
+                current_state=instance.current_state,
+            )
+        except Exception:
+            # Restore the pre-turn in-memory state so the streaming turn is
+            # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
+            # D-013). GeneratorExit deliberately does NOT reach here.
+            snapshot.restore(instance)
+            raise
+
+        # Pass 1: Data extraction + transition (runs fully)
+        (
+            extraction_response,
+            transition_occurred,
+            previous_state,
+        ) = await self._aexecute_extraction_and_transition_pass(
+            instance, user_message, conversation_id
+        )
+
+        try:
+            # Execute post-processing handlers
             #
-            # Why this generator try/except is NOT redundant:
-            #  (a) NOT redundant with process(): that guard lives in a different
-            #      method and never runs for the streaming caller. Do NOT delete
-            #      this as "already covered by process()".
-            #  (b) NOT redundant with _stream_response_generation_pass's
-            #      `persist=False` path: that flag ONLY suppresses appending the
-            #      accumulated assistant message to conversation history — it
-            #      never restores current_state / context.data / working_memory /
-            #      metadata. Those four survive a mid-stream failure uncorrupted
-            #      without this block.
-            #  (c) `except Exception` (NOT BaseException) is deliberate, matching
-            #      process() and the D-015 streaming-abandonment contract:
-            #      GeneratorExit / KeyboardInterrupt from a consumer that stopped
-            #      iterating must NOT trigger rollback — the partial reply the
-            #      user already saw is kept (documented boundary; a yielded chunk
-            #      cannot be un-yielded, same as H2's "external side effects not
-            #      undone").
-            snapshot = _TurnSnapshot.capture(instance)
-
-            # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
-            # mirror of the per-turn clear in process(); after the snapshot.
-            instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
-            # D-025: the cut-off record, like the classification record, belongs
-            # to the turn that produced it (after the snapshot: a rolled-back
-            # turn restores the prior one).
-            instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
-
-            # DECISION plan-2026-09-12T065608-089d0ec7/D-002
-            # Widened turn-atomicity, streaming mirror of process()'s guard
-            # above (same D-002 rationale: two separate try/except blocks,
-            # Pass 1 stays unwrapped). See the comment in process() for the
-            # full explanation; not repeated here to avoid drift between the
-            # two copies.
-            #
-            # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
-            # the two blocks below are NOT symmetric in scope -- see the D-017
-            # comment in process() (same file, above) for the full rationale.
-            # In short: PRE_PROCESSING (immediately below) is its own separate
-            # try/except; POST_PROCESSING (further down) is deliberately
-            # folded into the SAME try as Pass 2's streaming call
-            # (_stream_response_generation_pass), so a POST_PROCESSING
-            # handler failure here also rolls back Pass 1's already-committed
-            # transition + extracted data, not just its own partial merge.
-            try:
-                # Execute pre-processing handlers
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.PRE_PROCESSING,
-                    current_state=instance.current_state,
-                )
-            except Exception:
-                # Restore the pre-turn in-memory state so the streaming turn is
-                # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
-                # D-013). GeneratorExit deliberately does NOT reach here.
-                snapshot.restore(instance)
-                raise
-
-            # Pass 1: Data extraction + transition (runs fully)
-            extraction_response, transition_occurred, previous_state = (
-                self._execute_extraction_and_transition_pass(
-                    instance, user_message, conversation_id
-                )
+            # D-017: a failure here shares the except block below with
+            # Pass 2's streaming call -- see the D-017 note above this
+            # method's PRE_PROCESSING try.
+            self.execute_handlers(
+                instance,
+                HandlerTiming.POST_PROCESSING,
+                current_state=instance.current_state,
             )
 
-            try:
-                # Execute post-processing handlers
-                #
-                # D-017: a failure here shares the except block below with
-                # Pass 2's streaming call -- see the D-017 note above this
-                # method's PRE_PROCESSING try.
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.POST_PROCESSING,
-                    current_state=instance.current_state,
-                )
-
-                # Pass 2: Stream response generation
-                yield from self._stream_response_generation_pass(
+            # Pass 2: Stream response generation
+            async with aclosing(
+                self._stream_response_generation_pass(
                     instance,
                     user_message,
                     extraction_response,
@@ -426,9 +466,12 @@ class DriverMixin(_PipelineSurface):
                     previous_state,
                     conversation_id,
                 )
-            except Exception:
-                # Restore the pre-turn in-memory state so the streaming turn is
-                # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
-                # D-013). GeneratorExit deliberately does NOT reach here.
-                snapshot.restore(instance)
-                raise
+            ) as chunks:
+                async for chunk in chunks:
+                    yield chunk
+        except Exception:
+            # Restore the pre-turn in-memory state so the streaming turn is
+            # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
+            # D-013). GeneratorExit deliberately does NOT reach here.
+            snapshot.restore(instance)
+            raise

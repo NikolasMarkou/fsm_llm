@@ -19,8 +19,9 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       context with the log off or for an id with no stack (the caller's own lookup raises the
       public error).
     - ``event_stream(api, conversation_id, stream)``: *stream* itself with the log off, else
-      ``runtime.scoped_iter`` over it (the scope is bound only while the stream runs, so a stream
-      consumed on another thread never resets a token it did not set).
+      ``runtime.scoped_iter`` over it, or ``aio.asteps`` for an async generator (the scope is
+      bound only while the stream runs a step, so a stream consumed on another thread or task
+      never resets a token it did not set).
     - ``record_started(api, conversation_id)``: appends the ``context/record`` (``source:
       "start"``) with the state after the greeting; when the log cannot be written the
       conversation is ended and the error raised, so the caller never holds an id whose every turn
@@ -83,10 +84,11 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext, suppress
-from typing import Any
+from typing import Any, TypeVar, cast
 
+from fsm_llm.aio import asteps
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.engine.events import record_delta, record_state, state_ref_of
 from fsm_llm.logging import logger
@@ -138,12 +140,17 @@ def event_scope(api: _ApiSurface, conversation_id: str) -> AbstractContextManage
     return _NO_SCOPE if scope is None else activate(scope)
 
 
-def event_stream(
-    api: _ApiSurface, conversation_id: str, stream: Iterator[str]
-) -> Iterator[str]:
-    """Return *stream*, scoped while it runs when the log is on."""
+_Stream = TypeVar("_Stream", AsyncGenerator[str, None], Iterator[str])
+
+
+def event_stream(api: _ApiSurface, conversation_id: str, stream: _Stream) -> _Stream:
+    """Return *stream*, scoped while it runs when the log is on (a sync or an async stream)."""
     scope = _scope_of(api, conversation_id)
-    return stream if scope is None else scoped_iter(scope, stream)
+    if scope is None:
+        return stream
+    if isinstance(stream, AsyncGenerator):
+        return cast(_Stream, asteps(lambda: activate(scope), stream))
+    return cast(_Stream, scoped_iter(scope, stream))
 
 
 def child_event_scope(

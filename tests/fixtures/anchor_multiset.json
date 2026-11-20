@@ -704,6 +704,16 @@
       "delta": 1,
       "reason": "step 2.3 of plan f150ec28: new anchor at engine/kinds/conversation/executor.py where the async twins sit beside the unchanged sync extract and after_transition; no other token was added or lost",
       "token": "plan-2026-11-19T193704-f150ec28/D-012"
+    },
+    {
+      "delta": 1,
+      "reason": "step 3.2 of plan f150ec28: new anchor at aio.asteps (bind a ContextVar per step of a stream, never across a yield); no other token was added or lost for it",
+      "token": "plan-2026-11-19T193704-f150ec28/D-014"
+    },
+    {
+      "delta": -1,
+      "reason": "step 3.2 of plan f150ec28: converse_stream and advance_stream became iterate_sync over ONE shared _open_stream; the by-name reference to the anchor that advance_stream carried is gone with the duplicate closure, the anchor itself moved with its code to _open_stream",
+      "token": "plan-2026-07-21T082818-4c63deac/D-002"
     }
   ]
 }

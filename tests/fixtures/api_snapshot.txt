@@ -2,7 +2,9 @@
 fsm_llm.API class
   def __init__(self, fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], llm_interface: LLMInterface | None = None, model: str | None = None, api_key: str | None = None, temperature: float | None = None, max_tokens: int | None = None, max_history_size: int = 5, max_message_length: int = 1000, handlers: list[FSMHandler] | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, transition_config: TransitionEvaluatorConfig | None = None, session_store: SessionStore | None = None, handler_timeout: float | None = None, max_fsm_cache_size: int = 64, *, executors: Mapping[str, StateExecutor] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, max_steps: int | None = None, max_seconds: float | None = None, **llm_kwargs)
   def aadvance(self, conversation_id: str) -> AdvanceResult
+  def aadvance_stream(self, conversation_id: str) -> AsyncGenerator[str, None]
   def aconverse(self, user_message: str, conversation_id: str) -> str
+  def aconverse_stream(self, user_message: str, conversation_id: str) -> AsyncGenerator[str, None]
   def advance(self, conversation_id: str) -> AdvanceResult
   def advance_stream(self, conversation_id: str) -> Iterator[str]
   def astart_conversation(self, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None, _suppress_start: bool = False, _conversation_id: str | None = None) -> tuple[str, str]
@@ -219,9 +221,11 @@ fsm_llm.FSMInstance class(BaseModel)
 fsm_llm.FSMManager class
   def __init__(self, fsm_loader: Callable[[str], FSMDefinition] = load_fsm_definition, llm_interface: LLMInterface | None = None, data_extraction_prompt_builder: DataExtractionPromptBuilder | None = None, response_generation_prompt_builder: ResponseGenerationPromptBuilder | None = None, field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None, transition_evaluator: TransitionEvaluator | None = None, max_history_size: int = 5, max_message_length: int = 1000, handler_system: HandlerSystem | None = None, handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE, max_fsm_cache_size: int = 64, *, executors: Mapping[str, StateExecutor] | None = None)
   def aadvance(self, conversation_id: str, log: Any = None) -> AdvanceResult
+  def aadvance_stream(self, conversation_id: str, log: Any = None) -> AsyncGenerator[str, None]
   def advance(self, conversation_id: str, log: Any = None) -> AdvanceResult
   def advance_stream(self, conversation_id: str, log: Any = None) -> Iterator[str]
   def aprocess_message(self, conversation_id: str, message: str, log: Any = None) -> str
+  def aprocess_message_stream(self, conversation_id: str, message: str, log: Any = None) -> AsyncGenerator[str, None]
   def astart_conversation(self, fsm_id: str, initial_context: dict[str, Any] | None = None, *, suppress_start: bool = False, conversation_id: str | None = None, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, str]
   def copy_raw_context_data(self, conversation_id: str) -> dict[str, Any] | None
   def end_conversation(self, conversation_id: str, log: Any = None) -> None

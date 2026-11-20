@@ -9,7 +9,7 @@ share, which is also what ``engine/kinds/services.py`` (``_PipelineServices``) n
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from fsm_llm.context.layout import (
@@ -113,7 +113,7 @@ class _PipelineSurface:
             transition_occurred: bool,
             previous_state: str | None,
             conversation_id: str,
-        ) -> Iterator[str]: ...
+        ) -> AsyncGenerator[str, None]: ...
 
         def execute_handlers(
             self,

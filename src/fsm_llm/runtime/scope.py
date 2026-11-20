@@ -25,8 +25,8 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
     - ``llm_call(interface, call_type, request, *, stream=False)``: wraps one model call of the
       engine, ``with llm_call(llm, "completion", request) as call: reply = ...;
       call.response(reply)``. A stream (``stream=True``) reads its chunks through
-      ``call.stream(chunks)`` (or ``call.stream_from(make)``, which also guards the call that
-      opens the stream) and calls ``call.stream_done(joined_text)`` in its ``finally``
+      ``call.stream(chunks)`` (``call.astream(chunks)`` for an async generator, which also
+      guards the call that opens the stream: it runs on the first step) and calls ``call.stream_done(joined_text)`` in its ``finally``
       (``abandoned`` is read from how the chunks ended, or given). An observed interface
       (``is_observed``) is logged by the observer, so the call only adds the joined reply of a
       stream (and a mid-stream error). Any other interface (a double, a mock, a custom class, a
@@ -68,7 +68,7 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -402,22 +402,38 @@ class LlmCall:
             return chunks
         return self._produce(chunks)
 
-    def stream_from(self, make: Callable[[], Iterable[str]]) -> Iterable[str]:
-        """Like ``stream``, but *make* (the call that opens the provider stream) runs on the
-        FIRST chunk, inside the guarded read.
+    def astream(self, chunks: AsyncGenerator[str, None]) -> AsyncGenerator[str, None]:
+        """The async form of ``stream``: the same bookkeeping over an async generator.
 
-        Interface contract: *make* takes no argument and returns the chunk iterable (a
-        generator, or a plain ``def`` that returns one). The pass reads ``call.stream_from(lambda:
-        llm.generate_response_stream(request))`` and never calls the interface itself: a plain
-        ``def`` that raises before it returns its iterator is then ``provider/error`` (not an
-        abandoned reply), and one that reads the provider stream eagerly runs with the inner
-        observer off, so a wrapper around a ``LiteLLMInterface`` logs ONE request.
+        An engine-logged call switches the inner request observer off only WHILE a chunk is
+        awaited (a ``ContextVar`` set and reset inside one step, never across a ``yield``).
+        With no scope *chunks* is returned as it is.
         """
+        if self._scope is None:
+            return chunks
+        return self._aproduce(chunks)
 
-        def lazy() -> Iterator[str]:
-            yield from make()
-
-        return self.stream(lazy())
+    async def _aproduce(
+        self, chunks: AsyncGenerator[str, None]
+    ) -> AsyncGenerator[str, None]:
+        suppress = self._source == SOURCE_ENGINE
+        try:
+            while True:
+                token = install_observer(None) if suppress else None
+                try:
+                    chunk = await chunks.__anext__()
+                except StopAsyncIteration:
+                    self._exhausted = True
+                    return
+                except Exception:
+                    self._errored = True
+                    raise
+                finally:
+                    if token is not None:
+                        reset_observer(token)
+                yield chunk
+        finally:
+            await chunks.aclose()
 
     def _produce(self, chunks: Iterable[str]) -> Iterator[str]:
         suppress = self._source == SOURCE_ENGINE

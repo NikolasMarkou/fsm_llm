@@ -15,11 +15,11 @@ streams stay lazy nested closures (anchor 4c63deac/D-002 below).
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import aclosing, contextmanager
 from typing import Any
 
-from fsm_llm.aio import acall, run_sync
+from fsm_llm.aio import acall, acall_stream, iterate_sync, run_sync
 from fsm_llm.core.definitions import AdvanceResult, FSMError
 from fsm_llm.logging import logger
 
@@ -72,6 +72,55 @@ def _auto_save_session(api: _ApiSurface, conversation_id: str) -> None:
         api.save_session(conversation_id)
     except Exception as e:
         logger.warning(f"Auto-save session failed: {e!s}")
+
+
+def _open_stream(
+    api: _ApiSurface,
+    conversation_id: str,
+    doing: str,
+    do: str,
+    manager_name: str,
+    *args: Any,
+) -> AsyncGenerator[str, None]:
+    """The one stream entry of ``API``: the eager id check, then the lazy async generator.
+
+    Contract: the id is resolved NOW (``ValueError`` if unknown), so a stream never iterated
+    holds nothing. The generator streams ``fsm_manager.<manager_name>(id, *args)`` through
+    ``acall_stream`` under the event log scope and saves the session in its ``finally``
+    (also when closed early). Module level on purpose: see the D-002 anchor below.
+    """
+    with _turn_errors(doing, do):
+        # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
+        current_fsm_id = api._get_current_fsm_conversation_id(conversation_id)
+
+    # DECISION plan-2026-07-21T082818-4c63deac/D-002
+    # conv_lock acquisition stays LAZY inside the manager's stream (its first step), so an
+    # abandoned (never-iterated) stream cannot leak a lock and the ``_lock -> conv_lock`` order
+    # is preserved. This generator is a MODULE-LEVEL function taking the API (and the sync
+    # ``converse_stream`` is ``iterate_sync`` over it), deliberately NOT a ``self._..._inner``
+    # method and not ``self.aconverse_stream(...)``: a bound-method self-dispatch resolves to
+    # a Mock under ``Mock(spec=API)`` unbound-self tests and regressed the agents auto-save
+    # suite (D-003/CF1). Do NOT hoist conv_lock into the eager prologue and do NOT
+    # reintroduce a ``self.``-attribute inner generator.
+    async def _stream() -> AsyncGenerator[str, None]:
+        with _turn_errors(doing, do):
+            try:
+                async with aclosing(
+                    event_stream(
+                        api,
+                        conversation_id,
+                        acall_stream(
+                            api.fsm_manager, manager_name, current_fsm_id, *args
+                        ),
+                    )
+                ) as chunks:
+                    async for chunk in chunks:
+                        yield chunk
+            finally:
+                # Auto-save session after stream completes or is abandoned
+                _auto_save_session(api, conversation_id)
+
+    return _stream()
 
 
 class TurnEntriesMixin(_ApiSurface):
@@ -271,36 +320,30 @@ class TurnEntriesMixin(_ApiSurface):
             String chunks of the response as they arrive; nothing when the
             turn ended on a silent state.
         """
-        with _turn_errors("streaming", "stream"):
-            # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
-            # Runs at CALL time (this is a plain function, not a generator).
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        return iterate_sync(
+            _open_stream(
+                self,
+                conversation_id,
+                "streaming",
+                "stream",
+                "process_message_stream",
+                user_message,
+            )
+        )
 
-        # DECISION plan-2026-07-21T082818-4c63deac/D-002
-        # conv_lock acquisition stays LAZY inside this nested-closure generator
-        # (via ``process_message_stream``'s own inner generator), so an abandoned
-        # (never-iterated) stream cannot leak a lock and the ``_lock -> conv_lock``
-        # order is preserved.  The generator is a NESTED CLOSURE (capturing
-        # ``self``/args from scope) and deliberately NOT a ``self._..._inner``
-        # method: a bound-method self-dispatch resolves to a Mock under
-        # ``Mock(spec=API)`` unbound-self tests and regressed the agents
-        # auto-save suite (D-003/CF1).  Do NOT hoist conv_lock into the eager
-        # prologue and do NOT reintroduce a ``self.``-attribute inner generator.
-        def _stream() -> Iterator[str]:
-            with _turn_errors("streaming", "stream"):
-                try:
-                    yield from event_stream(
-                        self,
-                        conversation_id,
-                        self.fsm_manager.process_message_stream(
-                            current_fsm_id, user_message
-                        ),
-                    )
-                finally:
-                    # Auto-save session after stream completes or is abandoned
-                    _auto_save_session(self, conversation_id)
-
-        return _stream()
+    def aconverse_stream(
+        self, user_message: str, conversation_id: str
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``converse_stream``: a plain function (the id is checked now)
+        that returns a lazy async generator; ``async for`` over it yields the same chunks."""
+        return _open_stream(
+            self,
+            conversation_id,
+            "streaming",
+            "stream",
+            "process_message_stream",
+            user_message,
+        )
 
     def advance_stream(self, conversation_id: str) -> Iterator[str]:
         """Run one step of the current state with no user message, streaming
@@ -328,21 +371,22 @@ class TurnEntriesMixin(_ApiSurface):
                 (terminal state) or a turn is already running for it; or when
                 the step failed, after its rollback.
         """
-        with _turn_errors("streaming a step without a", "stream a step without a"):
-            current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
+        return iterate_sync(
+            _open_stream(
+                self,
+                conversation_id,
+                "streaming a step without a",
+                "stream a step without a",
+                "advance_stream",
+            )
+        )
 
-        # Lazy nested closure, as in ``converse_stream`` (anchor
-        # plan-2026-07-21T082818-4c63deac/D-002 there): no lock is taken here
-        # and the generator is not a ``self.`` attribute.
-        def _stream() -> Iterator[str]:
-            with _turn_errors("streaming a step without a", "stream a step without a"):
-                try:
-                    yield from event_stream(
-                        self,
-                        conversation_id,
-                        self.fsm_manager.advance_stream(current_fsm_id),
-                    )
-                finally:
-                    _auto_save_session(self, conversation_id)
-
-        return _stream()
+    def aadvance_stream(self, conversation_id: str) -> AsyncGenerator[str, None]:
+        """The async twin of ``advance_stream`` (see ``aconverse_stream``)."""
+        return _open_stream(
+            self,
+            conversation_id,
+            "streaming a step without a",
+            "stream a step without a",
+            "advance_stream",
+        )

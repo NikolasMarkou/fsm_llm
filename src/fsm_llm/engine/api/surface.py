@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Callable, Iterator
+    from collections.abc import AsyncGenerator, Callable, Iterator
 
     from fsm_llm.core.definitions import AdvanceResult, FSMDefinition
     from fsm_llm.engine.fsm.manager import FSMManager
@@ -99,6 +99,10 @@ class _ApiSurface:
         async def aadvance(self, conversation_id: str) -> AdvanceResult: ...
 
         def advance_stream(self, conversation_id: str) -> Iterator[str]: ...
+
+        def aadvance_stream(
+            self, conversation_id: str
+        ) -> AsyncGenerator[str, None]: ...
 
         @classmethod
         def process_fsm_definition(

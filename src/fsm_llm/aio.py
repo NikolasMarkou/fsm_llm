@@ -21,10 +21,12 @@ import threading
 from collections.abc import (
     AsyncGenerator,
     AsyncIterable,
+    Callable,
     Coroutine,
     Iterable,
     Iterator,
 )
+from contextlib import AbstractContextManager, aclosing
 from contextvars import ContextVar
 from typing import Any, TypeVar, cast
 
@@ -32,8 +34,10 @@ __all__ = [
     "SYNC",
     "SuspendedInSyncModeError",
     "acall",
+    "acall_stream",
     "aiterate",
     "async_name",
+    "asteps",
     "iterate_sync",
     "run_sync",
 ]
@@ -219,3 +223,54 @@ async def aiterate(source: Iterable[T] | AsyncIterable[T]) -> AsyncGenerator[T, 
             yield cast(T, step)
     finally:
         stepper.close()
+
+
+async def acall_stream(
+    obj: Any, name: str, /, *args: Any, **kwargs: Any
+) -> AsyncGenerator[Any, None]:
+    """The stream form of :func:`acall`: yield the chunks of ``obj.<name>(...)``.
+
+    Sync mode: the SYNC method (a patch of it still intercepts), iterated inline. Async mode:
+    the ``a`` twin iterated natively, else the sync method on a worker thread, stepped one
+    ``next`` per worker call (:func:`aiterate`). Lazy: the call itself runs at the first step.
+    """
+    if SYNC.get():
+        source = getattr(obj, name)(*args, **kwargs)
+    else:
+        twin = getattr(obj, async_name(name), None)
+        source = (
+            twin(*args, **kwargs)
+            if twin is not None
+            else await asyncio.to_thread(getattr(obj, name), *args, **kwargs)
+        )
+    async with aclosing(aiterate(source)) as items:
+        async for item in items:
+            yield item
+
+
+async def asteps(
+    bind: Callable[[], AbstractContextManager[Any]],
+    source: AsyncGenerator[T, None],
+) -> AsyncGenerator[T, None]:
+    """Yield what ``source`` yields, entering ``bind()`` only WHILE ``source`` runs a step.
+
+    ``bind`` makes a context manager (a ``ContextVar`` binding: a logger context, the event log
+    scope), entered and left inside one step and around the final ``aclose``, never across a
+    ``yield``: the asyncgen finalizer runs ``aclose`` in another Context, where a reset of a
+    token set elsewhere raises ``ValueError``. Closing this generator closes ``source``.
+    """
+    # DECISION plan-2026-11-19T193704-f150ec28/D-014
+    # Bind per STEP, never across a ``yield`` (probe p7): do NOT hold a ``with bind():`` around
+    # the whole generator, even though it reads simpler. A consumer that breaks without
+    # ``aclose`` has the finalizer close it in a NEW task, and the token reset raises there.
+    try:
+        while True:
+            with bind():
+                try:
+                    item = await source.__anext__()
+                except StopAsyncIteration:
+                    return
+            yield item
+    finally:
+        with bind():
+            await source.aclose()

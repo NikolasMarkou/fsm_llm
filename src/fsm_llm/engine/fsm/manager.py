@@ -401,8 +401,9 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
             # to an RLock: under asyncio every task of a loop shares one thread, so an RLock
             # lets a sibling task's reader or ``end_conversation`` run INSIDE a suspended
             # turn (probed: it ended a conversation mid-turn). Do NOT add a waiting async
-            # acquire or a queue of waiters: a second turn is refused (D-001) and a blocking
-            # reader on the loop thread fails fast with ``ConversationBusyError``.
+            # acquire or a queue of async waiters: a second turn is refused (D-001) and a
+            # blocking reader on the loop thread fails fast with ``ConversationBusyError``.
+            # (Blocked THREADS queue inside the gate: see the hand-over in ``gate.py``.)
             self._conversation_locks[conversation_id] = TurnGate(conversation_id)
             budget = open_budget(max_steps, max_seconds)
             if budget is not None:

@@ -7,10 +7,11 @@ method and function bodies are unchanged.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
-from fsm_llm.aio import acall, run_sync
+from fsm_llm.aio import acall, acall_stream, run_sync
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
 from fsm_llm.context import record_cut_off, was_cut_off
 from fsm_llm.core.definitions import (
@@ -31,7 +32,7 @@ from .surface import _PipelineSurface
 class Pass2Mixin(_PipelineSurface):
     """Pass 2: the reply generation and its request builder."""
 
-    def _stream_response_generation_pass(
+    async def _stream_response_generation_pass(
         self,
         instance: FSMInstance,
         user_message: str | None,
@@ -39,8 +40,9 @@ class Pass2Mixin(_PipelineSurface):
         transition_occurred: bool,
         previous_state: str | None,
         conversation_id: str,
-    ) -> Iterator[str]:
-        """Stream Pass 2: yield response tokens as they arrive.
+    ) -> AsyncGenerator[str, None]:
+        """Stream Pass 2: yield response tokens as they arrive (an async generator; the
+        sync stream is ``iterate_sync`` over it).
 
         Yields nothing, and makes no LLM call, for a turn that ended on a
         silent state.
@@ -110,11 +112,16 @@ class Pass2Mixin(_PipelineSurface):
             self.llm_interface, "response_stream", request, stream=True
         ) as call:
             try:
-                for chunk in call.stream_from(
-                    lambda: self.llm_interface.generate_response_stream(request)
-                ):
-                    chunks.append(chunk)
-                    yield chunk
+                async with aclosing(
+                    call.astream(
+                        acall_stream(
+                            self.llm_interface, "generate_response_stream", request
+                        )
+                    )
+                ) as stream:
+                    async for chunk in stream:
+                        chunks.append(chunk)
+                        yield chunk
             except GeneratorExit:
                 raise
             except BaseException:
