@@ -8,8 +8,10 @@ the mutant of the gate it kills: ownership by thread id (``sibling_task``), excl
 release-by-ticket row), a wait on the loop thread (the fail-fast row; a watchdog frees the
 holder so the mutant ends the test instead of hanging it), a ticket reset by token (the
 asyncgen finalizer row), a binding never pruned (the pile-up row). The ``TestManagerLevel`` rows
-have the shape of ``findings/probes/p1_reentry.py``. No sleeps and no clock assertion: events and
-bounded joins only (Windows ticks 15.6 ms).
+have the shape of ``findings/probes/p1_reentry.py``. No clock assertion (Windows ticks 15.6 ms):
+events and bounded joins, and one sleep, the 1 ms poll of ``_wait_queued`` (bounded by
+``BOUND_SECONDS``; the poll reads the private queue). ``TestKnownLimits`` pins a limit the docs
+name (a timed-out handler thread keeps the ticket).
 """
 
 from __future__ import annotations
@@ -373,11 +375,11 @@ _FSM = json.loads(
 )
 
 
-def _manager() -> tuple[FSMManager, str]:
+def _manager(llm: ScriptedLLM | None = None) -> tuple[FSMManager, str]:
     definition = FSMDefinition(**_FSM)
     manager = FSMManager(
         fsm_loader=lambda _id: definition,
-        llm_interface=ScriptedLLM(default_response="hi"),
+        llm_interface=llm or ScriptedLLM(default_response="hi"),
     )
     conversation_id, _ = manager.start_conversation("x")
     return manager, conversation_id
@@ -449,3 +451,46 @@ class TestManagerLevel:
         )
         assert manager.process_message(cid, "hello") == "hi"
         assert seen == {"state": "chat"}
+
+
+class TestKnownLimits:
+    """Behaviour the docs name as a limit (plan f150ec28 D-020). A row that fails here means
+    the limit was fixed: remove its doc sentence and this row together."""
+
+    def test_a_timed_out_handler_thread_still_re_enters_the_gate(self):
+        """A handler that outlived its timeout runs on in a copy of the turn's Context, so it
+        still carries the ticket and reads (or ends) its conversation DURING the turn, where an
+        ``RLock`` made it wait. The read below returns while the turn is parked in Pass 2."""
+        in_pass2, read_done = threading.Event(), threading.Event()
+        seen: dict[str, Any] = {}
+
+        class ParkedInPass2(ScriptedLLM):
+            armed = False  # the greeting of the conversation is not the turn
+
+            def generate_response(self, request):
+                if self.armed:
+                    in_pass2.set()
+                    seen["read_before_the_turn_went_on"] = read_done.wait(BOUND_SECONDS)
+                return super().generate_response(request)
+
+        llm = ParkedInPass2(default_response="hi")
+        manager, cid = _manager(llm)
+        llm.armed = True
+        manager.handler_system.handler_timeout = 0.05
+
+        def straggler(context):
+            in_pass2.wait(BOUND_SECONDS)  # the join timed out long ago
+            try:
+                seen["state"] = manager.get_conversation_state(cid)
+            except (
+                Exception
+            ) as error:  # a fix makes the read wait or fail: the row ends
+                seen["state"] = repr(error)
+            read_done.set()
+            return {}
+
+        manager.handler_system.register_handler(
+            create_handler("straggler").at(HandlerTiming.PRE_PROCESSING).do(straggler)
+        )
+        assert manager.process_message(cid, "hello") == "hi"
+        assert seen == {"read_before_the_turn_went_on": True, "state": "chat"}

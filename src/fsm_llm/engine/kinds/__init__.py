@@ -44,6 +44,15 @@ Interface contract:
   conversation_id, extraction_response, previous_state, new_state)``: called
   once after a transition that ended in ``new_state`` (not for an agent-managed
   FSM); may update ``extraction_response`` and the context; returns ``None``.
+- Async twins (plan f150ec28): ``aextract`` and ``aafter_transition`` are what the async turn
+  (``aconverse`` and the like) calls, and the sync names are what ``converse`` calls. An
+  executor with only the sync methods works in both modes (the default twin runs the sync one
+  on a worker thread), with two limits: after a cancel that thread runs on with the live
+  instance and may still write into the conversation, so an executor that must be cancel-safe
+  overrides ``aextract``; and a subclass of ``ConversationExecutor`` or ``CompletionExecutor``
+  that overrides only the sync ``extract`` or ``after_transition`` is bypassed by the async
+  turn (the inherited native twin is found first): override the ``a`` twin too. No warning is
+  raised for either.
 - ``executor_for(state, executors=None)``: the executor of
   ``kind_of(state).name``: the per-instance ``executors`` map first, then the
   module table; a kind with neither runs as ``conversation`` (a passive kind),

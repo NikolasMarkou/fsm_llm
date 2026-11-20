@@ -336,7 +336,8 @@ class _ScopeObserver:
 
 
 class LlmCall:
-    """The recorder ``llm_call`` yields (see the module docstring). Not for construction."""
+    """The recorder ``llm_call`` yields (see the module docstring). An internal helper, not
+    public API and not for construction."""
 
     __slots__ = (
         "_call_type",

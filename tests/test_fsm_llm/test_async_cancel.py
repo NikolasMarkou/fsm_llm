@@ -18,18 +18,27 @@ from typing import Any
 import pytest
 
 from fsm_llm import API, FileSessionStore
-from fsm_llm.core.definitions import ResponseGenerationResponse, RunBudgetExceededError
+from fsm_llm.core.definitions import (
+    DataExtractionResponse,
+    FSMError,
+    ResponseGenerationResponse,
+    RunBudgetExceededError,
+)
+from fsm_llm.engine.kinds import ConversationExecutor, StateExecutor
 from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.llm import LLMInterface
 from fsm_llm.memory import WorkingMemory
 from fsm_llm.runtime import EventLog
 from fsm_llm.runtime.stores import fold_session
+from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm.test_async_engine import (
     _CHAT,
     _CID,
     _RUN,
     _SCENARIOS,
     _VOLATILE,
+    _collect,
+    _stream_api,
     _Streaming,
 )
 
@@ -276,11 +285,6 @@ class TestASyncOnlyInterface:
 # ----------------------------------------------------------------------------------------------
 
 
-def _stream_api(**api_kwargs):
-    llm = _Parking(stream_chunks=["a", "b", "c"], default_response="abc")
-    return API.from_definition(_CHAT(), llm_interface=llm, **api_kwargs), llm
-
-
 class TestStreams:
     @pytest.mark.parametrize("how", ["cancel", "close"])
     async def test_a_cancel_mid_pass_2_rolls_back_while_aclose_keeps_the_partial_reply(
@@ -290,7 +294,7 @@ class TestStreams:
         consumer rolls the whole turn back and persists no partial reply, ``aclose`` keeps
         today's abandonment rule (the user message and the partial reply stay). Kills: an arm
         that leaves the user exchange or the partial reply on a cancel, a close that rolls back."""
-        api, llm = _stream_api()
+        api, llm = _stream_api(_Parking)
         cid, _ = await api.astart_conversation()
         _attach_memory(api, cid)
         before = _seen(api, cid)
@@ -317,22 +321,18 @@ class TestStreams:
         held, (logged) a turn that does not end ``rolled_back`` with every request paired."""
         for k in (1, 2, 3):
             options = {"event_log": EventLog(tmp_path / f"k{k}")} if logged else {}
-            api, llm = _stream_api(**options)
+            api, llm = _stream_api(_Parking, **options)
             cid, _ = await api.astart_conversation(_conversation_id=_CID)
             _attach_memory(api, cid)
             before = _seen(api, cid)
             llm.park(k, _dirty(api, cid))
-            await _cancel(llm, _drain(api.aconverse_stream("hi", cid)))
+            await _cancel(llm, _collect(api.aconverse_stream("hi", cid)))
             assert _seen(api, cid) == before, f"k={k}"
             assert _gate_is_free(api, cid), f"k={k}"
             if logged:
                 TestTheSweep._the_log_shows_a_rolled_back_turn(api, cid, before)
             llm.park(-1)
-            assert await _drain(api.aconverse_stream("hi", cid)) == ["a", "b", "c"]
-
-
-async def _drain(stream) -> list[str]:
-    return [chunk async for chunk in stream]
+            assert await _collect(api.aconverse_stream("hi", cid)) == ["a", "b", "c"]
 
 
 async def _next(stream) -> str:
@@ -367,3 +367,120 @@ class TestRunLoops:
             assert (await api.aadvance(cid)).state_after == "c"
         with pytest.raises(RunBudgetExceededError):
             await api.aadvance(cid)
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 7.6: limits of the cancel and parity rules that the docs name (D-020). A row that fails
+# here means the limit was fixed: remove its doc sentence and the row together.
+# ----------------------------------------------------------------------------------------------
+
+
+class TestKnownLimits:
+    async def test_a_consumer_cancelled_in_its_own_await_abandons_the_stream(self):
+        """A cancel in the CONSUMER's code (the loop body, here its own await) never reaches
+        the stream: that is abandonment, not rollback. The partial reply stays and the
+        conversation stays claimed while the stream object lives, until ``aclose`` frees it.
+        Kills (documented rule): none; fails when the rule changes, as a fix would."""
+        api, _ = _stream_api()
+        cid, _ = await api.astart_conversation()
+        stream = api.aconverse_stream("hi", cid)
+        got, parked = [], asyncio.Event()
+
+        async def consumer() -> None:
+            async for chunk in stream:
+                got.append(chunk)
+                parked.set()
+                await asyncio.Event().wait()  # the consumer's own await (a socket send)
+
+        task = asyncio.create_task(consumer())
+        await asyncio.wait_for(parked.wait(), _BOUND)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert got == ["a"]
+        assert not _gate_is_free(api, cid)
+        with pytest.raises(FSMError, match="already being processed"):
+            await api.aconverse("again", cid)
+        await stream.aclose()  # the abandonment ends here: the partial reply is kept
+        assert api.get_conversation_history(cid)[-2:] == [
+            {"user": "hi"},
+            {"system": "a"},
+        ]
+        assert _gate_is_free(api, cid)
+        assert await api.aconverse("again", cid) == "abc"
+
+    async def test_a_sync_only_executor_may_write_into_the_conversation_after_a_cancel(
+        self,
+    ):
+        """The default ``aextract`` runs a sync-only executor's ``extract`` on a worker thread
+        with the live instance. A cancel rolls the turn back and returns at once, and the thread
+        goes on: its late write lands after the rollback. Kills (documented rule): none."""
+        entered, go_on, finished = (threading.Event() for _ in range(3))
+
+        class SyncOnly(StateExecutor):
+            def extract(self, pipeline, instance, user_message, conversation_id, state):
+                entered.set()
+                go_on.wait(_BOUND)
+                instance.context.data["late_write"] = "from a cancelled turn"
+                finished.set()
+                return DataExtractionResponse(extracted_data={})
+
+        api = API.from_definition(
+            _CHAT(),
+            llm_interface=ScriptedLLM(default_response="ok"),
+            executors={"conversation": SyncOnly()},
+        )
+        cid, _ = await api.astart_conversation()
+        before = _seen(api, cid)
+        task = asyncio.create_task(api.aconverse("hi", cid))
+        await asyncio.to_thread(entered.wait, _BOUND)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert _seen(api, cid) == before and _gate_is_free(api, cid)
+        go_on.set()
+        await asyncio.to_thread(finished.wait, _BOUND)
+        assert api.get_data(cid)["late_write"] == "from a cancelled turn"
+
+    async def test_an_executor_subclass_that_overrides_only_the_sync_extract_is_bypassed(
+        self,
+    ):
+        """``converse`` honours an override of the sync ``extract``; ``aconverse`` finds the
+        inherited native ``aextract`` first and never calls it (no warning). The same override
+        with its ``aextract`` twin is called in both modes. Kills (documented rule): none."""
+
+        class SyncExtract(ConversationExecutor):
+            calls = 0
+
+            def extract(self, pipeline, instance, user_message, conversation_id, state):
+                self.calls += 1
+                return DataExtractionResponse(extracted_data={"done": True})
+
+        class BothExtracts(SyncExtract):
+            async def aextract(self, *args):
+                return self.extract(*args)
+
+        def build(executor):
+            llm = ScriptedLLM(default_response="ok")
+            return API.from_definition(
+                _CHAT(), llm_interface=llm, executors={"conversation": executor}
+            )
+
+        results = {}
+        for name, cls in (("sync only", SyncExtract), ("with twin", BothExtracts)):
+            sync_executor, async_executor = cls(), cls()
+            sync_api, async_api = build(sync_executor), build(async_executor)
+            sync_cid, _ = sync_api.start_conversation()
+            sync_api.converse("hi", sync_cid)
+            async_cid, _ = await async_api.astart_conversation()
+            await async_api.aconverse("hi", async_cid)
+            results[name] = (
+                sync_executor.calls,
+                async_executor.calls,
+                sync_api.get_current_state(sync_cid),
+                async_api.get_current_state(async_cid),
+            )
+        assert results == {
+            "sync only": (1, 0, "bye", "chat"),
+            "with twin": (1, 1, "bye", "bye"),
+        }
