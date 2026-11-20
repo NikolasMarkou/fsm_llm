@@ -1172,6 +1172,7 @@
     "fsm_llm.synthesis.policy",
     "fsm_llm.synthesis.prompts",
     "fsm_llm.synthesis.repair",
+    "fsm_llm.synthesis.reply",
     "fsm_llm.synthesis.runner",
     "fsm_llm.synthesis.simulation",
     "fsm_llm.synthesis.synthesizer",

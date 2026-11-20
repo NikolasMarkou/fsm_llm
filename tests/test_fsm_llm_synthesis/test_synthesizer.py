@@ -48,7 +48,7 @@ from fsm_llm.synthesis import (
     run_gates,
 )
 from fsm_llm.synthesis import prompts as prompts_module
-from fsm_llm.synthesis import synthesizer as synthesizer_module
+from fsm_llm.synthesis import reply as reply_module
 from fsm_llm.synthesis.constants import APPROVAL_UNTRUSTED_LABEL
 from fsm_llm.synthesis.prompts import (
     EXAMPLE_FSM,
@@ -61,13 +61,11 @@ from fsm_llm.synthesis.prompts import (
     operator_line,
     system_prompt,
 )
+from fsm_llm.synthesis.reply import _judge, _repair_brackets, normalise_extraction
 from fsm_llm.synthesis.synthesizer import (
     CompileResult,
     FSMSynthesizer,
     _approval_request,
-    _judge,
-    _repair_brackets,
-    normalise_extraction,
     reviewer_from_hitl,
 )
 from fsm_llm.testing import ScriptedLLM, UnscriptedCallError, final_reply
@@ -287,7 +285,7 @@ class TestUnparseableReplyDetail:
             raise json.JSONDecodeError("Invalid \\escape: '[GOAL END]'", "x", 3)
 
         fake = types.SimpleNamespace(loads=echo, JSONDecodeError=json.JSONDecodeError)
-        monkeypatch.setattr(synthesizer_module, "json", fake)
+        monkeypatch.setattr(reply_module, "json", fake)
         text = _finding_text('{"a": 1,}')
         assert "GOAL" not in text and "parser" not in text
 
@@ -426,9 +424,7 @@ class TestBracketRepair:
 
     def test_a_truncated_reply_is_never_repaired(self, valid_fsm, monkeypatch):
         calls: list[str] = []
-        monkeypatch.setattr(
-            synthesizer_module, "_repair_brackets", lambda t: calls.append(t)
-        )
+        monkeypatch.setattr(reply_module, "_repair_brackets", lambda t: calls.append(t))
         cut = CompletionResponse(
             kind="final", text=_slipped(valid_fsm), finish_reason="length"
         )
@@ -437,9 +433,7 @@ class TestBracketRepair:
 
     def test_a_valid_document_never_reaches_the_repair(self, valid_fsm, monkeypatch):
         calls: list[str] = []
-        monkeypatch.setattr(
-            synthesizer_module, "_repair_brackets", lambda t: calls.append(t)
-        )
+        monkeypatch.setattr(reply_module, "_repair_brackets", lambda t: calls.append(t))
         for text in (_text(valid_fsm), "```json\n" + _text(valid_fsm) + "\n```"):
             assert _judge(final_reply(text), SynthesisPolicy(), (), RET).passed
         assert calls == []
@@ -1500,7 +1494,7 @@ def _ran(data: dict[str, Any], turns: list[str]) -> tuple[dict[str, Any], str]:
 
 def _compiled(fsm: dict[str, Any], normalise: bool = True, mp: Any = None) -> Any:
     if not normalise:
-        mp.setattr(synthesizer_module, "normalise_extraction", lambda data, _: data)
+        mp.setattr(reply_module, "normalise_extraction", lambda data, _: data)
     return _synth([_text(fsm)])[0].compile("g", return_keys=(KEY,))
 
 
@@ -1702,13 +1696,13 @@ class TestNormaliseExtraction:
     def test_it_runs_before_the_gates_not_after(self, monkeypatch):
         """Guards: a digest of a definition the gates never saw."""
         seen: list[str] = []
-        real = synthesizer_module.run_gates
+        real = reply_module.run_gates
 
         def spy(data: Any, *a: Any, **kw: Any) -> Any:
             seen.append(_text_of(data) or "")
             return real(data, *a, **kw)
 
-        monkeypatch.setattr(synthesizer_module, "run_gates", spy)
+        monkeypatch.setattr(reply_module, "run_gates", spy)
         _compiled(_retry())
         assert seen == [KEY_NAMING.format(key=KEY)]
 

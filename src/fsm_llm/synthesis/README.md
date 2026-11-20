@@ -44,6 +44,7 @@ A compile after a miss may carry one near miss in its request: the stored proced
 ## Files
 
 - `synthesizer.py` - `FSMSynthesizer` (`compile`, `obtain`, `approval`), `Procedure`, `CompileResult`, `ProcedureApprovalRequest`, `reviewer_from_hitl`.
+- `reply.py` - the reply judge: `_judge`, `normalise_extraction`, `_repair_brackets`.
 - `policy.py` - `SynthesisPolicy` (every limit), `check_policy` (G5), `needs_approval`, `inject_abort`, `strip_abort`.
 - `gates.py` - `run_gates`, `verify_stored`, `GateReport`, `GateFinding`; composes G1 to G5 and G6a.
 - `dryrun.py` - `analyze_dryrun` (G6a).

@@ -28,7 +28,7 @@ from fsm_llm.agents import ToolCall
 from fsm_llm.core.definitions import DataExtractionResponse, FSMDefinition, LLMUsage
 from fsm_llm.synthesis import FSMLibrary, SynthesisPolicy, digest_of, run_gates
 from fsm_llm.synthesis.gates import GATES
-from fsm_llm.synthesis.synthesizer import normalise_extraction
+from fsm_llm.synthesis.reply import normalise_extraction
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM
 
@@ -1238,6 +1238,7 @@ UNPINNED_CORE = {
     "src/fsm_llm/agents/semantic_tools.py": "embedding lookup, the bench library has no embedder",
     "src/fsm_llm/synthesis/diagnose.py": "repair, never called by the bench",
     "src/fsm_llm/synthesis/patch.py": "repair, never called by the bench",
+    "src/fsm_llm/synthesis/reply.py": "the reply judge `_judge`, moved out of the pinned synthesizer.py unchanged (an ast.dump-proven pure move, plan ace7a8c8 D-004); the registered blocks were already void, so it is declared here and not pinned",
     "src/fsm_llm/runtime/usage.py": "the outage reader of the pinned synthesis/runner.py (step 9 of plan 5a6a1f80); the bench runs with no event log, so it reads the interface's own count",
     "src/fsm_llm/eval/_pool.py": "run-directory plumbing, run_case_trial calls none",
     "src/fsm_llm/eval/constants.py": "run-directory plumbing, run_case_trial calls none",
