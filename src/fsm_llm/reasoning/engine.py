@@ -25,10 +25,6 @@ from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger
 
 from .constants import (
-    CALCULATION_STATE,
-    HYBRID_CLEARED_KEYS,
-    HYBRID_EVALUATION_STATE,
-    HYBRID_FIRST_STATE,
     RETRY_CLEARED_KEYS,
     SOLVE_DRIVER_KEYS,
     ContextKeys,
@@ -45,6 +41,7 @@ from .handlers import (
     ContextManager,
     OutputFormatter,
     ReasoningHandlers,
+    register_strategy_handlers,
     retries_exhausted,
 )
 from .utilities import get_reasoning_fsm, map_reasoning_type
@@ -179,19 +176,6 @@ class ReasoningEngine:
             .do(self.handlers.validate_when_insights_ready)
         )
 
-        self.orchestrator.register_handler(
-            self.orchestrator.create_handler(HandlerNames.CALCULATOR_EXECUTOR)
-            .on_state_entry(CALCULATION_STATE)
-            .critical()
-            .do(self.handlers.execute_calculation)
-        )
-
-        self.orchestrator.register_handler(
-            self.orchestrator.create_handler(HandlerNames.CALCULATOR_FINALIZER)
-            .on_state_entry(OrchestratorStates.FINAL_ANSWER)
-            .do(self.handlers.finalize_calculation)
-        )
-
         # Context pruner
         self.orchestrator.register_handler(
             self.orchestrator.create_handler(HandlerNames.CONTEXT_PRUNER)
@@ -214,30 +198,7 @@ class ReasoningEngine:
             .do(self._check_retry_limit)
         )
 
-        # DECISION plan-2026-11-05T134105-5ed71cf2/D-016: clear the hybrid
-        # body keys and needs_refinement on EVERY entry to the first hybrid
-        # state so the critical_evaluation back edge re-runs the analysis
-        # (core extracts only unset keys; without this the loop is a no-op
-        # and needs_refinement stays True). Do NOT add hybrid_loop_count
-        # here: it is handler-only and the counter bounds the loop (D-054).
-        # Same shape as the retry clear above (D-053); the first entry finds
-        # nothing to clear.
-        self.orchestrator.register_handler(
-            clear_keys_on_entry(
-                HYBRID_CLEARED_KEYS,
-                state=HYBRID_FIRST_STATE,
-                name=HandlerNames.HYBRID_KEY_CLEARER,
-            )
-        )
-
-        # Hybrid back-edge counter: strategy FSMs run on the orchestrator API,
-        # and only the hybrid FSM has this state.
-        self.orchestrator.register_handler(
-            self.orchestrator.create_handler(HandlerNames.HYBRID_LOOP_COUNTER)
-            .on_state_exit(HYBRID_EVALUATION_STATE)
-            .critical()
-            .do(self.handlers.count_hybrid_loop)
-        )
+        register_strategy_handlers(self.orchestrator)
 
     def _classify_problem(self, context: dict[str, Any]) -> dict[str, Any]:
         """

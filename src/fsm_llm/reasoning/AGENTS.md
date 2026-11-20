@@ -49,7 +49,7 @@ Strategy FSMs are linear chains ending in a terminal state, except `hybrid`, who
 
 Risk, not mitigated: the model now only translates the text to an expression, and a small model mis-translates. On a direct probe of 20 prompts a 2B model mis-parenthesised 6 of 20 expressions (it also wrote the computed number for some), a 9B model 0 of 20. A pre-computed number is a valid expression and is accepted silently.
 
-Handlers registered in `ReasoningEngine._register_handlers`:
+Handlers registered in `ReasoningEngine._register_handlers` (the calculator and hybrid ones through `register_strategy_handlers(api)` in `handlers.py`, called last):
 
 | Name (`HandlerNames`) | Timing | Trigger | Action |
 | --- | --- | --- | --- |
@@ -76,7 +76,7 @@ Pushed strategy FSMs run through the same orchestrator `API` (same `FSMManager` 
 | `engine.py` | `ReasoningEngine` | `_solve_lock` (`threading.Lock`) serializes `solve_problem` per instance |
 | `reasoning_modes/` | package, one module per FSM: the `<mode>_fsm` dicts (`orchestrator.py`, `classifier.py` and the strategy modules named after their `ReasoningType` value), `registry.py` (`ALL_REASONING_FSMS`, fills each state's `id` from its key), `_phrases.py` (the shared no-questions sentences) | the package `__init__` re-exports the dicts and `ALL_REASONING_FSMS` with a static `__all__`: import from `fsm_llm.reasoning.reasoning_modes`; keys: `orchestrator`, `classifier`, and the `ReasoningType` values |
 | `calculator.py` | `evaluate_expression`, `calculate`, the bounds `MAX_EXPRESSION_CHARS`, `MAX_EXPRESSION_NODES`, `MAX_EXPONENT`, `MAX_RESULT_BITS` | stdlib only, imports nothing of `fsm_llm`; read by `ReasoningHandlers.execute_calculation` only |
-| `handlers.py` | `ReasoningHandlers` (incl. `execute_calculation`, `finalize_calculation`), `ContextManager`, `OutputFormatter`, `_STOP_WORDS` | all static methods |
+| `handlers.py` | `ReasoningHandlers` (incl. `execute_calculation`, `finalize_calculation`), `register_strategy_handlers(api)` (the calculator and hybrid handlers), `ContextManager`, `OutputFormatter`, `_STOP_WORDS` | all static methods |
 | `definitions.py` | Pydantic models on `TimestampedModel` | computed fields; `extra="ignore"`, `validate_assignment=True`, `use_enum_values=True` |
 | `constants.py` | `ReasoningType`, `STRATEGIES` (one `StrategySpec` per type), `OrchestratorStates`, `ClassifierStates`, `ContextKeys`, `HandlerNames`, `Defaults`, `ErrorMessages`, `LogMessages` | state-name constants double as dict keys in the `reasoning_modes/` modules |
 | `utilities.py` | `get_reasoning_fsm`, `map_reasoning_type`, `get_available_reasoning_types` | the last two read `STRATEGIES` |

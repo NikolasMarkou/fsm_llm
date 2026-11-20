@@ -8,16 +8,23 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from fsm_llm import API, clear_keys_on_entry
 from fsm_llm.constants import MESSAGE_TRUNCATION_SUFFIX
 from fsm_llm.logging import logger
 
 from .calculator import calculate
 from .constants import (
+    CALCULATION_STATE,
+    HYBRID_CLEARED_KEYS,
+    HYBRID_EVALUATION_STATE,
+    HYBRID_FIRST_STATE,
     STRATEGIES,
     ContextKeys,
     Defaults,
     ErrorMessages,
+    HandlerNames,
     LogMessages,
+    OrchestratorStates,
     ReasoningType,
 )
 
@@ -448,6 +455,55 @@ class ReasoningHandlers:
             logger.info(LogMessages.CONTEXT_PRUNED.format(original=context_size))
 
         return pruned_updates
+
+
+def register_strategy_handlers(api: API) -> None:
+    """Register the handlers two strategy FSMs need on ``api``.
+
+    The calculator strategy needs its executor (``perform_calculation``) and
+    finalizer (``final_answer``); the hybrid strategy needs its key clearer and
+    its back-edge counter. ``ReasoningEngine`` calls this on its orchestrator
+    API; the handlers are keyed by state name, so an FSM without those states
+    never fires them. Not idempotent: a second call on one ``api`` registers
+    the four handlers again.
+    """
+    api.register_handler(
+        api.create_handler(HandlerNames.CALCULATOR_EXECUTOR)
+        .on_state_entry(CALCULATION_STATE)
+        .critical()
+        .do(ReasoningHandlers.execute_calculation)
+    )
+
+    api.register_handler(
+        api.create_handler(HandlerNames.CALCULATOR_FINALIZER)
+        .on_state_entry(OrchestratorStates.FINAL_ANSWER)
+        .do(ReasoningHandlers.finalize_calculation)
+    )
+
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-016: clear the hybrid
+    # body keys and needs_refinement on EVERY entry to the first hybrid
+    # state so the critical_evaluation back edge re-runs the analysis
+    # (core extracts only unset keys; without this the loop is a no-op
+    # and needs_refinement stays True). Do NOT add hybrid_loop_count
+    # here: it is handler-only and the counter bounds the loop (D-054).
+    # Same shape as the retry clear of ``ReasoningEngine._register_handlers``
+    # (D-053); the first entry finds nothing to clear.
+    api.register_handler(
+        clear_keys_on_entry(
+            HYBRID_CLEARED_KEYS,
+            state=HYBRID_FIRST_STATE,
+            name=HandlerNames.HYBRID_KEY_CLEARER,
+        )
+    )
+
+    # Hybrid back-edge counter: strategy FSMs run on the orchestrator API,
+    # and only the hybrid FSM has this state.
+    api.register_handler(
+        api.create_handler(HandlerNames.HYBRID_LOOP_COUNTER)
+        .on_state_exit(HYBRID_EVALUATION_STATE)
+        .critical()
+        .do(ReasoningHandlers.count_hybrid_loop)
+    )
 
 
 class ContextManager:
