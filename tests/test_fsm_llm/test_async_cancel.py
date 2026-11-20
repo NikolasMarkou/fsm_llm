@@ -27,6 +27,7 @@ from fsm_llm.runtime.stores import fold_session
 from tests.test_fsm_llm.test_async_engine import (
     _CHAT,
     _CID,
+    _RUN,
     _SCENARIOS,
     _VOLATILE,
     _Streaming,
@@ -268,3 +269,101 @@ class TestASyncOnlyInterface:
         assert _seen(api, cid) == before
         llm.hold = False
         assert await api.aconverse("again", cid) == "late"
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 4.2: streams and the run loop
+# ----------------------------------------------------------------------------------------------
+
+
+def _stream_api(**api_kwargs):
+    llm = _Parking(stream_chunks=["a", "b", "c"], default_response="abc")
+    return API.from_definition(_CHAT(), llm_interface=llm, **api_kwargs), llm
+
+
+class TestStreams:
+    @pytest.mark.parametrize("how", ["cancel", "close"])
+    async def test_a_cancel_mid_pass_2_rolls_back_while_aclose_keeps_the_partial_reply(
+        self, how
+    ):
+        """At the same point (chunk 'a' delivered, the second chunk awaited): a cancel of the
+        consumer rolls the whole turn back and persists no partial reply, ``aclose`` keeps
+        today's abandonment rule (the user message and the partial reply stay). Kills: an arm
+        that leaves the user exchange or the partial reply on a cancel, a close that rolls back."""
+        api, llm = _stream_api()
+        cid, _ = await api.astart_conversation()
+        _attach_memory(api, cid)
+        before = _seen(api, cid)
+        stream = api.aconverse_stream("hi", cid)
+        assert await stream.__anext__() == "a"
+        if how == "cancel":
+            llm.park(1, _dirty(api, cid))
+            await _cancel(llm, _next(stream))
+            assert _seen(api, cid) == before
+        else:
+            await stream.aclose()
+            assert api.get_conversation_history(cid)[-2:] == [
+                {"user": "hi"},
+                {"system": "a"},
+            ]
+        assert _gate_is_free(api, cid)
+
+    @pytest.mark.parametrize("logged", [False, True])
+    async def test_a_task_cancelled_at_any_chunk_wait_leaves_the_pre_turn_conversation(
+        self, logged, tmp_path
+    ):
+        """The consumer task is cancelled while a chunk is awaited, the first one included.
+        Kills: no cancel arm in the stream closure or the stream turn body, a gate that stays
+        held, (logged) a turn that does not end ``rolled_back`` with every request paired."""
+        for k in (1, 2, 3):
+            options = {"event_log": EventLog(tmp_path / f"k{k}")} if logged else {}
+            api, llm = _stream_api(**options)
+            cid, _ = await api.astart_conversation(_conversation_id=_CID)
+            _attach_memory(api, cid)
+            before = _seen(api, cid)
+            llm.park(k, _dirty(api, cid))
+            await _cancel(llm, _drain(api.aconverse_stream("hi", cid)))
+            assert _seen(api, cid) == before, f"k={k}"
+            assert _gate_is_free(api, cid), f"k={k}"
+            if logged:
+                TestTheSweep._the_log_shows_a_rolled_back_turn(api, cid, before)
+            llm.park(-1)
+            assert await _drain(api.aconverse_stream("hi", cid)) == ["a", "b", "c"]
+
+
+async def _drain(stream) -> list[str]:
+    return [chunk async for chunk in stream]
+
+
+async def _next(stream) -> str:
+    return await stream.__anext__()
+
+
+class TestRunLoops:
+    @pytest.mark.parametrize(("parked_in", "charged"), [("hook", 1), ("model", 2)])
+    async def test_a_cancel_between_rounds_leaves_the_conversation_usable(
+        self, parked_in, charged
+    ):
+        """Round 1 ran; the cancel lands in the ``before_step`` hook of round 2 (one turn
+        charged) or in the reply of round 2 (two charged): either way the conversation is in the
+        state of the last finished round, the gate is free and the budget counted what started.
+        Kills: a run loop that holds the gate between rounds, a lost charge."""
+        llm = _Parking(default_response="r")
+        api = API.from_definition(_RUN(), llm_interface=llm)
+        cid, _ = await api.astart_conversation(max_steps=2)
+
+        async def hook(n):
+            if parked_in == "hook" and n == 2:
+                llm.entered.set()
+                await asyncio.Event().wait()
+
+        llm.park(2 if parked_in == "model" else -1)
+        run = api.arun_until_terminal(cid, max_steps=9, before_step=hook)
+        await _cancel(llm, run)
+        assert api.get_current_state(cid) == "b" and _gate_is_free(api, cid)
+        assert api.get_conversation_history(cid) == [{"system": "r"}] * 2
+        llm.park(-1)
+        if charged == 1:
+            assert (await api.aadvance(cid)).state_after == "c"
+        with pytest.raises(RunBudgetExceededError):
+            await api.aadvance(cid)
