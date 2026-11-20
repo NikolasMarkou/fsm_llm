@@ -144,7 +144,7 @@ def main() -> None:
 
     if not _HAS_WORKFLOWS:
         print("This example requires fsm_llm.workflows.")
-        print("Install with: pip install fsm-llm[workflows]")
+        print('Install with: pip install "llm-fsm[workflows]"')
         return
 
     if not _HAS_AGENTS:

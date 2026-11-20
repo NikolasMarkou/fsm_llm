@@ -37,7 +37,7 @@ def main():
         )
         from fsm_llm.agents.definitions import MetaBuilderConfig
     except ImportError:
-        print("This example requires the agents extra: pip install fsm-llm[agents]")
+        print('This example requires the agents extra: pip install "llm-fsm[agents]"')
         return
 
     model = os.environ.get("LLM_MODEL") or "ollama_chat/bonsai-2:27b"

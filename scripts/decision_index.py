@@ -39,8 +39,11 @@ dot entries and knows only the file suffixes of `_STYLES`. The reason is the gat
 `--check` must give the same answer on every checkout and in CI with no planner, the pages
 of `docs/` quote anchors as examples, and `examples/` are frozen baselines, so widening the
 roots would judge text that is not a decision. The price is that a real anchor written outside the roots would be checked by
-the planner and never by CI (the `outside_scope` helper that listed such files had no caller
-and was deleted in plan ace7a8c8 step 5). Citations of a decision
+the planner and never by CI. `outside_scope(root, tracked)` closes that: it reads every
+TRACKED file `scan` does not read with this same grammar (a file with no known suffix is
+read in every comment family) and lists them, and `--check` fails on any (a git work tree
+only: the files are `git ls-files`; `plans/` is left out, the manifest quotes anchors on
+purpose). Citations of a decision
 in prose or in a docstring (no comment marker) are outside both grammars and stay prose.
 
 Interface (the contract the generator of step 100 builds on):
@@ -57,6 +60,12 @@ Interface (the contract the generator of step 100 builds on):
   table or target for markdown, toml or ini, and Makefile; else `-`), `text` (the comment
   run that holds the anchor, marker and head removed). `key` is `(plan_id, number)`.
   There is no line number on purpose (D-008): a line is stale at the next commit.
+* `outside_scope(root, tracked) -> list[Anchor]`: the anchors of the files in `tracked` (POSIX
+  paths relative to `root`, for instance `git ls-files`) that `scan` does not read, same
+  order and shape as `scan`; the guard of the scope gap above. Never raises: a missing,
+  unreadable, symlinked or binary (a NUL byte) file is skipped.
+* `tracked_files(root) -> list[str] | None`: `git ls-files` of `root` (the `plans/` paths
+  left out), or `None` when `root` is no git work tree or git is missing.
 * `load_manifest(path) -> dict[(plan_id, number), ManifestEntry]` in file order; the first
   line of a repeated key wins; a missing or unreadable file is `{}`. A manifest line is
   `^<plan-id>/D-NNN[ \\t]*|` (the planner's resolver); the rest is split on the first `|`
@@ -96,9 +105,10 @@ import ast
 import io
 import os
 import re
+import subprocess
 import sys
 import tokenize
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -513,6 +523,43 @@ def scan(root: Path) -> list[Anchor]:
         if text is not None:
             anchors.extend(_scan_file(rel, text))
     return anchors
+
+
+#: Every comment family, read in a file `outside_scope` meets with no known suffix.
+_ALL_STYLES = ("#", "//", "/*", "--", "<!--")
+
+
+def outside_scope(root: Path, tracked: Iterable[str]) -> list[Anchor]:
+    """The anchors of the `tracked` files that `scan` does not read. See the docstring."""
+    base = Path(root)
+    scanned = {rel for rel, _ in _files(base)}
+    anchors: list[Anchor] = []
+    for rel in sorted(set(tracked) - scanned):
+        path = base / rel
+        if not path.is_file() or path.is_symlink():
+            continue
+        text = _read(path)
+        if text is None or "\x00" in text:
+            continue
+        anchors.extend(_scan_file(rel, text, _style_of(rel) or _ALL_STYLES))
+    return anchors
+
+
+def tracked_files(root: Path) -> list[str] | None:
+    """`git ls-files` of `root` without `plans/`, or None (no git, not a work tree)."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    names = done.stdout.decode("utf-8", "replace").split("\0")
+    return [n for n in names if n and not n.startswith("plans/")]
 
 
 # --------------------------------------------------------------------------- states
@@ -943,6 +990,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.write.write_bytes(render(anchors, manifest).encode("ascii"))
         return 0
     found = problems(anchors, manifest)
+    tracked = tracked_files(args.root)
+    if tracked is not None:
+        found += [
+            f"{a.path}: {a.token} sits where this scanner does not read (move it under "
+            "src, tests, scripts or .github)"
+            for a in outside_scope(args.root, tracked)
+        ]
     if found:
         for message in found:
             print(f"error: {message}", file=sys.stderr)

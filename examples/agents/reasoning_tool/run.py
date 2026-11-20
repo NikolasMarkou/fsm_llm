@@ -134,7 +134,7 @@ def main() -> None:
 
     if not _HAS_REASONING:
         print("This example requires fsm_llm.reasoning.")
-        print("Install with: pip install fsm-llm[reasoning]")
+        print('Install with: pip install "llm-fsm[reasoning]"')
         return
 
     # Build tool registry

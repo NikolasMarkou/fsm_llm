@@ -106,7 +106,7 @@ def main() -> None:
 
     if not _HAS_AGENT:
         print("This example requires fsm_llm.agents and fsm_llm.reasoning.")
-        print("Install with: pip install fsm-llm[agents,reasoning]")
+        print('Install with: pip install "llm-fsm[agents,reasoning]"')
         return
 
     # Build tool registry (reason is auto-registered)
