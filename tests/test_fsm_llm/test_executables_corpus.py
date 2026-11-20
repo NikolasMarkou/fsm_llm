@@ -82,3 +82,17 @@ def test_the_text_is_the_same_under_three_hash_seeds():
             check=True,
         )
         assert done.stdout.strip() == here, f"PYTHONHASHSEED={seed}"
+
+
+@pytest.mark.parametrize("case", [c for c in sorted(_CASES) if c.startswith("agents/")])
+def test_no_terminal_state_of_an_agent_carries_an_extraction(case):
+    # Core runs no extraction in a terminal state: only the reply is written.
+    states = _CASES[case]["states"]
+    for sid, state in states.items():
+        if not state.get("transitions"):
+            for field in (
+                "extraction_instructions",
+                "field_extractions",
+                "classification_extractions",
+            ):
+                assert not state.get(field), (case, sid, field)

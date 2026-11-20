@@ -39,6 +39,7 @@ Test doubles and fixtures:
 | `test_records.py` | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, exceptions |
 | `test_scoring.py` | `classify_result` golden parity, `SCORE_LABELS`, `MAX_SCORE`, `TestReportedFailure` (a line-anchored `Error:` or `Success: False` caps at 2, an extraction rate of at most 50% is partial) |
 | `test_stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` |
+| `test_bench_parity.py` | the `scripts/bench_common.py` copies of `wilson_ci` and `fisher_exact_two_sided` equal the `stats` functions |
 | `test_timeout_table.py` | the harness timeout table against the agent budgets found by an `ast` scan of `examples/`: no harness timeout ties or is below an `AgentConfig` budget; the examples on the default 300 s budget are at 360 s |
 | `__init__.py` | Empty package marker |
 

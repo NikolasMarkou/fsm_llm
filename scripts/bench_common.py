@@ -38,11 +38,11 @@ class BenchDataError(RuntimeError):
 
 
 # DECISION plan-2026-09-29T061903-581c2634/D-008
-# wilson_ci, fisher_exact_two_sided, _utc_now, _git_commit, _write_json,
-# append_row and read_rows are stdlib copies of their fsm_llm.eval twins. Do NOT
-# delegate them to fsm_llm.eval, not even lazily: importing fsm_llm pulls
-# litellm, which fetches its model-cost map over HTTP, so an offline bench
-# command (a report recount) would open a socket.
+# wilson_ci and fisher_exact_two_sided are stdlib copies of their fsm_llm.eval
+# twins (the other helpers here are bench-local). Do NOT delegate them to
+# fsm_llm.eval, not even lazily: importing fsm_llm pulls litellm, which fetches
+# its model-cost map over HTTP, so an offline bench command (a report recount)
+# would open a socket.
 # tests/test_fsm_llm_eval/test_bench_parity.py keeps the two copies equal;
 # change both together. See decisions.md D-008.
 def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:

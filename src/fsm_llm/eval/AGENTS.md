@@ -103,7 +103,7 @@ Python:
 - `setup_cli_logging` only in `run()`, never in `main_cli()` (tests call `main_cli` in-process).
 - An empty `expect` is rejected even when Python `checks` are passed (D-004).
 - Case trials stay on threads in one process; do not move them to a subprocess per trial (D-004).
-- `scripts/bench_common.py` must stay stdlib-only and offline at import time and never import `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its copies (`wilson_ci`, `fisher_exact_two_sided`, `_utc_now`, `_git_commit`, `_write_json`, `append_row`, `read_rows`) are not kept equal to this package by any test (the bench tests were dropped, plan ace7a8c8 step 4).
+- `scripts/bench_common.py` must stay stdlib-only and offline at import time and never import `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its copies of `wilson_ci` and `fisher_exact_two_sided` are kept equal to this package by `tests/test_fsm_llm_eval/test_bench_parity.py`; its other helpers (`_utc_now`, `_git_commit`, `_write_json`, `append_row`, `read_rows`) are bench-local and have no twin check (the other bench tests were dropped, plan ace7a8c8 step 4).
 - `fsm_llm/__init__.py` never imports this subpackage.
 - One case trial = one fresh `API`, closed in `finally`; trial exceptions are data (`error` set), never a crashed run.
 - `on_done` callbacks in `run_interruptible` run on the calling thread, so `results`/`trials` lists need no lock.

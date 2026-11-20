@@ -496,6 +496,16 @@ class TestRobustFSMDefinitionProcessing:
 # ======================================================================
 
 
+def test_from_definition_takes_exactly_one_definition(mock_llm2_interface):
+    # `definition=` is a declared keyword (the shipped examples use it): give one of the two.
+    with pytest.raises(TypeError, match="exactly one"):
+        API.from_definition(llm_interface=mock_llm2_interface)
+    with pytest.raises(TypeError, match="exactly one"):
+        API.from_definition({}, definition={}, llm_interface=mock_llm2_interface)
+    with pytest.raises(TypeError):
+        API.from_definition({}, {}, llm_interface=mock_llm2_interface)
+
+
 class TestRobustInitialization:
     """Test API initialization with proper FSM definition handling."""
 

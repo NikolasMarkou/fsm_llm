@@ -77,7 +77,7 @@ fsm_llm/
 │   ├── synthesis/             # Runtime FSM synthesis: compile, gates, library, runner
 │   └── testing/               # Public test doubles, scripted user, assertions
 ├── tests/                     # One folder per subpackage plus root-level files
-├── examples/                  # Runnable examples by category (evaluation baselines)
+├── examples/                  # Runnable examples by category (scored by fsm-llm-eval)
 ├── docs/                      # The documentation pages of the site (mkdocs.yml builds them)
 ├── evaluation/                # Datasets and recorded eval runs
 ├── scripts/                   # Supply-chain audit, benches
@@ -86,9 +86,9 @@ fsm_llm/
 └── CHANGELOG.md, EVALUATE.md, CONTRIBUTING.md, SECURITY.md
 ```
 
-## Examples are frozen
+## Examples follow the API
 
-Do not modify anything under `examples/` unless a maintainer asks for it. The examples are the evaluation baselines for `fsm-llm-eval examples`, and every shipped FSM JSON must keep loading (`tests/test_examples`).
+An example under `examples/` that calls a removed or renamed API is updated to the new one in the commit that breaks it (an example with no place in the new model may be deleted). Every shipped FSM JSON must keep loading and every example call must bind to a live signature (`tests/test_examples`); `fsm-llm-eval examples` scores them, so read a change against the last scorecard.
 
 ## Plans, decisions and findings
 

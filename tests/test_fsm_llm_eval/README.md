@@ -24,6 +24,7 @@ The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repos
 - `test_scoring.py` - golden table for `classify_result`, the score labels, and the rule that a line-anchored `Error:` or `Success: False`, or an extraction rate of at most 50%, cannot score 4.
 - `test_timeout_table.py` - reads the examples' source with `ast` and checks that no harness timeout ties or is below an agent's own `timeout_seconds` budget.
 - `test_stats.py` - Wilson interval, Fisher exact test, `pass_rate`, and exact `below_percent` threshold checks.
+- `test_bench_parity.py` - the stdlib copies of `wilson_ci` and `fisher_exact_two_sided` in `scripts/bench_common.py` equal the `fsm_llm.eval.stats` functions.
 
 ## How to use it
 

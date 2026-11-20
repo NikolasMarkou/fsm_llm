@@ -7,7 +7,8 @@ Purpose: Markdown documentation for FSM-LLM v0.13.0 (landing page, quickstart, c
 
 - In scope: the Markdown files of this folder, flat (no subfolder). FSM-LLM is one distribution (`llm-fsm`); the code lives in `src/fsm_llm/` and the extensions are subpackages: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`, `fsm_llm.testing`.
 - Out of scope: runnable code, per-package READMEs (they stay in `src/fsm_llm/<package>/`), `CHANGELOG.md`, `EVALUATE.md`, planning artifacts under `plans/`, the public API snapshot (the test fixture `tests/fixtures/api_snapshot.txt`, never documentation). By user preference, monitor docs belong in `api_reference.md`. Do not create a separate `docs/monitor.md`.
-- Removed on purpose (step 123 of plan d454fd62, D-052, the user's instruction), never recreate under another name: `docs/reference/` (generated module pages), `docs/packages/` (includes of the package READMEs), `docs/upgrade-guide/` (the changelog is the migration record), `docs/decisions/` (the generated decision index), `docs/api.txt` and `docs/agents_roadmap.md`.
+- Removed in step 123 of plan d454fd62 (D-052; history, not a ban: plan ace7a8c8 D-040 lets a page come back when the work needs it): `docs/reference/` (generated module pages), `docs/packages/` (includes of the package READMEs), `docs/upgrade-guide/` (the changelog is the migration record), `docs/decisions/` (the generated decision index), `docs/api.txt` and `docs/agents_roadmap.md`.
+- Binding status (plan ace7a8c8, D-040, the owner's order): every file here except `2026_roadmap.md` may be rewritten, restructured, renamed or deleted when the work needs it. The page set, the `> Covers` header form, the page template, the wrapper rule and the `mkdocs.yml` nav and `exclude_docs` below describe the current state and are advisory. The docs tests are change detectors for that state: rewrite or drop them in the step that changes the pages, and keep what protects a real property (the strict build, the code blocks that must run, a link that resolves). No emoji, no em dash and no count stay.
 
 ## Architecture
 
@@ -83,4 +84,4 @@ No known mismatches between these pages and the code. When one is found, list it
 - After any edit, run `.venv/bin/python -m pytest tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm/test_docs_site.py tests/test_fsm_llm/test_docs_content.py tests/test_fsm_llm/test_docs_links.py tests/test_fsm_llm_regression/test_regression_cli_and_exports.py`, and a strict build with `make docs` when the docs tools are installed.
 - A new full FSM example must include `description` on the FSM and on every state, `id` and `purpose` on every state, and a reachable terminal state.
 - Renaming or deleting a page means updating `mkdocs.yml`, the tests above and the pointers in `src/fsm_llm/engine/fsm/manager.py`.
-- Example paths cited here must exist under `examples/`. Do not edit `examples/` to fit the docs: they are evaluation baselines.
+- Example paths cited here must exist under `examples/`. An example is updated when the API changes (plan ace7a8c8 D-039), never to fit a page.
