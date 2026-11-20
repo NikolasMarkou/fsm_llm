@@ -14,7 +14,7 @@ import gc
 import sys
 import threading
 import warnings
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +26,7 @@ from fsm_llm.aio import (
     SuspendedInSyncModeError,
     acall,
     aiterate,
+    aoffload,
     async_name,
     iterate_sync,
     run_sync,
@@ -459,6 +460,68 @@ class TestAiterate:
         assert drive[1](drain(source())) == [1, 2]
 
 
+class TestAoffload:
+    """``aoffload``, the one worker hop (plan ace7a8c8 D-003): inline in sync mode."""
+
+    @staticmethod
+    def probe(*args, **kwargs):
+        return threading.get_ident(), SYNC.get(), args, kwargs
+
+    def test_sync_mode_runs_inline_on_the_caller_thread(self):
+        got = run_sync(aoffload(self.probe, 1, k=2))
+
+        assert got == (threading.get_ident(), True, (1,), {"k": 2})
+        assert SYNC.get() is False
+
+    async def test_async_mode_runs_on_a_worker_with_its_arguments(self):
+        ident, flag, args, kwargs = await aoffload(self.probe, 1, k=2)
+
+        assert ident != threading.get_ident()
+        assert (flag, args, kwargs) == (False, (1,), {"k": 2})
+        assert SYNC.get() is False
+
+    async def test_the_worker_reads_the_context_of_the_caller(self):
+        ticket: ContextVar[tuple[str, int]] = ContextVar("ticket")
+        ticket.set(("turn", 7))
+
+        assert await aoffload(ticket.get) == ("turn", 7)
+
+    @pytest.mark.parametrize("mode", ["sync", "async"])
+    def test_an_exception_propagates_in_both_modes(self, mode):
+        def down():
+            raise ValueError("provider down")
+
+        with pytest.raises(ValueError, match="provider down"):
+            run_sync(aoffload(down)) if mode == "sync" else asyncio.run(aoffload(down))
+        assert SYNC.get() is False
+
+    def test_a_cancelled_await_returns_at_once_and_the_worker_runs_on(self):
+        """Known limit (same as part A): the worker keeps going after a cancel."""
+        started, release, done = (threading.Event() for _ in range(3))
+
+        def work():
+            started.set()
+            release.wait(5)
+            done.set()
+
+        async def main():
+            task = asyncio.ensure_future(aoffload(work))
+            while not started.is_set():
+                await asyncio.sleep(0.01)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not done.is_set()  # the await ended while the worker is inside
+            release.set()
+            for _ in range(200):
+                if done.is_set():
+                    break
+                await asyncio.sleep(0.01)
+
+        asyncio.run(main())
+        assert done.is_set()
+
+
 class TestModule:
     def test_it_imports_the_standard_library_only(self):
         tree = ast.parse(Path(aio.__file__).read_text(encoding="utf-8"))
@@ -476,6 +539,7 @@ class TestModule:
             "acall",
             "acall_stream",
             "aiterate",
+            "aoffload",
             "asteps",
             "async_name",
             "iterate_sync",

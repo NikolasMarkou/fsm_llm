@@ -7,14 +7,13 @@ Layer ``llm`` (plan d454fd62, step 73): split out of the old ``fsm_llm/llm/__ini
 from __future__ import annotations
 
 import abc
-import asyncio
 import json
 import os
-from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Iterator, Mapping, Sequence
 from contextlib import aclosing
-from typing import Any, TypeVar
+from typing import Any
 
-from fsm_llm.aio import SYNC, aiterate
+from fsm_llm.aio import aiterate, aoffload
 from fsm_llm.constants import (
     DEFAULT_TOOL_MODEL,
     ENV_LLM_MODEL,
@@ -470,18 +469,6 @@ def _completion_response(response: Any) -> CompletionResponse:
     return CompletionResponse(kind="final", text=text, finish_reason=finish_reason)
 
 
-_R = TypeVar("_R")
-
-
-async def _on_worker(call: Callable[..., _R], request: Any) -> _R:
-    """Run a sync interface method for its default ``a`` twin: on a worker thread in async
-    mode, inline in sync mode (``SYNC`` set by ``run_sync``: there is no loop to hop to, and
-    a worker started from a loop thread would run the method a second time elsewhere)."""
-    if SYNC.get():
-        return call(request)
-    return await asyncio.to_thread(call, request)
-
-
 class LLMInterface(abc.ABC):
     """
     Abstract interface for LLM communication supporting the 2-pass architecture.
@@ -643,13 +630,13 @@ class LLMInterface(abc.ABC):
 
     async def acomplete(self, request: CompletionRequest) -> CompletionResponse:
         """The async twin of ``complete``: the default runs it on a worker thread."""
-        return await _on_worker(self.complete, request)
+        return await aoffload(self.complete, request)
 
     async def agenerate_response(
         self, request: ResponseGenerationRequest
     ) -> ResponseGenerationResponse:
         """The async twin of ``generate_response``: the default runs it on a worker thread."""
-        return await _on_worker(self.generate_response, request)
+        return await aoffload(self.generate_response, request)
 
     async def agenerate_response_stream(
         self, request: ResponseGenerationRequest
@@ -660,7 +647,7 @@ class LLMInterface(abc.ABC):
         in sync mode) and closes it when the stream ends, fails or the consumer stops
         early (``aclose``, a cancel or a timeout; then once the step in flight ends).
         """
-        chunks = await _on_worker(self.generate_response_stream, request)
+        chunks = await aoffload(self.generate_response_stream, request)
         async with aclosing(aiterate(chunks)) as steps:
             async for chunk in steps:
                 yield chunk
@@ -669,10 +656,10 @@ class LLMInterface(abc.ABC):
         self, request: FieldExtractionRequest
     ) -> FieldExtractionResponse:
         """The async twin of ``extract_field``: the default runs it on a worker thread."""
-        return await _on_worker(self.extract_field, request)
+        return await aoffload(self.extract_field, request)
 
     async def aextract_bulk_data(
         self, request: BulkExtractionRequest
     ) -> DataExtractionResponse:
         """The async twin of ``extract_bulk_data``: the default runs it on a worker thread."""
-        return await _on_worker(self.extract_bulk_data, request)
+        return await aoffload(self.extract_bulk_data, request)

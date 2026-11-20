@@ -36,6 +36,7 @@ __all__ = [
     "acall",
     "acall_stream",
     "aiterate",
+    "aoffload",
     "async_name",
     "asteps",
     "iterate_sync",
@@ -74,6 +75,22 @@ async def acall(obj: Any, name: str, /, *args: Any, **kwargs: Any) -> Any:
     if twin is not None:
         return await twin(*args, **kwargs)
     return await asyncio.to_thread(getattr(obj, name), *args, **kwargs)
+
+
+async def aoffload(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run ``fn(*args, **kwargs)`` on a worker thread: the one worker hop of the library.
+
+    Interface contract: ``fn`` is a plain sync callable; returns its value and raises what
+    it raises. Async mode: ``asyncio.to_thread``, so the worker reads a copy of the caller's
+    Context (a ``ContextVar`` set by the caller is visible there), and a cancelled await
+    returns at once while the worker runs ``fn`` to its end (its late result is dropped).
+    Sync mode (``SYNC`` set by ``run_sync``): ``fn`` runs inline on the caller's thread,
+    there being no loop to hop to and a worker started from here would run it elsewhere.
+    Use ``acall`` instead when the object has an ``a`` twin or a test may patch the name.
+    """
+    if SYNC.get():
+        return fn(*args, **kwargs)
+    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 def _step(awaitable: Any) -> Any:
