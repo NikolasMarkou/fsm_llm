@@ -8,6 +8,7 @@ method bodies are unchanged. The ``_lock`` then ``conv_lock`` order and the lazy
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import traceback
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
@@ -418,8 +419,9 @@ class TurnsMixin:
                     self._rollback_user_message(instance, message, log)
                     # DECISION plan-2026-09-19T175721-21cd7f8e/D-009
                     # ERROR handlers run here too (they used to never run on the
-                    # stream path). GeneratorExit / KeyboardInterrupt / SystemExit
-                    # are separate arms below and deliberately fire nothing.
+                    # stream path). GeneratorExit / KeyboardInterrupt / SystemExit /
+                    # CancelledError (D-002 of plan f150ec28) are separate arms below
+                    # and deliberately fire nothing.
                     self._fire_error_handlers(instance, e, log)
                     raise
                 except GeneratorExit:
@@ -433,8 +435,10 @@ class TurnsMixin:
                     # pipeline is preserved.
                     self._rollback_user_message(instance, message, log)
                     raise
-                except (KeyboardInterrupt, SystemExit):
+                except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
                     # DECISION plan-2026-07-18T162030-a02151fe/D-014 [STALE]
+                    # [SUPERSEDED BY plan-2026-11-19T193704-f150ec28/D-002 on the cancel
+                    # clause: a CancelledError is named here too, same rule, no ERROR handler]
                     self._rollback_user_message(instance, message, log)
                     raise
                 except Exception as e:
@@ -490,8 +494,11 @@ class TurnsMixin:
             # docs/handlers.md promises "ERROR -- On any exception".
             self._fire_error_handlers(instance, e, log)
             raise
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
             # DECISION plan-2026-07-18T162030-a02151fe/D-014 [STALE]
+            # [SUPERSEDED BY plan-2026-11-19T193704-f150ec28/D-002 on the cancel clause: a
+            # cancelled turn is rolled back whole (the driver restores the snapshot) and this
+            # arm pops its user message; do NOT run ERROR handlers or wrap it either]
             # This clause must stay BEFORE `except Exception` and must re-raise
             # BARE. Do NOT merge it into the Exception clause below and do NOT
             # wrap it in FSMError: KeyboardInterrupt/SystemExit derive from

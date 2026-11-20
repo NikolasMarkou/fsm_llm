@@ -1,0 +1,270 @@
+"""A cancelled async turn changes nothing (plan f150ec28, step 4, D-002).
+
+The sweep runs a scripted turn once to count its model awaits N, then once per k in 1..N on a
+double that parks the k-th await (``_Parking``), cancels the task there and checks what the
+caller can see: state, data, metadata, working memory and history equal their pre-turn values,
+the gate is free, no ERROR handler ran, a retry of the same turn answers like an uncancelled
+run, and with the event log on the turn ends ``rolled_back``, every request has its end and a
+fold of the log is the pre-turn conversation. A cancel is never swallowed: the task ends
+cancelled. Rows use events and bounded waits, never sleeps or the clock.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+from typing import Any
+
+import pytest
+
+from fsm_llm import API, FileSessionStore
+from fsm_llm.core.definitions import ResponseGenerationResponse, RunBudgetExceededError
+from fsm_llm.handlers import HandlerTiming, create_handler
+from fsm_llm.llm import LLMInterface
+from fsm_llm.memory import WorkingMemory
+from fsm_llm.runtime import EventLog
+from fsm_llm.runtime.stores import fold_session
+from tests.test_fsm_llm.test_async_engine import (
+    _CHAT,
+    _CID,
+    _SCENARIOS,
+    _VOLATILE,
+    _Streaming,
+)
+
+_BOUND = 10  # seconds: a wait that would hang fails instead
+
+
+class _Parking(_Streaming):
+    """The ``at``-th model await after ``park`` (counted from 1; a stream chunk counts) sets
+    ``entered``, runs ``dirty`` (the commits of a handler) and waits until it is cancelled."""
+
+    calls = 0
+    park_at = 0
+    dirty: Any = None
+
+    def park(self, at: int, dirty: Any = None) -> None:
+        self.calls, self.park_at, self.dirty = 0, at, dirty
+        self.entered.clear()
+
+    async def _hop(self) -> None:
+        self.calls += 1
+        if self.calls == self.park_at:
+            if self.dirty:
+                self.dirty()
+            self.entered.set()
+            await asyncio.Event().wait()
+        await super()._hop()
+
+
+def _seen(api, cid) -> dict[str, Any]:
+    """Everything a turn can touch that a caller can see (clock keys left out)."""
+    instance = api.fsm_manager.instances[cid]
+    context = instance.context
+    memory = context.working_memory
+    return {
+        "state": instance.current_state,
+        "data": {k: v for k, v in context.data.items() if k not in _VOLATILE},
+        "metadata": dict(context.metadata),
+        "memory": None if memory is None else memory.to_dict(),
+        "history": list(context.conversation.exchanges),
+        "visible": api.get_data(cid),
+    }
+
+
+def _dirty(api, cid):
+    """Writes into every restorable place, as the commits of a handler would."""
+    context = api.fsm_manager.instances[cid].context
+
+    def write() -> None:
+        context.data["junk"] = 1
+        context.metadata["junk"] = 1
+        context.working_memory.set("scratch", "junk", 1)
+
+    return write
+
+
+def _attach_memory(api, cid) -> None:
+    api.fsm_manager.instances[cid].context.working_memory = WorkingMemory()
+
+
+def _step(api, cid, message):
+    return api.aadvance(cid) if message is None else api.aconverse(message, cid)
+
+
+async def _cancel(llm: _Parking, work) -> asyncio.Task:
+    """Run ``work`` until the parked await, cancel it there and return the cancelled task."""
+    task = asyncio.create_task(work)
+    await asyncio.wait_for(llm.entered.wait(), _BOUND)
+    task.cancel()
+    await asyncio.wait({task}, timeout=_BOUND)
+    assert task.cancelled()  # never swallowed, never converted
+    return task
+
+
+def _gate_is_free(api, cid) -> bool:
+    manager = api.fsm_manager
+    return not manager._active_turns and not manager._conversation_locks[cid].locked()
+
+
+async def _prepare(name, turn, log_dir=None, **api_kwargs):
+    """A started conversation of a scenario with its first ``turn`` turns done, a working
+    memory attached, and its double (script included) as it stands before the turn."""
+    scenario = _SCENARIOS[name]
+    llm = scenario.llm(_Parking)
+    if log_dir is not None:
+        api_kwargs["event_log"] = EventLog(log_dir)
+    api = API.from_definition(scenario.fsm(), llm_interface=llm, **api_kwargs)
+    cid, _ = await api.astart_conversation(scenario.context, _conversation_id=_CID)
+    _attach_memory(api, cid)
+    for _ in range(scenario.advance):
+        await api.aadvance(cid)
+    for message in scenario.turns[:turn]:
+        await _step(api, cid, message)
+    return api, llm, cid
+
+
+def _log_rows(api, kind):
+    return [e for e in api.event_log.read(_CID) if e["type"] == kind]
+
+
+#: (scenario, index of the swept turn): a field extraction, a bulk extraction, a
+#: classification, the extraction after a transition and Pass 2 (plain); an AMBIGUOUS
+#: classifier tie; a completion state; message-free steps.
+_SWEPT = [("plain", 0), ("plain", 1), ("tie", 0), ("completion", 0), ("steps", 1)]
+
+
+class TestTheSweep:
+    @pytest.mark.parametrize("logged", [False, True])
+    @pytest.mark.parametrize(("name", "turn"), _SWEPT)
+    async def test_a_cancel_at_every_model_await_restores_the_pre_turn_conversation(
+        self, name, turn, logged, tmp_path
+    ):
+        """Kills: no arm around Pass 1 (a committed transition and extraction survive), no pop
+        of the user message (an orphan exchange), a release outside the ``finally`` (the gate
+        stays held), an arm that catches ``Exception`` only (every k fails), an ERROR handler
+        that runs on a cancel, a swallowed cancel."""
+        message = _SCENARIOS[name].turns[turn]
+        api, llm, cid = await _prepare(
+            name, turn, tmp_path / "control" if logged else None
+        )
+        llm.park(-1)  # counts only
+        expected = await _step(api, cid, message)
+        awaits, after = llm.calls, _seen(api, cid)
+        assert awaits > 0
+        fired: list[str] = []  # the ERROR handlers of every run append here
+        for k in range(1, awaits + 1):
+            where = tmp_path / f"k{k}" if logged else None
+            api, llm, cid = await _prepare(name, turn, where)
+            api.register_handler(
+                create_handler("errors")
+                .at(HandlerTiming.ERROR)
+                .do(lambda context: fired.append("error"))
+            )
+            before, script = _seen(api, cid), list(llm.replies)
+            llm.park(k, _dirty(api, cid))
+            await _cancel(llm, _step(api, cid, message))
+            assert _seen(api, cid) == before, f"k={k}"
+            assert _gate_is_free(api, cid) and fired == [], f"k={k}"
+            if logged:
+                self._the_log_shows_a_rolled_back_turn(api, cid, before)
+            llm.park(-1)
+            llm.replies[:] = script
+            assert await _step(api, cid, message) == expected, f"k={k}"
+            assert _seen(api, cid) == after, f"k={k}"
+
+    @staticmethod
+    def _the_log_shows_a_rolled_back_turn(api, cid, before) -> None:
+        events = list(api.event_log.read(_CID))
+        kinds = [e["type"] for e in events]
+        assert [e["outcome"] for e in events if e["type"] == "turn/end"][-1] == (
+            "rolled_back"
+        )
+        assert kinds.count("llm/request") == (
+            kinds.count("llm/response") + kinds.count("provider/error")
+        )
+        assert kinds.count("provider/error") >= 1
+        folded = fold_session(events, api.event_log.get_json)
+        assert folded is not None
+        assert folded.current_state == before["state"]
+        assert folded.conversation_history == before["history"]
+
+
+class TestWhatElseACancelLeaves:
+    async def test_a_cancelled_turn_still_counts_against_a_lifetime_budget(self):
+        """Kills: a charge that moves into the rolled-back part (the cancelled turn is free)."""
+        llm = _Parking(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        cid, _ = await api.astart_conversation(max_steps=2)
+        llm.park(1)
+        await _cancel(llm, api.aconverse("one", cid))
+        llm.park(-1)
+        assert await api.aconverse("two", cid) == "ok"
+        with pytest.raises(RunBudgetExceededError):
+            await api.aconverse("three", cid)
+
+    async def test_a_session_store_saves_nothing_for_a_cancelled_turn(self, tmp_path):
+        """Kills: an auto-save that runs on the way out of a cancelled turn."""
+        store = FileSessionStore(tmp_path)
+        llm = _Parking(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm, session_store=store)
+        cid, _ = await api.astart_conversation()
+        llm.park(1)
+        await _cancel(llm, api.aconverse("one", cid))
+        assert store.load(cid) is None
+
+    async def test_a_cancelled_greeting_leaves_nothing_registered(self):
+        """Kills: a greeting without a cancel arm (an instance, a lock and a budget stay under
+        an id nobody holds, and the same id is refused as live)."""
+        llm = _Parking(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        llm.park(1)
+        await _cancel(llm, api.astart_conversation(max_steps=3, _conversation_id=_CID))
+        manager = api.fsm_manager
+        assert manager.instances == {} and manager._conversation_locks == {}
+        assert manager._turn_budgets == {}
+        llm.park(-1)
+        assert (await api.astart_conversation(_conversation_id=_CID))[0] == _CID
+
+
+class _SyncOnly(LLMInterface):
+    """A sync-only interface: its async twins are the default ones, on a worker thread. After
+    ``hold`` its reply blocks until ``proceed`` is set."""
+
+    def __init__(self) -> None:
+        self.hold = False
+        self.entered, self.proceed, self.done = (threading.Event() for _ in range(3))
+
+    def generate_response(self, request):
+        if self.hold:
+            self.entered.set()
+            self.proceed.wait(_BOUND)
+        self.done.set()
+        return ResponseGenerationResponse(message="late")
+
+
+class TestASyncOnlyInterface:
+    async def test_the_late_reply_lands_after_the_rollback_and_changes_nothing(self):
+        """The documented hazard: the cancel returns at once and the worker thread runs on. The
+        state is the pre-turn state before the late reply and after it. Kills: a rollback that
+        waits for the worker, a late reply that is committed."""
+        llm = _SyncOnly()
+        api = API.from_definition(_CHAT(), llm_interface=llm)
+        cid, _ = await api.astart_conversation()
+        before = _seen(api, cid)
+        llm.hold = True
+        llm.done.clear()
+        loop = asyncio.get_running_loop()
+        task = asyncio.create_task(api.aconverse("hi", cid))
+        try:
+            assert await loop.run_in_executor(None, llm.entered.wait, _BOUND)
+            task.cancel()
+            await asyncio.wait({task}, timeout=_BOUND)
+            assert task.cancelled() and not llm.done.is_set()  # returned at once
+            assert _seen(api, cid) == before and _gate_is_free(api, cid)
+        finally:
+            llm.proceed.set()
+        assert await loop.run_in_executor(None, llm.done.wait, _BOUND)
+        assert _seen(api, cid) == before
+        llm.hold = False
+        assert await api.aconverse("again", cid) == "late"

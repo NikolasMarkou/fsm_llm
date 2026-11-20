@@ -72,6 +72,9 @@ class Pass2Mixin(_PipelineSurface):
         # Accumulate chunks to store in conversation history
         chunks: list[str] = []
         persist = True
+        # [SUPERSEDED BY plan-2026-11-19T193704-f150ec28/D-002 on the cancel clause: the paragraph
+        # on a KeyboardInterrupt below stands for interrupts; a CancelledError now has the arms
+        # of the driver and of `turns.py` (the whole turn is rolled back, no partial reply).]
         # DECISION plan-2026-07-18T051819-80b0bd4d/D-015 [STALE]: client abandonment and a backend
         # stream error MUST diverge here, and the ORDER of these except clauses is
         # the whole mechanism.

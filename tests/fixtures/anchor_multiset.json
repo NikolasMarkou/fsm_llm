@@ -714,6 +714,11 @@
       "delta": -1,
       "reason": "step 3.2 of plan f150ec28: converse_stream and advance_stream became iterate_sync over ONE shared _open_stream; the by-name reference to the anchor that advance_stream carried is gone with the duplicate closure, the anchor itself moved with its code to _open_stream",
       "token": "plan-2026-07-21T082818-4c63deac/D-002"
+    },
+    {
+      "delta": 6,
+      "reason": "step 4 of plan f150ec28: the cancel arms of D-002 (the new arm of the two turn bodies in driver.py, the greeting arm in manager.py) and the supersession markers on the anchors they amend (a02151fe/D-014 in the two turns.py arms, 80b0bd4d/D-015 in pass2.py); no other token was added or lost for it",
+      "token": "plan-2026-11-19T193704-f150ec28/D-002"
     }
   ]
 }

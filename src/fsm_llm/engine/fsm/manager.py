@@ -14,6 +14,7 @@ constructor, the definition cache, start, end and context update. The turn path 
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 import uuid
@@ -453,7 +454,10 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         except FSMError as e:
             self._cleanup_after_failed_start(conversation_id, instance, e, log)
             raise
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+            # DECISION plan-2026-11-19T193704-f150ec28/D-002: a cancelled greeting cleans up and
+            # re-raises, like an interrupt (no END handler, never wrapped); do NOT leave the
+            # instance registered for an id nobody holds.
             self._cleanup_conversation_resources(conversation_id)
             raise
         except Exception as e:

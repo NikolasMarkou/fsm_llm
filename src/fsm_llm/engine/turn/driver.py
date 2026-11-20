@@ -7,6 +7,7 @@ method and function bodies are unchanged.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import aclosing
 
@@ -169,118 +170,133 @@ class DriverMixin(_PipelineSurface):
             snapshot = _TurnSnapshot.capture(instance)
             turn = _TurnRecord(state_before=snapshot.state, state_after=snapshot.state)
 
-            # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): a transition
-            # classification record belongs to the turn that produced it. Clear
-            # it AFTER the snapshot so a rolled-back turn restores the prior
-            # record; do NOT move this before the snapshot, and do NOT drop it
-            # from process_stream() (same clear there). The record lives in
-            # metadata only (A4, plan-2026-09-21T203800-8a03483a/D-005).
-            instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
-            # D-025: the cut-off record, like the classification record, belongs
-            # to the turn that produced it (after the snapshot: a rolled-back
-            # turn restores the prior one).
-            instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
-
-            # DECISION plan-2026-09-12T065608-089d0ec7/D-002
-            # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
-            # calls are now EACH individually wrapped in their own restore-on-
-            # exception block (reusing the D-012 `_TurnSnapshot` of records.py, no
-            # new snapshot logic). Two SEPARATE try/except blocks, not one block
-            # spanning PRE_PROCESSING through Pass 2: Pass 1
-            # (_execute_extraction_and_transition_pass) deliberately stays
-            # OUTSIDE both — it owns its own internal partial-commit contracts
-            # (D-005 scoped CONTEXT_UPDATE rollback, D-006 handler re-raise,
-            # _execute_state_transition's POST_TRANSITION rollback), and folding
-            # it into this outer restore would wipe data Pass 1 legitimately
-            # committed before a later failure (see
-            # TestPostTransitionHandlerFailure /
-            # TestPreTransitionContextUpdateRollback in
-            # tests/test_fsm_llm/test_pipeline_handler_contract.py, which pin
-            # exactly that scoped behavior). This narrows D-006's documented
-            # "survives for PRE_PROCESSING / POST_PROCESSING" guarantee for the
-            # case where the SAME handler invocation that produced the partial
-            # merge is also what raises: process() now immediately restores the
-            # pre-turn snapshot in that case. See D-002 in decisions.md.
-            #
-            # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
-            # the two try/except blocks below are NOT symmetric in scope. The
-            # PRE_PROCESSING block (immediately below) is its OWN, separate
-            # try/except -- Pass 1 runs AFTER it, unwrapped, so a PRE_PROCESSING
-            # failure can only ever roll back state PRE_PROCESSING itself
-            # touched (nothing yet, structurally, since Pass 1 hasn't run).
-            # The POST_PROCESSING block further down is DELIBERATELY FOLDED
-            # INTO THE SAME try as Pass 2 (_execute_response_generation_pass) --
-            # one shared restore-on-exception block, not two. Do NOT split it
-            # into its own try/except "to match PRE_PROCESSING's shape": Pass 1
-            # (extraction + transition evaluation + the state transition itself)
-            # has ALREADY run and committed by the time POST_PROCESSING starts,
-            # so a POST_PROCESSING handler failure intentionally rolls back
-            # BOTH its own partial merge AND Pass 1's already-committed
-            # transition + extracted data -- the whole pre-turn snapshot, the
-            # same as a Pass-2 failure would. This is turn atomicity applied
-            # consistently: a half-turn (new state kept, response never
-            # generated) is not a better outcome than a whole-turn rollback,
-            # exactly the same reasoning D-002 already applied to
-            # POST_TRANSITION and PRE_PROCESSING. Pinned by
-            # TestPostProcessingHandlerFailureRollsBackTransition in
-            # tests/test_fsm_llm/test_pipeline_handler_contract.py. See D-017
-            # in decisions.md (this entry does not edit or replace D-002 --
-            # D-002's own text under-described this scope; D-017 clarifies it).
             try:
-                # Execute pre-processing handlers
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.PRE_PROCESSING,
-                    current_state=instance.current_state,
+                # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): a transition
+                # classification record belongs to the turn that produced it. Clear
+                # it AFTER the snapshot so a rolled-back turn restores the prior
+                # record; do NOT move this before the snapshot, and do NOT drop it
+                # from process_stream() (same clear there). The record lives in
+                # metadata only (A4, plan-2026-09-21T203800-8a03483a/D-005).
+                instance.context.metadata.pop(
+                    METADATA_KEY_TRANSITION_CLASSIFICATION, None
                 )
-            except Exception:
-                # Restore the pre-turn in-memory state so the turn is atomic.
-                # Covers all handler-mutable fields, not just state+data (D-012).
-                snapshot.restore(instance)
-                raise
+                # D-025: the cut-off record, like the classification record, belongs
+                # to the turn that produced it (after the snapshot: a rolled-back
+                # turn restores the prior one).
+                instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
 
-            # Pass 1: Data extraction + transition evaluation + execution
-            (
-                extraction_response,
-                transition_occurred,
-                previous_state,
-            ) = await self._aexecute_extraction_and_transition_pass(
-                instance, user_message, conversation_id, turn=turn
-            )
-
-            try:
-                # Execute post-processing handlers (after potential transition)
+                # DECISION plan-2026-09-12T065608-089d0ec7/D-002
+                # Widened turn-atomicity: PRE_PROCESSING and POST_PROCESSING handler
+                # calls are now EACH individually wrapped in their own restore-on-
+                # exception block (reusing the D-012 `_TurnSnapshot` of records.py, no
+                # new snapshot logic). Two SEPARATE try/except blocks, not one block
+                # spanning PRE_PROCESSING through Pass 2: Pass 1
+                # (_execute_extraction_and_transition_pass) deliberately stays
+                # OUTSIDE both — it owns its own internal partial-commit contracts
+                # (D-005 scoped CONTEXT_UPDATE rollback, D-006 handler re-raise,
+                # _execute_state_transition's POST_TRANSITION rollback), and folding
+                # it into this outer restore would wipe data Pass 1 legitimately
+                # committed before a later failure (see
+                # TestPostTransitionHandlerFailure /
+                # TestPreTransitionContextUpdateRollback in
+                # tests/test_fsm_llm/test_pipeline_handler_contract.py, which pin
+                # exactly that scoped behavior). This narrows D-006's documented
+                # "survives for PRE_PROCESSING / POST_PROCESSING" guarantee for the
+                # case where the SAME handler invocation that produced the partial
+                # merge is also what raises: process() now immediately restores the
+                # pre-turn snapshot in that case. See D-002 in decisions.md.
                 #
                 # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
-                # a failure here shares the except block below with Pass 2 --
-                # see the D-017 note above this method's PRE_PROCESSING try for
-                # the full rationale. A raise here rolls back Pass 1's
-                # already-committed transition too, not just this call's own
-                # partial merge.
-                self.execute_handlers(
-                    instance,
-                    HandlerTiming.POST_PROCESSING,
-                    current_state=instance.current_state,
-                )
+                # the two try/except blocks below are NOT symmetric in scope. The
+                # PRE_PROCESSING block (immediately below) is its OWN, separate
+                # try/except -- Pass 1 runs AFTER it, unwrapped, so a PRE_PROCESSING
+                # failure can only ever roll back state PRE_PROCESSING itself
+                # touched (nothing yet, structurally, since Pass 1 hasn't run).
+                # The POST_PROCESSING block further down is DELIBERATELY FOLDED
+                # INTO THE SAME try as Pass 2 (_execute_response_generation_pass) --
+                # one shared restore-on-exception block, not two. Do NOT split it
+                # into its own try/except "to match PRE_PROCESSING's shape": Pass 1
+                # (extraction + transition evaluation + the state transition itself)
+                # has ALREADY run and committed by the time POST_PROCESSING starts,
+                # so a POST_PROCESSING handler failure intentionally rolls back
+                # BOTH its own partial merge AND Pass 1's already-committed
+                # transition + extracted data -- the whole pre-turn snapshot, the
+                # same as a Pass-2 failure would. This is turn atomicity applied
+                # consistently: a half-turn (new state kept, response never
+                # generated) is not a better outcome than a whole-turn rollback,
+                # exactly the same reasoning D-002 already applied to
+                # POST_TRANSITION and PRE_PROCESSING. Pinned by
+                # TestPostProcessingHandlerFailureRollsBackTransition in
+                # tests/test_fsm_llm/test_pipeline_handler_contract.py. See D-017
+                # in decisions.md (this entry does not edit or replace D-002 --
+                # D-002's own text under-described this scope; D-017 clarifies it).
+                try:
+                    # Execute pre-processing handlers
+                    self.execute_handlers(
+                        instance,
+                        HandlerTiming.PRE_PROCESSING,
+                        current_state=instance.current_state,
+                    )
+                except Exception:
+                    # Restore the pre-turn in-memory state so the turn is atomic.
+                    # Covers all handler-mutable fields, not just state+data (D-012).
+                    snapshot.restore(instance)
+                    raise
 
-                # Pass 2: Response generation based on final state
-                turn.response = await self._execute_response_generation_pass(
-                    instance,
-                    user_message,
+                # Pass 1: Data extraction + transition evaluation + execution
+                (
                     extraction_response,
                     transition_occurred,
                     previous_state,
-                    conversation_id,
+                ) = await self._aexecute_extraction_and_transition_pass(
+                    instance, user_message, conversation_id, turn=turn
                 )
-                turn.state_after = instance.current_state
-                return turn
-            except Exception:
-                # Restore the pre-turn in-memory state so the turn is atomic.
-                # Covers all handler-mutable fields, not just state+data (D-012).
-                # D-017: this ALSO undoes Pass 1's already-committed state
-                # transition + extracted data when the exception originated in
-                # POST_PROCESSING (see the D-017 comment above), not only when
-                # it originated in Pass 2.
+
+                try:
+                    # Execute post-processing handlers (after potential transition)
+                    #
+                    # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
+                    # a failure here shares the except block below with Pass 2 --
+                    # see the D-017 note above this method's PRE_PROCESSING try for
+                    # the full rationale. A raise here rolls back Pass 1's
+                    # already-committed transition too, not just this call's own
+                    # partial merge.
+                    self.execute_handlers(
+                        instance,
+                        HandlerTiming.POST_PROCESSING,
+                        current_state=instance.current_state,
+                    )
+
+                    # Pass 2: Response generation based on final state
+                    turn.response = await self._execute_response_generation_pass(
+                        instance,
+                        user_message,
+                        extraction_response,
+                        transition_occurred,
+                        previous_state,
+                        conversation_id,
+                    )
+                    turn.state_after = instance.current_state
+                    return turn
+                except Exception:
+                    # Restore the pre-turn in-memory state so the turn is atomic.
+                    # Covers all handler-mutable fields, not just state+data (D-012).
+                    # D-017: this ALSO undoes Pass 1's already-committed state
+                    # transition + extracted data when the exception originated in
+                    # POST_PROCESSING (see the D-017 comment above), not only when
+                    # it originated in Pass 2.
+                    snapshot.restore(instance)
+                    raise
+            except asyncio.CancelledError:
+                # DECISION plan-2026-11-19T193704-f150ec28/D-002
+                # [SUPERSEDES the "Pass 1 stays outside" shape of 9925aa3a/D-012,
+                # 089d0ec7/D-002 and D-017 for a cancel only]
+                # A cancelled turn is rolled back WHOLE, Pass 1 included: this ONE arm wraps
+                # everything after the snapshot. Do NOT narrow it to the two `except
+                # Exception` blocks inside (Pass 1 sits outside them, so a cancel there kept
+                # its committed transition and extraction), do NOT merge it into them (their
+                # shapes stay as D-017 says) and never swallow or convert it: restore, then
+                # re-raise. The manager pops the user message and fires no ERROR handler.
                 snapshot.restore(instance)
                 raise
 
@@ -397,81 +413,89 @@ class DriverMixin(_PipelineSurface):
         #      undone").
         snapshot = _TurnSnapshot.capture(instance)
 
-        # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
-        # mirror of the per-turn clear in process(); after the snapshot.
-        instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
-        # D-025: the cut-off record, like the classification record, belongs
-        # to the turn that produced it (after the snapshot: a rolled-back
-        # turn restores the prior one).
-        instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
-
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-002
-        # Widened turn-atomicity, streaming mirror of process()'s guard
-        # above (same D-002 rationale: two separate try/except blocks,
-        # Pass 1 stays unwrapped). See the comment in process() for the
-        # full explanation; not repeated here to avoid drift between the
-        # two copies.
-        #
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
-        # the two blocks below are NOT symmetric in scope -- see the D-017
-        # comment in process() (same file, above) for the full rationale.
-        # In short: PRE_PROCESSING (immediately below) is its own separate
-        # try/except; POST_PROCESSING (further down) is deliberately
-        # folded into the SAME try as Pass 2's streaming call
-        # (_stream_response_generation_pass), so a POST_PROCESSING
-        # handler failure here also rolls back Pass 1's already-committed
-        # transition + extracted data, not just its own partial merge.
         try:
-            # Execute pre-processing handlers
-            self.execute_handlers(
-                instance,
-                HandlerTiming.PRE_PROCESSING,
-                current_state=instance.current_state,
-            )
-        except Exception:
-            # Restore the pre-turn in-memory state so the streaming turn is
-            # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
-            # D-013). GeneratorExit deliberately does NOT reach here.
-            snapshot.restore(instance)
-            raise
+            # DECISION plan-2026-09-21T203800-8a03483a/D-002 (A8): streaming
+            # mirror of the per-turn clear in process(); after the snapshot.
+            instance.context.metadata.pop(METADATA_KEY_TRANSITION_CLASSIFICATION, None)
+            # D-025: the cut-off record, like the classification record, belongs
+            # to the turn that produced it (after the snapshot: a rolled-back
+            # turn restores the prior one).
+            instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
 
-        # Pass 1: Data extraction + transition (runs fully)
-        (
-            extraction_response,
-            transition_occurred,
-            previous_state,
-        ) = await self._aexecute_extraction_and_transition_pass(
-            instance, user_message, conversation_id
-        )
-
-        try:
-            # Execute post-processing handlers
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-002
+            # Widened turn-atomicity, streaming mirror of process()'s guard
+            # above (same D-002 rationale: two separate try/except blocks,
+            # Pass 1 stays unwrapped). See the comment in process() for the
+            # full explanation; not repeated here to avoid drift between the
+            # two copies.
             #
-            # D-017: a failure here shares the except block below with
-            # Pass 2's streaming call -- see the D-017 note above this
-            # method's PRE_PROCESSING try.
-            self.execute_handlers(
-                instance,
-                HandlerTiming.POST_PROCESSING,
-                current_state=instance.current_state,
+            # DECISION plan-2026-09-12T065608-089d0ec7/D-017 [clarifies D-002]:
+            # the two blocks below are NOT symmetric in scope -- see the D-017
+            # comment in process() (same file, above) for the full rationale.
+            # In short: PRE_PROCESSING (immediately below) is its own separate
+            # try/except; POST_PROCESSING (further down) is deliberately
+            # folded into the SAME try as Pass 2's streaming call
+            # (_stream_response_generation_pass), so a POST_PROCESSING
+            # handler failure here also rolls back Pass 1's already-committed
+            # transition + extracted data, not just its own partial merge.
+            try:
+                # Execute pre-processing handlers
+                self.execute_handlers(
+                    instance,
+                    HandlerTiming.PRE_PROCESSING,
+                    current_state=instance.current_state,
+                )
+            except Exception:
+                # Restore the pre-turn in-memory state so the streaming turn is
+                # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
+                # D-013). GeneratorExit deliberately does NOT reach here.
+                snapshot.restore(instance)
+                raise
+
+            # Pass 1: Data extraction + transition (runs fully)
+            (
+                extraction_response,
+                transition_occurred,
+                previous_state,
+            ) = await self._aexecute_extraction_and_transition_pass(
+                instance, user_message, conversation_id
             )
 
-            # Pass 2: Stream response generation
-            async with aclosing(
-                self._stream_response_generation_pass(
+            try:
+                # Execute post-processing handlers
+                #
+                # D-017: a failure here shares the except block below with
+                # Pass 2's streaming call -- see the D-017 note above this
+                # method's PRE_PROCESSING try.
+                self.execute_handlers(
                     instance,
-                    user_message,
-                    extraction_response,
-                    transition_occurred,
-                    previous_state,
-                    conversation_id,
+                    HandlerTiming.POST_PROCESSING,
+                    current_state=instance.current_state,
                 )
-            ) as chunks:
-                async for chunk in chunks:
-                    yield chunk
-        except Exception:
-            # Restore the pre-turn in-memory state so the streaming turn is
-            # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
-            # D-013). GeneratorExit deliberately does NOT reach here.
+
+                # Pass 2: Stream response generation
+                async with aclosing(
+                    self._stream_response_generation_pass(
+                        instance,
+                        user_message,
+                        extraction_response,
+                        transition_occurred,
+                        previous_state,
+                        conversation_id,
+                    )
+                ) as chunks:
+                    async for chunk in chunks:
+                        yield chunk
+            except Exception:
+                # Restore the pre-turn in-memory state so the streaming turn is
+                # atomic. Covers all handler-mutable fields (D-004, mirrors D-012/
+                # D-013). GeneratorExit deliberately does NOT reach here.
+                snapshot.restore(instance)
+                raise
+        except asyncio.CancelledError:
+            # DECISION plan-2026-11-19T193704-f150ec28/D-002
+            # The stream mirror of the arm in `_run_turn` (read it there): a cancel rolls the
+            # whole turn back and no partial reply is kept (`pass2` drops it for any
+            # BaseException but GeneratorExit); `aclose` stays the abandonment rule.
             snapshot.restore(instance)
             raise
