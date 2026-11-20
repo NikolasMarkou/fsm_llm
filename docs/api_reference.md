@@ -91,6 +91,35 @@ for chunk in api.run_until_terminal_stream(conv_id, max_steps=20):
 
 `run_until_terminal` checks, before each step: has the conversation (top of the FSM stack) ended, is the `max_seconds` budget spent, is the `max_steps` budget spent, then calls `before_step(n)` and runs one `advance`. Budgets are checked only between steps. A spent budget raises `RunBudgetExceededError` (`budget` `"steps"` or `"seconds"`, `limit`, `steps_done`); the steps already run are kept, read them from `get_conversation_history` and `get_current_state`. A conversation closed during the run (from `before_step` or another thread) ends the run normally. When the top of the stack is an ended pushed FSM (stack depth above 1), `before_step(n)` is called once first: that call is not a step and is not budget-gated, `n` is the next step's number (the step itself calls it again with the same `n`; tell the two apart with `has_conversation_ended`), and if the hook pops the frame the run continues on the parent, otherwise it returns. `seconds_exempt_states` lets a round whose current state id is in the set run after `max_seconds` is spent (the steps budget still applies); ids are checked against the running definition (`ValueError`). `max_steps` must be an int of at least 1 and `max_seconds` `None` or a positive number (`ValueError` otherwise). The agents, the reasoning engine and workflow `AgentStep`s run on these loops.
 
+### Async Turns
+
+```python
+conv_id, reply = await api.astart_conversation(initial_context={"key": "val"})
+reply = await api.aconverse("user message", conv_id)           # -> str
+result = await api.aadvance(conv_id)                           # -> AdvanceResult
+async for chunk in api.aconverse_stream("user message", conv_id):  # lazy AsyncGenerator[str, None]
+    print(chunk, end="", flush=True)
+async for chunk in api.aadvance_stream(conv_id):
+    print(chunk, end="")
+
+async def before(n: int) -> None: ...                          # a plain function works too
+
+results = await api.arun_until_terminal(                       # -> tuple[AdvanceResult, ...]
+    conv_id, max_steps=20, max_seconds=60.0, before_step=before,
+)
+async for chunk in api.arun_until_terminal_stream(conv_id, max_steps=20):
+    print(chunk, end="")
+```
+
+Each async name runs the same turn as its sync twin (reply, data, history, state, request order, usage meter and event log content up to `ts` are equal). The turn is written once, as an `async def` body in the engine, and the sync names are thin `run_sync` or `iterate_sync` wrappers over it, so a sync caller needs no event loop and a patch of a sync name still intercepts it. While a model call is suspended the loop runs other tasks, so two conversations interleave on one loop. The streams are lazy (the id is checked at call time, the turn is claimed at the first step), and `before_step` of the async run loops may return an awaitable, which is awaited (the sync run loops keep `Callable[[int], None]`).
+
+- **One turn at a time, refused, never waited for.** A second `aconverse`, `converse` or `advance` on a conversation whose turn is in flight, from another task, another thread or a handler, raises `FSMError` ("already being processed"). A child task or `to_thread` worker started by the turn inherits it and may re-enter.
+- **Readers fail fast from a sibling task.** `get_data`, `get_current_state`, `end_conversation` and the other readers called from a SIBLING task of the loop during an async turn raise `ConversationBusyError` at once (waiting there could never end, the turn is a task of the same loop). From a plain thread they wait for the turn, in arrival order. Read after the turn, or from the turn's own task.
+- **A cancelled turn is rolled back whole.** `task.cancel()` (or `asyncio.timeout`) during a turn restores the context, metadata, working memory, history and state taken at the start, Pass 1 included, pops the user message, releases the conversation and runs no ERROR handler; the turn budget stays counted. A cancelled greeting leaves no instance registered. A stream consumer cancelled at an await rolls back the same way and keeps no partial reply, while `aclose` (the abandonment rule) keeps the partial reply. `athrow(CancelledError)` into a suspended stream is treated as `aclose`. A sync-only `LLMInterface` keeps running on its worker thread after a cancel, and its late reply is dropped.
+- **Handlers run inline on the loop**: a handler that blocks blocks the loop, and an `async def` handler is built and never awaited (as before). Use a sync handler.
+- **`push_fsm` is sync.** `apush_fsm` does not exist: the greeting model call of `push_fsm` (and of a `before_step` hook that calls it) blocks the loop.
+- **Known limit, event log on**: the log writes and their fsyncs run inline on the loop in async mode, about 29 fsync calls and about 76 ms of blocking I/O per logged turn on the measured NVMe (about 0.5 ms with the log off). `FileSessionStore.save` is inline too.
+
 ### Session Persistence
 
 Pass a `session_store` to persist conversations across process restarts (state auto-saves after each `converse`):

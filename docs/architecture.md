@@ -37,11 +37,11 @@ from the log (see the `runtime` row of Package Layout and the Event Log section 
 
 ### API (`engine/api/`)
 
-User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking. `fork` and `resume` (`engine/api/forks.py`) rebuild a conversation tree from the event log; `max_steps` and `max_seconds` give the root and each pushed frame a lifetime turn budget.
+User-facing entry point. Manages FSM definition processing, component wiring, conversation lifecycle, and FSM stacking. Every turn entry has an async twin (`aconverse`, `aadvance`, `astart_conversation`, `aconverse_stream`, `aadvance_stream`, `arun_until_terminal`, `arun_until_terminal_stream`): the turn is one `async def` body in the engine and the sync names (`converse`, `advance`, ...) are thin `run_sync` or `iterate_sync` wrappers over it, so a sync caller needs no event loop (`engine/api/turn_entries.py`, `engine/api/run.py`). `fork` and `resume` (`engine/api/forks.py`) rebuild a conversation tree from the event log; `max_steps` and `max_seconds` give the root and each pushed frame a lifetime turn budget.
 
 ### FSMManager (`engine/fsm/`) + MessagePipeline (`engine/turn/`)
 
-FSMManager handles FSM instance lifecycle with per-conversation thread locks and LRU FSM cache. It also owns the optional lifetime turn budget (`engine/fsm/budget.py`): one private record per manager conversation id (the root and every pushed frame), charged on the turn entry before any model call, outside the context, the metadata and the rollback snapshot, so no handler, extraction or rollback can reset it; a spent frame raises `RunBudgetExceededError` on its next turn and the engine never pops it. MessagePipeline implements the 2-pass processing:
+FSMManager handles FSM instance lifecycle with a per-conversation `TurnGate` (`engine/fsm/gate.py`) and an LRU FSM cache. The gate is owned by a ticket kept in a ContextVar, not by a thread, so it also holds between tasks of one event loop: a second turn on a conversation whose turn is in flight is refused with `FSMError` and never waits, and a reader called from a sibling task during an async turn raises `ConversationBusyError` at once. It also owns the optional lifetime turn budget (`engine/fsm/budget.py`): one private record per manager conversation id (the root and every pushed frame), charged on the turn entry before any model call, outside the context, the metadata and the rollback snapshot, so no handler, extraction or rollback can reset it; a spent frame raises `RunBudgetExceededError` on its next turn and the engine never pops it. MessagePipeline implements the 2-pass processing:
 
 ```
 Pass 1: PRE_PROCESSING handlers → LLM extract data → CONTEXT_UPDATE handlers
@@ -236,7 +236,7 @@ Priority ordering (lower first). Error modes: `"continue"` (log + skip) or `"rai
 - **Conversation history limits**: `max_history_size` (default 5) is the number of exchanges stored per conversation and also the number of messages the extraction and response prompts show (the last N, passed unchanged to the default prompt builders, so the unit of the shown window is messages); the history token budget (default 3000) can cut the window below N, so at most N messages are shown. `max_message_length` (default 1000)
 - **FSM definition caching**: LRU cache (max 64) for loaded definitions
 - **Handler pre-filtering**: Only check handlers matching current timing
-- **Thread safety**: Per-conversation RLocks in FSMManager
+- **Concurrency**: Per-conversation `TurnGate`s in FSMManager (one turn per conversation, per thread and per task; a second turn is refused). One loop serves many conversations: while a model call is suspended other tasks run. Handlers run inline on the loop. A cancelled turn is rolled back whole (Pass 1 included) and runs no ERROR handler. With the event log on, the log writes and their fsyncs run inline on the loop (about 76 ms per logged turn on the measured NVMe): a known limit
 
 ## Package Layout
 

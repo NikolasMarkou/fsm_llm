@@ -14,9 +14,13 @@ class FSMError(Exception):
 
 
 class ConversationBusyError(FSMError):
-    """A turn held the conversation's lock past
-    ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, so ending it was refused.
-    Nothing was changed; retry after the turn completes."""
+    """The conversation's turn gate is held and the caller cannot wait for it.
+
+    Two cases, both leave the conversation unchanged: a turn held the gate past
+    ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, so ending it was refused; or a reader
+    (``get_data``, ``end_conversation`` and the like) was called from a SIBLING task of the
+    event loop during an async turn, where waiting could never end, so it fails at once.
+    Retry after the turn completes. (A second TURN is refused with ``FSMError``, not this.)"""
 
     def __init__(self, message: str, conversation_id: str | None = None, **kwargs):
         super().__init__(message, **kwargs)

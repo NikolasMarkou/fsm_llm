@@ -73,7 +73,8 @@ the turn has been rolled back, so:
   on the conversation whose turn is in flight (from any handler timing, or between
   `next()` calls of an open stream) raises `FSMError` ("already being processed")
   instead of nesting. `update_context` and the read methods stay allowed.
-- `KeyboardInterrupt`, `SystemExit` and `GeneratorExit` run no handlers.
+- `KeyboardInterrupt`, `SystemExit`, `GeneratorExit` and `asyncio.CancelledError` run no handlers. A cancelled async turn (`aconverse` or `aadvance` under `task.cancel()`) is rolled back whole, Pass 1 included, and no ERROR handler fires.
+- **Handlers run inline on the loop in an async turn.** `aconverse` does not move a handler to a worker thread: a handler that blocks blocks the loop for its duration, and an `async def` handler is built and never awaited (as before). Keep handlers short and sync; a handler that calls `api.get_data` for its own conversation from the turn's own task or a child task is allowed.
 
 ## HandlerBuilder Reference
 
