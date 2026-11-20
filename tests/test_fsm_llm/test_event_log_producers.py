@@ -1020,10 +1020,12 @@ class TestEverySiteIsWrapped:
 
     @staticmethod
     def _called(node: ast.AST) -> str | None:
-        """The model method a call node calls: ``x.<name>(...)`` or ``acall(x, "<name>", ...)``.
+        """The model method a call node calls: ``x.<name>(...)``, ``acall(x, "<name>", ...)`` or
+        ``acall_stream(x, "<name>", ...)``.
 
         Plan 51fde95b (D-007): a call that goes through the transport helper of ``fsm_llm.aio``
-        names the method as a string, and is still a model call site.
+        names the method as a string, and is still a model call site. Plan f150ec28 (step 3.2):
+        so is a stream opened through ``acall_stream``.
         """
         if not isinstance(node, ast.Call):
             return None
@@ -1031,7 +1033,8 @@ class TestEverySiteIsWrapped:
             return node.func.attr if node.func.attr in _CALLS else None
         named = (
             getattr(node.args[1], "value", None)
-            if getattr(node.func, "id", None) == "acall" and len(node.args) > 1
+            if getattr(node.func, "id", None) in ("acall", "acall_stream")
+            and len(node.args) > 1
             else None
         )
         return named if named in _CALLS else None
@@ -1068,6 +1071,10 @@ class TestEverySiteIsWrapped:
     def test_the_sweep_sees_a_call_through_acall_and_flags_it_unwrapped(self):
         for source, name in [
             ('async def f(x):\n    return await acall(x, "complete", 1)\n', "complete"),
+            (
+                'async def f(x):\n    return acall_stream(x, "generate_response_stream")\n',
+                "generate_response_stream",
+            ),
             ('async def f(x):\n    return await acall(x, "_send", 1)\n', None),
             ("async def f(x):\n    return await acall(x)\n", None),
         ]:
@@ -1075,7 +1082,8 @@ class TestEverySiteIsWrapped:
             call = next(
                 n
                 for n in ast.walk(tree)
-                if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "acall"
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "id", "") in ("acall", "acall_stream")
             )
             assert self._called(call) == name
         tree = ast.parse('async def f(x):\n    return await acall(x, "complete", 1)\n')
