@@ -6,9 +6,13 @@
 #       files are the working tree against REV (default HEAD), untracked files included.
 #   scripts/gate.sh push
 #       The push gate (the pre-push hook): the step checks over the diff against origin/main,
-#       then everything linted, then one pytest process over the suites of the layers.
+#       then everything linted, then one pytest process over the suites of the layers and the
+#       named guard files of census section D (always, whatever the diff touches).
 #   scripts/gate.sh watch
 #       After a push: wait for the CI run(s) of HEAD, then compare the remote head with HEAD.
+#   scripts/gate.sh map PATH...
+#       Print the pytest arguments a step would take for the named touched paths (no run): the
+#       check of the touched-file map.
 #   scripts/gate.sh venv PYTEST_ARG...
 #       Run the named pytest paths on the Python 3.12, 3.14 and 3.15 venvs, for a cancel,
 #       stream-close or schema-bytes step only. Needs GATE_VENV_DIR holding v312, v314, v315.
@@ -51,8 +55,30 @@ FIXED_TESTS=(
   tests/test_fsm_llm/test_state_kinds.py
   tests/test_fsm_llm/test_codes.py
 )
+# The guards of the invariants (census section D of plan ace7a8c8). The push gate runs every row
+# whatever the diff touches (a security/ or context/ edit triggers no whole-directory run); a
+# missing file is RED, so a deleted guard cannot drop a row unseen. One row per line: LABEL: FILES.
+A=tests/test_fsm_llm_agents
+F=tests/test_fsm_llm
+R=tests/test_fsm_llm_regression
+GUARD_ROWS=(
+  "D1 HITL grant: $A/test_hitl_security.py $A/test_trust_boundary.py $A/test_hitl.py $A/test_tool_timeouts.py $A/test_policy_layer.py"
+  "D2 secret filter and internal prefix: $F/test_context_unit.py $F/fixtures/context_key_corpus.py $F/fixtures/census_key_corpus.py $F/fixtures/holdout_key_corpus.py $A/test_secret_hygiene.py $R/test_bugs.py"
+  "D3 handler-only keys, forged seed: $F/test_advance.py $F/test_completion_state.py $F/test_synthesize_field.py $F/test_event_log_restore_trust.py $F/test_internal_key_seeding_log.py"
+  "D4 litellm, layering, laziness: $R/test_import_contract.py $R/test_string_imports.py $R/test_import_laziness.py $F/test_llm_provider_banner.py $F/test_embedder.py $F/test_no_implicit_env.py"
+  "D5 request bytes: $F/test_kind_equality.py $A/test_native_fc_golden.py $F/test_llm_request_path.py $F/test_llm_complete.py"
+  "D6 untrusted text, paths: $F/test_okf.py $F/test_agent_skills.py $A/test_okf.py tests/test_fsm_llm_synthesis/test_policy.py tests/test_fsm_llm_synthesis/test_gates.py tests/test_fsm_llm_synthesis/test_dryrun.py tests/test_fsm_llm_synthesis/test_synthesizer.py"
+  "D7 one turn, cancel, lock order, budgets: $F/test_turn_gate.py $F/test_async_cancel.py $F/test_fsm_lock_order.py $F/test_turn_guard_deterministic.py $F/test_run_until_terminal.py $F/test_turn_budgets.py"
+  "D8 event log: $F/test_event_log_crash.py $F/test_event_log_stack_crash.py $F/test_event_log_jsonl.py $F/test_event_log_privacy.py $F/test_event_log_retention.py"
+  "D9 server auth: tests/test_fsm_llm_monitor/test_server_security.py $F/test_api_key_compare_sites.py $A/test_remote.py"
+  "D10 supply chain: tests/test_packaging.py $R/test_supply_chain.py $R/test_distribution_name.py"
+  "D11 no silent model: $F/test_model_not_configured.py $R/test_no_model_paths.py"
+  "D12 examples bind: tests/test_examples/test_example_calls_bind.py tests/test_examples/test_example_import_paths.py"
+)
+unset A F R
 MARKERS="not slow and not real_llm and not integration"
 FAILS=0
+mode=${1:-}
 
 check() {  # check NAME CMD...: run, say RED and count a failure, never stop
   local name=$1; shift
@@ -96,20 +122,72 @@ py_ruff() {  # ruff check and format --check on the touched python files
 
 any_src_py() { local f; for f in "${TOUCHED[@]}"; do case $f in src/*.py) return 0 ;; esac; done; return 1; }
 
-# The two generated fixtures come from their writers; the diff is for the eye of the person
-# running the gate (an unexpected change is theirs to read before the commit).
-regenerate_fixtures() {
+# The two generated fixtures come from their writers. Step mode writes and prints the diff for the
+# eye of the person running the gate (an unexpected change is theirs to read before the commit).
+# Push mode never keeps a rewrite: the committed files are judged as they are, so a stale fixture
+# (a module with no decision, a public name not in the snapshot) is RED here, not in CI.
+FIXTURES=(tests/fixtures/module_path_map.json tests/fixtures/api_snapshot.txt)
+
+write_fixtures() {
   "$PY" -m tests.test_fsm_llm_regression.test_module_path_map --write \
-    && "$PY" scripts/api_snapshot.py --write tests/fixtures/api_snapshot.txt \
-    && git --no-pager diff --stat "$1" -- tests/fixtures/module_path_map.json tests/fixtures/api_snapshot.txt
+    && "$PY" scripts/api_snapshot.py --write tests/fixtures/api_snapshot.txt
 }
 
-# The test arguments of a step: the fixed set, the touched test files and the suite directories
-# mapped from the touched src prefix. A touch of engine/, core/, llm/ or aio.py maps to nothing:
-# the step names its test files with --tests (never all of tests/test_fsm_llm/ on a step).
+regenerate_fixtures() {  # regenerate_fixtures BASE
+  write_fixtures || return 1
+  git --no-pager diff --stat "$1" -- "${FIXTURES[@]}"
+}
+
+verify_fixtures() {  # the writers change nothing, and HEAD holds what the tree holds
+  local keep f bad=0
+  keep=$(mktemp -d) || return 1
+  for f in "${FIXTURES[@]}"; do mkdir -p "$keep/$(dirname "$f")"; cp "$f" "$keep/$f"; done
+  write_fixtures || bad=1
+  for f in "${FIXTURES[@]}"; do
+    if ! cmp -s "$keep/$f" "$f"; then
+      echo "stale fixture: $f differs from its writer's output (run scripts/gate.sh step, read the diff, commit it)"
+      diff -u "$keep/$f" "$f" | head -20
+      cp "$keep/$f" "$f"; bad=1
+    fi
+  done
+  rm -rf "$keep"
+  git --no-pager diff --quiet HEAD -- "${FIXTURES[@]}" \
+    || { echo "a fixture has an uncommitted change: commit it before the push"; bad=1; }
+  return $bad
+}
+
+# The test files of every GUARD_ROWS row, one per line. A missing file is reported and counted.
+guard_files() {
+  local row f
+  for row in "${GUARD_ROWS[@]}"; do
+    for f in ${row#*: }; do
+      if [ ! -f "$f" ]; then echo "gate: guard file missing: $f ($row)" >&2; continue; fi
+      case ${f##*/} in test_*.py) echo "$f" ;; esac
+    done
+  done
+}
+
+# The test files that use the helper $1 (a tests/ python file that is not a test file): the ones
+# that import it, found with git grep. A conftest maps to the guard files under its directory (all
+# of them for tests/conftest.py); a helper with no importer maps to all the guard files.
+helper_users() {
+  local stem=${1##*/} users dir=${1%/*}
+  stem=${stem%.py}
+  if [ "$stem" = conftest ]; then
+    if [ "$dir" = tests ]; then guard_files; else guard_files | grep "^$dir/"; fi
+    return 0
+  fi
+  users=$(git grep -l -E "^[[:space:]]*(from|import)[[:space:]].*\<$stem\>" -- 'tests/*test_*.py' 2>/dev/null)
+  if [ -n "$users" ]; then printf '%s\n' "$users"; else guard_files; fi
+}
+
+# The test arguments of a step: the fixed set, the touched test files, the test files that use a
+# touched helper and the suite directories mapped from the touched src prefix. A touch of engine/,
+# core/, llm/ or aio.py maps to nothing: the step names its test files with --tests (never all of
+# tests/test_fsm_llm/ on a step).
 build_step_args() {
   ARGS=("${FIXED_TESTS[@]}")
-  local f d
+  local f u
   for f in "${TOUCHED[@]}"; do
     case $f in
       src/fsm_llm/agents/*) ARGS+=(tests/test_fsm_llm_agents tests/test_fsm_llm_meta) ;;
@@ -120,9 +198,13 @@ build_step_args() {
       src/fsm_llm/eval/*) ARGS+=(tests/test_fsm_llm_eval) ;;
       src/fsm_llm/testing/*) ARGS+=(tests/test_fsm_llm_testing) ;;
       tests/fixtures/*) ;;
-      tests/*/test_*.py|tests/test_*.py) [ -f "$f" ] && ARGS+=("$f") ;;
-      tests/test_fsm_llm/*.py) echo "note: $f is a helper of tests/test_fsm_llm/; name the files that use it with --tests" ;;
-      tests/*/*.py) d=${f#tests/}; ARGS+=("tests/${d%%/*}") ;;
+      tests/*.py)
+        # `*` also matches `/` in a case pattern, so decide on the base name
+        case ${f##*/} in
+          test_*.py) [ -f "$f" ] && ARGS+=("$f") ;;
+          *) while IFS= read -r u; do [ -n "$u" ] && ARGS+=("$u"); done < <(helper_users "$f")
+             echo "note: $f is a test helper: ran the test files that use it" >&2 ;;
+        esac ;;
     esac
   done
 }
@@ -140,7 +222,11 @@ common_checks() {
   check "import contracts" lint-imports
   check "decision anchors resolve" "$PY" scripts/decision_index.py --check
   if [ "${ALWAYS_MYPY:-0}" = 1 ] || any_src_py; then check "mypy" "$PY" -m mypy -p fsm_llm; fi
-  check "generated fixtures" regenerate_fixtures "$base"
+  if [ "$mode" = push ]; then
+    check "generated fixtures match their writers" verify_fixtures
+  else
+    check "generated fixtures" regenerate_fixtures "$base"
+  fi
 }
 
 finish() {  # finish LABEL: summary line and exit status
@@ -183,14 +269,26 @@ mode_push() {
       tests/test_fsm_llm_monitor tests/test_fsm_llm_eval tests/test_fsm_llm_testing
       tests/test_fsm_llm_workflows tests/test_fsm_llm_meta tests/test_fsm_llm_regression
       tests/test_examples tests/test_packaging.py)
-    local f whole=0
+    ARGS+=($(guard_files))
+    echo "guard rows run whatever the diff touches:"
+    local row
+    for row in "${GUARD_ROWS[@]}"; do echo "  ${row%%:*}"; done
+    local f whole=0 missing
+    missing=$(guard_files 2>&1 >/dev/null)
+    [ -z "$missing" ] || { echo "$missing"; check "named guard files exist" false; }
     for f in "${TOUCHED[@]}"; do
       case $f in src/fsm_llm/engine/*|src/fsm_llm/llm/*|src/fsm_llm/core/*|src/fsm_llm/runtime/*|src/fsm_llm/aio.py) whole=1 ;; esac
     done
     [ "$whole" -eq 1 ] && ARGS+=(tests/test_fsm_llm)
-    check "pytest (one process)" run_pytest "${ARGS[@]}"
+    [ "$FAILS" -eq 0 ] && check "pytest (one process)" run_pytest "${ARGS[@]}"
   fi
   finish push
+}
+
+mode_map() {  # map PATH...: the pytest arguments of a step for these touched paths, no run
+  TOUCHED=("$@")
+  build_step_args
+  printf '%s\n' "${ARGS[@]}"
 }
 
 mode_watch() {
@@ -225,11 +323,11 @@ mode_venv() {
   finish venv
 }
 
-mode=${1:-}
 [ $# -gt 0 ] && shift
 case $mode in
   step) mode_step "$@" ;;
   push) mode_push ;;
+  map) mode_map "$@" ;;
   watch) mode_watch ;;
   venv) mode_venv "$@" ;;
   *) sed -n 2,20p "$0"; exit 2 ;;
