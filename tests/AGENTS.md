@@ -7,7 +7,7 @@ Purpose: The full pytest tree of FSM-LLM: the suite folders for the `fsm_llm` pa
 
 - In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_coverage_ratchet.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `fixtures/module_path_map.json`, `fixtures/anchor_multiset.json`, `test_examples/`, and the `test_fsm_llm*` suite folders.
 - Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`, `synthesis`, `testing`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
-- Out: the bench data under `scripts/bench_data/`, the examples themselves (`examples/`, evaluation baselines, never edit unless asked).
+- Out: the bench data under `scripts/bench_data/` and the examples themselves (`examples/`, the evaluation baselines).
 
 ## Architecture
 

@@ -1432,7 +1432,7 @@ class TestExplicitEncodings:
         for root in roots:
             for path in sorted(root.rglob("*.py")):
                 rel = path.relative_to(_REPO_ROOT)
-                # scripts/bench_data is frozen, tracked history: never edited.
+                # scripts/bench_data is recorded history, not source.
                 if rel.parts[:2] == ("scripts", "bench_data"):
                     continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(rel))

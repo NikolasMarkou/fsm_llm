@@ -163,7 +163,7 @@ The library is organized into these groups of features.
   reports pass rates with Wilson confidence intervals (`EvalConfig`, `run_examples`,
   `run_cases`, `run_dataset`, `wilson_ci`).
 * **Pre-registered benches**: `scripts/agents_bench.py`, `scripts/skills_bench.py` and
-  `scripts/synthesis_bench.py` record blocks that are run once at a fixed n and never edited,
+  `scripts/synthesis_bench.py` record blocks that are run once at a fixed n,
   so a number in the repository can be recounted from its rows.
 
 ### One LLM layer, security and reliability

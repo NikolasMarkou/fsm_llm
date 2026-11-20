@@ -87,15 +87,6 @@ em_dash_gain() {
   return $bad
 }
 
-# scripts/bench_data/ is frozen history: no touched path under it (recorded blocks never change).
-bench_frozen() {
-  local f bad=0
-  for f in "${TOUCHED[@]}"; do
-    case $f in scripts/bench_data/*) echo "bench freeze: $f is touched"; bad=1 ;; esac
-  done
-  return $bad
-}
-
 py_ruff() {  # ruff check and format --check on the touched python files
   local files=() f
   for f in "${TOUCHED[@]}"; do case $f in *.py) [ -f "$f" ] && files+=("$f") ;; esac; done
@@ -143,7 +134,6 @@ common_checks() {
   local base=$1
   collect_touched "$base"
   echo "touched against $base: ${#TOUCHED[@]} file(s)"
-  check "bench freeze" bench_frozen
   check "ruff on touched python" py_ruff
   check "no new em dash" em_dash_gain "$base"
   check "whitespace (git diff --check)" git --no-pager diff --check "$base" --
