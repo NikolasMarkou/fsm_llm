@@ -35,7 +35,7 @@
 
 **In one line:** NOOA makes an agent a Python object; fsm_llm makes a conversation a verifiable, durable state machine, which can also be written as a Python object that compiles to one, or be compiled at runtime from a goal.
 
-**State of play.** Runtime FSM synthesis, the v2.1 flagship, shipped in v0.12.0 as `fsm_llm.synthesis` with gates G1 to G7, a content-addressed library, a runner and a repair loop. Its pre-registered benchmark ran three blocks, all INCONCLUSIVE: one model played every role, so the central claim (a frontier model compiles, a small model executes) is still untested. The platform under it (event log, async core, context engineering, serving) is still the v2.1 gap list.
+**State of play.** Runtime FSM synthesis, the v2.1 flagship, shipped in v0.12.0 as `fsm_llm.synthesis` with gates G1 to G7, a content-addressed library, a runner and a repair loop. Its pre-registered benchmark ran three blocks, all INCONCLUSIVE: one model played every role, so the central claim (a frontier model compiles, a small model executes) is still untested. The platform under it has moved: the durable event log, fork, resume and turn budgets, and the async LLM layer and async engine turns (rows 1.1 to 1.5, in part) are on main; the async conversion of agents, synthesis and workflow steps, context engineering and serving are still the v2.1 gap list.
 
 **Nine moves, in order of leverage:**
 

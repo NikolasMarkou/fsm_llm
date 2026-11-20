@@ -23,7 +23,7 @@ The pages in the table below are current guides for version 0.13.0, and each sta
 Beside them:
 
 - `contributing.md`, `security.md`, `evaluate.md` and `changelog.md` are one-line wrapper pages that include the root files `CONTRIBUTING.md`, `SECURITY.md`, `EVALUATE.md` and `CHANGELOG.md`. Edit the root file, never the wrapper.
-- `2026_roadmap.md` is the project roadmap. It belongs to the maintainer and is published as written: never edit it. Other roadmap pages (`*_roadmap.md`) are published the same way.
+- `2026_roadmap.md` is the project roadmap. It belongs to the maintainer and is published as written (no front matter, no directive). An agent may edit it, and the other roadmap pages (`*_roadmap.md`), to keep a status line true or when asked; it keeps that form.
 - `AGENTS.md` is the maintainer notes for coding agents; it is not published.
 - This file is the folder index on GitHub; `index.md` is the landing page of the site.
 

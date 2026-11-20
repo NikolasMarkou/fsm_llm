@@ -17,7 +17,7 @@ The files by kind:
 | --- | --- | --- | --- |
 | Current pages | `index.md`, `quickstart.md`, `concepts.md`, `fsm_design.md`, `handlers.md`, `synthesis.md`, `testing.md`, `api_reference.md`, `cli.md`, `architecture.md`, `examples.md` | `> Covers FSM-LLM v0.13.0` (matches `src/fsm_llm/__version__.py`; the form `v<version>` is pinned by `tests/test_fsm_llm_regression/test_release_version.py`) | Must match the code |
 | Wrappers | `contributing.md`, `security.md`, `evaluate.md`, `changelog.md` | none | One `include-markdown` line each of the root file; never edit the wrapper |
-| Roadmaps | `2026_roadmap.md`, and any other `*_roadmap.md` | none | Published as written: no front matter, no directive. `2026_roadmap.md` is user-owned: never edit it |
+| Roadmaps | `2026_roadmap.md`, and any other `*_roadmap.md` | none | Published as written: no front matter, no directive. `2026_roadmap.md` is user-owned: editable by an agent to keep a status line true or when asked, in the same published-as-written form |
 
 Every page is in the `nav` of `mkdocs.yml` or in its `exclude_docs` (`AGENTS.md` and `/README.md`); `tests/test_fsm_llm/test_docs_site.py` fails on a page that is neither.
 
@@ -68,7 +68,7 @@ Facts the pages state that must stay in step with the code:
 - Keep the `> Covers FSM-LLM v<version>` header on every current page and update it on release (`test_release_version.py` compares it with `pyproject.toml`).
 - No plan id and no step number in a page, no emoji, no em dash (a ratchet test counts them), no stale path, no count of tests, files, modules, lines, contracts or examples (`tests/test_fsm_llm_regression/test_doc_count_ratchet.py` fails when a page gains one).
 - A page has a title, a one-line purpose, the `Covers` line, sections and a `Next steps` section. No topic is written twice: link instead.
-- `2026_roadmap.md` is the maintainer's: never edit it or move it.
+- `2026_roadmap.md` is the maintainer's: edit it only to keep a status line true or when asked, never move or rename it.
 
 ## Dependencies
 
