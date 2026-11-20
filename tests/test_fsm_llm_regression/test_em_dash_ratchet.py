@@ -11,8 +11,9 @@ em dash to its exact count, and the test fails when
 * a file has FEWER than its entry, or an entry names a file that is gone or has none: the
   allowlist only tightens, so removed dashes cannot be put back unseen.
 
-Read: every file `git ls-files --cached --others --exclude-standard` lists, decodable as
-UTF-8 with no NUL byte. Never read: `plans/` (the plan record), `scripts/bench_data/`,
+Read: every file `git ls-files` lists (the index only: a foreign untracked file, a scratch
+file or a build product never turns the ratchet red, so the live working tree can be gated;
+a new file is judged from `git add` on), decodable as UTF-8 with no NUL byte. Never read: `plans/` (the plan record), `scripts/bench_data/`,
 `examples/` (frozen baselines), `docs/2026_roadmap.md` (never edited) and `EVALUATE.md` (an
 append-only run log). Not run when `git` is missing or the checkout is not a git repository.
 
@@ -51,11 +52,16 @@ EXEMPT = (
 
 
 def tracked_files(root: Path = REPO) -> list[str] | None:
-    """The files of the checkout (tracked, or untracked and not ignored), or None."""
+    """The tracked files of the checkout (`git ls-files`), or None without git.
+
+    Interface contract: `root` is a work tree. Returns sorted repo-relative posix paths of
+    the index (a file added with `git add` counts, an untracked one does not), or `None`
+    when git is missing, `root` has no `.git` or git fails.
+    """
     if shutil.which("git") is None or not (root / ".git").exists():
         return None
     done = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        ["git", "ls-files", "-z"],
         cwd=root,
         capture_output=True,
         timeout=60,
@@ -139,6 +145,24 @@ class TestTheRealTree:
         counts = count_dashes(REPO, files)
         assert len(files) > 500 and len(counts) > 50
         assert "src/fsm_llm/agents/base/__init__.py" in counts
+
+
+class TestTrackedFilesOnly:
+    def test_an_untracked_file_is_not_read_and_an_added_one_is(
+        self, tmp_path: Path
+    ) -> None:
+        if shutil.which("git") is None:
+            pytest.skip("git is missing")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+        (tmp_path / "tracked.md").write_text("x\n", encoding="utf-8")
+        (tmp_path / "foreign.md").write_text(f"x {DASH}\n", encoding="utf-8")
+        subprocess.run(["git", "add", "tracked.md"], cwd=tmp_path, check=True)
+        assert tracked_files(tmp_path) == ["tracked.md"]
+        subprocess.run(["git", "add", "foreign.md"], cwd=tmp_path, check=True)
+        assert tracked_files(tmp_path) == ["foreign.md", "tracked.md"]
+
+    def test_a_directory_without_git_gives_none(self, tmp_path: Path) -> None:
+        assert tracked_files(tmp_path) is None
 
 
 class TestMutants:

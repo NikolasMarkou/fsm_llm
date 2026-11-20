@@ -15,7 +15,15 @@ them, must therefore stay equal while code moves.
 A step that adds or removes a token on purpose appends one `reasons` entry per
 token in the same commit, with the signed change and the reason; the expected
 multiset is `baseline` plus every delta, and the tree must equal it. Do not edit
-`baseline` to make the test pass.
+`baseline` to make the test pass. A deliberate loss or gain is recorded by the writer,
+never by hand:
+
+    python -m tests.test_fsm_llm_regression.test_decision_anchor_multiset --write --reason TEXT
+
+which appends one entry per token whose count in `src/` differs from the expected multiset
+(the signed difference, TEXT as the reason: name the decision that drops or adds it, for
+example the D-029 rule that an anchor goes with the code a conversion deletes). It never
+touches `baseline`, and writes nothing when the tree already matches.
 
 Scope, the same as the planner's anchor scan (`validate-plan.mjs`
 `walkSourceFiles`): every file under `src/` whose extension is in
@@ -31,6 +39,7 @@ is still a reference that must not be lost). Both the current form
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -157,6 +166,28 @@ def multiset_problems(data: Mapping[str, Any], actual: Mapping[str, int]) -> lis
         for token, n in sorted(gained.items())
     ]
     return bad
+
+
+def reasons_for_change(
+    data: Mapping[str, Any], actual: Mapping[str, int], reason: str
+) -> list[dict[str, Any]]:
+    """The `reasons` entries that make `data` expect `actual`: one per token whose count
+    differs, `delta` the signed difference, `reason` the given text (sorted by token).
+
+    Interface contract: `data` is a loaded fixture (`baseline` and `reasons`), `actual` a
+    token count such as `scan_tokens()`, `reason` a non-blank text. Returns `[]` when the
+    tree already equals the expectation. Raises `ValueError` on a blank reason. Never
+    changes its arguments.
+    """
+    if not reason.strip():
+        raise ValueError("a reason must say why the anchor is lost or added")
+    expected = expected_counts(data)
+    entries: list[dict[str, Any]] = []
+    for token in sorted(set(expected) | set(actual)):
+        delta = actual.get(token, 0) - expected.get(token, 0)
+        if delta:
+            entries.append({"token": token, "delta": delta, "reason": reason.strip()})
+    return entries
 
 
 class TestTheRealTree:
@@ -290,18 +321,93 @@ class TestMultisetProblems:
         assert any(needle in p for p in bad), bad
 
 
-if __name__ == "__main__":
-    if sys.argv[1:] != ["--write"]:
-        sys.exit(
-            "usage: python -m tests.test_fsm_llm_regression.test_decision_anchor_multiset --write"
+class TestReasonsForChange:
+    def test_a_lost_and_a_gained_token_each_get_one_signed_entry(self) -> None:
+        actual = Counter({T1: 1, T2: 1, LEGACY: 1})
+        entries = reasons_for_change(_data(BASE), actual, "D-029 conversion")
+        assert entries == [
+            {"token": T1, "delta": -1, "reason": "D-029 conversion"},
+            {"token": LEGACY, "delta": 1, "reason": "D-029 conversion"},
+        ]
+        # recording them makes the real check pass, so the writer and the test agree
+        assert multiset_problems(_data(BASE, entries), actual) == []
+
+    def test_an_equal_tree_records_nothing(self) -> None:
+        assert reasons_for_change(_data(BASE), Counter(BASE), "x") == []
+
+    def test_an_earlier_reason_is_part_of_the_expectation(self) -> None:
+        earlier = [{"token": T1, "delta": -1, "reason": "first"}]
+        entries = reasons_for_change(_data(BASE, earlier), Counter({T2: 1}), "second")
+        assert entries == [{"token": T1, "delta": -1, "reason": "second"}]
+
+    def test_a_blank_reason_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            reasons_for_change(_data(BASE), Counter({T2: 1}), "   ")
+
+
+class TestTheWriter:
+    def test_write_appends_the_entries_and_leaves_the_baseline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fixture = tmp_path / "anchor_multiset.json"
+        fixture.write_text(render(_data(BASE)), encoding="utf-8")
+        monkeypatch.setattr(sys.modules[__name__], "FIXTURE", fixture)
+        monkeypatch.setattr(
+            sys.modules[__name__], "scan_tokens", lambda: Counter({T1: 1, T2: 1})
         )
-    if FIXTURE.exists():
-        sys.exit(
-            f"{FIXTURE.relative_to(REPO)} exists: the baseline is written once, add `reasons` instead"
+        assert main(["--write", "--reason", "the code went with D-029"]) == 0
+        written = json.loads(fixture.read_text(encoding="utf-8"))
+        assert written["baseline"] == BASE
+        assert written["reasons"] == [
+            {"token": T1, "delta": -1, "reason": "the code went with D-029"}
+        ]
+        assert fixture.read_text(encoding="utf-8") == render(written)
+        # a second run has nothing left to record
+        assert main(["--write", "--reason", "again"]) == 0
+        assert json.loads(fixture.read_text(encoding="utf-8")) == written
+
+    def test_a_blank_reason_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fixture = tmp_path / "anchor_multiset.json"
+        fixture.write_text(render(_data(BASE)), encoding="utf-8")
+        monkeypatch.setattr(sys.modules[__name__], "FIXTURE", fixture)
+        monkeypatch.setattr(
+            sys.modules[__name__], "scan_tokens", lambda: Counter({T2: 1})
         )
-    FIXTURE.write_text(
-        render({"baseline": dict(scan_tokens()), "reasons": []}),
-        encoding="utf-8",
-        newline="\n",
+        before = fixture.read_text(encoding="utf-8")
+        assert main(["--write", "--reason", " "]) == 2
+        assert fixture.read_text(encoding="utf-8") == before
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m tests.test_fsm_llm_regression.test_decision_anchor_multiset",
+        description="Record a deliberate loss or gain of a decision anchor token of src/.",
     )
-    print(f"wrote {FIXTURE.relative_to(REPO)}")
+    parser.add_argument("--write", action="store_true", required=True)
+    parser.add_argument("--reason", required=True, help="why (name the decision)")
+    args = parser.parse_args(argv)
+    if not FIXTURE.exists():
+        print(f"{FIXTURE} is missing", file=sys.stderr)
+        return 1
+    data = load(FIXTURE)
+    try:
+        entries = reasons_for_change(data, scan_tokens(), args.reason)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if not entries:
+        print("the tokens of src/ equal the expectation: nothing to record")
+        return 0
+    data["reasons"] = [*data["reasons"], *entries]
+    FIXTURE.write_text(render(data), encoding="utf-8", newline="\n")
+    for entry in entries:
+        print(f"{entry['delta']:+d} {entry['token']}")
+    shown = FIXTURE.relative_to(REPO) if FIXTURE.is_relative_to(REPO) else FIXTURE
+    print(f"wrote {shown} ({len(entries)} reason(s) appended)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
