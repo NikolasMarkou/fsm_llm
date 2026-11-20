@@ -25,14 +25,12 @@ Test doubles and fixtures:
 | `examples_dir` fixture | `test_examples.py` | tmp tree: `basic/ok/run.py`, `basic/ok/run_manual.py`, `basic/boom/run.py`, `agents/slow/run.py` (sleeps 30 s), `toplevel/run.py` (2 path parts, skipped) |
 | `examples_dir` fixture | `test_cli.py` | tmp tree: `basic/ok/run.py` (prints two states), `basic/bad/run.py` (exit 3) |
 | `_config(examples_dir, **overrides)` | `test_examples.py` | `merge_config` layer with `category_timeouts={"agents": 1}` so the slow example times out in 1 s |
-| `bc` fixture | `test_bench_parity.py` | Loads `scripts/bench_common.py` via `importlib.util.spec_from_file_location` |
 | `_GOLDEN` | `test_scoring.py` | The rows `(id, exit_code, stdout, stderr, duration, timed_out, score, failures)` from the original `scripts/eval.py` at commit `0facf56` |
 
 ## Key files
 
 | File | Covers |
 | --- | --- |
-| `test_bench_parity.py` | `wilson_ci`, `fisher_exact_two_sided`, `append_row`/`read_rows`, `_write_json`, `_utc_now`, `_git_commit` equal between `bench_common` and `fsm_llm.eval`; bench stats run in a subprocess with `socket.socket` patched to raise, and `fsm_llm` must not be in `sys.modules` |
 | `test_cases.py` | `load_cases`, `check_expectations`, `run_case_trial`, `run_cases`, `run_dataset`, `run` subcommand, checks hook, interrupt, `--fail-under` boundary |
 | `test_cli.py` | `main_cli`/`build_parser` for `examples`: exit codes, `--list`, config errors, runs, `--fail-under`, Ctrl-C |
 | `test_config.py` | `EvalConfig`, `merge_config`, `load_config`, `resolve_model`, reserved `llm_kwargs` |
@@ -105,6 +103,5 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 
 - Name tests after the defect they guard; many docstrings start `Defect guarded:` with a review id (W1, W2, W6, NOTE 10, NOTE 15).
 - Keep every case test able to both pass and fail (use `_passing()` and `_failing()`), so a checker that checks nothing is caught.
-- A new helper mirrored in `scripts/bench_common.py` needs a parity test in `test_bench_parity.py`.
 - No document states this suite's test count; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_eval --collect-only -q | tail -1`.
 - Run: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/`.

@@ -26,16 +26,13 @@ flowchart TD
     end
     conf --> root[test_integration_ollama.py]
     root --> ollama[(local Ollama, optional)]
-    bench2[test_agents_bench.py] --> ab[scripts/agents_bench.py]
     pkg[test_packaging.py] --> build[pyproject.toml, Makefile, tox.ini,<br/>CI workflow, MANIFEST.in]
-    bench[test_bench_common.py] --> bc[scripts/bench_common.py]
-    bench3[test_skills_bench.py] --> sb[scripts/skills_bench.py]
     ex --> exdir[examples/**/*.json]
 ```
 
 - `conftest.py` registers the four markers (`pyproject.toml` declares them too), and provides the fake LLMs most suites use. The main one is `MockLLM2Interface` (defined in the public `fsm_llm.testing`; tests import it from there, `conftest.py` only uses it in the `mock_llm2_interface` fixture), a fake of the 2-pass pipeline (Pass 1 extracts data from the user message, Pass 2 writes the reply): it returns fixed field values and a fixed reply and records every call.
 - Each suite folder tests one area and sits next to its source in `src/fsm_llm/`.
-- The test files at this level check things that span the repo: packaging, the bench scripts and their shared helpers, and live end-to-end runs.
+- The test files at this level check things that span the repo: packaging, the coverage ratchet, and live end-to-end runs.
 
 ## Suites
 
@@ -48,7 +45,7 @@ flowchart TD
 | `test_fsm_llm_workflows/` | Async workflow engine: step types, DSL and `WorkflowBuilder`, engine lifecycle, timeouts, removed-keyword refusals |
 | `test_fsm_llm_monitor/` | FastAPI dashboard: routes, security checks, instance manager, event collector, data models, OpenTelemetry exporter |
 | `test_fsm_llm_eval/` | `fsm_llm.eval` and the `fsm-llm-eval` CLI: example scoring, case datasets, config, statistics, result files |
-| `test_fsm_llm_synthesis/` | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end, and the offline checks of `scripts/synthesis_bench.py`. Bench status: blocks s0 to s2 run and recorded, all INCONCLUSIVE (see `docs/synthesis.md`). |
+| `test_fsm_llm_synthesis/` | `fsm_llm.synthesis`: the gates, the library, the runner, the agent tools, traces, diagnosis and repair, the concierge end to end. The bench `scripts/synthesis_bench.py` is frozen history with no test: blocks s0 to s2 run and recorded, all INCONCLUSIVE (see `docs/synthesis.md`). |
 | `test_fsm_llm_testing/` | `fsm_llm.testing`, the public test-helper subpackage: its layering (imported by name, loaded by no library module, no `pytest`, `litellm` or other subpackage) |
 | `test_fsm_llm_regression/` | One class per fixed bug across core, reasoning, workflows, CLI and packaging text, plus the layout safety nets (module path map, anchor multiset, 800-line guard) |
 | `test_examples/` | Every JSON file under `examples/` loads, parses as an `FSMDefinition` and passes `FSMValidator`, and every call into `fsm_llm` in the `examples/**/*.py` scripts still binds to the live signature, checked with `ast` and `inspect.signature` without running an example; `test_example_scripted_paths.py` drives shipped example FSMs offline with the public `fsm_llm.testing` doubles, scripted user and assertions, reading them as they are; `test_example_import_paths.py` resolves every `fsm_llm` import of the example scripts (module and name) without editing one |
@@ -58,9 +55,6 @@ flowchart TD
 - `conftest.py` - shared fixtures (`mock_llm2_interface`, `mock_llm_interface`, `sample_fsm_definition`, `sample_fsm_definition_v2`, `test_fixtures_root`), fake LLMs that live in `fsm_llm.testing` and are not re-exported here (`MockLLM2Interface`, with `configure_mock_extract_field` to script its field answers and `cut_reply=`/`cut_fields=` to script a reply or field cut off at `max_tokens`, and `PromptGroundedLLM`, which answers a field only when its evidence is in the prompt and raises `LLMResponseError` from `complete`), the `block_network` function that the agents and meta suites call from their own autouse fixtures (it refuses every IPv4/IPv6 connect, loopback included, unless the test is marked `real_llm` or `integration`), the `ollama_available(model_tag)` probe (one 3 second GET to `localhost:11434/api/tags`, never raises) and marker registration.
 - `__init__.py` - empty; makes `tests` a package so files can import `tests.conftest`.
 - `test_packaging.py` - the single `fsm_llm` package and its subpackages are named in every build and CI file (the layer packages of `LAYER_PACKAGES`, `security`, `core`, `llm`, `context`, `handlers`, `engine`, `okf`, `skills` and `tools` so far, ship with the core and are pinned to the disk instead), the monitor's static files ship, every subpackage has an install extra, module docstrings are real, and no `src` module binds a top-level name twice.
-- `test_bench_common.py` - offline tests for `scripts/bench_common.py`, the stdlib helpers that `agents_bench.py`, `skills_bench.py` and `synthesis_bench.py` share: no socket at import, stdlib-only top-level imports, no direct `litellm` reference, Wilson interval, Fisher exact test, the manifest-field constant, JSONL row round trip, wire-digest masking, the restore-on-raise contract of `captured_wire`, `manifest_differences` and `pinned_drift`.
-- `test_agents_bench.py` - offline tests for `scripts/agents_bench.py`: inert import, task set and its SHA-256, grader, metric math, manifest and pair disclosure, report, call meter, end-to-end run with fake results, arms, CLI.
-- `test_skills_bench.py` - offline tests for `scripts/skills_bench.py` (the pre-registered Agent Skills read-hint ablation, registered and not run): the fixture and its hash, the grader against a reference solver and failing runs, the hint-off arm, one scripted trial, the block rules, the refusals and layout. Scripted agents drive the real skill tools; no model is called.
 - `test_coverage_ratchet.py` - offline tests for `scripts/coverage_ratchet.py` (the branch-coverage ratchet: `check` against the baseline minus the tolerance, `update` that only raises and floors to 0.01, `guard` against an `origin/main` ref in a throwaway git repo) and for the coverage configuration (`[tool.coverage]` in `pyproject.toml`, the `coverage` pin, `--cov-branch` in the Makefile and tox coverage commands). No coverage run, no network.
 - `test_integration_ollama.py` - all marked `integration`, `real_llm` and `slow`. Most run a real conversation on `ollama_chat/qwen3.5:9b-q8_0` and skip without it; the classes `TestWorkflowUTCConsistency` and `TestParallelStepIsolation` check workflow timestamps and parallel-step context isolation with no model.
 - `fixtures/test_fsm_definitions/minimal_fsm.json` - a one-state FSM loaded by the `sample_fsm_definition` fixture (the fixture writes it if missing).

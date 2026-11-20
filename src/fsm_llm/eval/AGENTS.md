@@ -103,7 +103,7 @@ Python:
 - `setup_cli_logging` only in `run()`, never in `main_cli()` (tests call `main_cli` in-process).
 - An empty `expect` is rejected even when Python `checks` are passed (D-004).
 - Case trials stay on threads in one process; do not move them to a subprocess per trial (D-004).
-- `scripts/bench_common.py` must stay stdlib-only and offline at import time and never import `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its copies (`wilson_ci`, `fisher_exact_two_sided`, `_utc_now`, `_git_commit`, `_write_json`, `append_row`, `read_rows`) must match this package; `tests/test_fsm_llm_eval/test_bench_parity.py` enforces it, so change both together.
+- `scripts/bench_common.py` must stay stdlib-only and offline at import time and never import `fsm_llm.eval` (importing `fsm_llm` pulls litellm, which opens a socket; D-008). Its copies (`wilson_ci`, `fisher_exact_two_sided`, `_utc_now`, `_git_commit`, `_write_json`, `append_row`, `read_rows`) are frozen with the bench scripts; no test holds them equal to this package any more (the bench tests were dropped, plan ace7a8c8 step 4).
 - `fsm_llm/__init__.py` never imports this subpackage.
 - One case trial = one fresh `API`, closed in `finally`; trial exceptions are data (`error` set), never a crashed run.
 - `on_done` callbacks in `run_interruptible` run on the calling thread, so `results`/`trials` lists need no lock.
@@ -129,6 +129,6 @@ Python:
 - New export: add it to the static `__all__` in `__init__.py`.
 - Import as `from fsm_llm import eval as fsm_eval` or import names directly; a bare `from fsm_llm import eval` shadows the builtin.
 - Read the `# DECISION` anchors (D-003 in `examples.py`, D-004 in `cases.py`) before editing nearby.
-- Tests: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/` (`test_stats.py`, `test_records.py`, `test_config.py`, `test_scoring.py`, `test_examples.py`, `test_timeout_table.py`, `test_example_inputs.py`, `test_cases.py`, `test_cli.py`, `test_bench_parity.py`); offline, cases use `MockLLM2Interface`.
+- Tests: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/` (`test_stats.py`, `test_records.py`, `test_config.py`, `test_scoring.py`, `test_examples.py`, `test_timeout_table.py`, `test_example_inputs.py`, `test_cases.py`, `test_cli.py`); offline, cases use `MockLLM2Interface`.
 - Sample dataset: `evaluation/datasets/simple_greeting_cases.json` (the plumbing cases over `examples/basic/simple_greeting/fsm.json` plus `name_is_extracted` over `name_capture_fsm.json`, which a do-nothing model fails). Keep at least one case that depends on the model.
 - Do not edit `examples/`: its scripts are the evaluation baselines this package runs.

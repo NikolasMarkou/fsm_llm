@@ -1,18 +1,17 @@
 # test_fsm_llm_synthesis
 
-The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of the FSM-LLM repository, and for the pre-registered bench script `scripts/synthesis_bench.py`. It lives at `tests/test_fsm_llm_synthesis/`. No test count is written here; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_synthesis --collect-only -q | tail -1`.
+The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of the FSM-LLM repository. It lives at `tests/test_fsm_llm_synthesis/`. No test count is written here; measure it with `.venv/bin/python -m pytest tests/test_fsm_llm_synthesis --collect-only -q | tail -1`.
 
 ## What it is for
 
-`fsm_llm.synthesis` has a model write a finite state machine (FSM) for a goal, judges it with gates, stores it in a library and runs it as a child of a host conversation. A wrong judgement is costly: a procedure that passes the gates is reused by many conversations. These tests check each gate against hand-built procedures that are good, stuck, forged or hostile, the library and its lifecycle, the runner, the agent tools, the traces, the diagnosis and the repair loop, the goal fence, and the bench script. No test calls a real model and none opens a network connection.
+`fsm_llm.synthesis` has a model write a finite state machine (FSM) for a goal, judges it with gates, stores it in a library and runs it as a child of a host conversation. A wrong judgement is costly: a procedure that passes the gates is reused by many conversations. These tests check each gate against hand-built procedures that are good, stuck, forged or hostile, the library and its lifecycle, the runner, the agent tools, the traces, the diagnosis and the repair loop, and the goal fence. No test calls a real model and none opens a network connection.
 
 ## How it works
 
 - The strong model is `fsm_llm.testing.ScriptedLLM`: it answers `complete` from a queue of replies, keeps every request, and raises `UnscriptedCallError` on an exhausted queue. It is metered; a test that needs a model with no meter sets `llm.usage = None`.
 - The cheap model that runs the host and the pushed child is `ScriptedRunnerLLM` (a subclass of `fsm_llm.testing.MockLLM2Interface`, kept apart from `ScriptedLLM` because it has no bulk extraction and no `complete`): it extracts a fixed dict, writes a reply per state, and has a `usage()` meter that a simulator can read. `ByTurn` is the honest variant: it extracts a key only if the user's turn says `<key> is <value>`.
 - Most tests run on REAL `API`, `FSMLibrary`, `ProcedureRunner`, `Simulator` and `ToolRegistry` objects, so a claim such as "a model cannot forge `procedure_abort`" is proven through the real pipeline.
-- An autouse fixture blocks every IPv4 and IPv6 connect for the test (`tests.conftest.block_network`), loopback included, because the live bench model is a local Ollama. The `foreign_calls` fixture also fails a test that builds a `LiteLLMInterface` or makes a provider call.
-- The bench tests import `scripts/synthesis_bench.py` by adding `scripts/` to `sys.path`, and drive its host FSM, scripted user, grader and run loop with scripted models and a fake model-server client. They never register, run or smoke the bench against a server.
+- An autouse fixture blocks every IPv4 and IPv6 connect for the test (`tests.conftest.block_network`), loopback included, because a live model is a local Ollama. The `foreign_calls` fixture also fails a test that builds a `LiteLLMInterface` or makes a provider call.
 
 ## Files
 
@@ -32,7 +31,6 @@ The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of t
 - `test_diagnose.py` - the fixed rule table.
 - `test_patch.py` - the RFC 6902 subset against the RFC's own examples and hostile input.
 - `test_repair.py` - `propose_patch` and `repair_procedure`: the promotion order, the decision rule, the poisoning guards.
-- `test_synthesis_bench.py` - the bench script: fixture hash, scripted user and grader, phases, verdict rule, preflight, pins, hygiene.
 
 ## How to use it
 
@@ -45,7 +43,6 @@ Run from the repository root with the project virtualenv:
 
 ## Things to know
 
-- Run from the repository root. Several tests import `tests.conftest`, and the bench tests read `scripts/synthesis_bench.py`, `scripts/bench_common.py` and the source files the bench pins.
-- Editing a source file the bench pins (`src/fsm_llm/synthesis/{dryrun,simulation,traces,gates,policy,synthesizer,runner,library,prompts,repair,constants}.py`, `src/fsm_llm/core/verify/*.py`, `src/fsm_llm/eval/cases.py` and others listed in `SRC_PINS`) or the fixture region of the script changes a hash. `test_synthesis_bench.py` holds the expected fixture hash; a change there voids a registered block, so change it only knowingly. Blocks s0 to s2 are registered and run; the s2 manifests already predate two later source edits (D-108, D-109), so `report s2` refuses by design and `s2/REPORT_s2.txt` is the record.
+- Run from the repository root. Several tests import `tests.conftest`, and `test_synthesizer.py` reads the reference children of `scripts/synthesis_bench.py` (read only; the script and its recorded blocks are frozen history with no test of their own).
 - Do not weaken a test to make a gate pass. Every gate test has a case that must pass AND one that must fail, so a gate that checks nothing is caught.
 - No test uses a marker (`slow`, `integration`, `real_llm`): the whole suite runs in the default and the CI selection.
