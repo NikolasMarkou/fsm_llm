@@ -399,6 +399,11 @@ class _Checker:
             target, len(call.args) + int(self_slot), keywords, call
         )
         name = getattr(target, "__qualname__", repr(target))
+        if self_slot and isinstance(call.func, ast.Attribute):
+            # name the class the example calls, not the mixin that defines the method
+            owner = self._type_of(call.func.value, types)
+            if owner is not None:
+                name = f"{owner.__qualname__}.{call.func.attr}"
         self.problems += [f"line {call.lineno}: {name}: {p}" for p in found]
 
 
