@@ -220,7 +220,18 @@ build_step_args() {
   done
 }
 
-run_pytest() { nice "$PY" -m pytest -q -p no:cacheprovider -m "$MARKERS" "$@"; }
+# One pytest process over the named paths, each once, a root-level file (tests/test_packaging.py)
+# last: a root-level file placed between paths of tests/test_fsm_llm/ makes pytest 9 lose that
+# folder's conftest for the files after it ("fixture 'log' not found", measured on the push set).
+run_pytest() {
+  local seen=" " a args=() tail_args=()
+  for a in "$@"; do
+    case $seen in *" $a "*) continue ;; esac
+    seen="$seen$a "
+    case $a in tests/*/*) args+=("$a") ;; tests/*.py) tail_args+=("$a") ;; *) args+=("$a") ;; esac
+  done
+  nice "$PY" -m pytest -q -p no:cacheprovider -m "$MARKERS" "${args[@]}" "${tail_args[@]}"
+}
 
 # The cheap checks shared by both gates. $1 is the base the touched files are read against.
 common_checks() {
