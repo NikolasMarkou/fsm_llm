@@ -27,11 +27,17 @@ Interface contract:
 - ``origin``: ``"operator"`` (a file a person wrote: V7 never applies) or ``"model"`` (model-written
   text, the synthesis and meta-builder output of roadmap E4.6: V7 applies). ``allow``: category
   to the names a model may require; ``None`` is an empty list, so every name is refused (fail
-  closed). V7: every ``requires`` name must be on the list, ``requires.tools`` may not be the bare
-  claim ``"some"``, ``requires.handlers`` must be empty (a handler binding comes from a template,
-  never from a model), and ``lifecycle`` may only be ``draft``. Lifecycle, capabilities and
-  contract are CLAIMS of the document, never authorization. A body key that binds code
-  (``handlers``, ``variants``, ``generator``) is refused by V1 for every origin.
+  closed). V7: every ``requires`` name must be on the list; every tool the BODY declares in a
+  completion state (read from the body as written and from the variable-filled body) must be on
+  the ``tools`` list whatever ``requires.tools`` says, and ``requires.tools`` may not be ``"some"``
+  nor ``"none"`` beside declared tools; the body may not set a persona, a ``model`` or
+  ``prompt_config`` on a classification entry, a validation-rule ``pattern`` or a ``synthesize``
+  state (a copy of what synthesis gate G5 refuses, D-053); ``requires.handlers`` must be empty (a
+  handler binding comes from a template, never from a model), and ``lifecycle`` may only be
+  ``draft``. V7 is NOT gate G5: text length, key names, unknown keys, priorities and the abort edge
+  stay G5's. Lifecycle, capabilities and contract are CLAIMS of the document, never
+  authorization. A body key that binds code (``handlers``, ``variants``, ``generator``) is
+  refused by V1 for every origin.
 - Model-authored text (names, keys, state ids) is capped and control-stripped before it reaches a
   message (``fsm_llm.text.capped_line``): a message may be shown to a model by a repair loop.
 
@@ -42,7 +48,7 @@ imports it at module top (``fsm_llm.core.verify.cli`` imports it inside the func
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
 
 from fsm_llm.core.codes import Lifecycle
@@ -82,38 +88,109 @@ def _shown(value: object) -> str:
     return repr(capped_line(value, _NAME_CHARS))
 
 
-def _tool_names(fsm: Mapping[str, Any]) -> set[str]:
-    """The tool names the RAW states declare (so a body that does not load is still read)."""
+def _tool_entries(fsm: Mapping[str, Any]) -> list[str | None]:
+    """The tools the RAW states declare, one entry per tool (``None``: no readable name)."""
     states = fsm.get("states")
-    names: set[str] = set()
+    entries: list[str | None] = []
     if isinstance(states, dict):
         for state in states.values():
             if isinstance(state, dict):
                 for spec in raw_kinds(state):
-                    names.update(
-                        n for n in spec.raw_declared_tools(state) if isinstance(n, str)
-                    )
-    return names
+                    entries.extend(spec.raw_declared_tools(state))
+    return entries
+
+
+def _tool_names(fsm: Mapping[str, Any]) -> set[str]:
+    """The tool names the RAW states declare (so a body that does not load is still read)."""
+    return {n for n in _tool_entries(fsm) if isinstance(n, str)}
+
+
+def _items(value: object) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+# The settings a model-written body may not carry. A COPY of what synthesis gate G5 refuses
+# (``synthesis/policy.py``: ``persona-set``, ``model-setting`` with ``_MODEL_SETTING_KEYS``,
+# ``regex-pattern`` and ``nested-synthesize``): ``core.verify`` may not import ``synthesis``. Key
+# presence decides, as in G5; a message names the key and never its value (D-053).
+_MODEL_SETTING_KEYS = ("model", "prompt_config")
+
+
+def _body_setting_problems(fsm: Mapping[str, Any]) -> list[str]:
+    """V7: the persona, model settings, regex patterns and synthesize states of a body."""
+    problems: list[str] = []
+    if fsm.get("persona") is not None:
+        problems.append("body.fsm sets a persona: a model may not")
+    states = fsm.get("states")
+    for sid, state in states.items() if isinstance(states, dict) else ():
+        if not isinstance(state, dict):
+            continue
+        where = f"state {_shown(sid)}"
+        if "synthesize" in state:
+            problems.append(f"{where} is a synthesize state: a model may not write one")
+        for entry in (
+            e
+            for e in _items(state.get("classification_extractions"))
+            if isinstance(e, dict)
+        ):
+            problems += [
+                f"{where}: a classification entry sets {key}: a model may not"
+                for key in _MODEL_SETTING_KEYS
+                if key in entry
+            ]
+        for extraction in _items(state.get("field_extractions")):
+            rules = (
+                extraction.get("validation_rules")
+                if isinstance(extraction, dict)
+                else None
+            )
+            if isinstance(rules, dict) and "pattern" in rules:
+                problems.append(
+                    f"{where}: a validation rule has a pattern: a model may not write a regex"
+                )
+    return problems
 
 
 def _model_problems(
-    envelope: ExecutableEnvelope, allow: Mapping[str, Collection[str]] | None
+    envelope: ExecutableEnvelope,
+    allow: Mapping[str, Collection[str]] | None,
+    bodies: Sequence[Mapping[str, Any]],
 ) -> list[str]:
-    """V7: what a model-origin document may not claim or require."""
+    """V7: what a model-origin document may not claim, require, declare or set.
+
+    *bodies* are the FSM body as written and, when variables were filled, the filled one: the
+    tools and settings of the body are judged whatever ``requires`` says (D-053).
+    """
     requires = envelope.requires
     problems = []
+    listed = {}
+    for category in ("tools", "callables", "executables"):
+        names = (allow or {}).get(category, ())
+        listed[category] = {names} if isinstance(names, str) else set(names)
+    declared = [entry for body in bodies for entry in _tool_entries(body)]
     if requires.tools == "some":
         problems.append("requires.tools 'some' cannot be checked; name the tools")
+    elif requires.tools == "none" and declared:
+        problems.append(
+            "requires.tools 'none' disagrees with the body, which declares completion tools"
+        )
+    reported: set[str | None] = set()
     for category in ("tools", "callables", "executables"):
         names = getattr(requires, category)
-        listed = (allow or {}).get(category, ())
-        listed = {listed} if isinstance(listed, str) else set(listed)
-        if isinstance(names, list):
-            problems += [
-                f"{category} name {_shown(n)} is not on the allow-list"
-                for n in names
-                if n not in listed
-            ]
+        for n in names if isinstance(names, list) else ():
+            if n not in listed[category]:
+                problems.append(f"{category} name {_shown(n)} is not on the allow-list")
+                if category == "tools":
+                    reported.add(n)
+    for n in dict.fromkeys(declared):
+        if n in reported:
+            continue
+        if n is None:
+            problems.append("a completion tool of the body has no readable name")
+        elif n not in listed["tools"]:
+            problems.append(f"body tool {_shown(n)} is not on the allow-list")
+    for body in bodies:
+        problems += _body_setting_problems(body)
     if requires.handlers:
         problems.append(
             f"requires.handlers names {_shown(requires.handlers[0])}: a handler "
@@ -124,7 +201,7 @@ def _model_problems(
             f"lifecycle {_shown(envelope.lifecycle.value)} is a claim a model "
             "may not make; only 'draft'"
         )
-    return problems
+    return list(dict.fromkeys(problems))
 
 
 def load_executable(
@@ -257,6 +334,6 @@ def load_executable(
 
     # V7
     if origin == "model":
-        for line in _model_problems(envelope, allow):
+        for line in _model_problems(envelope, allow, [envelope.body.fsm, fsm]):
             note("model", "error", line)
     return finish(envelope)

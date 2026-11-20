@@ -154,11 +154,12 @@ The `resolver` is a function called with `(category, name)`, the category being 
 `origin` says who wrote the document. `"operator"` is a file a person wrote and V7 never applies. `"model"` is text a model produced, and V7 then refuses it when:
 
 - a `requires` name of `tools`, `callables` or `executables` is not on the `allow` list (`allow` maps a category to the names a model may require; `None` is an empty list, so every name is refused);
-- `requires.tools` is the bare claim `"some"`, which cannot be checked;
+- a tool that a completion state of the body declares is not on the `tools` list. The body is read as written and, when variables were filled, as filled, and the check runs whatever `requires.tools` says: the claim `"some"` cannot be checked and is refused, the claim `"none"` beside declared tools is a disagreement and is refused, and a list that omits a declared tool is a `[names]` error as well;
+- the body sets a `persona`, a `model` or `prompt_config` on a classification entry, a validation rule `pattern`, or has a `synthesize` state (a message names the key, never its value);
 - `requires.handlers` names anything: a handler binding comes from a template, never from a model;
 - `lifecycle` is anything but `draft`.
 
-A body key that would bind code (`handlers`, `variants`, `generator`) is refused by V1 for every origin. Names, keys and state ids that came from a document reach a message only after they are capped and stripped of control characters, because a repair loop may show the message to a model. V7 has no consumer in the library yet; it is the check that the synthesis and meta-builder outputs will use.
+A body key that would bind code (`handlers`, `variants`, `generator`) is refused by V1 for every origin. Names, keys and state ids that came from a document reach a message only after they are capped and stripped of control characters, because a repair loop may show the message to a model. V7 has no consumer in the library yet. It is not the synthesis gate G5: V7 covers the lines above (the `requires` names, the declared tools, those four body settings, handlers and lifecycle) and nothing else of G5, so text length, key names, unknown keys, priorities and the abort edge are still checked only by G5, and a synthesis or meta-builder output needs both.
 
 ### Known limits
 

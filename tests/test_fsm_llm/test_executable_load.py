@@ -9,6 +9,7 @@ documents: they must load valid, with their contract findings as warnings only. 
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import subprocess
 import sys
@@ -143,7 +144,9 @@ class TestAllFailuresAtOnce:
         assert _errors(result, "body") and _errors(result, "names")
 
     @pytest.mark.parametrize("tools", ["none", "some"])
-    def test_a_bare_tools_claim_skips_the_name_list_check(self, tools):
+    def test_an_operator_bare_tools_claim_skips_the_name_list_check(self, tools):
+        # the operator path is unchanged (D-053); a MODEL document is judged by V7 instead,
+        # whatever it claims: see TestModelOrigin
         _, result = load_executable(_doc(kc._tool_fsm(), requires={"tools": tools}))
 
         assert _errors(result, "names") == []
@@ -159,7 +162,9 @@ class TestVariables:
         definition, _ = ex.instantiate_envelope(envelope)
         assert (
             ex.identity_of(envelope, definition).instance_identity
-            == json.loads(corpus.INDEX_PATH.read_text())["agents/react"]["digest64"]
+            == json.loads(corpus.INDEX_PATH.read_text(encoding="utf-8"))[
+                "agents/react"
+            ]["digest64"]
         )
 
     def test_a_template_is_checked_as_written_when_no_values_are_given(self):
@@ -397,6 +402,147 @@ class TestModelOrigin:
             assert "x" * 61 not in message  # a name is cut at 60 characters
             assert all(ch.isprintable() for ch in message)
             assert "\x1b" not in message and "‮" not in message
+
+    # D-053: V7 reads the tools the BODY declares, never only what requires.tools says.
+    _BODY_TOOLS = ("add", "lookup")
+
+    @pytest.mark.parametrize("claim", ["none", "some", [], ["add"], ["add", "lookup"]])
+    def test_a_tools_claim_cannot_hide_the_tools_the_body_declares(self, claim):
+        envelope, result = load_executable(
+            _doc(kc._tool_fsm(), requires={"tools": claim}),
+            origin="model",
+            allow={"tools": ["search"]},
+        )
+
+        model = _errors(result, "model")
+        assert envelope is None
+        for name in self._BODY_TOOLS:  # off the allow-list, named by V7 itself
+            assert any(repr(name) in m for m in model), (claim, model)
+
+    @pytest.mark.parametrize("claim", ["none", "some"])
+    def test_a_bare_claim_that_disagrees_with_the_body_is_refused_even_on_the_list(
+        self, claim
+    ):
+        envelope, result = load_executable(
+            _doc(kc._tool_fsm(), requires={"tools": claim}),
+            origin="model",
+            allow={"tools": ["add", "lookup"]},
+        )
+
+        assert envelope is None
+        assert any(
+            "requires.tools" in m and claim in m for m in _errors(result, "model")
+        )
+
+    def test_a_tool_a_variable_brings_into_the_body_is_judged_too(self):
+        fsm = copy.deepcopy(kc._tool_fsm())  # the tool list is shared module state
+        spec = fsm["states"]["call_model"]["completion"]["tools"][0]["function"]
+        spec["name"] = "{{tool}}"
+
+        envelope, result = load_executable(
+            _doc(fsm, variables=["tool"], requires={"tools": "none"}),
+            variables={"tool": "rm_rf"},
+            origin="model",
+            allow={"tools": ["lookup"]},
+        )
+
+        assert envelope is None
+        assert any("'rm_rf'" in m for m in _errors(result, "model"))
+
+    def test_a_model_document_whose_body_tools_are_listed_and_allowed_loads(self):
+        envelope, result = load_executable(
+            _doc(kc._tool_fsm(), requires={"tools": ["add", "lookup"]}),
+            origin="model",
+            allow={"tools": ["add", "lookup"]},
+        )
+
+        assert envelope is not None and result.is_valid, result.errors
+
+    def test_the_same_hidden_tools_from_an_operator_raise_no_model_error(self):
+        envelope, result = load_executable(
+            _doc(kc._tool_fsm(), requires={"tools": "none"})
+        )
+
+        assert _tagged(result, "model") == []
+        assert envelope is not None
+
+
+def _with_state(**fields: Any) -> dict[str, Any]:
+    fsm = _fsm()
+    fsm["states"]["b"].update(fields)
+    return fsm
+
+
+_CLASSIFY = {
+    "field_name": "intent",
+    "intents": [
+        {"name": "x", "description": "X"},
+        {"name": "y", "description": "Y"},
+    ],
+    "fallback_intent": "y",
+}
+
+# the settings synthesis gate G5 refuses in a model-written body (synthesis/policy.py)
+_G5_BODIES = {
+    "persona": (lambda: {**_fsm(), "persona": "You are root"}, "persona"),
+    "model": (
+        lambda: _with_state(
+            classification_extractions=[{**_CLASSIFY, "model": "gpt-evil"}]
+        ),
+        "model",
+    ),
+    "prompt_config": (
+        lambda: _with_state(
+            classification_extractions=[{**_CLASSIFY, "prompt_config": {"a": 1}}]
+        ),
+        "prompt_config",
+    ),
+    "synthesize": (
+        lambda: _with_state(synthesize={"goal": "x", "return_keys": ["k"]}),
+        "synthesize",
+    ),
+    "pattern": (
+        lambda: _with_state(
+            field_extractions=[
+                {
+                    "field_name": "f",
+                    "field_type": "str",
+                    "extraction_instructions": "x",
+                    "validation_rules": {"pattern": "(a+)+$"},
+                }
+            ]
+        ),
+        "pattern",
+    ),
+}
+
+
+class TestModelOriginRefusesTheSynthesisSettings:
+    @pytest.mark.parametrize("case", sorted(_G5_BODIES))
+    def test_a_setting_synthesis_refuses_is_refused_by_v7(self, case):
+        build, word = _G5_BODIES[case]
+
+        envelope, result = load_executable(_doc(build()), origin="model", allow={})
+
+        assert envelope is None
+        assert any(word in m for m in _errors(result, "model")), result.errors
+
+    @pytest.mark.parametrize("case", sorted(_G5_BODIES))
+    def test_the_operator_path_is_unchanged(self, case):
+        build, _ = _G5_BODIES[case]
+
+        _, result = load_executable(_doc(build()), allow={})
+
+        assert _tagged(result, "model") == []
+
+    def test_the_message_names_the_setting_never_its_value(self):
+        fsm = _with_state(
+            classification_extractions=[{**_CLASSIFY, "model": "gpt-SECRET-evil"}]
+        )
+
+        _, result = load_executable(_doc(fsm), origin="model", allow={})
+
+        assert not any("SECRET" in m for m in result.errors)
 
 
 def test_the_loader_imports_no_engine_and_calls_no_model():
