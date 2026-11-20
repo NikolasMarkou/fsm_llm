@@ -563,7 +563,6 @@ fsm_llm.has_workflows def()
 fsm_llm.load_env def(path: str | os.PathLike[str] | None = None, *, override: bool = False) -> Path | None
 fsm_llm.load_fsm_definition def(fsm_id_or_path: str) -> FSMDefinition
 fsm_llm.load_fsm_from_file def(path: str) -> FSMDefinition
-fsm_llm.quick_start def(path: str, model: str | None = None) -> API
 fsm_llm.setup_logging def(*, sink: str = 'stderr', format: str | None = None, level: str | None = None, log_dir: str = 'logs', rotation: str = '10 MB', retention: str = '1 month', compression: str = 'zip', context: bool = False) -> int
 fsm_llm.to_dot def(graph: FSMGraph) -> str
 fsm_llm.to_mermaid def(graph: FSMGraph) -> str
@@ -1203,7 +1202,6 @@ fsm_llm.agents.remember_interaction def(memory: MemoryBackend, task: str, answer
 fsm_llm.agents.save_artifact def(artifact: dict[str, Any], path: str | Path) -> Path
 fsm_llm.agents.save_working_memory def(memory: WorkingMemory, path: str) -> None
 fsm_llm.agents.tool def(fn: Callable[..., Any] | None = None, *, name: str | None = None, description: str | None = None, parameter_schema: dict[str, Any] | None = None, requires_approval: bool = False, annotations: ToolAnnotations | None = None, timeout_seconds: float | None = None) -> Any
-fsm_llm.agents.with_auto_memory def(tools: Any, config: AgentConfig | None = None, memory: MemoryBackend | None = None, **kwargs: Any) -> AutoMemoryReactAgent
 # fsm_llm.eval
 fsm_llm.eval.CaseReport class
   def __init__(self, run_dir: Path, model: str, trials: list[TrialResult], cases: list[dict[str, Any]], overall: dict[str, Any], wall_time: float, interrupted: bool = False) -> None
@@ -1607,24 +1605,6 @@ fsm_llm.reasoning.ReasoningType class(str, Enum)
   ReasoningType.CREATIVE = 'creative'
   ReasoningType.CRITICAL = 'critical'
   ReasoningType.HYBRID = 'hybrid'
-fsm_llm.reasoning.SolutionResult class(TimestampedModel)
-  field timestamp: datetime = factory
-  field solution: str required
-  field confidence: float = 0.0
-  field reasoning_summary: str required
-  field trace: ReasoningTrace required
-  field execution_time_seconds: float | None = None
-  field validation_result: ValidationResult | None = None
-  field alternative_solutions: list[str] = factory
-  field key_insights: list[str] = factory
-  field used_context_keys: set[str] = factory
-  property confidence_level
-  property has_alternatives
-  property is_high_confidence
-  property is_validated
-  property reasoning_depth
-  property solution_quality_summary
-  classmethod def validate_solution_not_empty(cls, v: str) -> str
 fsm_llm.reasoning.ValidationResult class(TimestampedModel)
   field timestamp: datetime = factory
   field is_valid: bool required

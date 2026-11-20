@@ -32,7 +32,6 @@ from .definitions import (
     ReasoningClassificationResult,
     ReasoningStep,
     ReasoningTrace,
-    SolutionResult,
     ValidationResult,
 )
 from .engine import ReasoningEngine
@@ -53,7 +52,6 @@ __all__ = [
     "ValidationResult",
     "ReasoningClassificationResult",
     "ProblemContext",
-    "SolutionResult",
     # Exceptions
     "ReasoningError",
     "ReasoningExecutionError",

@@ -59,7 +59,6 @@ from .auto_memory import (
     AutoMemoryReactAgent,
     augment_task_with_memories,
     remember_interaction,
-    with_auto_memory,
 )
 from .base import BaseAgent, accepts_tools
 from .composition import default_llm_judge, react_worker_factory
@@ -334,7 +333,6 @@ __all__ = [
     "AutoMemoryReactAgent",
     "augment_task_with_memories",
     "remember_interaction",
-    "with_auto_memory",
     # OKF knowledge bundles
     "OKFMemoryBackend",
     "create_okf_tools",

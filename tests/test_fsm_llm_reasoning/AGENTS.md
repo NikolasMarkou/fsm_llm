@@ -62,7 +62,6 @@ Model behaviour pinned in `test_definitions.py`:
 - `ReasoningTrace`: `reasoning_complexity` is `simple` (3 steps, 1 type), `moderate` (8, 2), `complex` (15, 3), `highly_complex` (25, 4); `average_step_time = execution_time_seconds / steps`, `None` when empty; computed fields passed as input (`total_steps`, `unique_states_visited`) are ignored; `reasoning_types_used` dumps as a sorted list (python and JSON mode) that `redacting_json_default` leaves intact.
 - `ReasoningClassificationResult`: `alternatives` de-duplicated in order.
 - `ProblemContext`: statement shorter than 3 chars or blank raises; `priority="urgent"` makes `is_high_priority` true; `context_size > 0`.
-- `SolutionResult`: blank `solution` raises; confidence 0.95 gives `VERY_HIGH`, `is_high_confidence`.
 
 ## Invariants and constraints
 

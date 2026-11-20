@@ -37,7 +37,7 @@ from typing import Any, Protocol
 from fsm_llm.logging import logger
 from fsm_llm.tools import tool
 
-from .definitions import AgentConfig, AgentResult
+from .definitions import AgentResult
 from .react import ReactAgent
 from .semantic_memory import SemanticMemoryStore
 
@@ -217,13 +217,3 @@ class AutoMemoryReactAgent(ReactAgent):
             self.memory.add(text)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(f"Auto-remember (on failure) failed: {e}")
-
-
-def with_auto_memory(
-    tools: Any,
-    config: AgentConfig | None = None,
-    memory: MemoryBackend | None = None,
-    **kwargs: Any,
-) -> AutoMemoryReactAgent:
-    """Convenience factory for an :class:`AutoMemoryReactAgent`."""
-    return AutoMemoryReactAgent(tools=tools, config=config, memory=memory, **kwargs)

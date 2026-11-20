@@ -486,19 +486,6 @@ def reset_handlers() -> None:
     _file_handler_initialized = False
 
 
-def register_stream_handler(
-    handler_id: int, sink: str, format: str, context: bool = False
-) -> None:
-    """Track a library-owned stream handler added outside ``setup_logging``.
-
-    ``reset_handlers`` will remove it, and a later ``setup_logging`` call with
-    the same ``(sink, format, context)`` returns ``-1`` instead of adding a
-    duplicate handler.
-    """
-    _library_handler_ids.append(handler_id)
-    _stream_handler_ids[_stream_key(sink, format, context)] = handler_id
-
-
 # --------------------------------------------------------------
 
 

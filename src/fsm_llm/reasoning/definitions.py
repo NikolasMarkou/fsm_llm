@@ -36,8 +36,7 @@ class ConfidenceLevel(str, Enum):
 
 def _confidence_level(confidence: float) -> ConfidenceLevel:
     """The category of a 0..1 confidence: >= 0.9 very high, >= 0.7 high,
-    >= 0.5 medium, else low (the one table of ``ReasoningStep`` and
-    ``SolutionResult``)."""
+    >= 0.5 medium, else low (the table of ``ReasoningStep``)."""
     if confidence >= 0.9:
         return ConfidenceLevel.VERY_HIGH
     if confidence >= 0.7:
@@ -482,109 +481,3 @@ class ProblemContext(TimestampedModel):
     def is_high_priority(self) -> bool:
         """Whether this is a high priority problem."""
         return self.priority in ["high", "urgent"]
-
-
-# ============================================================================
-# SOLUTION MODELS
-# ============================================================================
-
-
-class SolutionResult(TimestampedModel):
-    """
-    Comprehensive result of problem solving with detailed analytics.
-    """
-
-    solution: str = Field(
-        ..., min_length=1, description="The generated solution to the problem"
-    )
-
-    confidence: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Overall confidence in the solution quality",
-    )
-
-    reasoning_summary: str = Field(
-        ..., min_length=10, description="Summary of the reasoning process used"
-    )
-
-    trace: ReasoningTrace = Field(
-        ..., description="Complete trace of the reasoning process"
-    )
-
-    execution_time_seconds: float | None = Field(
-        default=None, ge=0.0, description="Total time taken to generate the solution"
-    )
-
-    validation_result: ValidationResult | None = Field(
-        default=None, description="Result of solution validation if performed"
-    )
-
-    alternative_solutions: list[str] = Field(
-        default_factory=list, description="Alternative solutions that were considered"
-    )
-
-    key_insights: list[str] = Field(
-        default_factory=list, description="Key insights discovered during reasoning"
-    )
-
-    used_context_keys: set[str] = Field(
-        default_factory=set, description="Context keys that were used in the solution"
-    )
-
-    @field_serializer("used_context_keys", when_used="json")
-    def _serialize_used_context_keys(self, value: set[str]) -> list[str]:
-        """Dump the used context keys as a sorted list (JSON only)."""
-        return sorted(value)
-
-    @field_validator("solution")
-    @classmethod
-    def validate_solution_not_empty(cls, v: str) -> str:
-        """Ensure solution is meaningful."""
-        cleaned = v.strip()
-        if not cleaned:
-            raise ValueError("Solution cannot be empty or only whitespace")
-        return cleaned
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def confidence_level(self) -> ConfidenceLevel:
-        """Categorical confidence level."""
-        return _confidence_level(self.confidence)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def is_high_confidence(self) -> bool:
-        """Whether this solution has high confidence."""
-        return self.confidence >= 0.8
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def reasoning_depth(self) -> int:
-        """Depth of reasoning measured by number of steps."""
-        return self.trace.total_steps
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def has_alternatives(self) -> bool:
-        """Whether alternative solutions were generated."""
-        return len(self.alternative_solutions) > 0
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def is_validated(self) -> bool:
-        """Whether the solution has been validated."""
-        return self.validation_result is not None
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def solution_quality_summary(self) -> str:
-        """Human-readable summary of solution quality."""
-        validated_text = " (validated)" if self.is_validated else ""
-        alt_text = (
-            f" with {len(self.alternative_solutions)} alternatives"
-            if self.has_alternatives
-            else ""
-        )
-        return f"{self.confidence_level.value} confidence solution{validated_text}{alt_text}"

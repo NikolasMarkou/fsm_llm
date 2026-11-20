@@ -338,8 +338,6 @@ __all__ = [
     "get_agents",
     # Framework info
     "get_version_info",
-    # Quick start
-    "quick_start",
     # Logging
     "setup_logging",
     # Debug helpers
@@ -458,25 +456,6 @@ def get_version_info():
             "agents": has_agents(),
         },
     }
-
-
-# --------------------------------------------------------------
-# Quick Start Helper
-# --------------------------------------------------------------
-
-
-def quick_start(path: str, model: str | None = None) -> API:
-    """
-    Quick start helper for new users.
-
-    Args:
-        path: Path to FSM definition file
-        model: LLM model to use
-
-    Returns:
-        Configured API instance ready to use
-    """
-    return API.from_file(path, model=model)
 
 
 # --------------------------------------------------------------

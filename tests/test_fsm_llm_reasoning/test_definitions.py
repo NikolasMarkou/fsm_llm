@@ -15,7 +15,6 @@ from fsm_llm.reasoning.definitions import (
     ReasoningStep,
     ReasoningStepType,
     ReasoningTrace,
-    SolutionResult,
     TimestampedModel,
     ValidationResult,
 )
@@ -238,32 +237,6 @@ class TestProblemContext:
         assert pc.is_high_priority is True
 
 
-class TestSolutionResult:
-    """Test SolutionResult model."""
-
-    def test_basic(self):
-        trace = ReasoningTrace(steps=[{"from": "a", "to": "b"}])
-        sr = SolutionResult(
-            solution="The answer is 42",
-            confidence=0.95,
-            reasoning_summary="Analytical reasoning applied",
-            trace=trace,
-        )
-        assert sr.confidence_level == ConfidenceLevel.VERY_HIGH
-        assert sr.is_high_confidence is True
-        assert sr.reasoning_depth == 1
-        assert sr.has_alternatives is False
-        assert sr.is_validated is False
-
-    def test_solution_not_empty(self):
-        with pytest.raises(ValueError):
-            SolutionResult(
-                solution="  ",
-                reasoning_summary="test summary here",
-                trace=ReasoningTrace(),
-            )
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
@@ -271,18 +244,12 @@ if __name__ == "__main__":
 _SORTED_KEYS = ["alpha", "beta", "gamma", "mid", "zeta"]
 _SET_PROBE = """
 import json
-from fsm_llm.reasoning.definitions import ReasoningStep, ReasoningTrace, SolutionResult
+from fsm_llm.reasoning.definitions import ReasoningStep
 keys = {"alpha", "mid", "beta", "zeta", "gamma"}
 step = ReasoningStep(step_type="analysis", content="a step", context_keys_used=keys)
-result = SolutionResult(
-    solution="an answer", reasoning_summary="a long enough summary",
-    trace=ReasoningTrace(), used_context_keys=keys,
-)
 print(json.dumps([
     json.loads(step.model_dump_json())["context_keys_used"],
-    json.loads(result.model_dump_json())["used_context_keys"],
     step.model_dump(mode="json")["context_keys_used"],
-    result.model_dump(mode="json")["used_context_keys"],
 ]))
 """
 
@@ -307,25 +274,14 @@ class TestSetFieldsSerializeSortedInJson:
             check=True,
         )
 
-        assert json.loads(done.stdout) == [_SORTED_KEYS] * 4
+        assert json.loads(done.stdout) == [_SORTED_KEYS] * 2
 
     def test_python_mode_keeps_the_set(self):
-        from fsm_llm.reasoning.definitions import (
-            ReasoningStep,
-            ReasoningTrace,
-            SolutionResult,
-        )
+        from fsm_llm.reasoning.definitions import ReasoningStep
 
         keys = {"b", "a"}
         step = ReasoningStep(
             step_type="analysis", content="a step", context_keys_used=keys
         )
-        result = SolutionResult(
-            solution="an answer",
-            reasoning_summary="a long enough summary",
-            trace=ReasoningTrace(),
-            used_context_keys=keys,
-        )
 
         assert step.model_dump()["context_keys_used"] == keys
-        assert result.model_dump()["used_context_keys"] == keys
