@@ -8,10 +8,18 @@ method bodies are unchanged. The helpers that took the class (``api: _ApiSurface
 
 from __future__ import annotations
 
+import inspect
 import time
-from collections.abc import Callable, Collection, Iterator
-from contextlib import contextmanager
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Collection,
+    Iterator,
+)
+from contextlib import aclosing, contextmanager
 
+from fsm_llm.aio import acall, acall_stream, iterate_sync, run_sync
 from fsm_llm.core.definitions import (
     AdvanceResult,
     FSMDefinition,
@@ -22,6 +30,17 @@ from fsm_llm.core.definitions import (
 from fsm_llm.engine.fsm.budget import _check_run_budgets
 
 from .surface import _ApiSurface
+
+#: ``before_step``: called with the number of the next step; an async hook may return an
+#: awaitable, which the run awaits (in sync mode it must not really suspend).
+_BeforeStep = Callable[[int], Awaitable[None] | None]
+
+
+async def _call_hook(before_step: _BeforeStep, step: int) -> None:
+    """Call ``before_step(step)`` and await what it returns when that is awaitable."""
+    result = before_step(step)
+    if inspect.isawaitable(result):
+        await result
 
 
 def _seconds_exempt_set(states: Collection[str]) -> frozenset[str]:
@@ -49,14 +68,14 @@ def _seconds_exempt_set(states: Collection[str]) -> frozenset[str]:
 # during a step, so the top of the stack is asked again every round. Do NOT
 # hold a lock or an open turn across the ``yield``: every step takes and
 # releases the conversation itself. See decisions.md D-027.
-def _run_rounds(
+async def _run_rounds(
     api: _ApiSurface,
     conversation_id: str,
     max_steps: int,
     max_seconds: float | None,
-    before_step: Callable[[int], None] | None,
+    before_step: _BeforeStep | None,
     seconds_exempt: frozenset[str] = frozenset(),
-) -> Iterator[int]:
+) -> AsyncGenerator[int, None]:
     """Yield 1, 2, ... once for each step a bounded run is allowed to take.
 
     Contract: the caller runs exactly one step of ``conversation_id`` per
@@ -110,7 +129,7 @@ def _run_rounds(
         # NOT add this loop in a subpackage (the reasoning engine's outer
         # pop-and-rerun loop is what D-013 replaced). See D-052.
         if api.has_conversation_ended(conversation_id):
-            if before_step is None or not _hook_popped_ended_frame(
+            if before_step is None or not await _hook_popped_ended_frame(
                 api, conversation_id, before_step, steps_done + 1
             ):
                 return
@@ -119,7 +138,7 @@ def _run_rounds(
         if steps_done >= max_steps:
             raise RunBudgetExceededError("steps", max_steps, steps_done)
         if before_step is not None:
-            before_step(steps_done + 1)
+            await _call_hook(before_step, steps_done + 1)
             if api.has_conversation_ended(conversation_id):
                 return
             check_seconds()
@@ -137,10 +156,10 @@ def _stack_depth(api: _ApiSurface, conversation_id: str) -> int:
         return len(api.conversation_stacks.get(conversation_id, ()))
 
 
-def _hook_popped_ended_frame(
+async def _hook_popped_ended_frame(
     api: _ApiSurface,
     conversation_id: str,
-    before_step: Callable[[int], None],
+    before_step: _BeforeStep,
     step: int,
 ) -> bool:
     """Offer an ended pushed frame to ``before_step``; True if the run goes on.
@@ -159,7 +178,7 @@ def _hook_popped_ended_frame(
     depth = _stack_depth(api, conversation_id)
     if depth <= 1:
         return False
-    before_step(step)
+    await _call_hook(before_step, step)
     if not api.has_conversation_ended(conversation_id):
         return True
     return _stack_depth(api, conversation_id) < depth
@@ -287,16 +306,40 @@ class RunMixin(_ApiSurface):
                 ``converse`` turn is, see ``advance``; earlier steps are
                 kept), or a turn is already running for the conversation.
         """
+        return run_sync(
+            self.arun_until_terminal(
+                conversation_id,
+                max_steps=max_steps,
+                max_seconds=max_seconds,
+                before_step=before_step,
+                seconds_exempt_states=seconds_exempt_states,
+            )
+        )
+
+    async def arun_until_terminal(
+        self,
+        conversation_id: str,
+        *,
+        max_steps: int,
+        max_seconds: float | None = None,
+        before_step: Callable[[int], Awaitable[None] | None] | None = None,
+        seconds_exempt_states: Collection[str] = (),
+    ) -> tuple[AdvanceResult, ...]:
+        """The async twin of ``run_until_terminal``: each step awaits ``aadvance``, and an
+        async ``before_step`` (one that returns an awaitable) is awaited."""
         _check_run_budgets(max_steps, max_seconds)
         exempt = self._checked_exempt_states(
             conversation_id, seconds_exempt_states, before_step
         )
         results: list[AdvanceResult] = []
-        for _ in _run_rounds(
-            self, conversation_id, max_steps, max_seconds, before_step, exempt
-        ):
-            with _closed_conversation_ends_run(self, conversation_id):
-                results.append(self.advance(conversation_id))
+        async with aclosing(
+            _run_rounds(
+                self, conversation_id, max_steps, max_seconds, before_step, exempt
+            )
+        ) as rounds:
+            async for _ in rounds:
+                with _closed_conversation_ends_run(self, conversation_id):
+                    results.append(await acall(self, "advance", conversation_id))
         return tuple(results)
 
     def run_until_terminal_stream(
@@ -347,6 +390,28 @@ class RunMixin(_ApiSurface):
         A conversation closed during the run ends the stream normally, as in
         ``run_until_terminal``.
         """
+        return iterate_sync(
+            self.arun_until_terminal_stream(
+                conversation_id,
+                max_steps=max_steps,
+                max_seconds=max_seconds,
+                before_step=before_step,
+                seconds_exempt_states=seconds_exempt_states,
+            )
+        )
+
+    def arun_until_terminal_stream(
+        self,
+        conversation_id: str,
+        *,
+        max_steps: int,
+        max_seconds: float | None = None,
+        before_step: Callable[[int], Awaitable[None] | None] | None = None,
+        seconds_exempt_states: Collection[str] = (),
+    ) -> AsyncGenerator[str, None]:
+        """The async twin of ``run_until_terminal_stream``: a plain function (arguments and
+        id are checked now) that returns a lazy async generator, each step an
+        ``aadvance_stream``."""
         _check_run_budgets(max_steps, max_seconds)
         # Existence check at call time, holding no lock afterwards. An ended
         # conversation (terminal, or already closed and remembered) is valid
@@ -357,12 +422,19 @@ class RunMixin(_ApiSurface):
 
         # Lazy nested closure, as in ``converse_stream`` (anchor
         # plan-2026-07-21T082818-4c63deac/D-002 there).
-        def _stream() -> Iterator[str]:
-            for _ in _run_rounds(
-                self, conversation_id, max_steps, max_seconds, before_step, exempt
-            ):
-                with _closed_conversation_ends_run(self, conversation_id):
-                    yield from self.advance_stream(conversation_id)
+        async def _stream() -> AsyncGenerator[str, None]:
+            async with aclosing(
+                _run_rounds(
+                    self, conversation_id, max_steps, max_seconds, before_step, exempt
+                )
+            ) as rounds:
+                async for _ in rounds:
+                    with _closed_conversation_ends_run(self, conversation_id):
+                        async with aclosing(
+                            acall_stream(self, "advance_stream", conversation_id)
+                        ) as chunks:
+                            async for chunk in chunks:
+                                yield chunk
 
         return _stream()
 
@@ -370,7 +442,7 @@ class RunMixin(_ApiSurface):
         self,
         conversation_id: str,
         seconds_exempt_states: Collection[str],
-        before_step: Callable[[int], None] | None,
+        before_step: _BeforeStep | None,
     ) -> frozenset[str]:
         """Validate a run's ``seconds_exempt_states`` at call time.
 

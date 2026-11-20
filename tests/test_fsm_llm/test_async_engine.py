@@ -15,6 +15,7 @@ import asyncio
 import gc
 import json
 import threading
+import time
 from collections.abc import Callable
 from contextlib import ExitStack
 from functools import partial
@@ -26,11 +27,16 @@ import pytest
 
 from fsm_llm import API, FileSessionStore
 from fsm_llm.aio import run_sync
-from fsm_llm.core.definitions import DataExtractionResponse, FSMError
+from fsm_llm.core.definitions import (
+    DataExtractionResponse,
+    FSMError,
+    RunBudgetExceededError,
+)
 from fsm_llm.engine.kinds import CompletionExecutor, ConversationExecutor, StateExecutor
 from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.runtime import EventLog
 from fsm_llm.testing import ScriptedLLM, final_reply
+from tests.conftest import bind_api_clock
 from tests.test_fsm_llm import kind_corpus as kc
 
 #: Context keys that differ between two runs of the same script (an id or a clock).
@@ -780,3 +786,147 @@ class TestStreams:
             {"system": "a"},
         ]
         assert await api.aconverse("again", cid) == "abc"
+
+
+# ----------------------------------------------------------------------------------------------
+# Step 3.3: the run loops (arun_until_terminal, arun_until_terminal_stream)
+# ----------------------------------------------------------------------------------------------
+
+_RUN = _fsm(
+    kc._state("a", response_instructions="A.", transitions=[kc._go("b")]),
+    kc._state("b", response_instructions="B.", transitions=[kc._go("c")]),
+    kc._state("c", response_instructions="C."),
+    initial="a",
+)
+_CHILD = _fsm(
+    kc._state("x", response_instructions="X.", transitions=[kc._go("y")]),
+    kc._state("y", response_instructions="Y."),
+    initial="x",
+)
+
+
+def _run_api(cls=_Suspending, **kwargs):
+    llm = cls(default_response="r", stream_chunks=["p", "q"])
+    api = API.from_definition(_RUN(), llm_interface=llm, **kwargs)
+    cid, _ = api.start_conversation(_conversation_id=_CID)
+    return api, llm, cid
+
+
+def _steps(results) -> list[tuple]:
+    return [(r.state_before, r.state_after, r.response, r.ended) for r in results]
+
+
+class _Ticking:
+    """The ``time`` binding of the API modules: ``monotonic`` moves when the double says so."""
+
+    now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+class _SlowReplies(_Suspending):
+    """Every reply costs ``seconds`` on a fake clock."""
+
+    def __init__(self, clock, seconds, **kwargs):
+        super().__init__(**kwargs)
+        self.clock, self.seconds = clock, seconds
+
+    def generate_response(self, request):
+        self.clock.now += self.seconds
+        return super().generate_response(request)
+
+
+class TestRunLoops:
+    async def test_the_async_run_answers_like_the_sync_run(self):
+        """Steps, replies, the final state and the request bytes of a multi-step run, with a
+        double whose calls suspend. Kills: a step that takes ``advance`` in async mode."""
+        want_api, want_llm, _ = _run_api(ScriptedLLM)
+        got_api, got_llm, _ = _run_api()
+        want = want_api.run_until_terminal(_CID, max_steps=9)
+        got = await got_api.arun_until_terminal(_CID, max_steps=9)
+        assert (
+            _steps(got)
+            == _steps(want)
+            == [
+                ("a", "b", "r", False),
+                ("b", "c", "r", True),
+            ]
+        )
+        assert _api_seen(got_api, got_llm, got) == _api_seen(want_api, want_llm, want)
+        assert (
+            got_llm.suspensions == len(got_llm.call_history) - 1
+        )  # all but the greeting
+
+    async def test_the_async_stream_run_yields_the_sync_chunks(self):
+        """Kills: a stream step that takes ``advance_stream`` in async mode, a lost round."""
+        want_api, _, _ = _run_api(ScriptedLLM)
+        got_api, _, _ = _run_api()
+        want = list(want_api.run_until_terminal_stream(_CID, max_steps=9))
+        got = await _collect(got_api.arun_until_terminal_stream(_CID, max_steps=9))
+        assert got == want == ["p", "q", "p", "q"]
+        assert got_api.get_current_state(_CID) == "c"
+
+    async def test_a_spent_step_budget_raises_after_the_steps_it_allowed(self):
+        """Absolute: one step ran and is kept, the next never started. Kills: a budget check
+        that moves after the step, a check that is skipped."""
+        api, _, _ = _run_api()
+        with pytest.raises(RunBudgetExceededError) as spent:
+            await api.arun_until_terminal(_CID, max_steps=1)
+        assert (spent.value.budget, spent.value.limit, spent.value.steps_done) == (
+            "steps",
+            1,
+            1,
+        )
+        assert api.get_current_state(_CID) == "b"
+        with pytest.raises(RunBudgetExceededError) as sync_spent:
+            _run_api()[0].run_until_terminal(_CID, max_steps=1)
+        assert str(spent.value) == str(sync_spent.value)
+
+    async def test_a_spent_seconds_budget_stops_before_the_next_step(self, monkeypatch):
+        """The injected clock moves 10 s per reply against a 5 s budget: step 1 runs, step 2
+        never starts. Kills: a seconds check that is skipped or run after the step."""
+        clock = _Ticking()
+        bind_api_clock(monkeypatch, clock)
+        api, _, _ = _run_api(lambda **kw: _SlowReplies(clock, 10.0, **kw))
+        clock.now = 1000.0  # the greeting's cost is before the run's own start
+        with pytest.raises(RunBudgetExceededError) as spent:
+            await api.arun_until_terminal(_CID, max_steps=9, max_seconds=5.0)
+        assert (spent.value.budget, spent.value.steps_done) == ("seconds", 1)
+        assert api.get_current_state(_CID) == "b"
+
+    async def test_an_async_before_step_is_awaited_and_may_push_and_pop(self):
+        """The hook returns a coroutine: the run awaits it (it pushes a child FSM before step 2
+        and pops the ended child when it is offered), and the path equals the run with a SYNC
+        hook. Kills: a hook result that is not awaited (no push: the path differs), a hook
+        that runs after the step."""
+
+        def hook_body(api, n):
+            if n == 2 and api.get_stack_depth(_CID) == 1:
+                api.push_fsm(_CID, _CHILD())
+            elif api.get_stack_depth(_CID) > 1 and api.has_conversation_ended(_CID):
+                api.pop_fsm(_CID)
+
+        want_api, _, _ = _run_api(ScriptedLLM)
+        want = want_api.run_until_terminal(
+            _CID, max_steps=9, before_step=lambda n: hook_body(want_api, n)
+        )
+        got_api, _, _ = _run_api()
+        offered: list[int] = []
+
+        async def hook(n):
+            await asyncio.sleep(0)  # a real suspension: the run must await it
+            offered.append(n)
+            hook_body(got_api, n)
+
+        got = await got_api.arun_until_terminal(_CID, max_steps=9, before_step=hook)
+        assert _steps(got) == _steps(want)
+        assert [r.state_before for r in got] == [
+            "a",
+            "x",
+            "b",
+        ]  # the child ran in between
+        assert offered and got_api.get_stack_depth(_CID) == 1
