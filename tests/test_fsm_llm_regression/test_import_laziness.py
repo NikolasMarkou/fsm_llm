@@ -1,33 +1,38 @@
 """`import fsm_llm` loads a pinned set of packages and no more.
 
-Plan d454fd62, step 96. The package is lazy on purpose: `fsm_llm/__init__.py` never imports a
-subpackage (they import `from fsm_llm import API`, and `monitor` would drag fastapi into a core
-install), and the layer packages above the core (`okf`, `skills`, `tools`, `policy`) and the
-shared kernel modules that only they use (`text`, `frontmatter`, `cli_support`) load when a
-caller imports them by name. The public API needs the core layers, so those load.
+Plan d454fd62, step 96; merged into one child process by plan ace7a8c8, step 3 (D-037). The
+package is lazy on purpose: `fsm_llm/__init__.py` never imports a subpackage (they import
+`from fsm_llm import API`, and `monitor` would drag fastapi into a core install), and the layer
+packages above the core (`okf`, `skills`, `tools`, `policy`) and the shared kernel modules that
+only they use (`text`, `frontmatter`, `cli_support`) load when a caller imports them by name.
+The public API needs the core layers, so those load.
 
 The allowed set is measured, not argued: `EAGER` is what `import fsm_llm` loads in a fresh
 `python -I` process (first-level names below `fsm_llm`). The test pins it exactly, so a new
-eager import, in either direction, is a visible diff of this file. A second test plants an eager
-import of a subpackage, of a layer package and of a kernel module in a scratch copy of the tree
-and checks the same probe catches each, so the pin is not vacuous.
+eager import, in either direction, is a visible diff of this file. That exact pin is also what
+catches a planted eager import of a subpackage, a layer package or a kernel module (an earlier
+form of this file proved it with a scratch copy of the tree per mutation; one child now serves
+every row).
 
-Each probe is a child process (`python -I`, model-server variables on a closed port, nothing
+`MUST_NOT_LOAD_AT_IMPORT` names deeper modules that must stay out of `sys.modules` after
+`import fsm_llm`: a module that a package would otherwise pull in by a re-export or a top-level
+import (the envelope and its loader, the run context, the executable registry). A row is added
+in the step that creates the module.
+
+The probe is one child process (`python -I`, model-server variables on a closed port, nothing
 inherited): a session that already holds a module cannot hide a leak, and no model or network
 is touched.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
-from tests.test_fsm_llm_regression.workflow_support import passthrough_env
 
 REPO = Path(__file__).resolve().parents[2]
 PKG = REPO / "src" / "fsm_llm"
@@ -79,27 +84,32 @@ ON_REQUEST = (
 )
 #: Third-party packages a core import must not pull in (the extras bring them).
 HEAVY_THIRD_PARTY = ("pytest", "fastapi", "uvicorn", "mcp", "opentelemetry")
+#: Dotted modules (a package name stands for itself and everything below it) that must not be
+#: in `sys.modules` after `import fsm_llm`, each with the reason. Empty at first: the steps that
+#: create the envelope, its loader, the run context and the executable registry add their row.
+MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {}
 
-# The child code: import the package from `root`, print the first-level names loaded.
+# The child code: import the package from `root`, print every loaded `fsm_llm` module and the
+# heavy third-party packages that came with it, as one JSON object.
 _PROBE = (
-    "import sys\n"
+    "import json, sys\n"
     "sys.path.insert(0, {root!r})\n"
     "import fsm_llm\n"
     "assert fsm_llm.__file__.startswith({root!r}), fsm_llm.__file__\n"
-    "names = sorted({{m.split('.')[1] for m in sys.modules if m.startswith('fsm_llm.')}})\n"
+    "mods = sorted(m for m in sys.modules if m == 'fsm_llm' or m.startswith('fsm_llm.'))\n"
     "heavy = [m for m in {heavy!r} if m in sys.modules]\n"
-    "print(','.join(names)); print(','.join(heavy))\n"
+    "print(json.dumps({{'modules': mods, 'heavy': heavy}}))\n"
 )
 
 
-def loaded_by_import(src_root: Path = REPO / "src") -> tuple[set[str], list[str]]:
-    """First-level `fsm_llm.<name>` modules and heavy third-party packages that
-    `import fsm_llm` loads from the tree whose `src` directory is *src_root*.
+def loaded_by_import(src_root: Path = REPO / "src") -> dict[str, list[str]]:
+    """What `import fsm_llm` loads from the tree whose `src` directory is *src_root*.
 
     Interface contract: *src_root* contains the `fsm_llm` package directory. Runs one
     `python -I` child (so no user site, no `PYTHONPATH`, no cwd on the path) with the model-server
     variables on a closed port and a 120 s timeout; raises `AssertionError` with the child's stderr
-    when the import fails. Returns `(names, heavy)`.
+    when the import fails. Returns `{"modules": [...], "heavy": [...]}`: every loaded dotted
+    `fsm_llm` module (sorted) and the heavy third-party packages that were loaded.
     """
     code = _PROBE.format(root=str(src_root), heavy=HEAVY_THIRD_PARTY)
     done = subprocess.run(
@@ -113,20 +123,34 @@ def loaded_by_import(src_root: Path = REPO / "src") -> tuple[set[str], list[str]
             "OLLAMA_API_BASE": "http://127.0.0.1:9",
             "OLLAMA_HOST": "http://127.0.0.1:9",
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
-            **passthrough_env(),  # Windows: `import asyncio` needs SYSTEMROOT
+            # Windows: `import asyncio` needs SYSTEMROOT
+            **(
+                {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
+                if "SYSTEMROOT" in os.environ
+                else {}
+            ),
         },
     )
     assert done.returncode == 0, done.stderr
-    names_line, heavy_line = [*done.stdout.strip().split("\n"), ""][:2]
-    return (
-        {n for n in names_line.split(",") if n},
-        [h for h in heavy_line.split(",") if h],
-    )
+    return json.loads(done.stdout)
+
+
+def first_level(modules: list[str]) -> set[str]:
+    """The first-level names below `fsm_llm` in a list of dotted module names."""
+    return {m.split(".")[1] for m in modules if m.startswith("fsm_llm.")}
+
+
+@pytest.fixture(scope="module")
+def loaded() -> dict[str, list[str]]:
+    """The one child process of this file."""
+    return loaded_by_import()
 
 
 class TestImportFsmLlmIsLazy:
-    def test_it_loads_exactly_the_pinned_set(self) -> None:
-        names, _ = loaded_by_import()
+    def test_it_loads_exactly_the_pinned_set(
+        self, loaded: dict[str, list[str]]
+    ) -> None:
+        names = first_level(loaded["modules"])
 
         assert names == EAGER, (
             f"unexpected eager imports: {sorted(names - EAGER)}; "
@@ -134,20 +158,32 @@ class TestImportFsmLlmIsLazy:
             "A new eager import is a layout decision: update EAGER with the reason."
         )
 
-    def test_no_subpackage_loads(self) -> None:
-        names, _ = loaded_by_import()
+    def test_no_subpackage_and_no_request_only_module_loads(
+        self, loaded: dict[str, list[str]]
+    ) -> None:
+        names = first_level(loaded["modules"])
 
         assert not names & set(SUBPACKAGES)
-
-    def test_no_request_only_layer_or_kernel_module_loads(self) -> None:
-        names, _ = loaded_by_import()
-
         assert not names & set(ON_REQUEST)
 
-    def test_no_extras_only_third_party_package_loads(self) -> None:
-        _, heavy = loaded_by_import()
+    def test_no_extras_only_third_party_package_loads(
+        self, loaded: dict[str, list[str]]
+    ) -> None:
+        assert loaded["heavy"] == []
 
-        assert heavy == []
+    def test_a_listed_module_stays_out(self, loaded: dict[str, list[str]]) -> None:
+        for name, reason in MUST_NOT_LOAD_AT_IMPORT.items():
+            leaked = [
+                m for m in loaded["modules"] if m == name or m.startswith(f"{name}.")
+            ]
+            assert leaked == [], f"{name} must not load at import ({reason}): {leaked}"
+
+    def test_the_listed_modules_are_real(self) -> None:
+        for name in MUST_NOT_LOAD_AT_IMPORT:
+            relative = Path(*name.split(".")[1:])
+            assert (PKG / relative).is_dir() or (PKG / relative).with_suffix(
+                ".py"
+            ).is_file(), name
 
     def test_the_pinned_names_are_real_and_the_lists_do_not_overlap(self) -> None:
         on_disk = {
@@ -175,46 +211,3 @@ class TestImportFsmLlmIsLazy:
         )
 
         assert unclassified == set(), unclassified
-
-
-@pytest.fixture(scope="module")
-def tree(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A scratch copy of the package (`<tmp>/src/fsm_llm`); the tests plant into it and restore."""
-    root = tmp_path_factory.mktemp("lazy") / "src"
-    shutil.copytree(
-        PKG, root / "fsm_llm", ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
-    )
-    return root
-
-
-class TestThePinCatchesAPlantedEagerImport:
-    """The same probe, run against a scratch copy of the package with one eager import
-    appended to `fsm_llm/__init__.py`, reports it: the pin is not vacuous."""
-
-    @pytest.mark.parametrize(
-        "planted",
-        [
-            "fsm_llm.agents",  # a subpackage
-            "fsm_llm.okf",  # a layer package above the core
-            "fsm_llm.text",  # a kernel module that loads on request
-        ],
-    )
-    def test_a_planted_eager_import_is_reported(self, tree: Path, planted: str) -> None:
-        init = tree / "fsm_llm" / "__init__.py"
-        original = init.read_text(encoding="utf-8")
-        try:
-            init.write_text(
-                original + f"\nimport {planted}  # planted by the test\n",
-                encoding="utf-8",
-            )
-            names, _ = loaded_by_import(tree)
-        finally:
-            init.write_text(original, encoding="utf-8")
-
-        assert planted.split(".")[1] in names
-        assert names != EAGER
-
-    def test_the_unplanted_copy_matches_the_pin(self, tree: Path) -> None:
-        names, _ = loaded_by_import(tree)
-
-        assert names == EAGER

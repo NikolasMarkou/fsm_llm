@@ -130,8 +130,8 @@ build_step_args() {
       src/fsm_llm/testing/*) ARGS+=(tests/test_fsm_llm_testing) ;;
       tests/fixtures/*) ;;
       tests/*/test_*.py|tests/test_*.py) [ -f "$f" ] && ARGS+=("$f") ;;
-      tests/test_fsm_llm/*) echo "note: $f is a helper of tests/test_fsm_llm/; name the files that use it with --tests" ;;
-      tests/*/*) d=${f#tests/}; ARGS+=("tests/${d%%/*}") ;;
+      tests/test_fsm_llm/*.py) echo "note: $f is a helper of tests/test_fsm_llm/; name the files that use it with --tests" ;;
+      tests/*/*.py) d=${f#tests/}; ARGS+=("tests/${d%%/*}") ;;
     esac
   done
 }
