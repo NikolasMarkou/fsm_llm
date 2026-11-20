@@ -20,6 +20,7 @@ import gc
 import json
 import sys
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -239,6 +240,57 @@ class TestBlockingAcquire:
         stop.set()
         worker.join(BOUND_SECONDS)
         assert not worker.is_alive() and not gate.locked()
+
+
+def _wait_queued(gate: TurnGate, count: int) -> None:
+    """Block (bounded) until ``count`` acquirers are queued on ``gate``."""
+    deadline = time.monotonic() + BOUND_SECONDS
+    while len(gate._queue) < count:
+        assert time.monotonic() < deadline, "the acquirer never queued"
+        time.sleep(0.001)
+
+
+class TestHandOver:
+    """The last release gives the gate to the oldest waiter directly. The ``RLock`` handed over
+    at C level, without the GIL; a gate that frees itself first lets the releasing thread retake
+    it before a woken reader can run, and a reader beside a writer that loops over turns got
+    about one read in ten (``test_core_hardening_seam`` read 100 of the 1000 it did before)."""
+
+    def test_the_last_release_hands_the_gate_to_the_oldest_waiter(self):
+        """Kills: a release that frees the gate (the releaser's own retry gets in, barging),
+        a LIFO or unordered wake (the order row)."""
+        gate = TurnGate()
+        assert gate.acquire()
+        go, done, order = threading.Event(), threading.Event(), []
+
+        def waiter(number: int) -> None:
+            assert gate.acquire(timeout=BOUND_SECONDS)
+            order.append(number)
+            assert go.wait(BOUND_SECONDS)
+            gate.release()
+            if number == 1:
+                done.set()
+
+        for number in (0, 1):
+            threading.Thread(target=waiter, args=(number,), daemon=True).start()
+            _wait_queued(gate, number + 1)
+        gate.release()
+        assert gate.acquire(blocking=False) is False  # the waiter owns it now
+        go.set()
+        assert done.wait(BOUND_SECONDS)
+        assert order == [0, 1]
+        assert _probe(gate) is True and not gate.locked()
+
+    def test_a_waiter_that_times_out_leaves_the_queue(self):
+        """Kills: a timed-out waiter that stays queued (the release then hands the gate to a
+        thread that is gone and nobody can take it)."""
+        gate = TurnGate()
+        assert gate.acquire()
+        assert _in_thread(gate.acquire, True, 0.05) is False
+        assert not gate._queue
+        gate.release()
+        assert not gate.locked()
+        assert _in_thread(_probe, gate) is True
 
 
 class TestRelease:

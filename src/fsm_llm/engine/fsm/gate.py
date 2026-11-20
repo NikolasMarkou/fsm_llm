@@ -15,7 +15,11 @@ Interface contract:
       it is not negative (False on expiry). A blocking second owner on the thread of an event loop
       whose holder is a task of that loop raises ``ConversationBusyError`` at once, whatever the
       timeout: the wait could never end, the loop is what would release it. There is no async
-      acquire and no queue of waiters: a turn that finds the gate held is refused by its caller.
+      acquire: a turn that finds the gate held is refused by its caller. Waiting threads are
+      served in arrival order and the LAST release hands the gate to the first of them directly
+      (it is never free in between), so the thread that just released cannot take it back
+      before a waiter ran: a lock released and retaken in a tight loop must not starve a reader
+      (the ``threading.RLock`` this replaces handed over at C level, without the GIL).
     - ``release(ticket=None) -> None``: one hold. With no ticket it is the hold of the current
       Context. With the ticket ``current_ticket()`` returned after the ``acquire`` it works from
       any Context and any thread, so a stream's ``finally`` may run in an asyncgen finalizer.
@@ -32,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from collections import deque
 from contextvars import ContextVar
 
 from fsm_llm.core.definitions import ConversationBusyError
@@ -47,6 +52,16 @@ class GateTicket:
     def __init__(self, loop_thread: int | None) -> None:
         self.depth = 1
         self.loop_thread = loop_thread
+
+
+class _Waiter:
+    """A blocked acquirer: the ticket ``release`` handed it (``None`` until then)."""
+
+    __slots__ = ("loop_thread", "ticket")
+
+    def __init__(self) -> None:
+        self.loop_thread = _running_loop_thread()
+        self.ticket: GateTicket | None = None
 
 
 #: The tickets this Context holds, newest last (only ever ``set`` to a new tuple).
@@ -71,38 +86,71 @@ class TurnGate:
         self._conversation_id = conversation_id  # only for the refusal message
         self._cond = threading.Condition(threading.Lock())  # a leaf mutex
         self._owner: GateTicket | None = None
+        self._queue: deque[_Waiter] = deque()  # blocked acquirers, oldest first
 
     def _mine(self) -> GateTicket | None:
         owner = self._owner
         return owner if owner is not None and owner in _HELD.get() else None
 
+    def _bind(self, ticket: GateTicket) -> None:
+        live = tuple(t for t in _HELD.get() if t.depth > 0)
+        _HELD.set((*live, ticket))
+
+    def _hand_over(self) -> None:
+        """The gate has no holder: give it to the oldest waiter, else leave it free."""
+        if not self._queue:
+            self._owner = None
+            return
+        waiter = self._queue.popleft()
+        self._owner = waiter.ticket = GateTicket(waiter.loop_thread)
+        self._cond.notify_all()
+
     def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
         deadline = None if timeout < 0 else time.monotonic() + timeout
         with self._cond:
-            while True:
-                mine = self._mine()
-                if mine is not None:
-                    mine.depth += 1
-                    return True
-                if self._owner is None:
-                    ticket = GateTicket(_running_loop_thread())
-                    self._owner = ticket
-                    live = tuple(t for t in _HELD.get() if t.depth > 0)
-                    _HELD.set((*live, ticket))
-                    return True
-                if not blocking:
-                    return False
-                if self._owner.loop_thread == threading.get_ident():
-                    raise ConversationBusyError(
-                        f"Conversation {self._conversation_id} is held by a turn of this "
-                        "event loop, so a blocking call on the loop thread would never "
-                        "return: call it from another thread or after the turn ends",
-                        conversation_id=self._conversation_id,
+            mine = self._mine()
+            if mine is not None:
+                mine.depth += 1
+                return True
+            if self._owner is None:
+                self._owner = ticket = GateTicket(_running_loop_thread())
+                self._bind(ticket)
+                return True
+            if not blocking:
+                return False
+            if self._owner.loop_thread == threading.get_ident():
+                raise ConversationBusyError(
+                    f"Conversation {self._conversation_id} is held by a turn of this "
+                    "event loop, so a blocking call on the loop thread would never "
+                    "return: call it from another thread or after the turn ends",
+                    conversation_id=self._conversation_id,
+                )
+            waiter = _Waiter()
+            self._queue.append(waiter)
+            try:
+                while waiter.ticket is None:
+                    remaining = (
+                        None if deadline is None else deadline - time.monotonic()
                     )
-                remaining = None if deadline is None else deadline - time.monotonic()
-                if remaining is not None and remaining <= 0:
-                    return False
-                self._cond.wait(remaining)
+                    if remaining is not None and remaining <= 0:
+                        break
+                    self._cond.wait(remaining)
+            except BaseException:
+                self._abandon(waiter)
+                raise
+            if waiter.ticket is None:
+                self._abandon(waiter)
+                return False
+            self._bind(waiter.ticket)
+            return True
+
+    def _abandon(self, waiter: _Waiter) -> None:
+        """A waiter stops waiting (timeout, interrupt): leave the queue, or, when a release
+        already handed it the gate, hand the gate on."""
+        if waiter.ticket is None:
+            self._queue.remove(waiter)
+        else:
+            self._hand_over()
 
     def release(self, ticket: GateTicket | None = None) -> None:
         with self._cond:
@@ -112,8 +160,7 @@ class TurnGate:
             held.depth -= 1
             if held.depth > 0:
                 return
-            self._owner = None
-            self._cond.notify_all()
+            self._hand_over()
         _HELD.set(tuple(t for t in _HELD.get() if t is not held))
 
     def locked(self) -> bool:
