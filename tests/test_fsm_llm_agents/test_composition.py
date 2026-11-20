@@ -16,6 +16,7 @@ from fsm_llm.agents import (
 from fsm_llm.agents.composition import _default_complete
 from fsm_llm.agents.definitions import AgentResult, AgentTrace, EvaluationResult
 from fsm_llm.agents.exceptions import EvaluationError
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import AgentError, LLMResponseError
 
 
@@ -43,7 +44,7 @@ class TestReactWorkerFactory:
             seen.append(task)
             return AgentResult(
                 answer=f"done:{task}",
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
@@ -68,7 +69,7 @@ class TestReactWorkerFactory:
         def fake_run(self, task, initial_context=None):
             return AgentResult(
                 answer="x",
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 

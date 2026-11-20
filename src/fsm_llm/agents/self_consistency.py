@@ -213,7 +213,6 @@ class SelfConsistencyAgent(BaseAgent):
         votes = sum(1 for s in samples if winner and _vote_key(s) == winner)
         return AgentResult(
             answer=aggregated,
-            success=answered,
             stop_reason=StopReason.ANSWERED if answered else StopReason.NO_RESULT,
             trace=trace,
             final_context={

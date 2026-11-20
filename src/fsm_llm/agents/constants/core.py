@@ -56,7 +56,7 @@ class ContextKeys(metaclass=MirroredConstants):
     # DECISION plan-2026-09-29T103145-06a5ec0a/D-027: public, NOT
     # internal-prefixed. Do NOT rename it to `_forced_stop_reason`:
     # `API.get_data` drops internal keys, so the result seam never saw it and a
-    # forced pass read as success=True. Only a `StopReason.FORCED` value counts
+    # forced pass read as success=True. Only a `FORCED_STOP_REASONS` value counts
     # and it can only lower `success`; caller context never supplies it
     # (`RUN_OUTPUT_KEYS`).
     FORCED_STOP_REASON = "forced_stop_reason"

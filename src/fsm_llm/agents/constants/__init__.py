@@ -55,7 +55,7 @@ from .meta import (
     MetaHandlerNames,
     MetaLogMessages,
 )
-from .outcomes import StopReason
+from .outcomes import FORCED_STOP_REASONS, StopReason
 from .states import (
     NATIVE_FC_HANDLER_ONLY_KEYS,
     ADaPTStates,
@@ -84,6 +84,7 @@ __all__ = [
     "Defaults",
     "ErrorMessages",
     "EvalOptStates",
+    "FORCED_STOP_REASONS",
     "FRAMEWORK_ONLY_KEYS",
     "HandlerNames",
     "HandlerPriorities",

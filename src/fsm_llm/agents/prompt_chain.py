@@ -199,7 +199,9 @@ class PromptChainAgent(BaseAgent):
                     logger.warning(
                         f"Gate failed at step '{prev_step.name}', terminating chain"
                     )
-                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.GATE_FAILED
+                    updates[ContextKeys.FORCED_STOP_REASON] = (
+                        StopReason.GATE_FAILED.value
+                    )
                     return updates
 
             if refresh is not None:

@@ -15,6 +15,7 @@ import pytest
 from fsm_llm.agents import PythonToolLoader, ToolRegistry
 from fsm_llm.agents.definitions import AgentResult, AgentTrace
 from fsm_llm.agents.swarm import SwarmAgent
+from fsm_llm.core.codes import Status
 from fsm_llm.memory import WorkingMemory
 from fsm_llm.tools import ToolCall
 
@@ -30,7 +31,7 @@ def _agent(
     agent.run = Mock(
         return_value=AgentResult(
             answer=answer,
-            success=True,
+            status=Status.OK,
             trace=AgentTrace(
                 total_iterations=iterations,
                 tool_calls=[ToolCall(tool_name="t", parameters={})] * calls,
@@ -97,7 +98,7 @@ class TestSwarmMemorySharing:
         agent.run = Mock(
             return_value=AgentResult(
                 answer="done",
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(total_iterations=1),
                 final_context={},
             )
@@ -122,7 +123,7 @@ class TestSwarmMemorySharing:
         agent.run = Mock(
             return_value=AgentResult(
                 answer="done",
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(total_iterations=1),
                 final_context={},
             )
@@ -149,7 +150,7 @@ class TestAgentGraphEdgeConditionSafety:
             agent.run = Mock(
                 return_value=AgentResult(
                     answer=answer,
-                    success=True,
+                    status=Status.OK,
                     trace=AgentTrace(total_iterations=1),
                     final_context={"result": answer},
                 )
@@ -197,7 +198,7 @@ class TestSwarmAgent:
         agent.run = Mock(
             return_value=AgentResult(
                 answer=answer,
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(total_iterations=1),
                 final_context=context or {},
             )
@@ -328,7 +329,7 @@ class TestSwarmAgent:
             time.sleep(0.05)
             return AgentResult(
                 answer="Handing off",
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(total_iterations=1),
                 final_context={"next_agent": "a"},
             )
@@ -354,7 +355,7 @@ class TestAgentGraph:
         agent.run = Mock(
             return_value=AgentResult(
                 answer=answer,
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(total_iterations=1),
                 final_context=context or {},
             )

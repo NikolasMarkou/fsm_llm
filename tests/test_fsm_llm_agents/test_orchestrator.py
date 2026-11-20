@@ -15,6 +15,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.definitions import AgentConfig, AgentResult
 from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
 from fsm_llm.agents.orchestrator import OrchestratorAgent
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
@@ -38,7 +39,7 @@ def _make_registry() -> ToolRegistry:
 
 
 def _dummy_worker(subtask: str) -> AgentResult:
-    return AgentResult(answer=f"Solved: {subtask}", success=True)
+    return AgentResult(answer=f"Solved: {subtask}", status=Status.OK)
 
 
 class TestOrchestratorCreation:
@@ -345,7 +346,7 @@ class TestAllCollectedTypedExtraction:
 
         def worker(subtask: str) -> AgentResult:
             workers.append(subtask)
-            return AgentResult(answer="w", success=True)
+            return AgentResult(answer="w", status=Status.OK)
 
         llm = _DecisionLLM(ContextKeys.ALL_COLLECTED, [False, True])
         agent = OrchestratorAgent(

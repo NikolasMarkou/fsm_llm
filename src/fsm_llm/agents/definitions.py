@@ -12,8 +12,10 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from fsm_llm.agents.constants import Defaults, MetaDefaults
+from fsm_llm.agents.constants import Defaults, MetaDefaults, StopReason
+from fsm_llm.core.codes import Reason, Status, status_of_stop_reason
 from fsm_llm.core.definitions import ModelNotConfiguredError
+from fsm_llm.core.results import RunResult
 from fsm_llm.llm import PLACEHOLDER_MODEL, interface_model, resolve_model
 from fsm_llm.tools.models import ToolCall
 
@@ -338,20 +340,93 @@ def config_with(base: AgentConfig, **updates: Any) -> AgentConfig:
     return type(base)(**{**fields, **updates})
 
 
+def _no_status() -> Status:
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-046: ``status`` has this
+    # raising default factory, so a result that gives neither ``status`` nor
+    # ``stop_reason`` is a ``ValueError`` and one that gives ``stop_reason``
+    # derives it first (the ``before`` validator). Do NOT make ``status``
+    # required: the pydantic mypy plugin then demands ``status=`` at every call
+    # site that derives it from ``stop_reason``. Do NOT give it a real default
+    # (``OK``, ``FAILED``): a result built with no outcome would pass as one.
+    # Do NOT put a ``success`` field back (``extra="forbid"`` refuses it).
+    # ``model_copy(update=)`` does not validate: set ``status``, ``reason`` and
+    # ``stop_reason`` together. See decisions.md D-046.
+    raise ValueError("AgentResult needs a status or a stop_reason: give one of them")
+
+
 class AgentResult(BaseModel):
-    """Result of an agent execution."""
+    """Result of an agent execution.
+
+    How the run ended is ``status`` (and ``reason``) from ``fsm_llm.core.codes``;
+    ``success`` is derived from it (``status is Status.OK``) and is not a field,
+    so ``AgentResult(success=...)`` is refused. Give ``stop_reason`` and the
+    status and reason follow from it (``status_of_stop_reason``), or give
+    ``status`` (an explicit ``status`` or ``reason`` wins); giving neither is a
+    ``ValueError``. ``run_result()`` projects the result onto the core
+    ``RunResult`` envelope.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     answer: str
-    success: bool
+    status: Status = Field(default_factory=lambda: _no_status())
+    """How the run ended; derived from ``stop_reason`` when omitted."""
+    reason: Reason | None = None
+    """Why the status is not ``ok``, when a reason is known."""
     trace: AgentTrace = Field(default_factory=AgentTrace)
     final_context: dict[str, Any] = Field(default_factory=dict)
     structured_output: Any = None
     """Validated Pydantic model instance when ``AgentConfig.output_schema`` is set."""
-    stop_reason: str | None = None
-    """Why the run ended, a ``constants.StopReason`` value (``None`` when the
-    result was built outside an agent pattern). ``success`` is True only for
-    ``answered`` and ``evidence``; a forced stop keeps its answer but reports
-    ``success=False``."""
+    stop_reason: StopReason | None = None
+    """Why the run ended, a ``constants.StopReason`` (``None`` when the result
+    was built outside an agent pattern). Success only for ``answered`` and
+    ``evidence``; a forced stop keeps its answer but is not ``ok``."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_status(cls, data: Any) -> Any:
+        """Fill ``status`` and ``reason`` from ``stop_reason`` when ``status`` is omitted."""
+        if not isinstance(data, dict) or data.get("status") is not None:
+            return data
+        stop_reason = data.get("stop_reason")
+        if stop_reason is None:
+            return data
+        status, reason = status_of_stop_reason(StopReason.from_string(stop_reason))
+        derived = {**data, "status": status}
+        if data.get("reason") is None:
+            derived["reason"] = reason
+        return derived
+
+    @property
+    def success(self) -> bool:
+        """True exactly when the run ended ``ok`` (derived from ``status``)."""
+        return self.status is Status.OK
+
+    def run_result(self) -> RunResult:
+        """This result as the core ``RunResult`` envelope.
+
+        ``status``, ``reason`` and ``answer`` carry over; ``outputs`` is
+        ``structured_output`` as a dict when it is a model or a mapping, else
+        ``{}``; ``detail`` holds ``stop_reason`` (the wire string or ``None``),
+        ``iterations_used`` and ``tools_used``; ``identity`` is empty.
+        """
+        outputs: dict[str, Any] = {}
+        structured = self.structured_output
+        if isinstance(structured, BaseModel):
+            outputs = structured.model_dump()
+        elif isinstance(structured, dict):
+            outputs = dict(structured)
+        return RunResult(
+            status=self.status,
+            reason=self.reason,
+            outputs=outputs,
+            answer=self.answer,
+            detail={
+                "stop_reason": self.stop_reason.value if self.stop_reason else None,
+                "iterations_used": self.iterations_used,
+                "tools_used": list(self.tools_used),
+            },
+        )
 
     @property
     def iterations_used(self) -> int:
@@ -564,7 +639,7 @@ class MetaBuilderResult(AgentResult):
 
     # Defaults for the two fields AgentResult requires
     answer: str = ""
-    success: bool = True
+    status: Status = Status.OK
 
     artifact_type: ArtifactType = ArtifactType.FSM
     artifact: dict[str, Any] = Field(default_factory=dict)

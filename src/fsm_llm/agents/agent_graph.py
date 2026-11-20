@@ -219,7 +219,6 @@ class AgentGraph:
                 logger.error(f"AgentGraph node '{node_name}' failed: {e}")
                 results[node_name] = AgentResult(
                     answer=f"Node '{node_name}' failed: {e}",
-                    success=False,
                     stop_reason=StopReason.NO_RESULT,
                     trace=AgentTrace(),
                     final_context=node_context,
@@ -234,7 +233,8 @@ class AgentGraph:
             if not result.success:
                 logger.warning(
                     f"AgentGraph node '{node_name}' did not succeed "
-                    f"({result.stop_reason}); its outgoing edges are not taken"
+                    f"({result.stop_reason.value if result.stop_reason else None}); "
+                    "its outgoing edges are not taken"
                 )
                 continue
 
@@ -266,7 +266,6 @@ class AgentGraph:
         if not results:
             return AgentResult(
                 answer="No agents executed",
-                success=False,
                 stop_reason=StopReason.NO_RESULT,
                 trace=AgentTrace(),
                 final_context=context,
@@ -301,13 +300,15 @@ class AgentGraph:
         # Success needs every executed node; the reason is the first failed
         # node's in execution order, else the answering node's.
         failed = [results[n] for n in execution_order if not results[n].success]
+        outcome = failed[0] if failed else last_result
         return AgentResult(
             answer=last_result.answer,
-            success=not failed,
+            status=outcome.status,
+            reason=outcome.reason,
             stop_reason=(
-                failed[0].stop_reason or StopReason.NO_RESULT
+                outcome.stop_reason or StopReason.NO_RESULT
                 if failed
-                else last_result.stop_reason
+                else outcome.stop_reason
             ),
             trace=combined_trace,
             final_context=final_context,

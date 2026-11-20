@@ -479,11 +479,11 @@ class NativeFCHandlers:
         }
         answer = context.get(_K.ANSWER)
         if how == NativeLoopEnd.EXHAUSTED:
-            delta[ContextKeys.FORCED_STOP_REASON] = StopReason.MAX_ITERATIONS
+            delta[ContextKeys.FORCED_STOP_REASON] = StopReason.MAX_ITERATIONS.value
         elif how != NativeLoopEnd.FINAL or not (
             isinstance(answer, str) and answer.strip()
         ):
-            delta[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT
+            delta[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT.value
         return delta
 
 

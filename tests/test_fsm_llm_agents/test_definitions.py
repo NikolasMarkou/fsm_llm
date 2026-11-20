@@ -6,6 +6,7 @@ import pytest
 
 from fsm_llm.agents.constants import Defaults
 from fsm_llm.agents.definitions import AgentConfig, AgentResult, AgentStep, AgentTrace
+from fsm_llm.core.codes import Status
 from fsm_llm.policy import ApprovalRequest
 from fsm_llm.tools import ToolCall, ToolDefinition, ToolResult
 
@@ -347,7 +348,7 @@ class TestAgentResult:
     """Tests for AgentResult model."""
 
     def test_basic_result(self):
-        result = AgentResult(answer="42", success=True)
+        result = AgentResult(answer="42", status=Status.OK)
         assert result.answer == "42"
         assert result.iterations_used == 0
         assert result.tools_used == []
@@ -357,7 +358,7 @@ class TestAgentResult:
             tool_calls=[ToolCall(tool_name="calc", parameters={})],
             total_iterations=3,
         )
-        result = AgentResult(answer="42", success=True, trace=trace)
+        result = AgentResult(answer="42", status=Status.OK, trace=trace)
         assert result.iterations_used == 3
         assert result.tools_used == ["calc"]
 

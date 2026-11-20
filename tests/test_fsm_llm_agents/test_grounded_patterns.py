@@ -20,10 +20,11 @@ from types import SimpleNamespace
 import pytest
 
 from fsm_llm import typed_field_extraction
-from fsm_llm.agents.constants import ContextKeys
+from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.agents.debate import DebateAgent
 from fsm_llm.agents.fsm_definitions import loop_field_context_keys
 from fsm_llm.agents.handlers import make_fresh_keys_handler
+from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionResponse,
@@ -752,9 +753,9 @@ class TestSuccessContract:
     def test_stop_reason_is_an_optional_serialisable_field(self):
         from fsm_llm.agents.definitions import AgentResult
 
-        legacy = AgentResult(answer="a", success=True)
+        legacy = AgentResult(answer="a", status=Status.OK)
         assert legacy.stop_reason is None
-        dumped = AgentResult(answer="a", success=False, stop_reason="stalled")
+        dumped = AgentResult(answer="a", stop_reason="stalled")
         assert '"stop_reason":"stalled"' in dumped.model_dump_json()
 
     def test_evalopt_forced_pass_at_max_refinements_reports_failure(self):
@@ -948,7 +949,6 @@ class TestSuccessContract:
             def run(self, task: str, initial_context: object = None) -> AgentResult:
                 return AgentResult(
                     answer=f"to {self.target}",
-                    success=True,
                     stop_reason="answered",
                     final_context={"next_agent": self.target},
                 )
@@ -972,9 +972,7 @@ class TestSuccessContract:
 
         class _Forced:
             def run(self, task: str, initial_context: object = None) -> AgentResult:
-                return AgentResult(
-                    answer="best effort", success=False, stop_reason="forced_pass"
-                )
+                return AgentResult(answer="best effort", stop_reason="forced_pass")
 
         client = TestClient(AgentServer(agent=_Forced()).app)  # type: ignore[arg-type]
         body = client.post("/invoke", json={"task": "t"}).json()
@@ -2227,7 +2225,7 @@ class TestOrchestratorWorkers:
 
         def worker(subtask: str) -> AgentResult:
             calls.append(subtask)
-            return AgentResult(answer=f"done {subtask}", success=True)
+            return AgentResult(answer=f"done {subtask}", status=Status.OK)
 
         warnings: list[str] = []
         from fsm_llm.logging import logger
@@ -2255,7 +2253,7 @@ class TestOrchestratorWorkers:
         from fsm_llm.agents import AgentResult
 
         def worker(subtask: str) -> AgentResult:
-            return AgentResult(answer=f"done {subtask}", success=True)
+            return AgentResult(answer=f"done {subtask}", status=Status.OK)
 
         agent = self._agent(worker, max_workers=1)
         agent.run("Plan the trip")
@@ -2281,7 +2279,7 @@ def _silent_orchestrator_run() -> tuple[object, PromptGroundedLLM]:
     from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent
 
     def worker(subtask: str) -> AgentResult:
-        return AgentResult(answer=f"done {subtask}", success=True)
+        return AgentResult(answer=f"done {subtask}", status=Status.OK)
 
     llm = _TurnAwareLLM(
         {
@@ -2476,7 +2474,7 @@ class TestForcedStopBeforeTheSpeakingState:
             },
         )
         agent = self._closing(OrchestratorAgent, stop_at)(
-            worker_factory=lambda t: AgentResult(answer=f"done {t}", success=True),
+            worker_factory=lambda t: AgentResult(answer=f"done {t}", status=Status.OK),
             config=AgentConfig(max_iterations=12),
             llm_interface=llm,
         )
@@ -2548,7 +2546,7 @@ def _no_trace_run_requests(pattern: str) -> tuple[PromptGroundedLLM, dict]:
             }
         )
         OrchestratorAgent(
-            worker_factory=lambda t: AgentResult(answer=f"done {t}", success=True),
+            worker_factory=lambda t: AgentResult(answer=f"done {t}", status=Status.OK),
             config=AgentConfig(max_iterations=8),
             llm_interface=llm,
         ).run("Plan the trip", initial_context=hint)
@@ -2723,7 +2721,6 @@ class _RecordingNode:
         self.calls.append((task, context))
         return AgentResult(
             answer=f"{self.name} answer",
-            success=True,
             stop_reason="answered",
             final_context={**context, f"from_{self.name}": True, **self.outputs},
         )
@@ -3104,7 +3101,11 @@ class _FailingNode(_RecordingNode):
     def run(self, task: str, initial_context: dict | None = None):
         result = super().run(task, initial_context)
         return result.model_copy(
-            update={"success": False, "stop_reason": "max_iterations"}
+            update={
+                "status": Status.ABORTED,
+                "reason": Reason.BUDGET_SPENT,
+                "stop_reason": StopReason.MAX_ITERATIONS,
+            }
         )
 
 

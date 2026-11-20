@@ -153,7 +153,7 @@ class ADaPTAgent(BaseAgent):
             # completion).
             subtask_results = self._subtask_entries(final_context)
             forced = self._forced_stop_reason(final_context)
-            stop_reason: str
+            stop_reason: StopReason
             if forced is not None:
                 # Same rule as every FSM pattern (D-011): a forced stop ships
                 # its answer with success=False.
@@ -193,7 +193,6 @@ class ADaPTAgent(BaseAgent):
 
             return AgentResult(
                 answer=answer,
-                success=success,
                 stop_reason=stop_reason,
                 trace=trace,
                 final_context=self._filter_context(final_context),

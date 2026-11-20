@@ -665,7 +665,10 @@ def export_agent_result(
             lines.append(f"... {len(calls) - _RUN_MAX_CALLS} more call(s) not listed")
         sections.append("## Tool calls\n\n" + "\n".join(lines) + "\n")
     subject = capped_line(task, 80) if task else capped_line(result.answer, 80)
-    stop = capped_line(result.stop_reason or "", 40) or "unknown"
+    stop = (
+        capped_line(result.stop_reason.value if result.stop_reason else "", 40)
+        or "unknown"
+    )
     concept = OKFConcept(
         id=f"runs/{now.strftime('%Y%m%dT%H%M%S')}-{secrets.token_hex(4)}",
         type="Agent Run",

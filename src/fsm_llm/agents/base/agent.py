@@ -233,7 +233,7 @@ class BaseAgent(HitlGateMixin, OutcomeMixin, RunsMixin, RegistrationMixin, ABC):
         execution_evidence_keys: list[str] | None = None,
         judged: bool = False,
         answer_cut_off: bool = False,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, StopReason]:
         """Compute ``(success, stop_reason)`` for a finished FSM run.
 
         Interface contract (callers: ``_standard_run``; ``ADaPTAgent.run``
@@ -277,7 +277,7 @@ class BaseAgent(HitlGateMixin, OutcomeMixin, RunsMixin, RegistrationMixin, ABC):
         # a non-empty answer, bf7ffe24/D-005) states its verdict through a
         # handler-recorded `no_result`, read HERE. Do NOT compute success in
         # the pattern, add a per-pattern keyword or put NO_RESULT in
-        # StopReason.FORCED (it is not a forced stop: no warning, no limiter
+        # FORCED_STOP_REASONS (it is not a forced stop: no warning, no limiter
         # reads it). The key is handler-only and a run output, so a model or
         # caller cannot write it. See decisions.md D-028.
         if final_context.get(ContextKeys.FORCED_STOP_REASON) == StopReason.NO_RESULT:

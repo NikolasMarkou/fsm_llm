@@ -183,7 +183,7 @@ class REWOOAgent(BaseAgent):
                 ContextKeys.EVIDENCE: {},
                 ContextKeys.EVIDENCE_STATUS: [],
                 ContextKeys.PLAN_CUT_OFF: True,
-                ContextKeys.FORCED_STOP_REASON: StopReason.TRUNCATED,
+                ContextKeys.FORCED_STOP_REASON: StopReason.TRUNCATED.value,
             }
         plan_blueprint = context.get(ContextKeys.PLAN_BLUEPRINT, [])
         if not isinstance(plan_blueprint, list):

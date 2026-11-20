@@ -14,6 +14,7 @@ from fsm_llm.agents import (
     tool,
 )
 from fsm_llm.agents.definitions import AgentResult, AgentTrace
+from fsm_llm.core.codes import Status
 
 
 def _fake_embed(text: str) -> list[float]:
@@ -90,7 +91,7 @@ class TestAutoMemoryReactAgent:
             captured["task"] = task
             return AgentResult(
                 answer="Python",
-                success=True,
+                status=Status.OK,
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
@@ -127,7 +128,7 @@ class TestAutoMemoryReactAgent:
         def fake_run(self, task, initial_context=None):
             return AgentResult(
                 answer="garbage",
-                success=False,
+                status=Status.FAILED,
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 

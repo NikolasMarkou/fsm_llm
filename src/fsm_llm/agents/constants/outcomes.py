@@ -7,12 +7,23 @@ and re-exported by ``fsm_llm.agents.constants``.
 
 from __future__ import annotations
 
+from enum import Enum
 
-class StopReason:
+from fsm_llm.core.codes import _parse
+
+__all__ = ["FORCED_STOP_REASONS", "StopReason"]
+
+
+class StopReason(str, Enum):
     """Why an agent run ended: the value of ``AgentResult.stop_reason``.
 
-    ``ANSWERED`` and ``EVIDENCE`` go with ``success=True``; every other
-    value goes with ``success=False``.
+    A ``str`` Enum with the wire strings as values: a member equals, hashes and
+    dumps as its string. ``ANSWERED`` and ``EVIDENCE`` derive status ``ok``
+    (``AgentResult.success``); every other value derives a status that is not
+    ``ok`` (``fsm_llm.core.codes.status_of_stop_reason``). Write ``.value``,
+    never ``str(member)`` or an f-string, into a message, a context dict or a
+    definition: the formatting of a member is ``StopReason.X`` on every
+    supported Python.
     """
 
     # Concluded with a real answer: an answer key or an executed tool call.
@@ -48,9 +59,22 @@ class StopReason:
     # Do NOT report it as success. See decisions.md D-025.
     TRUNCATED = "truncated"
 
-    # Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``
-    # (the prompt-chain gate handler records ``GATE_FAILED``; the run loop
-    # records ``ENDED`` and ``TRUNCATED``).
-    FORCED: frozenset[str] = frozenset(
-        {MAX_ITERATIONS, FORCED_PASS, STALLED, GATE_FAILED, ENDED, TRUNCATED}
-    )
+    @classmethod
+    def from_string(cls, value: StopReason | str) -> StopReason:
+        """The member for a member or an exact value; ``ValueError`` otherwise."""
+        return _parse(cls, value, "stop_reason")
+
+
+# Reasons a forcing handler may record in ``ContextKeys.FORCED_STOP_REASON``
+# (the prompt-chain gate handler records ``GATE_FAILED``; the run loop records
+# ``ENDED`` and ``TRUNCATED``).
+FORCED_STOP_REASONS: frozenset[StopReason] = frozenset(
+    {
+        StopReason.MAX_ITERATIONS,
+        StopReason.FORCED_PASS,
+        StopReason.STALLED,
+        StopReason.GATE_FAILED,
+        StopReason.ENDED,
+        StopReason.TRUNCATED,
+    }
+)

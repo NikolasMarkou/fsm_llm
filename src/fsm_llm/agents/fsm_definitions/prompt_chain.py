@@ -54,7 +54,7 @@ def build_prompt_chain_fsm(
                     f"Stop: the gate of {chain[i - 1].name} failed",
                     50,
                     "The previous step's gate failed",
-                    _is(ContextKeys.FORCED_STOP_REASON, StopReason.GATE_FAILED),
+                    _is(ContextKeys.FORCED_STOP_REASON, StopReason.GATE_FAILED.value),
                 )
             )
         transitions.append(

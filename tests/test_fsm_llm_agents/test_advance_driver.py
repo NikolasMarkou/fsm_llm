@@ -57,7 +57,12 @@ from fsm_llm.agents import (
 )
 from fsm_llm.agents import constants as agent_constants
 from fsm_llm.agents.base import BaseAgent
-from fsm_llm.agents.constants import RUN_OUTPUT_KEYS, ContextKeys, StopReason
+from fsm_llm.agents.constants import (
+    FORCED_STOP_REASONS,
+    RUN_OUTPUT_KEYS,
+    ContextKeys,
+    StopReason,
+)
 from fsm_llm.agents.definitions import AgentResult, EvaluationResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.agents.fsm_definitions import (
@@ -77,6 +82,7 @@ from fsm_llm.agents.fsm_definitions import (
 from fsm_llm.agents.fsm_definitions._loop import _await_approval_state
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.verified_react import _REFLECTION_NOTE
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import (
     AgentError,
     BulkExtractionRequest,
@@ -2340,7 +2346,7 @@ def _orchestrator_run() -> tuple:
 
     def worker(subtask: str) -> AgentResult:
         events.append(("worker", subtask))
-        return AgentResult(answer=f"done {subtask}", success=True)
+        return AgentResult(answer=f"done {subtask}", status=Status.OK)
 
     llm = _TurnAwareLLM(
         {
@@ -3430,7 +3436,7 @@ class TestRunEndedFromOutside:
 
         assert runs == ["capital of France"]  # step 2 ran the tool; step 3 never ran
         assert (result.success, result.stop_reason) == (False, StopReason.ENDED)
-        assert StopReason.ENDED in StopReason.FORCED
+        assert StopReason.ENDED in FORCED_STOP_REASONS
 
     def test_stream_ends_without_an_error(self):
         runs: list[str] = []

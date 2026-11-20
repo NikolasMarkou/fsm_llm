@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fsm_llm import API
+    from fsm_llm.agents.constants import StopReason
     from fsm_llm.agents.definitions import AgentConfig, AgentTrace
 
 
@@ -40,7 +41,7 @@ class _AgentSurface:
             execution_evidence_keys: list[str] | None = None,
             judged: bool = False,
             answer_cut_off: bool = False,
-        ) -> tuple[bool, str]: ...
+        ) -> tuple[bool, StopReason]: ...
 
         # HitlGateMixin (hitl_gate.py)
         @property

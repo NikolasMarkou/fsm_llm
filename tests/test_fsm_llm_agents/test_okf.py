@@ -46,6 +46,7 @@ from fsm_llm.constants import (
     OKF_READ_PAGE_CHARS,
     OKF_SUMMARY_MAX_ITEMS,
 )
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import OKFError
 from fsm_llm.logging import logger
 from fsm_llm.okf import (
@@ -508,7 +509,7 @@ class TestMemoryBackend:
 
         def fake_run(self: Any, task: str, initial_context: Any = None) -> AgentResult:
             seen["task"] = task
-            return AgentResult(answer="It is 7341 KB.", success=True)
+            return AgentResult(answer="It is 7341 KB.", status=Status.OK)
 
         monkeypatch.setattr(ReactAgent, "run", fake_run)
         warnings: list[str] = []
@@ -816,7 +817,6 @@ class TestExportSemanticMemory:
 def _result(**fields: Any) -> AgentResult:
     base: dict[str, Any] = {
         "answer": "Done \x1b[31mred\x1b[0m.",
-        "success": True,
         "trace": AgentTrace(
             tool_calls=[
                 ToolCall(
@@ -859,7 +859,7 @@ class TestExportAgentResult:
         assert not [i for i in check_bundle(bundle) if i.severity == "error"]
 
     def test_failed_run_is_a_draft_and_never_leaks_final_context(self, tmp_path: Path):
-        result = _result(success=False, stop_reason="max_iterations")
+        result = _result(stop_reason="max_iterations")
         path = export_agent_result(result, tmp_path / "kb")
         text = path.read_text(encoding="utf-8")
         assert "status: draft" in text
@@ -1138,7 +1138,7 @@ class TestBackendLabelAndClaimedTrust:
 
         def fake_run(self: Any, task: str, initial_context: Any = None) -> AgentResult:
             seen["task"] = task
-            return AgentResult(answer="ok", success=True)
+            return AgentResult(answer="ok", status=Status.OK)
 
         monkeypatch.setattr(ReactAgent, "run", fake_run)
         bundle = _zephyr_bundle()

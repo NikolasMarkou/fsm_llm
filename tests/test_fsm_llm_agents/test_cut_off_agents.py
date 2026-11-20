@@ -16,7 +16,12 @@ from typing import Any
 import pytest
 
 from fsm_llm.agents import ReactAgent, REWOOAgent
-from fsm_llm.agents.constants import ContextKeys, ErrorMessages, StopReason
+from fsm_llm.agents.constants import (
+    FORCED_STOP_REASONS,
+    ContextKeys,
+    ErrorMessages,
+    StopReason,
+)
 from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     FieldExtractionResponse,
@@ -184,7 +189,7 @@ class TestReactFinalReplyCut:
         assert result.stop_reason == StopReason.MAX_ITERATIONS
 
     def test_truncated_is_a_forced_reason_with_a_warning(self):
-        assert StopReason.TRUNCATED in StopReason.FORCED
+        assert StopReason.TRUNCATED in FORCED_STOP_REASONS
 
 
 class _CutPlanLLM(PromptGroundedLLM):

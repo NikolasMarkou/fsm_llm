@@ -166,14 +166,14 @@ class OutcomeMixin(_AgentSurface):
     @staticmethod
     def _forced_stop_reason(
         final_context: dict[str, Any], *, judged: bool = False
-    ) -> str | None:
+    ) -> StopReason | None:
         """The ``StopReason`` of a forced stop, or ``None`` if none was forced.
 
         Interface contract (callers: ``_run_outcome``, ``ADaPTAgent.run``):
         a run was forced when ``max_iterations_reached is True`` (limiter,
         stall) or a forcing handler recorded a reason under
         ``ContextKeys.FORCED_STOP_REASON`` (forced pass at a revision limit).
-        Returns that recorded reason when it is one of ``StopReason.FORCED``,
+        Returns that recorded reason when it is one of ``FORCED_STOP_REASONS``,
         else ``StopReason.MAX_ITERATIONS`` for a bare forced flag. With
         ``judged`` (EvalOpt, MakerChecker: a judge handler rules on every
         output that ships) only a recorded reason counts; the bare flag says

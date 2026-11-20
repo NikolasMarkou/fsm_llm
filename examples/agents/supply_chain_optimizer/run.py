@@ -25,6 +25,7 @@ from fsm_llm.agents import (
     AgentResult,
     OrchestratorAgent,
     ReactAgent,
+    StopReason,
     ToolRegistry,
     tool,
 )
@@ -296,7 +297,9 @@ def create_supply_chain_workers(model: str):
         try:
             return agent.run(subtask)
         except Exception as e:
-            return AgentResult(answer=f"Analysis inconclusive: {e}", success=False)
+            return AgentResult(
+                answer=f"Analysis inconclusive: {e}", stop_reason=StopReason.NO_RESULT
+            )
 
     return worker
 

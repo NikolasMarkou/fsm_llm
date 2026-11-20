@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from fsm_llm.agents.constants import (
+    FORCED_STOP_REASONS,
     AgentStates,
     ContextKeys,
     ReflexionStates,
@@ -40,16 +41,19 @@ def forced_stop_skip(context: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def recorded_forced_reason(context: Mapping[str, Any]) -> str | None:
-    """The ``StopReason.FORCED`` value a forcing handler recorded, else None.
+def recorded_forced_reason(context: Mapping[str, Any]) -> StopReason | None:
+    """The ``FORCED_STOP_REASONS`` member a forcing handler recorded, else None.
 
     Interface contract (callers: :func:`is_forced_verdict`,
     ``AgentHandlers.check_iteration_limit``, ``BaseAgent._forced_stop_reason``,
     the Debate limiter): reads ``forced_stop_reason`` and returns it only when
-    it is a string in ``StopReason.FORCED``. Never raises.
+    it is a string in ``FORCED_STOP_REASONS`` (returned as the member). Never
+    raises.
     """
     reason = context.get(ContextKeys.FORCED_STOP_REASON)
-    return reason if isinstance(reason, str) and reason in StopReason.FORCED else None
+    if isinstance(reason, str) and reason in FORCED_STOP_REASONS:
+        return StopReason(reason)
+    return None
 
 
 # The verdict a ReAct-family turn concludes on, per state it leaves.

@@ -238,7 +238,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
                 ContextKeys.REFINEMENT_FEEDBACK: eval_result.feedback,
                 ContextKeys.AGENT_TRACE: trace,
                 # The output ships, but the run reports success=False (D-011).
-                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
+                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS.value,
             }
 
         # Evaluation failed, provide feedback for refinement

@@ -277,7 +277,9 @@ class DebateAgent(BaseAgent):
             # judge did not reach itself is a forced pass (D-011), not success.
             if current_round >= num_rounds:
                 if context.get(ContextKeys.CONSENSUS_REACHED) is not True:
-                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
+                    updates[ContextKeys.FORCED_STOP_REASON] = (
+                        StopReason.FORCED_PASS.value
+                    )
                 updates[ContextKeys.CONSENSUS_REACHED] = True
 
             return updates
@@ -320,7 +322,7 @@ class DebateAgent(BaseAgent):
                 return update
             genuine = context.get(ContextKeys.CONSENSUS_REACHED) is True
             if not genuine and recorded_forced_reason(context) is None:
-                update[ContextKeys.FORCED_STOP_REASON] = StopReason.MAX_ITERATIONS
+                update[ContextKeys.FORCED_STOP_REASON] = StopReason.MAX_ITERATIONS.value
             return update
 
         return check_iteration_limit

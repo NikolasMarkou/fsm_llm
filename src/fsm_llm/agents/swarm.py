@@ -160,7 +160,6 @@ class SwarmAgent(BaseAgent):
                 logger.error(f"Agent '{current_agent_name}' failed: {e}")
                 return AgentResult(
                     answer=f"Swarm failed at agent '{current_agent_name}': {e}",
-                    success=False,
                     stop_reason=StopReason.NO_RESULT,
                     trace=AgentTrace(
                         tool_calls=all_tool_calls, total_iterations=iterations
@@ -259,7 +258,6 @@ class SwarmAgent(BaseAgent):
         if last_result is None:
             return AgentResult(
                 answer="Swarm produced no results",
-                success=False,
                 stop_reason=StopReason.NO_RESULT,
                 trace=AgentTrace(total_iterations=0),
                 final_context=context,
@@ -281,18 +279,23 @@ class SwarmAgent(BaseAgent):
 
         # A requested handoff the cap refused is a forced stop: the last
         # answer ships with success=False (D-011). A handoff to an unknown
-        # agent is no_result: the requested work never ran (D-051).
-        stop_reason: str | None
+        # agent is no_result: the requested work never ran (D-051). Otherwise
+        # the last agent's own outcome is forwarded, status included, so a
+        # result with no stop_reason keeps its status.
+        outcome: dict[str, Any]
         if capped:
-            success, stop_reason = False, StopReason.MAX_ITERATIONS
+            outcome = {"stop_reason": StopReason.MAX_ITERATIONS}
         elif unrouted:
-            success, stop_reason = False, StopReason.NO_RESULT
+            outcome = {"stop_reason": StopReason.NO_RESULT}
         else:
-            success, stop_reason = last_result.success, last_result.stop_reason
+            outcome = {
+                "status": last_result.status,
+                "reason": last_result.reason,
+                "stop_reason": last_result.stop_reason,
+            }
         return AgentResult(
             answer=last_result.answer,
-            success=success,
-            stop_reason=stop_reason,
+            **outcome,
             trace=combined_trace,
             final_context=final_context,
             structured_output=last_result.structured_output,

@@ -13,6 +13,8 @@ import uuid
 from typing import Any
 
 from fsm_llm.agents.constants import Defaults
+from fsm_llm.core.codes import Status
+from fsm_llm.core.results import RunResult
 from fsm_llm.logging import logger
 from fsm_llm.security import api_key_matches, checked_api_key, presented_api_key
 from fsm_llm.tools import ToolDefinition, ToolExecutionError, require_int_limit
@@ -391,21 +393,38 @@ class RemoteAgentTool:
         self._timeout = timeout
         self._api_key = checked_api_key(api_key)
 
+    def _run_result(self, data: Any) -> RunResult:
+        """The ``RunResult`` of an ``/invoke`` response body from a peer.
+
+        Interface contract: ``data`` is whatever the peer sent. Status comes
+        from the peer's ``success`` flag (``failed`` only for ``false``; a body
+        without it, or one that is not a mapping, counts as successful). The
+        peer's ``stop_reason`` is kept as the text it arrived as in
+        ``detail["stop_reason"]``, never parsed into ``StopReason``: a peer of
+        another version may send a value this one has never seen. Never raises.
+        """
+        if not isinstance(data, dict):
+            return RunResult(status=Status.OK, answer=str(data))
+        failed = data.get("success", True) is False
+        return RunResult(
+            status=Status.FAILED if failed else Status.OK,
+            answer=str(data.get("answer", data)),
+            detail={"stop_reason": data.get("stop_reason")},
+        )
+
     def _answer(self, data: Any) -> str:
         """The answer in an ``/invoke`` response body.
 
         Raises ``ToolExecutionError`` when the server reports
         ``success: false``; a body without ``success`` counts as successful.
         """
-        if not isinstance(data, dict):
-            return str(data)
-        answer = str(data.get("answer", data))
-        if data.get("success", True) is False:
+        run = self._run_result(data)
+        if not run.success:
             raise ToolExecutionError(
-                f"Remote agent '{self._name}' did not succeed: {answer}",
+                f"Remote agent '{self._name}' did not succeed: {run.answer}",
                 tool_name=self._name,
             )
-        return answer
+        return run.answer or ""
 
     def _post_args(self, task: str, context: dict[str, Any] | None) -> dict[str, Any]:
         """The ``post`` arguments shared by ``invoke`` and ``ainvoke``."""

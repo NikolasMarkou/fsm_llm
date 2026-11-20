@@ -19,6 +19,7 @@ from fsm_llm import (
     SessionState,
     WorkingMemory,
 )
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import (
     ResponseGenerationRequest,
     ResponseGenerationResponse,
@@ -208,7 +209,7 @@ class TestSchemaEnforcedOutput:
 
         class DummyAgent(BaseAgent):
             def run(self, task, initial_context=None):
-                return AgentResult(answer="done", success=True)
+                return AgentResult(answer="done", status=Status.OK)
 
             def _register_handlers(self, api):
                 pass

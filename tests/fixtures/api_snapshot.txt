@@ -831,12 +831,15 @@ fsm_llm.agents.AgentGraphBuilder class
   def set_entry(self, name: str) -> AgentGraphBuilder
 fsm_llm.agents.AgentResult class(BaseModel)
   field answer: str required
-  field success: bool required
+  field status: Status = factory
+  field reason: Reason | None = None
   field trace: AgentTrace = factory
   field final_context: dict[str, Any] = factory
   field structured_output: Any = None
-  field stop_reason: str | None = None
+  field stop_reason: StopReason | None = None
   property iterations_used
+  def run_result(self) -> RunResult
+  property success
   property tools_used
 fsm_llm.agents.AgentServer class
   def __init__(self, agent: Any, host: str = '127.0.0.1', port: int = 8500, name: str | None = None, timeout: float = 300.0, api_key: str | None = None, max_input_chars: int | None = 100000, max_concurrent: int = 8) -> None
@@ -1026,11 +1029,12 @@ fsm_llm.agents.MetaBuilderConfig class(AgentConfig)
 fsm_llm.agents.MetaBuilderError class(AgentError)
 fsm_llm.agents.MetaBuilderResult class(AgentResult)
   field answer: str = ''
-  field success: bool = True
+  field status: Status = Status.OK
+  field reason: Reason | None = None
   field trace: AgentTrace = factory
   field final_context: dict[str, Any] = factory
   field structured_output: Any = None
-  field stop_reason: str | None = None
+  field stop_reason: StopReason | None = None
   field artifact_type: ArtifactType = ArtifactType.FSM
   field artifact: dict[str, Any] = factory
   field artifact_json: str = ''
@@ -1150,7 +1154,17 @@ fsm_llm.agents.SemanticToolRegistry class(ToolRegistry)
   def register(self, tool: ToolDefinition) -> SemanticToolRegistry
   def retrieve(self, query: str, top_k: int | None = None) -> list[ToolDefinition]
   def to_prompt_description(self, query: str | None = None, top_k: int | None = None) -> str
-fsm_llm.agents.StopReason class
+fsm_llm.agents.StopReason class(str, Enum)
+  StopReason.ANSWERED = 'answered'
+  StopReason.EVIDENCE = 'evidence'
+  StopReason.MAX_ITERATIONS = 'max_iterations'
+  StopReason.FORCED_PASS = 'forced_pass'
+  StopReason.STALLED = 'stalled'
+  StopReason.VERIFICATION_FAILED = 'verification_failed'
+  StopReason.NO_RESULT = 'no_result'
+  StopReason.GATE_FAILED = 'gate_failed'
+  StopReason.ENDED = 'ended'
+  StopReason.TRUNCATED = 'truncated'
 fsm_llm.agents.SwarmAgent class(BaseAgent)
   def __init__(self, agents: dict[str, BaseAgent], entry_agent: str, max_handoffs: int = 10, memory: WorkingMemory | None = None, config: AgentConfig | None = None) -> None
   def add_agent(self, name: str, agent: BaseAgent) -> SwarmAgent

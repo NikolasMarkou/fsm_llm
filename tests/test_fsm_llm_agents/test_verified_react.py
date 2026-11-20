@@ -9,6 +9,7 @@ import pytest
 from fsm_llm.agents import AgentConfig, ToolRegistry, VerifiedReactAgent, tool
 from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.agents.definitions import AgentResult, AgentTrace
+from fsm_llm.core.codes import Status
 
 
 @tool
@@ -26,7 +27,7 @@ def _registry():
 def _result(answer, success=True):
     return AgentResult(
         answer=answer,
-        success=success,
+        status=Status.OK if success else Status.FAILED,
         trace=AgentTrace(tool_calls=[], total_iterations=1),
     )
 

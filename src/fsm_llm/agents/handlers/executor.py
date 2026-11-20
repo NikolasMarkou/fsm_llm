@@ -127,7 +127,7 @@ class AgentHandlers(ThinkTurnLimiter):
                     # termination here too — otherwise the guard would block
                     # conclude and the loop would run to the hard budget ceiling.
                     ContextKeys.MAX_ITERATIONS_REACHED: True,
-                    ContextKeys.FORCED_STOP_REASON: StopReason.STALLED,
+                    ContextKeys.FORCED_STOP_REASON: StopReason.STALLED.value,
                 }
 
             if not should_terminate or unknown:

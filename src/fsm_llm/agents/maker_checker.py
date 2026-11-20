@@ -328,5 +328,5 @@ class MakerCheckerAgent(BaseAgent):
             return {}
         return {
             ContextKeys.CHECKER_PASSED: True,
-            ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS,
+            ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS.value,
         }

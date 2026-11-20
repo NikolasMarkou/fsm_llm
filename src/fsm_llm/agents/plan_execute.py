@@ -350,7 +350,7 @@ class PlanExecuteAgent(BaseAgent):
                     "outcome: synthesizing the results so far"
                 )
                 updates[ContextKeys.ALL_STEPS_COMPLETE] = True
-                updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT
+                updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT.value
             elif step_failed:
                 if context.get(ContextKeys.REPLAN_COUNT, 0) >= max_replans:
                     logger.warning(
@@ -363,7 +363,7 @@ class PlanExecuteAgent(BaseAgent):
                     # plan short, so the run did not reach its goal. Do NOT
                     # leave it unrecorded (an earlier successful step reads as
                     # evidence and the run ships success=True).
-                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT
+                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.NO_RESULT.value
             else:
                 next_index = current_index + 1
                 updates[ContextKeys.CURRENT_STEP_INDEX] = next_index

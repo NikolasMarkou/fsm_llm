@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import json
+from enum import Enum
 from pathlib import Path
 from typing import ClassVar, get_args
 
@@ -35,7 +36,10 @@ _ENUMS = [Status, Reason, CompletionKind, Lifecycle, MessageSource]
 
 
 def _public_values(cls: type) -> dict[str, str]:
-    """The plain string attributes of a constants class (no dunders, no sets)."""
+    """The wire strings of a str enum (its members) or of a plain constants class
+    (its public string attributes, no dunders, no sets), name to value."""
+    if issubclass(cls, Enum):
+        return {member.name: member.value for member in cls}
     return {
         name: value
         for name, value in vars(cls).items()

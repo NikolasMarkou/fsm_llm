@@ -13,7 +13,7 @@ Run:
 
 import os
 
-from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent
+from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent, StopReason
 
 
 def simple_worker(subtask: str) -> AgentResult:
@@ -45,11 +45,11 @@ def simple_worker(subtask: str) -> AgentResult:
 
     for key, response in responses.items():
         if key in s:
-            return AgentResult(answer=response, success=True)
+            return AgentResult(answer=response, stop_reason=StopReason.ANSWERED)
 
     return AgentResult(
         answer=f"Researched: {subtask}. Found general information on the topic.",
-        success=True,
+        stop_reason=StopReason.ANSWERED,
     )
 
 

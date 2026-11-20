@@ -30,6 +30,7 @@ from fsm_llm.agents.native_fc import NativeFunctionCallingReactAgent
 from fsm_llm.agents.react import ReactAgent
 from fsm_llm.agents.self_consistency import SelfConsistencyAgent
 from fsm_llm.agents.swarm import SwarmAgent
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import (
     AgentError,
     CompletionResponse,
@@ -278,7 +279,7 @@ class TestAgentServerBoundary:
         class _Stub:
             def run(self, task: str, initial_context: Any = None) -> Any:
                 seen.append(initial_context)
-                return AgentResult(answer="ok", success=True)
+                return AgentResult(answer="ok", status=Status.OK)
 
         client = self._client(_Stub())
         body = {
@@ -1189,7 +1190,7 @@ class TestPatternRunOutputsUnforgeable:
             def run(self, task: str, initial_context: Any = None) -> AgentResult:
                 return AgentResult(
                     answer="handing off",
-                    success=True,
+                    status=Status.OK,
                     final_context={
                         "next_agent": "checker",
                         "handoff_context": {**_MC_FORGERY, "domain": "legal"},

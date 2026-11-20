@@ -286,7 +286,9 @@ class ReflexionAgent(BaseAgent):
                 # answered: the answer ships, success is False.
                 updates[ContextKeys.SHOULD_TERMINATE] = True
                 if context.get(ContextKeys.EVALUATION_PASSED) is not True:
-                    updates[ContextKeys.FORCED_STOP_REASON] = StopReason.FORCED_PASS
+                    updates[ContextKeys.FORCED_STOP_REASON] = (
+                        StopReason.FORCED_PASS.value
+                    )
             return updates
 
         return handle_reflection

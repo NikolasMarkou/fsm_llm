@@ -39,6 +39,7 @@ from typing import Any
 
 from fsm_llm import API
 from fsm_llm.agents.constants import ContextKeys, StopReason
+from fsm_llm.core.codes import status_of_stop_reason
 from fsm_llm.logging import logger
 from fsm_llm.tools import require_int_limit
 
@@ -116,9 +117,12 @@ class VerifiedReactAgent(ReactAgent):
             )
         assert result is not None
         # REACT-04: the last answer still ships, but it is not verified.
+        # ``model_copy`` does not validate, so the derived pair is set here.
+        status, reason = status_of_stop_reason(StopReason.VERIFICATION_FAILED)
         return result.model_copy(
             update={
-                "success": False,
+                "status": status,
+                "reason": reason,
                 "stop_reason": StopReason.VERIFICATION_FAILED,
             }
         )

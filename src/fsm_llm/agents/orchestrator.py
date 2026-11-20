@@ -42,7 +42,7 @@ class OrchestratorAgent(BaseAgent):
 
         def my_worker(subtask: str) -> AgentResult:
             # ... solve subtask ...
-            return AgentResult(answer="result", success=True)
+            return AgentResult(answer="result", stop_reason=StopReason.ANSWERED)
 
         agent = OrchestratorAgent(worker_factory=my_worker)
         result = agent.run("Analyze the pros and cons of remote work")

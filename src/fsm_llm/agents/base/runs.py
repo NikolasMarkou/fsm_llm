@@ -15,6 +15,7 @@ from typing import Any
 
 from fsm_llm import API
 from fsm_llm.agents.constants import (
+    FORCED_STOP_REASONS,
     RESULT_DROPPED_CONTEXT_KEYS,
     ContextKeys,
     Defaults,
@@ -97,7 +98,7 @@ class RunsMixin(_AgentSurface):
             if conv_id not in api.list_active_conversations() and not (
                 steps and steps[-1].ended
             ):
-                final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.ENDED
+                final_context[ContextKeys.FORCED_STOP_REASON] = StopReason.ENDED.value
             else:
                 # DECISION plan-2026-11-06T093029-0068b055/D-025 (answer source:
                 # D-027): the LAST turn's cut-off record rides out in
@@ -416,9 +417,9 @@ class RunsMixin(_AgentSurface):
                     final_context, extra_answer_keys
                 ),
             )
-            if stop_reason in StopReason.FORCED:
+            if stop_reason in FORCED_STOP_REASONS:
                 logger.warning(
-                    f"Agent '{agent_type}' was forced to stop ({stop_reason}); "
+                    f"Agent '{agent_type}' was forced to stop ({stop_reason.value}); "
                     f"shipping its last answer with success=False."
                 )
             elif not success:
@@ -434,7 +435,6 @@ class RunsMixin(_AgentSurface):
 
             return AgentResult(
                 answer=answer,
-                success=success,
                 trace=trace,
                 # DECISION plan-2026-09-24T091842-c1d5bfbc/D-012: the redo
                 # stash leaves the result here, not in _filter_context (shared

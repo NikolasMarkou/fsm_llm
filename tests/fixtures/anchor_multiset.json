@@ -729,6 +729,11 @@
       "delta": 1,
       "reason": "plan ace7a8c8 D-043: the engine half of 2cefeb61 D-051 moves to core/definitions/patch.py under a new anchor of its own; the scope half keeps D-051 in synthesis/patch.py",
       "token": "plan-2026-11-20T055240-ace7a8c8/D-043"
+    },
+    {
+      "delta": 1,
+      "reason": "plan ace7a8c8 D-046: new anchor on AgentResult status default factory (step 10, C4a)",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-046"
     }
   ]
 }

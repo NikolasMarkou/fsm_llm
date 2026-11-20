@@ -22,7 +22,7 @@ Run:
 
 import os
 
-from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent
+from fsm_llm.agents import AgentConfig, AgentResult, OrchestratorAgent, StopReason
 
 
 def market_researcher(subtask: str) -> AgentResult:
@@ -35,7 +35,7 @@ def market_researcher(subtask: str) -> AgentResult:
                 "growing at 25% CAGR. China leads with 60% of sales. Battery costs dropped "
                 "to $139/kWh. Key trend: solid-state batteries expected by 2027."
             ),
-            success=True,
+            stop_reason=StopReason.ANSWERED,
         )
     if any(kw in s for kw in ["competitor", "player", "company"]):
         return AgentResult(
@@ -44,9 +44,11 @@ def market_researcher(subtask: str) -> AgentResult:
                 "Volkswagen Group (8%), Hyundai-Kia (7%), GM (5%). "
                 "New entrants: Rivian, Lucid, Chinese brands NIO and XPeng expanding globally."
             ),
-            success=True,
+            stop_reason=StopReason.ANSWERED,
         )
-    return AgentResult(answer=f"Market research on: {subtask[:100]}", success=True)
+    return AgentResult(
+        answer=f"Market research on: {subtask[:100]}", stop_reason=StopReason.ANSWERED
+    )
 
 
 def tech_researcher(subtask: str) -> AgentResult:
@@ -60,7 +62,7 @@ def tech_researcher(subtask: str) -> AgentResult:
                 "Autonomous driving: Level 3 available, Level 4 in testing. "
                 "V2G (vehicle-to-grid) becoming a revenue opportunity."
             ),
-            success=True,
+            stop_reason=StopReason.ANSWERED,
         )
     if any(kw in s for kw in ["infrastructure", "charging"]):
         return AgentResult(
@@ -69,9 +71,12 @@ def tech_researcher(subtask: str) -> AgentResult:
                 "Gap: rural areas underserved. Ultra-fast (350kW+) only 5% of network. "
                 "Home charging dominates at 80% of daily charging events."
             ),
-            success=True,
+            stop_reason=StopReason.ANSWERED,
         )
-    return AgentResult(answer=f"Technical research on: {subtask[:100]}", success=True)
+    return AgentResult(
+        answer=f"Technical research on: {subtask[:100]}",
+        stop_reason=StopReason.ANSWERED,
+    )
 
 
 def swot_analyst(subtask: str) -> AgentResult:
@@ -88,7 +93,7 @@ def swot_analyst(subtask: str) -> AgentResult:
             "THREATS: Raw material supply constraints (lithium, cobalt), "
             "grid capacity limits, hydrogen fuel cell competition, policy changes."
         ),
-        success=True,
+        stop_reason=StopReason.ANSWERED,
     )
 
 
@@ -103,7 +108,7 @@ def recommendation_writer(subtask: str) -> AgentResult:
             "4. DEVELOP V2G capabilities as differentiator\n"
             "5. PARTNER with Chinese manufacturers for cost-competitive models"
         ),
-        success=True,
+        stop_reason=StopReason.ANSWERED,
     )
 
 
@@ -167,7 +172,9 @@ def main():
         ):
             return strategy_lead.run(subtask)
         else:
-            return AgentResult(answer=f"Delegated: {subtask[:100]}", success=True)
+            return AgentResult(
+                answer=f"Delegated: {subtask[:100]}", stop_reason=StopReason.ANSWERED
+            )
 
     top_config = AgentConfig(model=model, max_iterations=15, temperature=0.7)
     top_orchestrator = OrchestratorAgent(

@@ -10,6 +10,7 @@ import pytest
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.definitions import AgentConfig, AgentResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.tools import ToolRegistry
 
@@ -21,7 +22,7 @@ class ConcreteAgent(BaseAgent):
         super().__init__(config, **api_kwargs)
 
     def run(self, task, initial_context=None):
-        return AgentResult(answer=f"Answer: {task}", success=True)
+        return AgentResult(answer=f"Answer: {task}", status=Status.OK)
 
     def _register_handlers(self, api):
         pass
@@ -41,7 +42,7 @@ class TestBaseAgentCallable:
             def run(self, task, initial_context=None):
                 ctx = initial_context or {}
                 return AgentResult(
-                    answer=f"{task} [{ctx.get('mode', 'default')}]", success=True
+                    answer=f"{task} [{ctx.get('mode', 'default')}]", status=Status.OK
                 )
 
             def _register_handlers(self, api):
@@ -205,7 +206,7 @@ class TestBaseAgentContextFiltering:
         """
         result = AgentResult(
             answer="done",
-            success=True,
+            status=Status.OK,
             final_context=BaseAgent._filter_context(
                 {
                     "order_id": "A-1",

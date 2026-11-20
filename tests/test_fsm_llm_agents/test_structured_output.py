@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from fsm_llm.agents import PromptChainAgent
 from fsm_llm.agents.base import BaseAgent
 from fsm_llm.agents.definitions import AgentConfig, AgentResult, ChainStep
+from fsm_llm.core.codes import Status
 from fsm_llm.testing import PromptGroundedLLM
 from tests.test_fsm_llm_agents.support import _Out
 
@@ -37,7 +38,7 @@ class ConcreteAgent(BaseAgent):
         structured = self._try_parse_structured_output(answer)
         return AgentResult(
             answer=answer,
-            success=True,
+            status=Status.OK,
             structured_output=structured,
         )
 
@@ -143,12 +144,12 @@ class TestAgentResultStructuredOutput:
     """Tests for structured_output on AgentResult."""
 
     def test_default_none(self):
-        result = AgentResult(answer="test", success=True)
+        result = AgentResult(answer="test", status=Status.OK)
         assert result.structured_output is None
 
     def test_set_structured_output(self):
         report = SimpleReport(title="T", summary="S", score=0.5)
-        result = AgentResult(answer="test", success=True, structured_output=report)
+        result = AgentResult(answer="test", status=Status.OK, structured_output=report)
         assert result.structured_output is report
 
 

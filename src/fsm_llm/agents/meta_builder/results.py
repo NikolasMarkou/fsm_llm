@@ -13,6 +13,7 @@ from fsm_llm.agents.constants import MetaBuildOutcome
 from fsm_llm.agents.definitions import ArtifactType, MetaBuilderResult
 from fsm_llm.agents.exceptions import MetaBuilderError
 from fsm_llm.agents.meta_output import format_artifact_json
+from fsm_llm.core.codes import Status
 
 from .names import _K, _S, _TYPE_VALUES
 from .surface import _MetaBuilderSurface
@@ -102,7 +103,7 @@ class ResultsMixin(_MetaBuilderSurface):
         if not isinstance(artifact, dict):
             return MetaBuilderResult(
                 answer="Build was not completed",
-                success=False,
+                status=Status.FAILED,
                 artifact_type=artifact_type,
                 artifact={},
                 artifact_json="{}",
@@ -116,7 +117,7 @@ class ResultsMixin(_MetaBuilderSurface):
         artifact_json = format_artifact_json(artifact)
         return MetaBuilderResult(
             answer=artifact_json,
-            success=valid,
+            status=Status.OK if valid else Status.FAILED,
             artifact_type=artifact_type,
             artifact=artifact,
             artifact_json=artifact_json,
