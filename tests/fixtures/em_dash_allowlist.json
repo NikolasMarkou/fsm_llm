@@ -156,7 +156,6 @@
  "src/fsm_llm/reasoning/reasoning_modes/hybrid.py": 1,
  "src/fsm_llm/runner.py": 1,
  "src/fsm_llm/tools/models.py": 5,
- "src/fsm_llm/tools/registry.py": 1,
  "src/fsm_llm/tools/truncation.py": 2,
  "src/fsm_llm/workflows/__init__.py": 1,
  "src/fsm_llm/workflows/__version__.py": 1,
