@@ -54,7 +54,7 @@ def _token_count(value: Any) -> int:
 def usage_counts(response: Any) -> tuple[int, int, int] | None:
     """(prompt, completion, total) tokens of a provider reply; ``None`` if absent.
 
-    Read defensively (the rules of ``scripts/agents_bench.py``'s reader):
+    Read defensively (the rules of the deleted agents bench reader):
     ``usage`` may be a dict or an object, may be missing (streamed replies
     carry none), and its fields may be missing or not ints. A missing
     ``total_tokens`` is the sum of the other two.

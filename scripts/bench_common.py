@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Shared stdlib helpers of the pre-registered live benches (no CLI).
+"""Shared stdlib helpers of the pre-registered live bench (no CLI).
 
-``scripts/agents_bench.py`` and ``scripts/skills_bench.py`` load this module
-and reuse its statistics (``wilson_ci``, ``fisher_exact_two_sided``), jsonl
-row files, manifest comparison and drift checks, wire capture and digests.
-They keep no copy: this file is the one source (plan 65baa765, D-002), and
-``tests/test_fsm_llm_eval/test_bench_parity.py`` holds its seven mirrored
-helpers equal to their ``fsm_llm.eval`` twins.
+``scripts/synthesis_bench.py`` loads this module and reuses its statistics
+(``wilson_ci``, ``fisher_exact_two_sided``), jsonl row files, manifest
+comparison and drift checks and wire capture. It keeps no copy: this file is the
+one source (plan 65baa765, D-002). The agents and skills benches that shared it
+were deleted (plan ace7a8c8, D-039).
 
 Import hygiene: the top level imports the standard library only; anything
 else (``fsm_llm.llm.providers.litellm``, ``fsm_llm.tools``) is imported LAZILY inside the
@@ -17,10 +16,8 @@ socket-disabled subprocess import in the tests.
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import math
-import re
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -32,19 +29,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 MODEL_TAG = "qwen3.5:4b"
 
-#: The six fields a manifest MUST carry for two blocks to be comparable.
-_FIELDS = "prompt_bytes_sha256 tool_surface fixture_hash model_digest arm git_commit"
-MANIFEST_FIELDS = tuple(_FIELDS.split())
-
 #: How a pair prints a field one manifest does not carry.
 NOT_RECORDED = "not recorded"
-#: The date line a prompt-mode system prompt carries (core prompts.py); a
-#: wire digest masks it so a digest does not move overnight or with TZ.
-_DATE_LINE_RE = re.compile(r"Today's date: \d{4}-\d{2}-\d{2}")
-_DATE_MASK = "Today's date: <DATE>"
-#: Stands in for the task text in a digested user turn (``tasks_sha256`` /
-#: ``fixture_hash`` pin the task text itself).
-_TASK_MASK = "<TASK>"
 
 
 class BenchDataError(RuntimeError):
@@ -140,8 +126,7 @@ class WireCaptured(Exception):
 def captured_wire() -> Iterator[list[dict[str, Any]]]:
     """Capture every request at core's one send binding; send nothing.
 
-    Interface contract (callers: ``request_disclosure`` in agents_bench;
-    the tests):
+    Interface contract (callers: synthesis_bench):
         - Replaces ``fsm_llm.llm.providers.litellm.completion`` (the binding every
           ``LiteLLMInterface`` request goes through, ``_send``) for the
           duration of the block with a stub that appends a deep copy of the
@@ -174,22 +159,6 @@ def captured_wire() -> Iterator[list[dict[str, Any]]]:
         core_llm.completion = original
 
 
-def sha256_json(obj: Any) -> str:
-    """sha256 of ``json.dumps(obj)`` with key order kept, never sorted: a
-    schema whose keys were reordered is a different digest."""
-    return hashlib.sha256(json.dumps(obj).encode("utf-8")).hexdigest()
-
-
-def _masked(content: Any, task_text: str | None) -> Any:
-    """``content`` with the date line and the task text masked (str only)."""
-    if not isinstance(content, str):
-        return content
-    text = _DATE_LINE_RE.sub(_DATE_MASK, content)
-    if task_text:
-        text = text.replace(task_text, _TASK_MASK)
-    return text
-
-
 def wire_settings(call_params: dict[str, Any]) -> dict[str, Any]:
     """Every request kwarg except ``messages`` and ``tools``, secrets redacted.
 
@@ -210,40 +179,6 @@ def wire_settings(call_params: dict[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def wire_digest(call_params: dict[str, Any], task_text: str | None) -> dict[str, Any]:
-    """Digests of one captured request, comparable across days and TZs.
-
-    Interface contract (callers: ``request_disclosure`` in agents_bench):
-        - ``system_sha256``: the system message contents in order;
-          ``user_sha256``: every other message (role and content), with the
-          ``Today's date:`` line and ``task_text`` masked, so the Ollama
-          ``/nothink`` prefix, a schema echo or the neutral turn still count;
-          ``tools_sha256``: the ``tools`` kwarg bytes (key order kept), or
-          ``None``; ``settings_sha256``: ``wire_settings`` (values included).
-        - Never raises on a strange message shape (non-dict entries are
-          digested as given).
-    """
-    messages = call_params.get("messages") or []
-    system: list[Any] = []
-    others: list[Any] = []
-    for message in messages:
-        if not isinstance(message, dict):
-            others.append(message)
-            continue
-        content = _masked(message.get("content"), task_text)
-        if message.get("role") == "system":
-            system.append(content)
-        else:
-            others.append({**message, "content": content})
-    tools = call_params.get("tools")
-    return {
-        "system_sha256": sha256_json(system),
-        "user_sha256": sha256_json(others),
-        "tools_sha256": None if tools is None else sha256_json(tools),
-        "settings_sha256": sha256_json(wire_settings(call_params)),
-    }
-
-
 def _leaf_text(value: Any) -> str:
     """A leaf as JSON, type-exact (``1`` vs ``true``, ``120`` vs ``120.0``),
     key order kept (as every digest here keeps it)."""
@@ -258,7 +193,7 @@ def manifest_differences(
 ) -> list[str]:
     """One ``"key: A vs B"`` line per manifest leaf that differs, A first.
 
-    Interface contract (callers: ``report`` pairs in agents_bench; the tests):
+    Interface contract (callers: ``pinned_drift``):
         - Walks the union of both manifests' keys in sorted order, recursing
           into keys whose values are dicts on both sides (dotted paths, e.g.
           ``model_digest.digest``); every other differing value is one line
@@ -288,8 +223,7 @@ def pinned_drift(
 ) -> list[str]:
     """The pinned keys a registered manifest no longer matches at ``run``.
 
-    Interface contract (callers: ``_checked_manifest`` in agents_bench, the
-    run gate of skills_bench; the tests):
+    Interface contract (callers: the run gate of synthesis_bench):
         - ``recorded`` is the manifest read back from disk, ``current`` the
           one ``build_manifest`` returns now. ``current`` is normalised the
           way ``_write_json`` stores a manifest (keys sorted at every level)
@@ -300,8 +234,7 @@ def pinned_drift(
           ``"model_digest"`` when the served digest moved. ``[]`` = no drift.
           A key ``current`` lacks is compared as ``None``. Never raises.
     """
-    # DECISION plan-2026-10-01T093600-944e2692/D-049: one drift check for
-    # agents_bench and skills_bench, against the stored (sort_keys) form. Do NOT compare the
+    # DECISION plan-2026-10-01T093600-944e2692/D-049: one drift check, against the stored (sort_keys) form. Do NOT compare the
     # in-memory manifest as built (list items of dicts then drift on key
     # order) and do NOT let `run` overwrite a registered manifest instead of
     # checking it (the committed pre-registration would vanish). See D-049.

@@ -1,7 +1,7 @@
 # test_fsm_llm_eval
 
 Path: `tests/test_fsm_llm_eval`
-Purpose: Offline pytest suite for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fsm_llm.eval.__main__`), plus parity with `scripts/bench_common.py`.
+Purpose: Offline pytest suite for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fsm_llm.eval.__main__`).
 
 ## Scope
 
@@ -10,7 +10,7 @@ Covers `fsm_llm.eval`: `config`, `records`, `stats`, `scoring`, `examples`, `cas
 - `examples` mode: run each `examples/<category>/<name>/run.py` (and `run_manual.py`) as a subprocess, score 0 (CRASH) to 4 (PASS) with `classify_result`, write `results.json`, `scorecard.md`, and per-example logs.
 - `run` mode (cases): replay JSON/JSONL conversation cases N trials each against an FSM, check expectations, write `rows.jsonl`, `results.json`, `summary.md` with Wilson intervals.
 
-No test calls a real LLM or network. Not covered here: the rest of `fsm_llm` core, `scripts/bench_common.py` beyond the mirrored helpers.
+No test calls a real LLM or network. Not covered here: the rest of `fsm_llm` core, `scripts/bench_common.py`.
 
 ## Architecture
 

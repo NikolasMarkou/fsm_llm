@@ -3,8 +3,7 @@ Binomial statistics for evaluation results (stdlib only, no scipy).
 
 ``wilson_ci`` and ``fisher_exact_two_sided`` were moved verbatim from
 ``scripts/bench_common.py``, which keeps its own stdlib copies so it stays
-offline (D-008 of plan 581c2634); the bench scripts are frozen, so the copies no
-longer move.
+offline (D-008 of plan 581c2634).
 """
 
 from __future__ import annotations
