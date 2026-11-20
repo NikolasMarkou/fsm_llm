@@ -173,6 +173,7 @@ include-package-data = false
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed"]
 "fsm_llm.monitor" = ["static/**/*", "templates/*"]
+"fsm_llm.core.definitions" = ["schemas/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -13,11 +13,11 @@ import json
 import os
 import stat
 import tempfile
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.definitions.limits import nests_deeper_than
 from fsm_llm.core.definitions.schema import (
     SCHEMA_VERSION_DEFAULT,
     SCHEMA_VERSION_OLDEST,
@@ -61,28 +61,6 @@ def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     if repeated:
         raise ValueError(f"duplicate key(s) {sorted(repeated)}")
     return dict(pairs)
-
-
-def _nests_deeper_than(value: Any, limit: int) -> bool:
-    """True when a container of `value` sits deeper than `limit` (the root is 1).
-
-    Iterative (an explicit stack): a recursive walk would hit the very limit it
-    guards against. `value` is what `json.load` returned: dicts, lists, scalars.
-    """
-    stack = [(value, 1)]
-    while stack:
-        node, level = stack.pop()
-        children: Iterable[Any]
-        if isinstance(node, dict):
-            children = node.values()
-        elif isinstance(node, list):
-            children = node
-        else:
-            continue
-        if level > limit:
-            return True
-        stack.extend((child, level + 1) for child in children)
-    return False
 
 
 def upgrade_fsm_file(path: str) -> UpgradeResult:
@@ -156,7 +134,7 @@ def upgrade_fsm_file(path: str) -> UpgradeResult:
         )
     if parsed >= current:
         return UpgradeResult(rewritten=False)  # nothing to do, not a failure
-    if _nests_deeper_than(data, _MAX_NESTING_DEPTH):
+    if nests_deeper_than(data, _MAX_NESTING_DEPTH):
         return _refuse(path, f"it is nested more than {_MAX_NESTING_DEPTH} levels deep")
     data["version"] = SCHEMA_VERSION_DEFAULT
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"

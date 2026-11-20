@@ -9,7 +9,9 @@ reasoning FSM and keeps the full FSMs; each has a text fixture under
 hash goldens (``sort_keys=True``) cannot see state order. ``index.json`` holds
 ``sha256`` (the golden recipe), ``fsm_id`` and ``digest64`` per case. Excluded:
 ``SemanticToolRegistry`` retrieval (an embedding model, not reproducible).
-Regenerate with ``python -m tests.executables_corpus --write`` and review the diff.
+``wrap(case)`` puts a case in its executable envelope (plan ace7a8c8, C7); ``--write`` also
+writes the shipped JSON Schema of the envelope. Regenerate with
+``python -m tests.executables_corpus --write`` and review the diff.
 """
 
 from __future__ import annotations
@@ -296,11 +298,60 @@ def index_text() -> str:
     return json.dumps(index(), indent=2, sort_keys=True, ensure_ascii=True) + "\n"
 
 
+def wrap(case: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The envelope document of a full-FSM case, as a plain dict.
+
+    ``raw`` is the case's FSM dict when the caller already built it (``fsm_cases()``
+    builds all of them); omitted, it is built here.
+
+    ``agents/*`` are ``fsm`` documents (the ``pattern`` kind arrives with E4.2); a
+    ``reasoning/*`` case with an entry in ``STRATEGIES`` is a ``strategy`` document
+    carrying its aliases, results and solution key. The header comes from the case:
+    ``id`` is the case name, ``name`` and ``description`` those of the FSM,
+    ``requires.tools`` the tool names its completion states declare, ``capabilities``
+    ``tools`` (some tool is declared), ``hitl`` (a state names an approval) and
+    ``strategy``; ``lifecycle`` is ``builtin``; the contract is empty.
+    """
+    from fsm_llm.core.state_kinds import declared_tool_names
+    from fsm_llm.reasoning.constants import STRATEGIES
+
+    raw = fsm_cases()[case] if raw is None else raw
+    tools = sorted(declared_tool_names(FSMDefinition(**raw).states.values()))
+    reasoning = case.startswith("reasoning/")
+    spec = STRATEGIES.get(case.removeprefix("reasoning/")) if reasoning else None
+    capabilities = (
+        (["tools"] if tools else [])
+        + (["hitl"] if any("approval" in sid for sid in raw["states"]) else [])
+        + (["strategy"] if spec else [])
+    )
+    body: dict[str, Any] = {"fsm": raw}
+    if spec:
+        body["strategy"] = {
+            "aliases": list(spec.aliases),
+            "results": dict(spec.results),
+            "solution_key": spec.solution_key,
+        }
+    return {
+        "schema": "fsm-llm/executable",
+        "kind": "strategy" if spec else "fsm",
+        "id": case,
+        "name": raw["name"],
+        "description": raw["description"],
+        "requires": {"tools": tools},
+        "capabilities": capabilities,
+        "lifecycle": "builtin",
+        "body": body,
+    }
+
+
 def write_all() -> None:
-    """Regenerate every fixture and the index; delete a fixture no case owns."""
+    """Regenerate every fixture, the index and the shipped schema; delete a fixture no case owns."""
+    from fsm_llm.core.definitions.executable import SCHEMA_PATH, schema_text
+
     cases = fsm_cases()
     files = {fixture_path(case): render(d) for case, d in cases.items()}
     files[INDEX_PATH] = index_text()
+    files[SCHEMA_PATH] = schema_text()
     for path, text in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as handle:

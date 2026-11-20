@@ -89,6 +89,10 @@ HEAVY_THIRD_PARTY = ("pytest", "fastapi", "uvicorn", "mcp", "opentelemetry")
 #: create the envelope, its loader, the run context and the executable registry add their row.
 MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
     "fsm_llm.core.results": "the result envelope (C13) loads when a runner or a caller imports it",
+    "fsm_llm.core.definitions.executable": (
+        "the executable envelope loads when a loader imports it; "
+        "`core/definitions/__init__.py` does not re-export it"
+    ),
 }
 
 # The child code: import the package from `root`, print every loaded `fsm_llm` module and the

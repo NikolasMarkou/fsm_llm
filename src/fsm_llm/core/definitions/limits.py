@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from typing import Any
 
 # The single source of truth for every identifier-shaped field in this module:
 # `State.id`, `Transition.target_state`, `TransitionOption.target_state` and
@@ -37,3 +39,25 @@ CONVERSATION_SUMMARY_MAX_CHARS = 2000
 DEFAULT_SYNTHESIS_RESULT_KEY = "synthesis_result"
 SYNTHESIZE_GOAL_MAX_LENGTH = 2000
 SYNTHESIZE_KEY_MAX_LENGTH = 100
+
+
+def nests_deeper_than(value: Any, limit: int) -> bool:
+    """True when a container of `value` sits deeper than `limit` (the root is 1).
+
+    Iterative (an explicit stack): a recursive walk would hit the very limit it
+    guards against. `value` is what `json.load` returned: dicts, lists, scalars.
+    """
+    stack = [(value, 1)]
+    while stack:
+        node, level = stack.pop()
+        children: Iterable[Any]
+        if isinstance(node, dict):
+            children = node.values()
+        elif isinstance(node, list):
+            children = node
+        else:
+            continue
+        if level > limit:
+            return True
+        stack.extend((child, level + 1) for child in children)
+    return False

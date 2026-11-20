@@ -765,7 +765,118 @@ fsm_llm.okf.writes_within_caps def(concept: OKFConcept) -> bool
 # fsm_llm.engine.okf_bridge
 fsm_llm.engine.okf_bridge.bundle_from_memory_entries def(entries: Iterable[Any], *, generated_by: str | None = None, now: datetime | str | None = None) -> OKFBundle
 fsm_llm.engine.okf_bridge.create_okf_handler def(bundle: OKFBundle, *, context_key: str = 'okf_concepts', timing: HandlerTiming = HandlerTiming.PRE_PROCESSING, states: Iterable[str] = (), query_key: str | None = None, max_items: int = 20, include_deprecated: bool = False, name: str = 'OKFContext') -> BaseHandler
+# fsm_llm.core.definitions.executable
+fsm_llm.core.definitions.executable.Capability class(str, Enum)
+  Capability.TOOLS = 'tools'
+  Capability.HITL = 'hitl'
+  Capability.STREAMING = 'streaming'
+  Capability.STRATEGY = 'strategy'
+  Capability.CONVERSATIONAL = 'conversational'
+fsm_llm.core.definitions.executable.Contract class(BaseModel)
+  field inputs: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field outputs: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field handler_only_keys: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field input_templates: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])], Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=2000)])]] = factory
+fsm_llm.core.definitions.executable.ENVELOPE_FIELD_VERSIONS dict
+fsm_llm.core.definitions.executable.ENVELOPE_SCHEMA_VERSION_DEFAULT = '1.0'
+fsm_llm.core.definitions.executable.ENVELOPE_SCHEMA_VERSION_OLDEST = '1.0'
+fsm_llm.core.definitions.executable.ExecutableDocument alias Annotated[FsmEnvelope | StrategyEnvelope | ProcedureEnvelope, FieldInfo(annotation=NoneType, required=True, discriminator='kind')]
+fsm_llm.core.definitions.executable.ExecutableDocumentError class(ExecutableError, ValueError)
+  def __init__(self, message: str, *, problems: Sequence[str] = (), details: dict[str, Any] | None = None)
+fsm_llm.core.definitions.executable.ExecutableEnvelope class(BaseModel)
+  field schema_: Literal['fsm-llm/executable'] required
+  field schema_version: str = '1.0'
+  field kind: str required
+  field id: str required
+  field version: str = '1'
+  field name: str = ''
+  field description: str = ''
+  field contract: Contract = factory
+  field requires: Requires = factory
+  field capabilities: list[Capability] = factory
+  field lifecycle: Lifecycle = Lifecycle.DRAFT
+  field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
+  field body: FsmBody required
+  field metadata: dict[str, Any] = factory
+fsm_llm.core.definitions.executable.ExecutableError class(FSMError)
+fsm_llm.core.definitions.executable.FsmBody class(BaseModel)
+  field fsm: dict[str, Any] required
+fsm_llm.core.definitions.executable.FsmEnvelope class(ExecutableEnvelope)
+  field schema_: Literal['fsm-llm/executable'] required
+  field schema_version: str = '1.0'
+  field kind: Literal['fsm'] required
+  field id: str required
+  field version: str = '1'
+  field name: str = ''
+  field description: str = ''
+  field contract: Contract = factory
+  field requires: Requires = factory
+  field capabilities: list[Capability] = factory
+  field lifecycle: Lifecycle = Lifecycle.DRAFT
+  field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
+  field body: FsmBody required
+  field metadata: dict[str, Any] = factory
+fsm_llm.core.definitions.executable.InstanceIdentityMismatchError class(InstantiationError)
+  def __init__(self, message: str, *, expected: str | None = None, actual: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.core.definitions.executable.InstantiationError class(ExecutableError, ValueError)
+fsm_llm.core.definitions.executable.MAX_DOCUMENT_DEPTH = 200
+fsm_llm.core.definitions.executable.ProcedureBody class(FsmBody)
+  field fsm: dict[str, Any] required
+  field provenance: dict[str, str | list[str] | None] = factory
+fsm_llm.core.definitions.executable.ProcedureEnvelope class(ExecutableEnvelope)
+  field schema_: Literal['fsm-llm/executable'] required
+  field schema_version: str = '1.0'
+  field kind: Literal['procedure'] required
+  field id: str required
+  field version: str = '1'
+  field name: str = ''
+  field description: str = ''
+  field contract: Contract = factory
+  field requires: Requires = factory
+  field capabilities: list[Capability] = factory
+  field lifecycle: Lifecycle = Lifecycle.DRAFT
+  field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
+  field body: ProcedureBody required
+  field metadata: dict[str, Any] = factory
+fsm_llm.core.definitions.executable.Requires class(BaseModel)
+  field tools: Annotated[list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]], FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=256)])] | Literal['none', 'some'] = factory
+  field handlers: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field callables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field executables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+fsm_llm.core.definitions.executable.StrategyBody class(FsmBody)
+  field fsm: dict[str, Any] required
+  field strategy: StrategyDecl required
+fsm_llm.core.definitions.executable.StrategyDecl class(BaseModel)
+  field aliases: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field results: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])], Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field solution_key: str required
+fsm_llm.core.definitions.executable.StrategyEnvelope class(ExecutableEnvelope)
+  field schema_: Literal['fsm-llm/executable'] required
+  field schema_version: str = '1.0'
+  field kind: Literal['strategy'] required
+  field id: str required
+  field version: str = '1'
+  field name: str = ''
+  field description: str = ''
+  field contract: Contract = factory
+  field requires: Requires = factory
+  field capabilities: list[Capability] = factory
+  field lifecycle: Lifecycle = Lifecycle.DRAFT
+  field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
+  field body: StrategyBody required
+  field metadata: dict[str, Any] = factory
+fsm_llm.core.definitions.executable.canonical_digest def(payload: Mapping[str, Any]) -> str
+fsm_llm.core.definitions.executable.executable_json_schema def() -> dict[str, Any]
+fsm_llm.core.definitions.executable.identity_of def(template: ExecutableEnvelope, instance: FSMDefinition | Mapping[str, Any] | None = None) -> Identity
+fsm_llm.core.definitions.executable.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> tuple[FSMDefinition, dict[str, Any]]
+fsm_llm.core.definitions.executable.newer_envelope_fields def(envelope: ExecutableEnvelope) -> tuple[SchemaFinding, ...]
+fsm_llm.core.definitions.executable.parse_executable def(data: object) -> ExecutableEnvelope
+fsm_llm.core.definitions.executable.rebuild_instance def(envelope: ExecutableEnvelope, record: Mapping[str, Any], expected_instance_identity: str) -> FSMDefinition
+fsm_llm.core.definitions.executable.scan_placeholders def(node: Any) -> tuple[set[str], set[str]]
+fsm_llm.core.definitions.executable.schema_text def() -> str
+fsm_llm.core.definitions.executable.substitute_variables def(node: Any, values: Mapping[str, str]) -> Any
 # fsm_llm.core.definitions.schema
+fsm_llm.core.definitions.schema.EXECUTABLE_SCHEMA_ID = 'fsm-llm/executable'
 fsm_llm.core.definitions.schema.FIELD_VERSIONS dict
 fsm_llm.core.definitions.schema.SCHEMA_VERSION_DEFAULT = '4.2'
 fsm_llm.core.definitions.schema.SCHEMA_VERSION_OLDEST = '4.0'

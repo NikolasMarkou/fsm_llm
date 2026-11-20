@@ -1,0 +1,556 @@
+{
+  "$defs": {
+    "Capability": {
+      "description": "What an executable claims to do (a claim, never authorization).",
+      "enum": [
+        "tools",
+        "hitl",
+        "streaming",
+        "strategy",
+        "conversational"
+      ],
+      "title": "Capability",
+      "type": "string"
+    },
+    "Contract": {
+      "additionalProperties": false,
+      "description": "The keys an executable reads and writes (checked at load against the flow analysis).",
+      "properties": {
+        "handler_only_keys": {
+          "description": "Keys only a handler may write",
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Handler Only Keys",
+          "type": "array"
+        },
+        "input_templates": {
+          "additionalProperties": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "description": "input name -> text with {{placeholders}}, rendered from caller arguments into that input's VALUE, never into instruction text",
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Input Templates",
+          "type": "object"
+        },
+        "inputs": {
+          "description": "Keys the caller supplies",
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Inputs",
+          "type": "array"
+        },
+        "outputs": {
+          "description": "Keys the run returns",
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Outputs",
+          "type": "array"
+        }
+      },
+      "title": "Contract",
+      "type": "object"
+    },
+    "FsmBody": {
+      "additionalProperties": false,
+      "description": "``{fsm}``. The FSM is an object here; V2 loads and validates it as ``API`` would.",
+      "properties": {
+        "fsm": {
+          "additionalProperties": true,
+          "description": "An FSM definition, checked by the body loader and not by this schema",
+          "title": "Fsm",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fsm"
+      ],
+      "title": "FsmBody",
+      "type": "object"
+    },
+    "FsmEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/FsmBody"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "maxItems": 256,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract": {
+          "$ref": "#/$defs/Contract"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "fsm",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "draft"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Name",
+          "type": "string"
+        },
+        "requires": {
+          "$ref": "#/$defs/Requires"
+        },
+        "schema": {
+          "const": "fsm-llm/executable",
+          "description": "The envelope format id",
+          "title": "Schema",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "description": "The envelope format version (not the FSM definition version)",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "variables": {
+          "description": "Operator-filled {{name}} placeholders; never a caller's input",
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Variables",
+          "type": "array"
+        },
+        "version": {
+          "default": "1",
+          "description": "Author's label",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "body"
+      ],
+      "title": "FsmEnvelope",
+      "type": "object"
+    },
+    "Lifecycle": {
+      "description": "The lifecycle claim of an executable or a library procedure.\n\nThe first four members equal ``fsm_llm.synthesis.constants.LIFECYCLES`` in\norder (``draft`` to ``deprecated``); ``BUILTIN`` is the fifth: a built-in\nexecutable that ships in code. It is a claim of its source, never an\nauthorization.",
+      "enum": [
+        "draft",
+        "verified",
+        "trusted",
+        "deprecated",
+        "builtin"
+      ],
+      "title": "Lifecycle",
+      "type": "string"
+    },
+    "ProcedureBody": {
+      "additionalProperties": false,
+      "properties": {
+        "fsm": {
+          "additionalProperties": true,
+          "description": "An FSM definition, checked by the body loader and not by this schema",
+          "title": "Fsm",
+          "type": "object"
+        },
+        "provenance": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Provenance",
+          "type": "object"
+        }
+      },
+      "required": [
+        "fsm"
+      ],
+      "title": "ProcedureBody",
+      "type": "object"
+    },
+    "ProcedureEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/ProcedureBody"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "maxItems": 256,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract": {
+          "$ref": "#/$defs/Contract"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "procedure",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "draft"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Name",
+          "type": "string"
+        },
+        "requires": {
+          "$ref": "#/$defs/Requires"
+        },
+        "schema": {
+          "const": "fsm-llm/executable",
+          "description": "The envelope format id",
+          "title": "Schema",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "description": "The envelope format version (not the FSM definition version)",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "variables": {
+          "description": "Operator-filled {{name}} placeholders; never a caller's input",
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Variables",
+          "type": "array"
+        },
+        "version": {
+          "default": "1",
+          "description": "Author's label",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "body"
+      ],
+      "title": "ProcedureEnvelope",
+      "type": "object"
+    },
+    "Requires": {
+      "additionalProperties": false,
+      "description": "Every name the body uses, resolved at load. ``tools`` may be a bare claim.",
+      "properties": {
+        "callables": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Callables",
+          "type": "array"
+        },
+        "executables": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Executables",
+          "type": "array"
+        },
+        "handlers": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Handlers",
+          "type": "array"
+        },
+        "tools": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 256,
+              "type": "array"
+            },
+            {
+              "enum": [
+                "none",
+                "some"
+              ],
+              "type": "string"
+            }
+          ],
+          "title": "Tools"
+        }
+      },
+      "title": "Requires",
+      "type": "object"
+    },
+    "StrategyBody": {
+      "additionalProperties": false,
+      "properties": {
+        "fsm": {
+          "additionalProperties": true,
+          "description": "An FSM definition, checked by the body loader and not by this schema",
+          "title": "Fsm",
+          "type": "object"
+        },
+        "strategy": {
+          "$ref": "#/$defs/StrategyDecl"
+        }
+      },
+      "required": [
+        "fsm",
+        "strategy"
+      ],
+      "title": "StrategyBody",
+      "type": "object"
+    },
+    "StrategyDecl": {
+      "additionalProperties": false,
+      "description": "How reasoning selects and reads a ``strategy`` executable.",
+      "properties": {
+        "aliases": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Aliases",
+          "type": "array"
+        },
+        "results": {
+          "additionalProperties": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": "orchestrator key -> key read from the FSM",
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Results",
+          "type": "object"
+        },
+        "solution_key": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Solution Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "solution_key"
+      ],
+      "title": "StrategyDecl",
+      "type": "object"
+    },
+    "StrategyEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/StrategyBody"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "maxItems": 256,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract": {
+          "$ref": "#/$defs/Contract"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "strategy",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "draft"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Name",
+          "type": "string"
+        },
+        "requires": {
+          "$ref": "#/$defs/Requires"
+        },
+        "schema": {
+          "const": "fsm-llm/executable",
+          "description": "The envelope format id",
+          "title": "Schema",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "description": "The envelope format version (not the FSM definition version)",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "variables": {
+          "description": "Operator-filled {{name}} placeholders; never a caller's input",
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Variables",
+          "type": "array"
+        },
+        "version": {
+          "default": "1",
+          "description": "Author's label",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "body"
+      ],
+      "title": "StrategyEnvelope",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "fsm": "#/$defs/FsmEnvelope",
+      "procedure": "#/$defs/ProcedureEnvelope",
+      "strategy": "#/$defs/StrategyEnvelope"
+    },
+    "propertyName": "kind"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/FsmEnvelope"
+    },
+    {
+      "$ref": "#/$defs/StrategyEnvelope"
+    },
+    {
+      "$ref": "#/$defs/ProcedureEnvelope"
+    }
+  ]
+}

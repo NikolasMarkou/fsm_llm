@@ -26,6 +26,7 @@ from typing import Any
 from pydantic import BaseModel
 
 __all__ = [
+    "EXECUTABLE_SCHEMA_ID",
     "FIELD_VERSIONS",
     "SCHEMA_VERSION_DEFAULT",
     "SCHEMA_VERSION_OLDEST",
@@ -33,6 +34,11 @@ __all__ = [
     "newer_fields",
     "parse_version",
 ]
+
+# The `schema` header value of an executable envelope (roadmap 6.5.1). Here, in the eager leaf,
+# so `fsm-llm-validate` can route on the header without importing the lazy envelope module
+# (`core/definitions/executable.py`); the envelope's own versions live in that module.
+EXECUTABLE_SCHEMA_ID = "fsm-llm/executable"
 
 # The version an omitted `FSMDefinition.version` takes.
 SCHEMA_VERSION_DEFAULT = "4.2"

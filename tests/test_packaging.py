@@ -928,7 +928,12 @@ class TestNoRangeAdmitsAnUntestedMajor:
 #: Non-`.py` files the wheel carries, relative to the package root. Written out
 #: by hand on purpose: derived from `[tool.setuptools.package-data]`, a dropped
 #: glob would shrink both sides of the comparison and still pass.
-_WHEEL_DATA_GLOBS = ("py.typed", "monitor/static/**/*", "monitor/templates/*")
+_WHEEL_DATA_GLOBS = (
+    "py.typed",
+    "monitor/static/**/*",
+    "monitor/templates/*",
+    "core/definitions/schemas/*.json",
+)
 
 #: Repo-root files setuptools reads while building (readme, license, manifest).
 _BUILD_ROOT_FILES = ("pyproject.toml", "README.md", "LICENSE", "MANIFEST.in")
