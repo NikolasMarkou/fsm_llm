@@ -19,6 +19,7 @@ import pytest
 
 from fsm_llm import API, FileSessionStore
 from fsm_llm.core.definitions import (
+    ConversationBusyError,
     DataExtractionResponse,
     FSMError,
     ResponseGenerationResponse,
@@ -38,6 +39,8 @@ from tests.test_fsm_llm.test_async_engine import (
     _SCENARIOS,
     _VOLATILE,
     _collect,
+    _Gated,
+    _run_api,
     _stream_api,
     _Streaming,
 )
@@ -484,3 +487,55 @@ class TestKnownLimits:
             "sync only": (1, 0, "bye", "chat"),
             "with twin": (1, 1, "bye", "bye"),
         }
+
+    async def test_the_task_that_ran_a_streams_first_step_owns_the_conversation_between_chunks(
+        self,
+    ):
+        """The claim is bound in the Context of the task that ran the stream's FIRST step. After
+        a hand-off to another task to drain, a sibling is refused, and the first task still
+        reads the conversation mid-turn (it could end it as well). Kills (documented rule):
+        none."""
+        api, _ = _stream_api()
+        cid, _ = await api.astart_conversation()
+        read_now = asyncio.Event()
+
+        async def sibling() -> dict:  # created BEFORE the claim: it holds no ticket
+            await read_now.wait()
+            return api.get_data(cid)
+
+        sibling_task = asyncio.create_task(sibling())
+        stream = api.aconverse_stream("hi", cid)
+        assert await stream.__anext__() == "a"  # the claim is bound in THIS task
+        parked, go_on, got = asyncio.Event(), asyncio.Event(), []
+
+        async def drain() -> None:
+            async for chunk in stream:
+                got.append(chunk)
+                parked.set()
+                await go_on.wait()
+
+        drainer = asyncio.create_task(drain())
+        await asyncio.wait_for(parked.wait(), _BOUND)
+        read_now.set()
+        with pytest.raises(ConversationBusyError):
+            await sibling_task
+        assert api.get_data(cid) is not None  # the first task passes the gate mid-turn
+        go_on.set()
+        await asyncio.wait_for(drainer, _BOUND)
+        assert got == ["b", "c"] and _gate_is_free(api, cid)
+
+    async def test_a_second_run_loop_on_a_busy_conversation_fails_with_the_gate_refusal(
+        self,
+    ):
+        """The second ``arun_until_terminal`` fails at its first read, with
+        ``ConversationBusyError``, not the "already being processed" text of a second turn
+        (both are ``FSMError``). Kills (documented rule): none."""
+        api, llm, cid = _run_api(_Gated)
+        llm.arm()
+        first = asyncio.create_task(api.arun_until_terminal(cid, max_steps=9))
+        await asyncio.wait_for(llm.entered.wait(), _BOUND)
+        with pytest.raises(ConversationBusyError) as refused:
+            await api.arun_until_terminal(cid, max_steps=9)
+        assert "already being processed" not in str(refused.value)
+        llm.release.set()
+        assert [r.state_after for r in await first] == ["b", "c"]
