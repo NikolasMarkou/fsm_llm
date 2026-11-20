@@ -1,0 +1,256 @@
+{
+  "name": "adapt_agent",
+  "description": "ADaPT agent with recursive decomposition",
+  "initial_state": "attempt",
+  "persona": "You are an adaptive AI agent that attempts tasks directly first. If the direct attempt is insufficient, you decompose the task into simpler subtasks and solve them recursively. Always try the direct approach before decomposing.",
+  "states": {
+    "attempt": {
+      "id": "attempt",
+      "description": "Attempt to solve the task directly",
+      "purpose": "Give a direct attempt at solving the task",
+      "required_context_keys": [
+        "attempt_result"
+      ],
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "attempt_result",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'attempt_result' field (str) from the task and the 'task', 'observations' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your direct attempt at the task: a complete answer written from your own knowledge.",
+          "context_keys": [
+            "task",
+            "observations"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "combine",
+          "description": "Iteration limit reached, produce best-effort answer",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "Should terminate due to iteration limit",
+              "logic": {
+                "==": [
+                  {
+                    "var": "should_terminate"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "assess",
+          "description": "Evaluate the attempt quality",
+          "priority": 100
+        }
+      ]
+    },
+    "assess": {
+      "id": "assess",
+      "description": "Assess whether the attempt succeeded",
+      "purpose": "Determine if the attempt is satisfactory or needs decomposition",
+      "required_context_keys": [
+        "attempt_succeeded"
+      ],
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "attempt_succeeded",
+          "field_type": "bool",
+          "extraction_instructions": "Extract the 'attempt_succeeded' field (bool) from the task and the 'task', 'observations', 'attempt_result' values in the 'Already extracted:' context. Weigh the attempt_result value against the task. true when it answers the task usefully and completely enough to hand over, even if it could be polished; false only when it is missing, off-task, or leaves a clearly required part of the task unanswered.",
+          "context_keys": [
+            "task",
+            "observations",
+            "attempt_result"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "combine",
+          "description": "Iteration limit reached, produce best-effort answer",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "Should terminate due to iteration limit",
+              "logic": {
+                "==": [
+                  {
+                    "var": "should_terminate"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "combine",
+          "description": "Attempt succeeded, produce final answer",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "The attempt was successful",
+              "logic": {
+                "==": [
+                  {
+                    "var": "attempt_succeeded"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "decompose",
+          "description": "Attempt failed, decompose into subtasks",
+          "priority": 150,
+          "conditions": [
+            {
+              "description": "Attempt failed and depth allows decomposition",
+              "logic": {
+                "and": [
+                  {
+                    "==": [
+                      {
+                        "var": "attempt_succeeded"
+                      },
+                      false
+                    ]
+                  },
+                  {
+                    "<": [
+                      {
+                        "var": "current_depth"
+                      },
+                      5
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "combine",
+          "description": "Attempt failed but depth limit reached, use best effort",
+          "priority": 200,
+          "conditions": [
+            {
+              "description": "Depth limit reached, force best effort",
+              "logic": {
+                "==": [
+                  {
+                    "var": "attempt_succeeded"
+                  },
+                  false
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "combine",
+          "description": "Fallback: use best effort if the assessment is unclear",
+          "priority": 900
+        }
+      ]
+    },
+    "decompose": {
+      "id": "decompose",
+      "description": "Decompose the task into simpler subtasks",
+      "purpose": "Break the task down for recursive solving",
+      "required_context_keys": [
+        "subtasks"
+      ],
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "subtasks",
+          "field_type": "list",
+          "extraction_instructions": "Extract the 'subtasks' field (list) from the task and the 'task', 'observations', 'attempt_result' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. The attempt_result value was judged insufficient. Your decomposition of the task: a JSON list of short subtask description strings, each simpler than the task and solvable on its own, together covering what the attempt missed.",
+          "context_keys": [
+            "task",
+            "observations",
+            "attempt_result"
+          ],
+          "required": true
+        },
+        {
+          "field_name": "operator",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'operator' field (str) from the task and the 'task', 'observations', 'attempt_result', 'subtasks' values in the 'Already extracted:' context. How the subtasks of your decomposition combine. 'AND' when every subtask is needed to answer the task (their results are combined); 'OR' when any single subtask would answer the task on its own (the first one that succeeds is enough). Answer with exactly AND or OR.",
+          "context_keys": [
+            "task",
+            "observations",
+            "attempt_result",
+            "subtasks"
+          ],
+          "required": false
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "combine",
+          "description": "Iteration limit reached, produce best-effort answer",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "Should terminate due to iteration limit",
+              "logic": {
+                "==": [
+                  {
+                    "var": "should_terminate"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "combine",
+          "description": "Subtasks defined, combine after recursive solving",
+          "priority": 100,
+          "conditions": [
+            {
+              "description": "Subtasks have been generated",
+              "logic": {
+                "has_context": "subtasks"
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "combine",
+          "description": "Fallback: combine without subtasks if none were produced",
+          "priority": 900
+        }
+      ]
+    },
+    "combine": {
+      "id": "combine",
+      "description": "Combine all results into the final answer",
+      "purpose": "Synthesize attempt results and subtask results",
+      "response_instructions": "Present your final answer clearly and completely, integrating all available results and evidence.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

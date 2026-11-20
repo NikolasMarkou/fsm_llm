@@ -1,0 +1,245 @@
+{
+  "name": "meta_builder",
+  "description": "Meta-builder: classify the artifact type, collect requirements, build the artifact with one structured completion",
+  "initial_state": "classify",
+  "persona": "A concise assistant that helps users design FSM-LLM artifacts: FSMs, workflows and agents",
+  "states": {
+    "classify": {
+      "id": "classify",
+      "description": "Decide which kind of artifact the user wants",
+      "purpose": "Classify the request as an FSM, a workflow or an agent",
+      "extraction_instructions": "",
+      "classification_extractions": [
+        {
+          "field_name": "artifact_type",
+          "intents": [
+            {
+              "name": "fsm",
+              "description": "A finite state machine, chatbot, dialogue system, conversational flow, survey, quiz, FAQ bot, help desk, interview, or onboarding flow"
+            },
+            {
+              "name": "workflow",
+              "description": "A multi-step workflow, data pipeline, automation, ETL process, batch job, sequential process, or async task orchestration"
+            },
+            {
+              "name": "agent",
+              "description": "An AI agent that uses tools, a ReAct agent, plan-and-execute agent, research agent, browsing agent, or any agentic pattern with tool use"
+            },
+            {
+              "name": "unknown",
+              "description": "The message does not say which kind of artifact it is: a detail, an edit, a question or a vague idea"
+            }
+          ],
+          "fallback_intent": "unknown",
+          "confidence_threshold": 0.4,
+          "context_keys": [
+            "latest_request"
+          ]
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "build",
+          "description": "The user asked to build right away",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "The user asked to build the artifact now",
+              "requires_context_keys": [
+                "build_requested"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "build_requested"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "collect",
+          "description": "Collect the artifact's requirements",
+          "priority": 900
+        }
+      ]
+    },
+    "collect": {
+      "id": "collect",
+      "description": "Gather the artifact's requirements from the user",
+      "purpose": "Acknowledge each detail, ask about what is unclear and invite the user to say 'build it'",
+      "extraction_instructions": "",
+      "context_scope": {
+        "read_keys": [
+          "artifact_type",
+          "requirements",
+          "validation_errors"
+        ]
+      },
+      "response_instructions": "You are helping the user design an FSM-LLM artifact. The context key artifact_type names its type (fsm, workflow or agent) and requirements lists everything the user has asked for so far; when validation_errors is present, the last build failed for those reasons. In 2-3 sentences: acknowledge what the user just said, note what you will include in the artifact, and ask one short follow-up question about anything still unclear. Never mention states, transitions, classification or any other internals of this assistant. End your message with this exact sentence: Say 'build it' when you're ready.",
+      "transitions": [
+        {
+          "target_state": "classify",
+          "description": "The user switched to another artifact type",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "The user asked for a different artifact type",
+              "requires_context_keys": [
+                "type_switch"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "type_switch"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "build",
+          "description": "The user asked to build the artifact",
+          "priority": 20,
+          "conditions": [
+            {
+              "description": "The user asked to build the artifact now",
+              "requires_context_keys": [
+                "build_requested"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "build_requested"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "build": {
+      "id": "build",
+      "description": "Generate the artifact spec in one structured call",
+      "purpose": "Ask the model for the whole artifact spec as JSON matching the per-type schema",
+      "completion": {
+        "response_format_key": "_build_response_format",
+        "messages_key": "_build_messages",
+        "result_key": "build_reply"
+      },
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "done",
+          "description": "The assembled artifact validated",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "The build produced a valid artifact",
+              "requires_context_keys": [
+                "build_outcome"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "build_outcome"
+                  },
+                  "valid"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "build_failed",
+          "description": "The build did not produce a valid artifact",
+          "priority": 900
+        }
+      ]
+    },
+    "build_failed": {
+      "id": "build_failed",
+      "description": "The last build failed validation",
+      "purpose": "Route the user's next message: build again, switch the artifact type, or collect more details",
+      "extraction_instructions": "",
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "classify",
+          "description": "The user switched to another artifact type",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "The user asked for a different artifact type",
+              "requires_context_keys": [
+                "type_switch"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "type_switch"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "build",
+          "description": "The user asked to build again",
+          "priority": 20,
+          "conditions": [
+            {
+              "description": "The user asked to build the artifact now",
+              "requires_context_keys": [
+                "build_requested"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "build_requested"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "collect",
+          "description": "Collect more details before the next build",
+          "priority": 900
+        }
+      ]
+    },
+    "done": {
+      "id": "done",
+      "description": "The artifact is built and valid",
+      "purpose": "End the session with the valid artifact",
+      "response_instructions": "",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "requirements",
+    "latest_request",
+    "build_requested",
+    "type_switch",
+    "keyword_type",
+    "build_outcome",
+    "artifact",
+    "validation_errors",
+    "review_presentation",
+    "build_reply",
+    "build_progress",
+    "build_summary"
+  ]
+}

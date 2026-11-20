@@ -1,0 +1,181 @@
+{
+  "name": "react_agent",
+  "description": "ReAct agent with tool use",
+  "initial_state": "think",
+  "persona": "You are a methodical AI agent that solves tasks by using tools step by step. Think carefully before each action. Review previous observations before deciding. Terminate when you have gathered enough information to answer the task.",
+  "states": {
+    "think": {
+      "id": "think",
+      "description": "Reason about the task and select the next tool to use",
+      "purpose": "Analyze the task and previous observations to decide the next action",
+      "required_context_keys": [
+        "tool_name",
+        "tool_input",
+        "should_terminate"
+      ],
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "tool_name",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'tool_name' field. Analyze the task and all previous observations to decide your next action.\n\nAvailable tools:\n- search: Tool search\n\nExtract the following as JSON:\n- \"tool_name\": name of the tool to use (must be one of the available tools), or \"none\" if no tool is needed\n- \"tool_input\": a JSON object with the parameters for the tool (MUST include all required parameters)\n- \"reasoning\": your step-by-step reasoning for choosing this action\n- \"should_terminate\": true if you have enough information to answer the task, false otherwise\n\nExample \u2014 using a tool:\n{\"tool_name\": \"search\", \"tool_input\": {\"query\": \"example query\"}, \"reasoning\": \"I need to find this information\", \"should_terminate\": false}\n\nExample \u2014 terminating with enough information:\n{\"tool_name\": \"none\", \"tool_input\": {}, \"reasoning\": \"I have all the information needed\", \"should_terminate\": true}\n\nRULES:\n1. You MUST select a tool on the first iteration. Do not set should_terminate=true without calling at least one tool first.\n2. Only set should_terminate=true AFTER you have tool results that fully answer the task.\n3. Always provide the required parameters for the selected tool.\n\nIMPORTANT: Review all previous observations carefully before deciding.\nIf previous tool calls have provided sufficient information, set should_terminate to true.\nDo NOT repeat the same tool call with the same parameters.",
+          "context_keys": [
+            "task",
+            "observations",
+            "agent_feedback"
+          ]
+        },
+        {
+          "field_name": "tool_input",
+          "field_type": "dict",
+          "extraction_instructions": "Extract the 'tool_input' field. Analyze the task and all previous observations to decide your next action.\n\nAvailable tools:\n- search: Tool search\n\nExtract the following as JSON:\n- \"tool_name\": name of the tool to use (must be one of the available tools), or \"none\" if no tool is needed\n- \"tool_input\": a JSON object with the parameters for the tool (MUST include all required parameters)\n- \"reasoning\": your step-by-step reasoning for choosing this action\n- \"should_terminate\": true if you have enough information to answer the task, false otherwise\n\nExample \u2014 using a tool:\n{\"tool_name\": \"search\", \"tool_input\": {\"query\": \"example query\"}, \"reasoning\": \"I need to find this information\", \"should_terminate\": false}\n\nExample \u2014 terminating with enough information:\n{\"tool_name\": \"none\", \"tool_input\": {}, \"reasoning\": \"I have all the information needed\", \"should_terminate\": true}\n\nRULES:\n1. You MUST select a tool on the first iteration. Do not set should_terminate=true without calling at least one tool first.\n2. Only set should_terminate=true AFTER you have tool results that fully answer the task.\n3. Always provide the required parameters for the selected tool.\n\nIMPORTANT: Review all previous observations carefully before deciding.\nIf previous tool calls have provided sufficient information, set should_terminate to true.\nDo NOT repeat the same tool call with the same parameters.",
+          "context_keys": [
+            "task",
+            "observations",
+            "agent_feedback"
+          ]
+        },
+        {
+          "field_name": "should_terminate",
+          "field_type": "bool",
+          "extraction_instructions": "Extract the 'should_terminate' field (bool) from the task and the 'task', 'observations', 'agent_feedback' values in the 'Already extracted:' context. true if you have enough information to answer the task: set it to true when the observations already answer the task or when no further tool call is needed; false only when another tool call is still required to answer it.",
+          "context_keys": [
+            "task",
+            "observations",
+            "agent_feedback"
+          ],
+          "required": false
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "conclude",
+          "description": "Task can be answered (a tool has run, or termination is forced)",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "Agent decided to terminate AND a tool has run or termination is forced",
+              "logic": {
+                "or": [
+                  {
+                    "and": [
+                      {
+                        "==": [
+                          {
+                            "var": "should_terminate"
+                          },
+                          true
+                        ]
+                      },
+                      {
+                        ">": [
+                          {
+                            "var": [
+                              "observation_count",
+                              0
+                            ]
+                          },
+                          0
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "==": [
+                      {
+                        "var": "max_iterations_reached"
+                      },
+                      true
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "act",
+          "description": "Execute the selected tool",
+          "priority": 300
+        }
+      ]
+    },
+    "act": {
+      "id": "act",
+      "description": "Execute the selected tool and observe the result",
+      "purpose": "Run the tool and record the observation",
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "conclude",
+          "description": "Terminate when framework signals completion",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "Framework/agent decided to terminate AND a tool has run or termination is forced",
+              "logic": {
+                "or": [
+                  {
+                    "and": [
+                      {
+                        "==": [
+                          {
+                            "var": "should_terminate"
+                          },
+                          true
+                        ]
+                      },
+                      {
+                        ">": [
+                          {
+                            "var": [
+                              "observation_count",
+                              0
+                            ]
+                          },
+                          0
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "==": [
+                      {
+                        "var": "max_iterations_reached"
+                      },
+                      true
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "think",
+          "description": "Return to thinking with new observation",
+          "priority": 900
+        }
+      ]
+    },
+    "conclude": {
+      "id": "conclude",
+      "description": "Formulate and present the final answer",
+      "purpose": "Synthesize all observations into a complete answer",
+      "required_context_keys": [
+        "answer",
+        "score"
+      ],
+      "response_instructions": "Write the final answer to the ORIGINAL task (the 'task' value in the context) clearly and completely. Base it on the tool observations and on facts given in the task, and cite the observations that support it. This reply is the last output of the run: no further tool will run, so do not describe work in progress or planned next steps. If the observations do not hold enough evidence, say plainly what could not be determined and give the best answer the evidence supports.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

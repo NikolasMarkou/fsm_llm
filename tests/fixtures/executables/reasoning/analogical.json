@@ -1,0 +1,93 @@
+{
+  "name": "analogical_reasoning",
+  "description": "Transfer insights and solutions via systematic analogical reasoning and pattern matching across domains",
+  "initial_state": "define_target_problem",
+  "persona": "You are an expert at finding meaningful connections and analogies. You help solve problems by identifying similar situations and transferring insights across domains.",
+  "states": {
+    "define_target_problem": {
+      "id": "define_target_problem",
+      "description": "Clearly define and characterize the target problem",
+      "purpose": "Analyze the problem to identify 'target_problem_description' and 'key_features_of_target'",
+      "required_context_keys": [
+        "target_problem_description",
+        "key_features_of_target"
+      ],
+      "extraction_instructions": "\n            Systematically define and characterize the target problem:\n\n            - What is the core challenge, question, or problem we're trying to solve?\n            - What are the key features, constraints, context, and important characteristics?\n            - What kind of solution, understanding, or outcome are we seeking?\n            - What essential structural or functional characteristics should any good analogy match?\n            - What are the most important aspects that an analogical source should share?\n\n            Create a clear, comprehensive characterization of the target problem for analogical matching.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Work only with the information already provided in the problem statement and context.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "find_source_analogs",
+          "description": "Target problem clearly defined"
+        }
+      ]
+    },
+    "find_source_analogs": {
+      "id": "find_source_analogs",
+      "description": "Identify potential analogous situations across various domains",
+      "purpose": "Find 'potential_analogs' with 'rationale_for_choice' and 'similarity_criteria_used'",
+      "required_context_keys": [
+        "potential_analogs",
+        "rationale_for_choice",
+        "similarity_criteria_used"
+      ],
+      "extraction_instructions": "\n            Systematically search for analogous situations across different domains:\n\n            - What situations, problems, or systems share important structural similarities?\n            - What comparable processes, mechanisms, or functional relationships exist in other fields?\n            - What parallel challenges exist in different domains (nature, technology, history, etc.)?\n            - What historical precedents, case studies, or examples show similar patterns?\n            - What systems or situations exhibit comparable dynamics or relationships?\n\n            Provide 2-4 potential analogs with clear rationale for why each might offer valuable insights.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Search for analogs based on your target problem characterization.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "map_correspondences",
+          "description": "Source analogs identified"
+        }
+      ]
+    },
+    "map_correspondences": {
+      "id": "map_correspondences",
+      "description": "Create systematic mapping between source analog and target problem",
+      "purpose": "Select best analog and create detailed mapping with 'selected_analog', 'analogical_mapping', 'identified_similarities', 'identified_differences'",
+      "required_context_keys": [
+        "selected_analog",
+        "analogical_mapping",
+        "identified_similarities",
+        "identified_differences"
+      ],
+      "extraction_instructions": "\n            Create systematic correspondences between the most promising analog and target:\n\n            - Choose the analog with the strongest structural and functional similarities\n            - Map specific elements from source to target (A corresponds to X, B relates to Y, etc.)\n            - Identify the strongest similarities that support and validate the analogy\n            - Note important differences or limitations that constrain the analogical inference\n            - Create explicit, systematic mapping of relationships and correspondences\n\n            Be precise about what maps to what and provide clear justification for the correspondences.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Create the mapping based on your analysis of potential analogs.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "transfer_insights",
+          "description": "Correspondences systematically mapped"
+        }
+      ]
+    },
+    "transfer_insights": {
+      "id": "transfer_insights",
+      "description": "Transfer knowledge and solutions from analog to target domain",
+      "purpose": "Generate 'transferred_insights_or_solutions' and 'potential_inferences'",
+      "required_context_keys": [
+        "transferred_insights_or_solutions",
+        "potential_inferences"
+      ],
+      "extraction_instructions": "\n            Systematically transfer insights using the analogical mapping:\n\n            - What solutions, strategies, or approaches worked effectively in the source domain?\n            - What principles, patterns, or mechanisms can be transferred to the target?\n            - What new understanding or perspective does the analogy provide about the target problem?\n            - What predictions, inferences, or hypotheses can we generate through analogical reasoning?\n            - How do successful strategies in the source domain suggest approaches for the target?\n\n            Be specific and explicit about how insights from the analog apply to and illuminate the target problem.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Generate insights based on the systematic analogical mapping you've created.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "evaluate_analogy_fit",
+          "description": "Insights transferred"
+        }
+      ]
+    },
+    "evaluate_analogy_fit": {
+      "id": "evaluate_analogy_fit",
+      "description": "Critically evaluate the analogy's validity and practical utility",
+      "purpose": "Assess analogy with 'analogy_strengths', 'analogy_weaknesses_or_limitations', 'adapted_solution_or_understanding', 'analogy_confidence_rating'",
+      "required_context_keys": [
+        "analogy_strengths",
+        "analogy_weaknesses_or_limitations",
+        "adapted_solution_or_understanding",
+        "analogy_confidence_rating"
+      ],
+      "extraction_instructions": "\n            Critically and systematically evaluate the analogical reasoning:\n\n            - What are the strongest, most compelling aspects of this analogy?\n            - Where does the analogy break down, mislead, or have significant limitations?\n            - How should the transferred solution or insight be adapted for the target context?\n            - What level of confidence is warranted in this analogical reasoning (1-10 scale)?\n            - What would strengthen or weaken confidence in the analogical inference?\n\n            Provide balanced evaluation with adapted solution and justified confidence rating.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Complete your evaluation with the information developed through your systematic analogical process.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

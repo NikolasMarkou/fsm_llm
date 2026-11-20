@@ -1,0 +1,130 @@
+{
+  "name": "native_fc",
+  "description": "Native function calling: model turns with tools, tool turns, an optional forced final tool turn and repair turn",
+  "initial_state": "call_model",
+  "persona": "A capable AI agent that uses the provided tools",
+  "states": {
+    "call_model": {
+      "id": "call_model",
+      "description": "One model turn with the tools declared",
+      "purpose": "Let the model call tools or give its final answer",
+      "completion": {
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "description": "Run lookup",
+              "parameters": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          },
+          {
+            "type": "function",
+            "function": {
+              "name": "record",
+              "description": "Run record",
+              "parameters": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        ],
+        "instructions": "Use the tools.",
+        "messages_key": "_native_messages",
+        "result_key": "model_reply"
+      },
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "run_tools",
+          "description": "The model asked for tools",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "The model turn was calls",
+              "requires_context_keys": [
+                "model_reply"
+              ],
+              "logic": {
+                "===": [
+                  {
+                    "var": "model_reply.kind"
+                  },
+                  "calls"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "conclude",
+          "description": "The model answered or garbled its turn",
+          "priority": 900
+        }
+      ]
+    },
+    "run_tools": {
+      "id": "run_tools",
+      "description": "Run the model's tool calls",
+      "purpose": "Run each call through the tool registry and record the results",
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "conclude",
+          "description": "The model loop has ended",
+          "priority": 40,
+          "conditions": [
+            {
+              "description": "The loop ended",
+              "requires_context_keys": [
+                "loop_end"
+              ],
+              "logic": {
+                "in": [
+                  {
+                    "var": "loop_end"
+                  },
+                  [
+                    "final",
+                    "malformed",
+                    "exhausted"
+                  ]
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "call_model",
+          "description": "Give the model the tool results",
+          "priority": 900
+        }
+      ]
+    },
+    "conclude": {
+      "id": "conclude",
+      "description": "The run is over",
+      "purpose": "Hold the answer, the trace and the run's outcome",
+      "response_instructions": "",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions",
+    "model_reply",
+    "forced_reply",
+    "repair_reply",
+    "native_answer",
+    "loop_end",
+    "force_final_pending",
+    "repair_pending"
+  ]
+}

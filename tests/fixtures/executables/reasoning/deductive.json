@@ -1,0 +1,54 @@
+{
+  "name": "deductive_reasoning",
+  "description": "Apply general principles and rules to reach specific conclusions through valid logical reasoning",
+  "initial_state": "identify_premises",
+  "persona": "You are a logical thinker who applies established principles and rules to reach certain conclusions through valid reasoning.",
+  "states": {
+    "identify_premises": {
+      "id": "identify_premises",
+      "description": "Identify the general rules, principles, and assumptions",
+      "purpose": "Establish 'premises' and identify 'assumptions'",
+      "required_context_keys": [
+        "premises",
+        "assumptions"
+      ],
+      "extraction_instructions": "\n            Identify the starting points for deductive reasoning:\n\n            - What general rules, laws, or principles apply to this problem?\n            - What facts or givens can we assume as true?\n            - What established knowledge is relevant?\n            - What premises does any argument rely on?\n            - What assumptions are being made (both stated and unstated)?\n\n            Be explicit about both obvious and hidden assumptions that underlie the reasoning.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Work with the premises and information already provided in the problem.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "apply_logic",
+          "description": "Premises and assumptions identified"
+        }
+      ]
+    },
+    "apply_logic": {
+      "id": "apply_logic",
+      "description": "Apply logical rules to derive conclusions step by step",
+      "purpose": "Document 'logical_steps' and 'intermediate_conclusions'",
+      "required_context_keys": [
+        "logical_steps",
+        "intermediate_conclusions"
+      ],
+      "extraction_instructions": "\n            Apply logical reasoning systematically:\n\n            - What follows logically from the established premises?\n            - What intermediate conclusions can be drawn at each step?\n            - What logical rules or forms are being applied (modus ponens, syllogism, etc.)?\n            - How does each step follow necessarily from the previous ones?\n            - What can be concluded with certainty at each stage?\n\n            Show your logical work clearly, step by step, ensuring valid inferences.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Apply logical reasoning to the premises you've identified.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "derive_conclusion",
+          "description": "Logical steps applied"
+        }
+      ]
+    },
+    "derive_conclusion": {
+      "id": "derive_conclusion",
+      "description": "Reach final conclusions and assess logical validity",
+      "purpose": "State final 'conclusion' and assess 'logical_validity'",
+      "required_context_keys": [
+        "conclusion",
+        "logical_validity"
+      ],
+      "extraction_instructions": "\n            Derive the final conclusion and validate the reasoning:\n\n            - What specific conclusion follows from the complete logical chain?\n            - Is the reasoning logically valid (do conclusions follow necessarily)?\n            - Does the conclusion adequately address the original problem?\n            - Are there any logical gaps, errors, or invalid inferences?\n            - How certain can we be about the final conclusion?\n\n            State your conclusion clearly and provide honest assessment of the logical validity.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Derive your conclusion from the logical steps you've taken.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

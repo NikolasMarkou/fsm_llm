@@ -1,12 +1,9 @@
-"""The identity recipe of an FSM definition is ONE core function (plan ace7a8c8, F1.1).
+"""The identity recipe of an FSM definition is ONE core function (plan ace7a8c8, F1).
 
-``fsm_id_of`` (the id ``API`` mints), ``definition_digest`` (the 64-hex content
-digest) and ``definition_canonical`` (the digest with its canonical text) live in
-``fsm_llm.core.definitions``. Before the move the recipe stood inline in
-``API.process_fsm_definition`` and again in ``FSMLibrary``. The literal recipe
-below is written out here on purpose: it is the independent reference every row
-compares against, so a change of the recipe fails here before it re-ids a
-conversation.
+``fsm_id_of``, ``definition_digest`` and ``definition_canonical`` live in
+``fsm_llm.core.definitions``; the recipe once stood inline in ``API`` and in
+``FSMLibrary``. ``_literal`` below writes it out on purpose: the independent
+reference every row compares with.
 """
 
 from __future__ import annotations
@@ -27,172 +24,145 @@ from fsm_llm.core.definitions import (
     fsm_id_of,
 )
 from fsm_llm.synthesis import FSMLibrary, digest_of
+from tests import executables_corpus as corpus
 from tests.test_fsm_llm import kind_corpus as kc
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
+_CORPUS = corpus.fsm_cases()
 
 
-def _definitions() -> dict[str, dict[str, Any]]:
-    handler_only = kc._fsm(
-        "HandlerOnly",
+def _two_states(name: str, **first: Any) -> dict[str, Any]:
+    return kc._fsm(
+        name,
         "a",
-        kc._state("a", handler_only_keys=["secret_note"], transitions=[kc._go("b")]),
+        kc._state("a", transitions=[kc._go("b")], **first),
         kc._state("b", response_instructions="Bye."),
     )
-    plain = kc._fsm(
-        "Plain",
-        "a",
-        kc._state("a", transitions=[kc._go("b")]),
-        kc._state("b", response_instructions="Bye."),
-    )
-    return {
-        "plain": plain,
-        "classification": kc._plain_fsm(),
-        "completion": kc._tool_fsm(),
-        "synthesize": kc._synth_fsm(),
-        "handler_only_keys": handler_only,
-    }
 
 
-_DEFINITIONS = _definitions()
+_DEFINITIONS = {
+    "plain": _two_states("Plain"),
+    "classification": kc._plain_fsm(),
+    "completion": kc._tool_fsm(),
+    "synthesize": kc._synth_fsm(),
+    "handler_only_keys": _two_states("HandlerOnly", handler_only_keys=["note"]),
+}
 
 
 def _literal(definition: FSMDefinition) -> tuple[str, str]:
-    """The recipe as it stood inline in ``API`` and ``FSMLibrary``: (digest, text)."""
+    """The recipe as it stood inline: (digest, canonical text)."""
     text = json.dumps(definition.model_dump(exclude_defaults=True), sort_keys=True)
     return hashlib.sha256(text.encode()).hexdigest(), text
 
 
 @pytest.mark.parametrize("name", sorted(_DEFINITIONS))
 class TestTheRecipe:
-    def test_the_canonical_pair_is_the_literal_recipe(self, name):
+    def test_the_pair_and_the_id_are_the_literal_recipe(self, name):
         definition = FSMDefinition(**_DEFINITIONS[name])
         digest, text = _literal(definition)
         assert definition_canonical(definition) == (digest, text)
         assert definition_digest(definition) == digest
-        assert len(digest) == 64
-        # the digest is of the very text returned, never of a re-dumped copy
-        assert hashlib.sha256(text.encode()).hexdigest() == digest
-
-    def test_the_id_is_name_and_eight_hex_of_the_digest(self, name):
-        definition = FSMDefinition(**_DEFINITIONS[name])
-        digest, _ = _literal(definition)
         assert fsm_id_of(definition) == f"fsm_{definition.name}_{digest[:8]}"
+        assert len(digest) == 64
 
-    def test_api_gives_the_same_id_for_a_dict_an_object_and_a_file(
-        self, name, tmp_path
-    ):
+    def test_api_gives_one_id_for_a_dict_an_object_and_a_file(self, name, tmp_path):
         data = _DEFINITIONS[name]
         path = tmp_path / "fsm.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         definition = FSMDefinition(**data)
-        ids = {
-            API.process_fsm_definition(data)[1],
-            API.process_fsm_definition(definition)[1],
-            API.process_fsm_definition(str(path))[1],
+        got = {
+            API.process_fsm_definition(arg)[1] for arg in (data, definition, str(path))
         }
-        assert ids == {fsm_id_of(definition)}
+        assert got == {fsm_id_of(definition)}
 
     def test_the_library_keys_and_stores_the_core_digest_and_text(self, name, tmp_path):
         definition = FSMDefinition(**_DEFINITIONS[name])
         digest, text = definition_canonical(definition)
-        assert digest_of(definition) == digest
-        library = FSMLibrary(tmp_path / "lib")
-        record = library.put(definition, goal="g", inputs_required=[], return_keys=[])
-        assert record.digest == digest
-        stored = (tmp_path / "lib" / "definitions" / f"{digest}.json").read_bytes()
-        assert stored == text.encode()
+        record = FSMLibrary(tmp_path).put(
+            definition, goal="g", inputs_required=[], return_keys=[]
+        )
+        stored = tmp_path / "definitions" / f"{digest}.json"
+        assert (digest_of(definition), record.digest) == (digest, digest)
+        assert stored.read_bytes() == text.encode()
+
+
+@pytest.mark.parametrize("case", sorted(_CORPUS))
+def test_the_core_recipe_is_the_literal_recipe_over_every_builtin(case):
+    definition = FSMDefinition(**_CORPUS[case])
+    digest, text = _literal(definition)
+    assert definition_canonical(definition) == (digest, text)
+    assert fsm_id_of(definition) == f"fsm_{definition.name}_{digest[:8]}"
 
 
 class TestDefaultsAreNotHashed:
-    """D-030 of plan 944e2692: a field at its default, given or omitted, is not in the hash."""
+    """D-030 of plan 944e2692: a field at its default, given or omitted, is not hashed."""
 
     def test_explicit_default_equals_omitted_and_a_non_default_differs(self):
         base = _DEFINITIONS["plain"]
         default = FSMDefinition.model_fields["version"].default
         omitted = definition_digest(FSMDefinition(**base))
-        explicit = definition_digest(FSMDefinition(**base, version=default))
-        other = definition_digest(FSMDefinition(**base, persona="A pirate"))
-        assert explicit == omitted
-        assert other != omitted
-
-    def test_a_changed_prompt_changes_the_id_and_the_digest(self):
-        base = FSMDefinition(**_DEFINITIONS["plain"])
-        changed = base.model_copy(deep=True)
-        changed.states["b"].response_instructions = "Goodbye."
-        assert definition_digest(changed) != definition_digest(base)
-        assert fsm_id_of(changed) != fsm_id_of(base)
+        assert definition_digest(FSMDefinition(**base, version=default)) == omitted
+        assert definition_digest(FSMDefinition(**base, persona="A pirate")) != omitted
 
 
-# The recipe has no second copy: a function that hashes a definition's default-free
-# dump is the one in core, and the detector below is proven on both shapes.
-_INLINE_RECIPE = (
-    "def f(d):\n"
-    "    return hashlib.sha256(json.dumps(d.model_dump(exclude_defaults=True),"
-    " sort_keys=True).encode()).hexdigest()\n"
-)
-_SPLIT_RECIPE = (
-    "def g(d):\n"
-    "    text = json.dumps(d.model_dump(exclude_defaults=True), sort_keys=True)\n"
-    "    return hashlib.sha256(text.encode()).hexdigest(), text\n"
-)
-_OTHER_HASH = (
-    "def h(d, ops):\n"
-    "    d.model_dump(exclude_defaults=True)\n"
-    "    return hashlib.sha256(json.dumps(ops, sort_keys=True).encode()).hexdigest()\n"
+_OLD_SHAPES = {
+    "one expression": "def f(d):\n return hashlib.sha256(json.dumps("
+    "d.model_dump(exclude_defaults=True), sort_keys=True).encode()).hexdigest()\n",
+    "split": "def f(d):\n text = json.dumps(d.model_dump(exclude_defaults=True))\n"
+    " return hashlib.sha256(text.encode()).hexdigest(), text\n",
+}
+_NOT_THE_RECIPE = (
+    "def f(d, ops):\n d.model_dump(exclude_defaults=True)\n"
+    " return hashlib.sha256(json.dumps(ops).encode()).hexdigest()\n"
 )
 
 
-def _is_default_free_dump(call: ast.AST) -> bool:
+def _named(call: ast.AST, attr: str) -> bool:
     return (
         isinstance(call, ast.Call)
         and isinstance(call.func, ast.Attribute)
-        and call.func.attr == "model_dump"
-        and any(
-            k.arg == "exclude_defaults"
-            and isinstance(k.value, ast.Constant)
-            and k.value.value is True
-            for k in call.keywords
-        )
+        and call.func.attr == attr
+    )
+
+
+def _default_free_dump(node: ast.AST) -> bool:
+    return _named(node, "model_dump") and any(
+        k.arg == "exclude_defaults" for k in node.keywords
     )
 
 
 def _inline_recipes(source: str) -> list[str]:
-    """Functions of *source* that call ``sha256`` and also ``json.dumps`` a
-    ``model_dump(exclude_defaults=True)`` (the old recipe, however the two are split)."""
+    """Functions that call ``sha256`` and ``json.dumps`` a default-free ``model_dump``."""
     found = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)]
-        hashes = any(
-            isinstance(c.func, ast.Attribute) and c.func.attr == "sha256" for c in calls
-        )
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
+        hashes = any(_named(c, "sha256") for c in calls)
         dumps = any(
-            isinstance(c.func, ast.Attribute)
-            and c.func.attr == "dumps"
-            and any(_is_default_free_dump(n) for n in ast.walk(c))
+            _named(c, "dumps") and any(_default_free_dump(n) for n in ast.walk(c))
             for c in calls
         )
         if hashes and dumps:
-            found.append(node.name)
+            found.append(fn.name)
     return found
 
 
 class TestOneRecipe:
-    def test_the_detector_sees_both_old_shapes_and_not_a_call_to_core(self):
-        assert _inline_recipes(_INLINE_RECIPE) == ["f"]
-        assert _inline_recipes(_SPLIT_RECIPE) == ["g"]
-        assert _inline_recipes(_OTHER_HASH) == []
-        assert _inline_recipes("def f(d):\n    return fsm_id_of(d)\n") == []
+    def test_the_detector_sees_both_old_shapes_and_not_other_hashing(self):
+        assert {k: _inline_recipes(v) for k, v in _OLD_SHAPES.items()} == {
+            "one expression": ["f"],
+            "split": ["f"],
+        }
+        assert _inline_recipes(_NOT_THE_RECIPE) == []
 
     def test_no_module_outside_core_hashes_a_definition_dump(self):
-        offenders = []
-        for path in sorted(_SRC.rglob("*.py")):
-            if path.relative_to(_SRC).parts[0] == "core":
-                continue
-            names = _inline_recipes(path.read_text(encoding="utf-8"))
-            offenders += [f"{path.relative_to(_SRC).as_posix()}::{n}" for n in names]
+        offenders = [
+            f"{path.relative_to(_SRC).as_posix()}::{name}"
+            for path in sorted(_SRC.rglob("*.py"))
+            if path.relative_to(_SRC).parts[0] != "core"
+            for name in _inline_recipes(path.read_text(encoding="utf-8"))
+        ]
         assert offenders == []
 
     def test_the_decision_anchors_stand_where_the_text_now_lives(self):

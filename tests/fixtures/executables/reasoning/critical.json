@@ -1,0 +1,89 @@
+{
+  "name": "critical_reasoning",
+  "description": "Systematic critical evaluation of arguments, claims, evidence, and reasoning to distinguish sound from unsound conclusions",
+  "initial_state": "identify_claims",
+  "persona": "You are a rigorous critical thinker who carefully evaluates arguments, evidence, and reasoning to separate truth from error and strong arguments from weak ones.",
+  "states": {
+    "identify_claims": {
+      "id": "identify_claims",
+      "description": "Identify and categorize the main claims and arguments",
+      "purpose": "Extract 'claims' and 'arguments' from the problem or text",
+      "required_context_keys": [
+        "claims",
+        "arguments"
+      ],
+      "extraction_instructions": "\n            Systematically identify what is being claimed or argued:\n\n            - What are the main conclusions, assertions, or claims being made?\n            - What specific arguments are presented to support these claims?\n            - What is the overall thesis, position, or central argument?\n            - Are there implicit or unstated assumptions underlying the arguments?\n            - How are factual claims distinguished from opinions, interpretations, or value judgments?\n\n            Clearly separate main arguments from supporting points and distinguish between different types of claims.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Work with the claims and arguments present in the given material.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "examine_evidence",
+          "description": "Claims and arguments identified"
+        }
+      ]
+    },
+    "examine_evidence": {
+      "id": "examine_evidence",
+      "description": "Critically examine the quality and sufficiency of supporting evidence",
+      "purpose": "Assess 'evidence_quality' and identify 'evidence_gaps'",
+      "required_context_keys": [
+        "evidence_quality",
+        "evidence_gaps"
+      ],
+      "extraction_instructions": "\n            Rigorously examine the evidence supporting the identified claims:\n\n            - What evidence is actually provided? Is it relevant, sufficient, and appropriate?\n            - How reliable, credible, and authoritative are the sources?\n            - Is the evidence current, representative, and methodologically sound?\n            - What important evidence is missing that would strengthen or weaken the argument?\n            - Are there potential biases, conflicts of interest, or limitations in how evidence was collected or presented?\n\n            Be specific about both strengths and critical weaknesses of the evidence base.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate the evidence that is already available in the material.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "analyze_logic",
+          "description": "Evidence examined"
+        }
+      ]
+    },
+    "analyze_logic": {
+      "id": "analyze_logic",
+      "description": "Analyze logical structure and identify reasoning flaws",
+      "purpose": "Conduct 'logical_analysis', identify 'assumptions' and 'fallacies'",
+      "required_context_keys": [
+        "logical_analysis",
+        "assumptions",
+        "fallacies"
+      ],
+      "extraction_instructions": "\n            Systematically analyze the logical structure and identify flaws:\n\n            - Do the conclusions actually follow logically from the stated premises?\n            - What key assumptions are being made (both stated and unstated)?\n            - Are there identifiable logical fallacies (ad hominem, straw man, false dilemma, appeal to authority, etc.)?\n            - Are there gaps in reasoning, unsupported logical leaps, or non sequiturs?\n            - Is the reasoning internally consistent throughout the argument?\n\n            Identify specific logical strengths and weaknesses with clear examples.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the logical structure of what has been provided.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "consider_alternatives",
+          "description": "Logic analyzed"
+        }
+      ]
+    },
+    "consider_alternatives": {
+      "id": "consider_alternatives",
+      "description": "Consider alternative explanations and strong counter-arguments",
+      "purpose": "Identify 'alternative_explanations' and 'counter_arguments'",
+      "required_context_keys": [
+        "alternative_explanations",
+        "counter_arguments"
+      ],
+      "extraction_instructions": "\n            Systematically consider alternatives and opposing viewpoints:\n\n            - What alternative explanations, interpretations, or conclusions are plausible?\n            - What are the strongest possible counter-arguments to the main claims?\n            - What would informed opponents or skeptics of this position argue?\n            - Are there other reasonable ways to interpret the same evidence?\n            - What additional considerations or factors might change the evaluation?\n\n            Present fair and intellectually honest alternatives rather than weak straw man arguments.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Generate thoughtful alternatives based on your systematic analysis.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "form_judgment",
+          "description": "Alternatives considered"
+        }
+      ]
+    },
+    "form_judgment": {
+      "id": "form_judgment",
+      "description": "Form comprehensive critical assessment with justified confidence level",
+      "purpose": "Provide 'critical_assessment' and 'confidence_rating'",
+      "required_context_keys": [
+        "critical_assessment",
+        "confidence_rating"
+      ],
+      "extraction_instructions": "\n            Form a well-reasoned overall critical judgment:\n\n            - How strong and convincing are the arguments when all factors are considered?\n            - What are the most significant strengths and critical weaknesses?\n            - How much confidence should we reasonably have in the main claims?\n            - What would most significantly strengthen or weaken these arguments?\n            - What is your final, balanced assessment of the overall reasoning quality?\n\n            Provide a fair, balanced evaluation with a confidence rating from 1-10 and clear justification.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Form your critical judgment based on your complete systematic analysis.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

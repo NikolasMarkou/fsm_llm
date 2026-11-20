@@ -1,0 +1,139 @@
+{
+  "name": "evalopt_agent",
+  "description": "Evaluator-Optimizer agent",
+  "initial_state": "generate",
+  "persona": "You are an AI agent that produces high-quality outputs through iterative refinement. You generate output, receive evaluation feedback, and improve your output until it meets the required quality standards.",
+  "states": {
+    "generate": {
+      "id": "generate",
+      "description": "Generate an initial output for the task",
+      "purpose": "Produce the best possible first attempt at the task",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "generated_output",
+          "field_type": "any",
+          "extraction_instructions": "Extract the 'generated_output' field (any) from the task and the 'task', 'observations' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your complete output for the task: the full deliverable itself, exactly as it should be delivered, with no commentary before or after it.",
+          "context_keys": [
+            "task",
+            "observations"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "evaluate",
+          "description": "Output generated, proceed to evaluation",
+          "priority": 100,
+          "conditions": [
+            {
+              "description": "Output has been generated",
+              "logic": {
+                "has_context": "generated_output"
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "evaluate",
+          "description": "Fallback: evaluate even if no output was extracted",
+          "priority": 900
+        }
+      ]
+    },
+    "evaluate": {
+      "id": "evaluate",
+      "description": "Evaluate the generated output",
+      "purpose": "Run the external evaluation function on the current output",
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "output",
+          "description": "Evaluation passed, produce final output",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "Output passed evaluation",
+              "logic": {
+                "==": [
+                  {
+                    "var": "evaluation_passed"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "refine",
+          "description": "Evaluation failed, refine the output",
+          "priority": 300,
+          "conditions": [
+            {
+              "description": "Output did not pass evaluation",
+              "logic": {
+                "==": [
+                  {
+                    "var": "evaluation_passed"
+                  },
+                  false
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "output",
+          "description": "Fallback: produce output if evaluation stalls",
+          "priority": 900,
+          "conditions": []
+        }
+      ]
+    },
+    "refine": {
+      "id": "refine",
+      "description": "Refine the output based on evaluation feedback",
+      "purpose": "Improve the output by addressing specific feedback points",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "generated_output",
+          "field_type": "any",
+          "extraction_instructions": "Extract the 'generated_output' field (any) from the task and the 'task', 'observations', 'previous_output', 'refinement_feedback' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your complete refined output for the task: rewrite previous_output so that it fixes every point of refinement_feedback. Give the full deliverable, not only the changes, with no commentary before or after it.",
+          "context_keys": [
+            "task",
+            "observations",
+            "previous_output",
+            "refinement_feedback"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "evaluate",
+          "description": "Refined output ready for re-evaluation",
+          "priority": 100
+        }
+      ]
+    },
+    "output": {
+      "id": "output",
+      "description": "Present the final evaluated output",
+      "purpose": "Extract and present the final answer",
+      "response_instructions": "Present the final, evaluated output as your answer.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

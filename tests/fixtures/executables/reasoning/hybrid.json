@@ -1,0 +1,186 @@
+{
+  "name": "hybrid_reasoning",
+  "description": "Systematically combines multiple reasoning approaches for comprehensive problem solving with loop prevention mechanisms",
+  "initial_state": "identify_components",
+  "persona": "You are a master strategist who skillfully combines different reasoning approaches to tackle complex problems from multiple complementary angles.",
+  "handler_only_keys": [
+    "hybrid_loop_count"
+  ],
+  "states": {
+    "identify_components": {
+      "id": "identify_components",
+      "description": "Break problem into components requiring different reasoning approaches",
+      "purpose": "Map 'problem_aspects' to reasoning types in 'reasoning_map'",
+      "required_context_keys": [
+        "problem_aspects",
+        "reasoning_map"
+      ],
+      "extraction_instructions": "\n            Systematically analyze the problem to identify aspects requiring different reasoning approaches:\n\n            - What parts need systematic analytical breakdown and decomposition?\n            - What components require logical deduction from established principles?\n            - Where might creative, innovative thinking provide valuable insights?\n            - What aspects need critical evaluation of arguments or evidence?\n            - What patterns might inductive reasoning help reveal from available data?\n\n            Create a comprehensive map of problem aspects to appropriate reasoning approaches.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the problem as presented to identify reasoning needs.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "apply_analytical",
+          "description": "Components identified and mapped to reasoning approaches"
+        }
+      ]
+    },
+    "apply_analytical": {
+      "id": "apply_analytical",
+      "description": "Apply systematic analytical reasoning to understand problem structure",
+      "purpose": "Create 'analytical_breakdown' and 'component_relationships'",
+      "required_context_keys": [
+        "analytical_breakdown",
+        "component_relationships"
+      ],
+      "extraction_instructions": "\n            Apply systematic analytical thinking to the problem:\n\n            - Break down complex aspects into simpler, more manageable components\n            - Identify relationships, dependencies, and interactions between components\n            - Understand the underlying structure and organizational principles\n            - Analyze how different elements contribute to the overall problem\n            - Document systematic findings from the analytical decomposition\n\n            Provide thorough analytical breakdown that will inform other reasoning approaches.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Proceed with systematic analytical breakdown based on your component identification.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "apply_logical",
+          "description": "Analytical reasoning systematically applied"
+        }
+      ]
+    },
+    "apply_logical": {
+      "id": "apply_logical",
+      "description": "Apply logical reasoning to derive sound conclusions",
+      "purpose": "Establish 'logical_conclusions' and 'reasoning_chain'",
+      "required_context_keys": [
+        "logical_conclusions",
+        "reasoning_chain"
+      ],
+      "extraction_instructions": "\n            Apply systematic logical reasoning to the analytical findings:\n\n            - What can be logically deduced from the analytical breakdown and identified relationships?\n            - What logical steps follow necessarily from the evidence and established facts?\n            - What conclusions can be drawn with high confidence based on logical inference?\n            - How do the logical pieces fit together to form coherent understanding?\n            - What clear chain of reasoning emerges from the logical analysis?\n\n            Build a clear, valid chain of logical reasoning that builds on the analytical foundation.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Apply logical reasoning systematically to your analytical findings.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "apply_creative",
+          "description": "Logical reasoning systematically applied"
+        }
+      ]
+    },
+    "apply_creative": {
+      "id": "apply_creative",
+      "description": "Apply creative thinking to generate novel approaches and insights",
+      "purpose": "Generate 'creative_insights' and 'novel_approaches'",
+      "required_context_keys": [
+        "creative_insights",
+        "novel_approaches"
+      ],
+      "extraction_instructions": "\n            Apply creative thinking to complement and enhance the analytical and logical work:\n\n            - What new perspectives or insights emerge from viewing the analysis creatively?\n            - How might innovative approaches complement or extend the logical conclusions?\n            - What novel solutions become possible when we think beyond conventional boundaries?\n            - What creative connections or unexpected relationships can enhance understanding?\n            - How can creative thinking add value to the systematic analysis already completed?\n\n            Generate creative insights that meaningfully enhance rather than contradict the systematic reasoning.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Generate creative insights building on your comprehensive analytical and logical work.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "critical_evaluation",
+          "description": "Creative reasoning systematically applied"
+        }
+      ]
+    },
+    "critical_evaluation": {
+      "id": "critical_evaluation",
+      "description": "Critically evaluate all findings with systematic loop prevention",
+      "purpose": "Create 'evaluation_results' and determine if refinement needed (maximum 2 loops)",
+      "required_context_keys": [
+        "evaluation_results"
+      ],
+      "extraction_instructions": "\n            Critically evaluate the integration of all reasoning approaches:\n\n            - How effectively do the analytical, logical, and creative approaches complement each other?\n            - Are there significant contradictions, gaps, or inconsistencies that need resolution?\n            - What are the key strengths and potential weaknesses of this combined approach?\n            - Are there critical flaws or missing elements that would justify returning for refinement?\n            - How robust and comprehensive is the overall reasoning when considered together?\n\n            Set needs_refinement=True only for serious, fundamental issues.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate comprehensively based on your multi-faceted analysis.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "integrate_solution",
+          "description": "Ready to integrate (no critical issues or loop limit reached)",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "No critical issues found or maximum loops reached",
+              "logic": {
+                "or": [
+                  {
+                    "!=": [
+                      {
+                        "var": "needs_refinement"
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    ">=": [
+                      {
+                        "var": [
+                          "hybrid_loop_count",
+                          0
+                        ]
+                      },
+                      2
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "identify_components",
+          "description": "Refinement needed (limited loops remaining)",
+          "priority": 2,
+          "conditions": [
+            {
+              "description": "Critical issues found and loops available",
+              "logic": {
+                "and": [
+                  {
+                    "==": [
+                      {
+                        "var": "needs_refinement"
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    "<": [
+                      {
+                        "var": [
+                          "hybrid_loop_count",
+                          0
+                        ]
+                      },
+                      2
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "integrate_solution": {
+      "id": "integrate_solution",
+      "description": "Integrate insights from all reasoning approaches into comprehensive solution",
+      "purpose": "Create 'integrated_solution' with 'reasoning_synthesis_notes'",
+      "required_context_keys": [
+        "integrated_solution",
+        "reasoning_synthesis_notes"
+      ],
+      "extraction_instructions": "\n            Systematically integrate all reasoning approaches into a comprehensive, unified solution:\n\n            - How do analytical insights, logical conclusions, and creative innovations combine synergistically?\n            - What is the most complete and nuanced understanding of the problem that emerges?\n            - How do different reasoning types reinforce, complement, or constructively challenge each other?\n            - What is the best integrated approach to solving or addressing the problem?\n            - How does the combination create understanding that is greater than the sum of individual parts?\n\n            Synthesize rather than merely summarize\u2014create genuine integration that leverages the strengths of each approach.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Integrate systematically based on your comprehensive multi-approach analysis.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "finalize_hybrid",
+          "description": "Solution comprehensively integrated"
+        }
+      ]
+    },
+    "finalize_hybrid": {
+      "id": "finalize_hybrid",
+      "description": "Present final hybrid solution with complete reasoning synthesis",
+      "purpose": "Finalize 'final_hybrid_solution' and 'reasoning_synthesis'",
+      "required_context_keys": [
+        "final_hybrid_solution",
+        "reasoning_synthesis"
+      ],
+      "extraction_instructions": "\n            Present the final comprehensive hybrid solution with complete synthesis:\n\n            - What is your final, most comprehensive and well-reasoned solution?\n            - How did each reasoning type (analytical, logical, creative, critical) contribute uniquely?\n            - What is the particular strength and advantage of this multi-faceted reasoning approach?\n            - How confident are you in this hybrid solution and why?\n            - What would be the most logical next steps for implementation, testing, or further development?\n\n            Provide a complete synthesis that demonstrates and showcases the power of systematically combined reasoning approaches.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Present your final integrated solution based on the complete hybrid reasoning process.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

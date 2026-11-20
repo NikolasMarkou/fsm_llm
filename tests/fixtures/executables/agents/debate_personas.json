@@ -1,0 +1,179 @@
+{
+  "name": "debate_agent",
+  "description": "Find the answer to the golden question",
+  "initial_state": "propose",
+  "persona": "a proposer",
+  "states": {
+    "propose": {
+      "id": "propose",
+      "description": "Generate or refine a proposition for the task",
+      "purpose": "Present a well-reasoned argument or answer",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "proposition",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'proposition' field (str) from the task and the 'task', 'observations', 'debate_rounds' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your proposition: a clear position on the task with its supporting arguments. If debate_rounds holds earlier rounds, improve the latest proposition using its critique and counter-argument. Role: a proposer",
+          "context_keys": [
+            "task",
+            "observations",
+            "debate_rounds"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "critique",
+          "description": "Proposition ready for critique",
+          "priority": 100
+        }
+      ]
+    },
+    "critique": {
+      "id": "critique",
+      "description": "Critically analyze the current proposition",
+      "purpose": "Identify weaknesses, gaps, and counterpoints",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "critique",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'critique' field (str) from the task and the 'task', 'observations', 'proposition' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your critique of the proposition value: its weaknesses, logical gaps, missing evidence and counterexamples. Role: a critic",
+          "context_keys": [
+            "task",
+            "observations",
+            "proposition"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "counter",
+          "description": "Critique complete, allow counter-argument",
+          "priority": 100
+        }
+      ]
+    },
+    "counter": {
+      "id": "counter",
+      "description": "Address the critique with counter-arguments",
+      "purpose": "Strengthen the proposition by addressing criticisms",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "counter_argument",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'counter_argument' field (str) from the task and the 'task', 'observations', 'proposition', 'critique' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your counter-arguments to the critique value: answer each of its points, concede the valid ones and strengthen the proposition. Role: a proposer",
+          "context_keys": [
+            "task",
+            "observations",
+            "proposition",
+            "critique"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "judge",
+          "description": "Counter-argument ready for judgment",
+          "priority": 100
+        }
+      ]
+    },
+    "judge": {
+      "id": "judge",
+      "description": "Evaluate the debate exchange and decide next action",
+      "purpose": "Determine whether consensus has been reached",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "judge_verdict",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'judge_verdict' field (str) from the task and the 'task', 'observations', 'proposition', 'critique', 'counter_argument' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your verdict on this round: weigh the proposition, critique and counter_argument values and name the strongest points of each. Role: a judge",
+          "context_keys": [
+            "task",
+            "observations",
+            "proposition",
+            "critique",
+            "counter_argument"
+          ],
+          "required": false
+        },
+        {
+          "field_name": "consensus_reached",
+          "field_type": "bool",
+          "extraction_instructions": "Extract the 'consensus_reached' field (bool) from the task and the 'task', 'observations', 'proposition', 'critique', 'counter_argument', 'current_round', 'debate_rounds' values in the 'Already extracted:' context. Weigh the proposition, critique and counter_argument values. true when the proposition, as defended in the counter-argument, is a satisfactory answer to the task; false only when another round (at most 5 in total; current_round is this round's number) would clearly improve it. debate_rounds holds the earlier rounds: true also when this round no longer changes the position materially. Role: a judge",
+          "context_keys": [
+            "task",
+            "observations",
+            "proposition",
+            "critique",
+            "counter_argument",
+            "current_round",
+            "debate_rounds"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "conclude",
+          "description": "Consensus reached or max rounds hit",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "Consensus reached or max rounds hit",
+              "logic": {
+                "or": [
+                  {
+                    "==": [
+                      {
+                        "var": "consensus_reached"
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    ">=": [
+                      {
+                        "var": "current_round"
+                      },
+                      5
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "propose",
+          "description": "Another round of debate needed",
+          "priority": 300
+        }
+      ]
+    },
+    "conclude": {
+      "id": "conclude",
+      "description": "Produce the final answer from the debate",
+      "purpose": "Synthesize the debate into a definitive answer",
+      "extraction_instructions": "",
+      "response_instructions": "Give the final, definitive answer to the task from the debate: state the answer first, then the key arguments from debate_rounds that shaped it.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

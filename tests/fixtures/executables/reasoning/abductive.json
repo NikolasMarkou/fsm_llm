@@ -1,0 +1,73 @@
+{
+  "name": "abductive_reasoning",
+  "description": "Find the best explanation for puzzling observations through systematic inference to the best explanation",
+  "initial_state": "identify_observations",
+  "persona": "You are a detective and investigator who excels at finding the most plausible explanations for puzzling observations and unexplained phenomena.",
+  "states": {
+    "identify_observations": {
+      "id": "identify_observations",
+      "description": "Identify key observations that require explanation",
+      "purpose": "Catalog 'observations' and identify 'surprising_elements' that require explanation",
+      "required_context_keys": [
+        "observations",
+        "surprising_elements"
+      ],
+      "extraction_instructions": "\n            Systematically identify what needs to be explained:\n\n            - What specific facts, phenomena, or observations are we trying to explain?\n            - What seems surprising, unexpected, anomalous, or puzzling?\n            - What patterns, behaviors, or outcomes need to be accounted for?\n            - What data points or evidence require explanation?\n            - What aspects of the situation seem to call for further understanding?\n\n            Focus on concrete, specific observations rather than interpretations or preliminary explanations.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Work with the observations already provided in the problem context.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "generate_hypotheses",
+          "description": "Key observations identified"
+        }
+      ]
+    },
+    "generate_hypotheses": {
+      "id": "generate_hypotheses",
+      "description": "Generate multiple potential explanations",
+      "purpose": "Create 'potential_hypotheses' with 'hypothesis_rationales' for each explanation",
+      "required_context_keys": [
+        "potential_hypotheses",
+        "hypothesis_rationales"
+      ],
+      "extraction_instructions": "\n            Generate multiple plausible explanations for the observations:\n\n            - What could reasonably account for what we observe?\n            - Consider different types of causes (direct, indirect, systemic, multiple contributing factors)\n            - Think about both obvious and less obvious potential explanations\n            - Include competing or alternative hypotheses that might explain the same phenomena\n            - Consider explanations at different levels (individual, systemic, environmental, etc.)\n\n            For each hypothesis, provide a clear rationale explaining why it could account for the observations.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Generate comprehensive hypotheses based on the observations you've identified.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "evaluate_hypotheses",
+          "description": "Hypotheses generated"
+        }
+      ]
+    },
+    "evaluate_hypotheses": {
+      "id": "evaluate_hypotheses",
+      "description": "Systematically evaluate each hypothesis against standard criteria",
+      "purpose": "Create 'hypothesis_evaluations' using 'evaluation_criteria' for systematic assessment",
+      "required_context_keys": [
+        "hypothesis_evaluations",
+        "evaluation_criteria"
+      ],
+      "extraction_instructions": "\n            Systematically evaluate each hypothesis using standard criteria for explanatory adequacy:\n\n            - Explanatory scope: How comprehensively does it explain the observations?\n            - Simplicity/parsimony: Is it unnecessarily complex or does it invoke minimal assumptions?\n            - Plausibility: How likely is it given our background knowledge and experience?\n            - Testability: Can it be verified, falsified, or further investigated?\n            - Consistency: Does it fit coherently with other established knowledge?\n            - Predictive power: Does it suggest new predictions or help anticipate future observations?\n\n            Rate each hypothesis systematically on these dimensions with clear justifications.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate based on the hypotheses you've systematically generated.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "select_best_explanation",
+          "description": "Hypotheses evaluated"
+        }
+      ]
+    },
+    "select_best_explanation": {
+      "id": "select_best_explanation",
+      "description": "Select most plausible explanation with clear justification",
+      "purpose": "Choose 'best_hypothesis' with 'selection_justification', 'confidence_in_explanation', and 'next_steps_for_validation'",
+      "required_context_keys": [
+        "best_hypothesis",
+        "selection_justification",
+        "confidence_in_explanation",
+        "next_steps_for_validation"
+      ],
+      "extraction_instructions": "\n            Select the best explanation through careful comparative analysis:\n\n            - Which hypothesis best balances all the evaluative criteria?\n            - Why is this the most plausible and compelling explanation overall?\n            - What is your confidence level in this explanation (1-10 scale) and why?\n            - What would you need to do to further test, validate, or investigate this explanation?\n            - What are the key strengths of this explanation and what limitations or uncertainties remain?\n\n            Provide clear, detailed justification for your selection and acknowledge appropriate levels of uncertainty.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Make your selection based on your systematic evaluation process.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

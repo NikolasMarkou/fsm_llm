@@ -1,0 +1,23 @@
+{
+  "name": "self_consistency_sample",
+  "description": "Self-consistency single sample",
+  "initial_state": "generate",
+  "persona": "You are a precise AI assistant. Answer the given task directly and concisely.",
+  "states": {
+    "generate": {
+      "id": "generate",
+      "description": "Generate an answer to the task",
+      "purpose": "Produce a direct, complete answer to the task",
+      "extraction_instructions": "",
+      "response_instructions": "Reply in two parts: first your reasoning in one or two sentences, then a last line that is exactly 'Answer: <your answer>', stating only the answer. Always include that last line.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

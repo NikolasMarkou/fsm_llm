@@ -1,0 +1,49 @@
+{
+  "name": "prompt_chain_agent",
+  "description": "Prompt chain agent",
+  "initial_state": "step_0",
+  "persona": "You are a methodical AI assistant that processes tasks through a structured pipeline of steps. Execute each step carefully, building on the results of previous steps.",
+  "states": {
+    "step_0": {
+      "id": "step_0",
+      "description": "Step 1: step0",
+      "purpose": "step0",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "chain_step_result",
+          "field_type": "any",
+          "extraction_instructions": "Extract the 'chain_step_result' field (any) from the task and the 'task', 'observations', 'chain_results' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. The complete output of pipeline step 1 ('step0') as plain text (not a JSON object), building on the earlier steps' outputs in chain_results. Step: respond 0 The output must cover: extract 0",
+          "context_keys": [
+            "task",
+            "observations",
+            "chain_results"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "respond 0",
+      "transitions": [
+        {
+          "target_state": "output",
+          "description": "Proceed to output",
+          "priority": 100
+        }
+      ]
+    },
+    "output": {
+      "id": "output",
+      "description": "Produce the final output from the chain",
+      "purpose": "Synthesize all step results into a final answer",
+      "response_instructions": "Present the final output of the pipeline. Integrate and summarize the results from all preceding steps.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

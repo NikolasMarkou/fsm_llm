@@ -1,0 +1,176 @@
+{
+  "name": "reasoning_orchestrator",
+  "description": "Orchestrates various reasoning strategies with retry limits and loop prevention.",
+  "initial_state": "problem_analysis",
+  "persona": "You are a reasoning guide helping to solve problems step by step. Be clear, logical, and thorough.",
+  "handler_only_keys": [
+    "validation_result",
+    "validation_checks",
+    "max_retries_reached",
+    "retry_count",
+    "solution_confidence",
+    "reasoning_type_selected",
+    "classified_problem_type",
+    "reasoning_push_pending",
+    "hybrid_loop_count",
+    "calculation_result",
+    "calculation_error_details"
+  ],
+  "states": {
+    "problem_analysis": {
+      "id": "problem_analysis",
+      "description": "Initial analysis of the problem",
+      "purpose": "Analyze the 'problem_statement' to identify 'problem_type', 'problem_components', and 'constraints'",
+      "required_context_keys": [
+        "problem_type",
+        "problem_components"
+      ],
+      "extraction_instructions": "\n            Break down the problem systematically. For simple arithmetic (e.g., '1+1'), set problem_type='arithmetic' and components as operands/operator.\n\n            Identify:\n            - The type of problem (arithmetic, logical, creative, analytical, etc.)\n            - Key components or elements involved\n            - Any constraints or limitations\n            - The expected outcome or goal\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Work with the problem statement provided in the context.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "strategy_selection",
+          "description": "Problem analyzed successfully",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "Problem type and components identified",
+              "requires_context_keys": [
+                "problem_type",
+                "problem_components"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "strategy_selection": {
+      "id": "strategy_selection",
+      "description": "Select appropriate reasoning strategy",
+      "purpose": "Choose 'reasoning_strategy' based on problem analysis. For arithmetic, choose 'simple_calculator'.",
+      "required_context_keys": [
+        "reasoning_strategy",
+        "strategy_rationale"
+      ],
+      "extraction_instructions": "\n            Select the most appropriate reasoning strategy based on the problem analysis:\n            - If problem_type is 'arithmetic', set reasoning_strategy to 'simple_calculator'\n            - For logical problems, consider 'deductive' or 'analytical'\n            - For creative problems, use 'creative' or 'hybrid'\n            - For evaluation tasks, use 'critical'\n            - For pattern recognition, use 'inductive'\n            - For explanation tasks, use 'abductive'\n            - For similarity-based problems, use 'analogical'\n            - For complex multi-faceted problems, use 'hybrid'\n\n            Provide clear rationale for your choice.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Make the strategy selection based on your problem analysis.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "execute_reasoning",
+          "description": "Strategy selected"
+        }
+      ]
+    },
+    "execute_reasoning": {
+      "id": "execute_reasoning",
+      "description": "Execute selected reasoning strategy",
+      "purpose": "Apply the chosen reasoning approach through specialized FSM execution",
+      "extraction_instructions": "\n            The appropriate reasoning FSM will be executed here by handlers based on the selected strategy.\n            This state serves as a coordination point for specialized reasoning execution.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. The execution will be handled automatically.\n            ",
+      "response_instructions": "Acknowledge the current state of reasoning. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "synthesize_solution",
+          "description": "Reasoning completed"
+        }
+      ]
+    },
+    "synthesize_solution": {
+      "id": "synthesize_solution",
+      "description": "Synthesize solution from reasoning results",
+      "purpose": "Create 'proposed_solution' and 'key_insights' from reasoning results",
+      "required_context_keys": [
+        "proposed_solution",
+        "key_insights"
+      ],
+      "extraction_instructions": "\n            Synthesize a comprehensive solution from the reasoning results:\n\n            - If 'calculation_result' exists (from simple calculator), use it as the proposed_solution\n            - If analytical results exist, synthesize from integrated_analysis and conclusions\n            - If creative results exist, use the best_creative_solution\n            - If critical results exist, incorporate the critical_assessment\n            - Always provide key_insights as a list of important findings\n            - Ensure the solution directly addresses the original problem\n\n            Create a clear, actionable solution with supporting insights.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Synthesize based on available reasoning outputs.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "validate_refine",
+          "description": "Solution synthesized"
+        }
+      ]
+    },
+    "validate_refine": {
+      "id": "validate_refine",
+      "description": "Validate solution with retry limit protection",
+      "purpose": "Check 'validation_result' and retry if needed (max 3 times)",
+      "extraction_instructions": "\n            Validate the proposed solution:\n\n            - Check if the solution adequately addresses the original problem\n            - Evaluate the logical consistency and completeness\n            - Assess confidence level (1-10 scale)\n            - Identify any significant gaps or errors\n            - Consider if retry is warranted (only for serious issues)\n\n            Handlers set validation_result and manage retry_count to prevent infinite loops.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Validate based on the solution quality and completeness.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "final_answer",
+          "description": "Solution valid or max retries reached",
+          "priority": 1,
+          "conditions": [
+            {
+              "description": "Valid solution or retry limit hit",
+              "logic": {
+                "or": [
+                  {
+                    "==": [
+                      {
+                        "var": "validation_result"
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    "==": [
+                      {
+                        "var": "max_retries_reached"
+                      },
+                      true
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "execute_reasoning",
+          "description": "Retry reasoning (if under limit)",
+          "priority": 2,
+          "conditions": [
+            {
+              "description": "Invalid and can retry",
+              "logic": {
+                "and": [
+                  {
+                    "==": [
+                      {
+                        "var": "validation_result"
+                      },
+                      false
+                    ]
+                  },
+                  {
+                    "!=": [
+                      {
+                        "var": "max_retries_reached"
+                      },
+                      true
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "final_answer": {
+      "id": "final_answer",
+      "description": "Present final answer with complete reasoning trace",
+      "purpose": "Set 'final_solution' and final metadata",
+      "required_context_keys": [
+        "final_solution",
+        "reasoning_trace"
+      ],
+      "extraction_instructions": "\n            Present the final solution with complete context:\n\n            Set final_solution to:\n            - proposed_solution if validation_result is True\n            - proposed_solution with retry warning if max_retries_reached but solution exists\n            - 'Unable to find valid solution after maximum attempts' if no valid solution\n\n            Include:\n            - Complete reasoning_trace showing the path taken\n            - Summary of key insights and approach used\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Present the final solution based on the reasoning process.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "creative_reasoning",
+  "description": "Generate novel and innovative solutions through divergent and convergent creative thinking processes",
+  "initial_state": "explore_perspectives",
+  "persona": "You are an innovative creative thinker who generates novel solutions by seeing problems from fresh perspectives and making unexpected connections.",
+  "states": {
+    "explore_perspectives": {
+      "id": "explore_perspectives",
+      "description": "Explore the problem from multiple creative perspectives",
+      "purpose": "Generate 'perspectives' and 'reframings' of the problem",
+      "required_context_keys": [
+        "perspectives",
+        "reframings"
+      ],
+      "extraction_instructions": "\n            Systematically explore the problem through different creative lenses:\n\n            - How would different people approach this (child, artist, engineer, scientist, entrepreneur)?\n            - What if we flipped key assumptions or removed major constraints?\n            - How is this problem similar to or different from challenges in completely different domains?\n            - What would this look like from the opposite or inverse perspective?\n            - What metaphors, analogies, or artistic representations reveal new angles?\n\n            Generate multiple fresh ways of viewing and framing the problem to unlock creative potential.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Generate diverse perspectives based on the problem as stated.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "generate_ideas",
+          "description": "Multiple perspectives explored"
+        }
+      ]
+    },
+    "generate_ideas": {
+      "id": "generate_ideas",
+      "description": "Brainstorm creative and unconventional ideas without judgment",
+      "purpose": "Create 'creative_ideas' and 'unconventional_approaches'",
+      "required_context_keys": [
+        "creative_ideas",
+        "unconventional_approaches"
+      ],
+      "extraction_instructions": "\n            Generate creative ideas through divergent thinking:\n\n            - What wild, impossible, or seemingly silly ideas come to mind?\n            - What if we completely removed key constraints or limitations?\n            - How do completely different fields or domains solve similar challenges?\n            - What would an ideal, unlimited-resource solution look like?\n            - What approaches break conventional thinking or challenge standard methods?\n\n            Focus on quantity and novelty over immediate practicality. Suspend judgment and let creativity flow freely.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Generate ideas freely based on your thorough perspective exploration.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "combine_concepts",
+          "description": "Ideas generated"
+        }
+      ]
+    },
+    "combine_concepts": {
+      "id": "combine_concepts",
+      "description": "Combine and synthesize ideas in novel ways",
+      "purpose": "Create 'combinations' and develop 'novel_solutions'",
+      "required_context_keys": [
+        "combinations",
+        "novel_solutions"
+      ],
+      "extraction_instructions": "\n            Systematically combine ideas in unexpected and innovative ways:\n\n            - What happens when we merge different approaches or solutions?\n            - How can we combine the best elements of multiple ideas into something new?\n            - What entirely new solutions emerge from mixing seemingly unrelated concepts?\n            - How can we build bridges between ideas from different domains or perspectives?\n            - What hybrid approaches might leverage multiple creative insights?\n\n            Create truly novel solutions that integrate multiple creative elements in unexpected ways.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Combine the ideas you've generated in innovative ways.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "evaluate_novelty",
+          "description": "Concepts combined"
+        }
+      ]
+    },
+    "evaluate_novelty": {
+      "id": "evaluate_novelty",
+      "description": "Evaluate creative solutions for novelty, feasibility, and impact",
+      "purpose": "Select 'best_creative_solution' and rate 'innovation_rating'",
+      "required_context_keys": [
+        "best_creative_solution",
+        "innovation_rating"
+      ],
+      "extraction_instructions": "\n            Critically evaluate your creative solutions using convergent thinking:\n\n            - Which solutions are most genuinely novel and original?\n            - Which best balance creativity with potential feasibility?\n            - What makes each solution truly innovative or groundbreaking?\n            - Which has the greatest potential for positive impact or effectiveness?\n            - How would you rate the overall creativity and innovation level (1-10 scale)?\n\n            Select the most promising creative solution and provide a detailed innovation assessment.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Evaluate and select based on the creative solutions you've systematically developed.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

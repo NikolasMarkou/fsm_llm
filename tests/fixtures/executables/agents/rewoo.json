@@ -1,0 +1,64 @@
+{
+  "name": "rewoo_agent",
+  "description": "REWOO agent with upfront planning",
+  "initial_state": "plan_all",
+  "persona": "You are a methodical AI agent that solves tasks by planning all tool calls upfront, then executing them, and finally synthesizing an answer from the collected evidence. You think before you act, and you plan completely.",
+  "states": {
+    "plan_all": {
+      "id": "plan_all",
+      "description": "Create a complete plan of all tool calls needed",
+      "purpose": "Generate a full plan with tool calls and variable references",
+      "required_context_keys": [
+        "plan_blueprint"
+      ],
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "plan_blueprint",
+          "field_type": "list",
+          "extraction_instructions": "Extract the 'plan_blueprint' field (list) from the task and the 'task', 'observations' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Analyze the task and create a COMPLETE plan of all tool calls needed to solve it. You must plan everything upfront in a single pass.\n\nAvailable tools:\n- search: Tool search\n- calc: Tool calc\n\nEach plan step can reference the output of a previous step using #E1, #E2, etc. (where the number matches the plan_id).\n\nExtract the following as JSON:\n- \"plan_blueprint\": a JSON list of plan step objects, each with:\n  - \"plan_id\": integer step number starting from 1 (e.g. 1, 2, 3)\n  - \"description\": what this step accomplishes\n  - \"tool_name\": which tool to call\n  - \"tool_input\": parameters for the tool (may contain #E1, #E2 references)\n- \"reasoning\": your overall reasoning for this plan\n\nExample plan_blueprint:\n[\n  {\"plan_id\": 1, \"description\": \"Search for X\", \"tool_name\": \"search\", \"tool_input\": {\"query\": \"X\"}},\n  {\"plan_id\": 2, \"description\": \"Search for Y using result of step 1\", \"tool_name\": \"search\", \"tool_input\": {\"query\": \"Y context: #E1\"}}\n]",
+          "context_keys": [
+            "task",
+            "observations"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "execute_plans",
+          "description": "Plan is complete, proceed to execution",
+          "priority": 100
+        }
+      ]
+    },
+    "execute_plans": {
+      "id": "execute_plans",
+      "description": "Execute all planned tool calls sequentially",
+      "purpose": "Run every tool call from the plan, substituting variable references",
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "solve",
+          "description": "All plans executed, proceed to synthesize answer",
+          "priority": 100
+        }
+      ]
+    },
+    "solve": {
+      "id": "solve",
+      "description": "Synthesize the final answer from all evidence",
+      "purpose": "Combine the task, plan, and all tool results into a final answer",
+      "response_instructions": "Present your final answer clearly, referencing the evidence gathered from the planned tool executions.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

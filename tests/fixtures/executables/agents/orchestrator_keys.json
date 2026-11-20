@@ -1,0 +1,147 @@
+{
+  "name": "orchestrator_agent",
+  "description": "Find the answer to the golden question",
+  "initial_state": "orchestrate",
+  "persona": "You are an orchestrator AI agent that solves tasks by decomposing them into subtasks and delegating to workers. You analyze results, determine if more work is needed, and synthesize a final answer from all results.",
+  "states": {
+    "orchestrate": {
+      "id": "orchestrate",
+      "description": "Decompose the task into subtasks for delegation",
+      "purpose": "Analyze the task and create a delegation plan",
+      "required_context_keys": [
+        "subtasks"
+      ],
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "subtasks",
+          "field_type": "any",
+          "extraction_instructions": "Extract the 'subtasks' field (any) from the task and the 'task', 'observations', 'worker_results', 'topic', 'audience' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your decomposition of the task: a JSON list of subtask description strings, each specific, self-contained and actionable for one worker. If worker_results holds results from earlier rounds, list only the work those results do not cover yet.",
+          "context_keys": [
+            "task",
+            "observations",
+            "worker_results",
+            "topic",
+            "audience"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "delegate",
+          "description": "Subtasks are ready for delegation",
+          "priority": 100,
+          "conditions": [
+            {
+              "description": "Subtasks have been generated",
+              "logic": {
+                "has_context": "subtasks"
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "synthesize",
+          "description": "Fallback: skip to synthesis if decomposition stalls",
+          "priority": 900,
+          "conditions": []
+        }
+      ]
+    },
+    "delegate": {
+      "id": "delegate",
+      "description": "Delegate subtasks to workers and collect results",
+      "purpose": "Execute worker_factory for each subtask",
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "collect",
+          "description": "Workers have finished, review results",
+          "priority": 100
+        }
+      ]
+    },
+    "collect": {
+      "id": "collect",
+      "description": "Review worker results and decide if more work is needed",
+      "purpose": "Assess completeness of gathered results",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "all_collected",
+          "field_type": "bool",
+          "extraction_instructions": "Extract the 'all_collected' field (bool) from the task and the 'task', 'observations', 'worker_results', 'topic', 'audience' values in the 'Already extracted:' context. Weigh the worker_results value against the task. true when those results are enough to write a useful final answer, even if some detail is thin; false only when a clearly required part of the task has no result at all.",
+          "context_keys": [
+            "task",
+            "observations",
+            "worker_results",
+            "topic",
+            "audience"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "synthesize",
+          "description": "All results collected, produce final answer",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "All needed results are collected",
+              "logic": {
+                "==": [
+                  {
+                    "var": "all_collected"
+                  },
+                  true
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "orchestrate",
+          "description": "More work needed, decompose further",
+          "priority": 300,
+          "conditions": [
+            {
+              "description": "More subtasks are needed",
+              "logic": {
+                "==": [
+                  {
+                    "var": "all_collected"
+                  },
+                  false
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "synthesize",
+          "description": "Fallback: synthesize with available results if decision stalls",
+          "priority": 900,
+          "conditions": []
+        }
+      ]
+    },
+    "synthesize": {
+      "id": "synthesize",
+      "description": "Synthesize all worker results into a final answer",
+      "purpose": "Produce a comprehensive answer from all worker results",
+      "response_instructions": "Present a clear, complete answer that integrates results from all workers. Reference specific worker results as evidence.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

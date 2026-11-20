@@ -1,0 +1,72 @@
+{
+  "name": "inductive_reasoning",
+  "description": "Reason from specific observations to discover general patterns and principles",
+  "initial_state": "gather_observations",
+  "persona": "You are an empirical thinker who discovers patterns by carefully examining specific examples and building general understanding from evidence.",
+  "states": {
+    "gather_observations": {
+      "id": "gather_observations",
+      "description": "Collect and organize specific observations and data points",
+      "purpose": "Identify 'observations' and 'data_points' relevant to the problem",
+      "required_context_keys": [
+        "observations",
+        "data_points"
+      ],
+      "extraction_instructions": "\n            Systematically gather specific, concrete observations:\n\n            - What specific examples, cases, or instances are available?\n            - What data points, measurements, or facts are relevant?\n            - What have we observed in similar situations or contexts?\n            - What specific behaviors, outcomes, or phenomena are documented?\n            - What concrete evidence is available for analysis?\n\n            Focus on collecting concrete, specific observations rather than general statements or theories.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Work with the observations and data available in the problem context.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "identify_commonalities",
+          "description": "Observations gathered"
+        }
+      ]
+    },
+    "identify_commonalities": {
+      "id": "identify_commonalities",
+      "description": "Find patterns and commonalities across observations",
+      "purpose": "Identify 'commonalities' and 'trends' in the data",
+      "required_context_keys": [
+        "commonalities",
+        "trends"
+      ],
+      "extraction_instructions": "\n            Systematically look for patterns across your observations:\n\n            - What do multiple cases, examples, or instances have in common?\n            - What trends, regularities, or consistencies emerge from the data?\n            - What relationships appear consistently across different observations?\n            - What factors or variables seem to be associated or correlated?\n            - What sequences, progressions, or developmental patterns do you notice?\n\n            Identify both obvious and subtle patterns that might not be immediately apparent.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Find patterns in the observations you've systematically gathered.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "form_hypothesis",
+          "description": "Commonalities identified"
+        }
+      ]
+    },
+    "form_hypothesis": {
+      "id": "form_hypothesis",
+      "description": "Form general hypothesis based on observed patterns",
+      "purpose": "Create 'hypothesis' supported by 'supporting_evidence'",
+      "required_context_keys": [
+        "hypothesis",
+        "supporting_evidence"
+      ],
+      "extraction_instructions": "\n            Form a well-grounded general hypothesis from the identified patterns:\n\n            - What general rule, principle, or law might explain the observed patterns?\n            - What predictions can you make about future or unobserved cases?\n            - What broader principle or generalization seems to apply?\n            - How would you clearly state this generalization?\n            - What specific evidence best supports this hypothesis?\n\n            Make your hypothesis specific enough to be testable while being general enough to be useful for prediction.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Form your hypothesis based on the patterns you've systematically identified.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "test_generalization",
+          "description": "Hypothesis formed"
+        }
+      ]
+    },
+    "test_generalization": {
+      "id": "test_generalization",
+      "description": "Test the strength and limits of the generalization",
+      "purpose": "Evaluate with 'test_results', 'counter_examples', and 'generalization_strength'",
+      "required_context_keys": [
+        "test_results",
+        "counter_examples",
+        "generalization_strength"
+      ],
+      "extraction_instructions": "\n            Rigorously test your generalization against available evidence:\n\n            - How well does it predict or explain other cases not used in forming it?\n            - What counter-examples, exceptions, or contradictory evidence exist?\n            - Under what conditions does the generalization hold or fail?\n            - How strong is the inductive support based on sample size and quality?\n            - What would strengthen or weaken confidence in this generalization?\n\n            Rate the strength of your generalization from 1-10 based on the quality and quantity of supporting evidence.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Test your generalization rigorously with all available information.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

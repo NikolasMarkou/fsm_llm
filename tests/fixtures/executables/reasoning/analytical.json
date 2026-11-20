@@ -1,0 +1,73 @@
+{
+  "name": "analytical_reasoning",
+  "description": "Analytical reasoning through systematic decomposition and component analysis",
+  "initial_state": "decompose",
+  "persona": "You are a methodical analytical thinker who breaks down complex problems systematically.",
+  "states": {
+    "decompose": {
+      "id": "decompose",
+      "description": "Break down the problem into component parts",
+      "purpose": "Identify 'components', 'attributes', and 'relationships'",
+      "required_context_keys": [
+        "components",
+        "attributes",
+        "relationships"
+      ],
+      "extraction_instructions": "\n            Systematically decompose the problem:\n\n            - Break the problem into smaller, manageable components\n            - Identify key attributes of each component\n            - Map relationships and dependencies between components\n            - Organize components hierarchically if applicable\n            - Note any emergent properties from component interactions\n\n            Focus on creating a clear structural understanding of the problem space.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Decompose based on the problem as presented.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "analyze_components",
+          "description": "Decomposition complete"
+        }
+      ]
+    },
+    "analyze_components": {
+      "id": "analyze_components",
+      "description": "Analyze each component in detail",
+      "purpose": "Create 'component_analysis' and identify 'data_requirements'",
+      "required_context_keys": [
+        "component_analysis",
+        "data_requirements"
+      ],
+      "extraction_instructions": "\n            Conduct detailed analysis of each component:\n\n            - Examine the function and role of each component\n            - Identify the properties and characteristics\n            - Determine how each component contributes to the whole\n            - Assess the importance and priority of each component\n            - Note what additional data might be needed for complete analysis\n\n            Create comprehensive component analysis with clear insights.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Analyze components based on your decomposition.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "identify_patterns",
+          "description": "Component analysis complete"
+        }
+      ]
+    },
+    "identify_patterns": {
+      "id": "identify_patterns",
+      "description": "Find patterns and dependencies between components",
+      "purpose": "Identify 'patterns', 'causal_links', and 'dependencies'",
+      "required_context_keys": [
+        "patterns",
+        "causal_links",
+        "dependencies"
+      ],
+      "extraction_instructions": "\n            Identify patterns and relationships:\n\n            - Look for recurring patterns across components\n            - Establish causal relationships (cause-effect links)\n            - Map dependencies (what depends on what)\n            - Identify feedback loops or circular dependencies\n            - Note any systematic behaviors or regularities\n\n            Focus on understanding the dynamic interactions between components.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Identify patterns from your component analysis.\n            ",
+      "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+      "transitions": [
+        {
+          "target_state": "integrate_findings",
+          "description": "Patterns identified"
+        }
+      ]
+    },
+    "integrate_findings": {
+      "id": "integrate_findings",
+      "description": "Synthesize understanding from all analytical work",
+      "purpose": "Create 'integrated_analysis' and 'key_insights'",
+      "required_context_keys": [
+        "integrated_analysis",
+        "key_insights"
+      ],
+      "extraction_instructions": "\n            Integrate all analytical findings:\n\n            - Synthesize component analysis, patterns, and relationships\n            - Create a comprehensive understanding of the problem\n            - Highlight the most important insights and discoveries\n            - Identify implications and potential solutions\n            - Summarize the analytical understanding clearly\n\n            Provide integrated analysis that brings together all analytical work into coherent understanding.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Integrate based on your complete analytical process.\n            ",
+      "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+      "transitions": []
+    }
+  }
+}

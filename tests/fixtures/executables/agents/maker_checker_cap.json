@@ -1,0 +1,185 @@
+{
+  "name": "maker_checker_agent",
+  "description": "Find the answer to the golden question",
+  "initial_state": "make",
+  "persona": "You are an AI agent that produces high-quality outputs through a maker-checker process. You alternate between creating content and critically evaluating it to ensure the highest quality.",
+  "states": {
+    "make": {
+      "id": "make",
+      "description": "Maker generates a draft output",
+      "purpose": "Produce a high-quality draft following the maker instructions",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "draft_output",
+          "field_type": "any",
+          "extraction_instructions": "Extract the 'draft_output' field (any) from the task and the 'task', 'observations' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your complete draft for the task. Give the full deliverable itself, with no commentary before or after it. Maker instructions: make it",
+          "context_keys": [
+            "task",
+            "observations"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "check",
+          "description": "Draft complete, proceed to checker review",
+          "priority": 100
+        }
+      ]
+    },
+    "check": {
+      "id": "check",
+      "description": "Checker evaluates the draft",
+      "purpose": "Critically evaluate the draft against quality criteria",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "checker_feedback",
+          "field_type": "str",
+          "extraction_instructions": "Extract the 'checker_feedback' field (str) from the task and the 'task', 'observations', 'draft_output', 'previous_draft' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your review of the draft_output value as the checker: what is good and each specific issue to fix. Evaluation criteria: check it",
+          "context_keys": [
+            "task",
+            "observations",
+            "draft_output",
+            "previous_draft"
+          ],
+          "required": true
+        },
+        {
+          "field_name": "quality_score",
+          "field_type": "float",
+          "extraction_instructions": "Extract the 'quality_score' field (float) from the task and the 'task', 'observations', 'draft_output', 'previous_draft' values in the 'Already extracted:' context. Your rating of the draft_output value against the criteria, a number from 0.0 (unusable) to 1.0 (meets every criterion). Evaluation criteria: check it",
+          "context_keys": [
+            "task",
+            "observations",
+            "draft_output",
+            "previous_draft"
+          ],
+          "required": true
+        },
+        {
+          "field_name": "checker_passed",
+          "field_type": "bool",
+          "extraction_instructions": "Extract the 'checker_passed' field (bool) from the task and the 'task', 'observations', 'draft_output', 'previous_draft' values in the 'Already extracted:' context. true if the draft_output value meets the criteria, false if it needs revision. Evaluation criteria: check it",
+          "context_keys": [
+            "task",
+            "observations",
+            "draft_output",
+            "previous_draft"
+          ],
+          "required": false
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "output",
+          "description": "Draft passed review, produce final output",
+          "priority": 10,
+          "conditions": [
+            {
+              "description": "Checker approved, or the budget is spent",
+              "logic": {
+                "or": [
+                  {
+                    "==": [
+                      {
+                        "var": "checker_passed"
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    "==": [
+                      {
+                        "var": "max_iterations_reached"
+                      },
+                      true
+                    ]
+                  },
+                  {
+                    ">=": [
+                      {
+                        "var": "revision_count"
+                      },
+                      2
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "revise",
+          "description": "Draft needs revision based on feedback",
+          "priority": 300,
+          "conditions": [
+            {
+              "description": "Checker found issues with the draft",
+              "logic": {
+                "==": [
+                  {
+                    "var": "checker_passed"
+                  },
+                  false
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "target_state": "revise",
+          "description": "Fallback: revise if checker result unclear",
+          "priority": 900,
+          "conditions": []
+        }
+      ]
+    },
+    "revise": {
+      "id": "revise",
+      "description": "Maker revises the draft based on checker feedback",
+      "purpose": "Address all checker feedback and produce an improved draft",
+      "extraction_instructions": "",
+      "field_extractions": [
+        {
+          "field_name": "draft_output",
+          "field_type": "any",
+          "extraction_instructions": "Extract the 'draft_output' field (any) from the task and the 'task', 'observations', 'previous_draft', 'checker_feedback' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Your complete revised draft for the task: rewrite previous_draft so that it fixes every point of checker_feedback (the whole draft, not only the changes). Give the full deliverable itself, with no commentary before or after it. Maker instructions: make it",
+          "context_keys": [
+            "task",
+            "observations",
+            "previous_draft",
+            "checker_feedback"
+          ],
+          "required": true
+        }
+      ],
+      "response_instructions": "",
+      "transitions": [
+        {
+          "target_state": "check",
+          "description": "Revised draft ready for re-evaluation",
+          "priority": 100
+        }
+      ]
+    },
+    "output": {
+      "id": "output",
+      "description": "Present the final reviewed output",
+      "purpose": "Extract and present the final answer",
+      "response_instructions": "Present the final, reviewed output as your answer.",
+      "transitions": []
+    }
+  },
+  "handler_only_keys": [
+    "max_iterations_reached",
+    "forced_stop_reason",
+    "iteration_count",
+    "observation_count",
+    "refused_actions"
+  ]
+}

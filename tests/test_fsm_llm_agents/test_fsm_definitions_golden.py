@@ -13,6 +13,9 @@ fails here.
 ``_approval_think_transition`` was inlined into ``_think_transitions`` (one
 caller); the ``*_approval`` cases cover its edge.
 
+The case table itself lives in ``tests/executables_corpus.py`` (plan ace7a8c8,
+F1.2), beside the readable text fixtures built from it.
+
 Do NOT regenerate a value to make a failure go away: a difference means a
 builder now emits a different prompt or routing contract.
 
@@ -25,230 +28,10 @@ the re-pin: only those six fields changed, nothing else.
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Callable
-from typing import Any
-
 import pytest
-from pydantic import BaseModel
 
-from fsm_llm.agents import build_parallel_react_fsm
-from fsm_llm.agents import fsm_definitions as fd
-from fsm_llm.agents.constants import ContextKeys
-from fsm_llm.agents.definitions import ChainStep
-from fsm_llm.agents.fsm_definitions import _common, _loop, native_fc
-from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.tools import ToolRegistry
-
-
-class _Out(BaseModel):
-    answer: str
-    score: int
-
-
-def _tool(params):
-    return "ok"
-
-
-def _registry(*names: str) -> ToolRegistry:
-    registry = ToolRegistry()
-    for name in names:
-        registry.register_function(_tool, name=name, description=f"Tool {name}")
-    return registry
-
-
-_TOOLS = ("search", "calc")
-_TASK = "Find the answer to the golden question"
-_KEYS = ("topic", "audience")
-_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": f"Run {name}",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    }
-    for name in ("lookup", "record")
-]
-
-
-def _chain(*gated: bool) -> list[ChainStep]:
-    return [
-        ChainStep(
-            step_id=f"s{i}",
-            name=f"step{i}",
-            extraction_instructions=f"extract {i}",
-            response_instructions=f"respond {i}" if i % 2 == 0 else "",
-            validation_fn=(lambda ctx: True) if gate else None,
-        )
-        for i, gate in enumerate(gated)
-    ]
-
-
-#: case name -> (callable, is a full FSM definition that core can load)
-_CASES: dict[str, tuple[Callable[[], Any], bool]] = {
-    # orchestrator and ADaPT
-    "orchestrator": (lambda: fd.build_orchestrator_fsm(), True),
-    "orchestrator_keys": (lambda: fd.build_orchestrator_fsm(_TASK, _KEYS), True),
-    "adapt": (lambda: fd.build_adapt_fsm(), True),
-    "adapt_depth": (lambda: fd.build_adapt_fsm(max_depth=5), True),
-    # reflexion
-    "reflexion": (lambda: fd.build_reflexion_fsm(_registry(*_TOOLS)), True),
-    "reflexion_approval": (
-        lambda: fd.build_reflexion_fsm(_registry(*_TOOLS), _TASK, True, _KEYS),
-        True,
-    ),
-    "reflexion_empty": (lambda: fd.build_reflexion_fsm(ToolRegistry()), True),
-    # plan-execute
-    "plan_execute": (lambda: fd.build_plan_execute_fsm(), True),
-    "plan_execute_empty": (lambda: fd.build_plan_execute_fsm(ToolRegistry()), True),
-    "plan_execute_tools": (
-        lambda: fd.build_plan_execute_fsm(_registry(*_TOOLS), _TASK),
-        True,
-    ),
-    # react
-    "react": (lambda: fd.build_react_fsm(_registry(*_TOOLS)), True),
-    "react_task_keys": (
-        lambda: fd.build_react_fsm(_registry(*_TOOLS), _TASK, context_keys=_KEYS),
-        True,
-    ),
-    "react_approval": (
-        lambda: fd.build_react_fsm(_registry(*_TOOLS), include_approval_state=True),
-        True,
-    ),
-    "react_classification": (
-        lambda: fd.build_react_fsm(_registry(*_TOOLS), use_classification=True),
-        True,
-    ),
-    "react_classification_approval": (
-        lambda: fd.build_react_fsm(_registry(*_TOOLS), _TASK, True, True, _Out, _KEYS),
-        True,
-    ),
-    "react_schema": (
-        lambda: fd.build_react_fsm(_registry("search"), output_schema=_Out),
-        True,
-    ),
-    "react_non_model_schema": (
-        lambda: fd.build_react_fsm(_registry("search"), output_schema=dict),
-        True,
-    ),
-    # prompt chain
-    "prompt_chain_one": (lambda: fd.build_prompt_chain_fsm(_chain(False)), True),
-    "prompt_chain_gates": (
-        lambda: fd.build_prompt_chain_fsm(_chain(True, False, True, False), _TASK),
-        True,
-    ),
-    # self-consistency
-    "self_consistency": (lambda: fd.build_self_consistency_fsm(), True),
-    "self_consistency_task": (lambda: fd.build_self_consistency_fsm(_TASK), True),
-    # debate
-    "debate": (lambda: fd.build_debate_fsm(), True),
-    "debate_personas": (
-        lambda: fd.build_debate_fsm(_TASK, "a proposer", "a critic", "a judge", 5),
-        True,
-    ),
-    # rewoo
-    "rewoo": (lambda: fd.build_rewoo_fsm(_registry(*_TOOLS)), True),
-    "rewoo_task_keys": (
-        lambda: fd.build_rewoo_fsm(_registry(*_TOOLS), _TASK, _KEYS),
-        True,
-    ),
-    # evaluator-optimizer
-    "evalopt": (lambda: fd.build_evalopt_fsm(), True),
-    "evalopt_task": (lambda: fd.build_evalopt_fsm(_TASK), True),
-    # maker-checker
-    "maker_checker": (lambda: fd.build_maker_checker_fsm("make it", "check it"), True),
-    "maker_checker_cap": (
-        lambda: fd.build_maker_checker_fsm("make it", "check it", _TASK, 2),
-        True,
-    ),
-    # meta builder and native function calling
-    "meta_builder": (lambda: fd.build_meta_builder_fsm(), True),
-    "native_fc": (
-        lambda: fd.build_native_fc_fsm(_SCHEMAS, instructions="Use the tools."),
-        True,
-    ),
-    "native_fc_forced": (
-        lambda: fd.build_native_fc_fsm(
-            _SCHEMAS, instructions="Use the tools.", force_final_tool="record"
-        ),
-        True,
-    ),
-    "native_fc_repair": (
-        lambda: fd.build_native_fc_fsm(
-            _SCHEMAS, instructions="Use the tools.", repair=True
-        ),
-        True,
-    ),
-    "native_fc_forced_repair": (
-        lambda: fd.build_native_fc_fsm(
-            _SCHEMAS,
-            instructions="Use the tools.",
-            force_final_tool="record",
-            repair=True,
-        ),
-        True,
-    ),
-    "native_fc_undeclared_forced": (
-        lambda: fd.build_native_fc_fsm(
-            _SCHEMAS, instructions="Use the tools.", force_final_tool="missing"
-        ),
-        True,
-    ),
-    # parallel react (exported from the package, not only the module)
-    "parallel_react": (lambda: build_parallel_react_fsm(_registry(*_TOOLS)), True),
-    "parallel_react_schema_keys": (
-        lambda: build_parallel_react_fsm(
-            _registry(*_TOOLS), _TASK, output_schema=_Out, context_keys=_KEYS
-        ),
-        True,
-    ),
-    "parallel_react_non_model_schema": (
-        lambda: build_parallel_react_fsm(_registry("search"), output_schema=dict),
-        True,
-    ),
-    # shared pieces
-    "loop_field_context_keys": (lambda: fd.loop_field_context_keys(), False),
-    "loop_field_context_keys_extra": (
-        lambda: fd.loop_field_context_keys(("a", ContextKeys.TASK, "b", "a")),
-        False,
-    ),
-    "tool_selection": (
-        lambda: _loop._tool_selection_field_extractions("pick", context_keys=("k",)),
-        False,
-    ),
-    "tool_selection_no_name": (
-        lambda: _loop._tool_selection_field_extractions(
-            "pick", include_tool_name=False, context_keys=()
-        ),
-        False,
-    ),
-    "think_fields": (lambda: _loop._think_field_extractions("pick"), False),
-    "think_fields_no_name": (
-        lambda: _loop._think_field_extractions(
-            "pick", include_tool_name=False, context_keys=("k",)
-        ),
-        False,
-    ),
-    "conclude_logic": (lambda: fd.conclude_on_evidence_logic(), False),
-    "conclude_logic_flag": (
-        lambda: fd.conclude_on_evidence_logic(ContextKeys.EVALUATION_PASSED),
-        False,
-    ),
-    "await_approval_state": (lambda: _loop._await_approval_state(), False),
-    "flag_condition": (lambda: _common._flag_condition("flag", "A flag"), False),
-    "reply_kind_condition": (lambda: native_fc._reply_kind_condition("calls"), False),
-    "finalize": (
-        lambda: _common._finalize_fsm("n", "d" * 400, "dflt", "s", "p", {"s": {}}),
-        False,
-    ),
-    "finalize_default_description": (
-        lambda: _common._finalize_fsm("n", "", "dflt", "s", "p", {}),
-        False,
-    ),
-}
+from fsm_llm.core.definitions import FSMDefinition, fsm_id_of
+from tests.executables_corpus import CASES, canonical_sha256
 
 #: case name -> (sha256 of the canonical JSON, fsm_id or "" for a fragment)
 _GOLDEN: dict[str, tuple[str, str]] = {
@@ -459,30 +242,16 @@ _GOLDEN: dict[str, tuple[str, str]] = {
 }
 
 
-def _canonical(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
-
-
-def _fsm_id(fsm: dict[str, Any]) -> str:
-    definition = FSMDefinition(**fsm)
-    digest = hashlib.sha256(
-        json.dumps(
-            definition.model_dump(exclude_defaults=True), sort_keys=True
-        ).encode()
-    ).hexdigest()
-    return f"fsm_{definition.name}_{digest[:8]}"
-
-
 def _measure(name: str) -> tuple[str, str]:
-    build, is_fsm = _CASES[name]
+    build, is_fsm = CASES[name]
     value = build()
-    return _canonical(value), _fsm_id(value) if is_fsm else ""
+    return canonical_sha256(value), fsm_id_of(FSMDefinition(**value)) if is_fsm else ""
 
 
 def test_every_case_has_a_golden_value():
-    assert set(_GOLDEN) == set(_CASES)
+    assert set(_GOLDEN) == set(CASES)
 
 
-@pytest.mark.parametrize("name", sorted(_CASES))
+@pytest.mark.parametrize("name", sorted(CASES))
 def test_builder_output_is_unchanged(name):
     assert _measure(name) == _GOLDEN[name]
