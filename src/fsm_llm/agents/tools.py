@@ -165,9 +165,11 @@ def register_agent(
     agent: Any,
     name: str,
     description: str,
+    *,
+    replace: bool = False,
 ) -> ToolRegistry:
     """Convenience function to register an agent as a tool.
 
-    Equivalent to ``registry.register_agent(agent, name, description)``.
+    Equivalent to ``registry.register_agent(agent, name, description, replace=replace)``.
     """
-    return registry.register_agent(agent, name, description)
+    return registry.register_agent(agent, name, description, replace=replace)

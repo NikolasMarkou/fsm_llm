@@ -24,7 +24,7 @@ class ToolTimedOut(ToolExecutionError):
 # DECISION plan-2026-10-01T093600-944e2692/D-008: `timeout_seconds` is enforced
 # here, in the one execute path, with a daemon worker thread (supersedes D-026
 # of plan 65baa765, whose runtime enforcement point no longer exists). Do NOT
-# hold `_tools_lock` while waiting, do NOT run a tool without `timeout_seconds` in a
+# hold the registry's lock while waiting, do NOT run a tool without `timeout_seconds` in a
 # thread (every call would pay one), and do NOT claim the tool was stopped: a
 # Python thread cannot be killed, so a timed-out tool keeps running (one more
 # live thread per timed-out call; a tool that keeps hanging accumulates them).

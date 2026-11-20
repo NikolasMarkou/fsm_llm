@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import functools
 import inspect
-import threading
 import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
 from pydantic import BaseModel
 
+from fsm_llm.core.names import NameRegistry
 from fsm_llm.logging import logger
 
 from .arguments import _bind_by_name, _fallback_arguments, _unwrap_nested_tool_input
@@ -40,39 +40,42 @@ class ToolRegistry:
     """
 
     def __init__(self) -> None:
-        # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: single NON-REENTRANT lock
-        # guarding EVERY read, write and iteration of `_tools`. Registration racing
-        # prompt/schema building was measured to raise
-        # `RuntimeError: dictionary changed size during iteration` in 20/20 trials
-        # (`ParallelReactAgent` dispatches tools on a ThreadPoolExecutor while the
-        # main thread rebuilds the prompt), so the lock is NOT optional on the
-        # iteration sites — the race came from iteration racing mutation, not from
-        # concurrent mutation alone. Do NOT "fix" a deadlock here by switching to
-        # `RLock`: every acquisition is leaf-level and releases before calling any
+        # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: ONE NON-REENTRANT leaf
+        # lock guards EVERY read, write and iteration of the tools. It is the lock of
+        # the `NameRegistry` below (core/names.py, plan ace7a8c8/D-049: the old private
+        # `_tools` dict and `_tools_lock` are gone). Registration racing prompt/schema
+        # building was measured to raise `RuntimeError: dictionary changed size during
+        # iteration` in 20/20 trials (`ParallelReactAgent` dispatches tools on a
+        # ThreadPoolExecutor while the main thread rebuilds the prompt), so the lock is
+        # NOT optional on the iteration sites. Do NOT "fix" a deadlock here by switching
+        # to `RLock`: every acquisition is leaf-level and releases before calling any
         # other method, mirroring `WorkingMemory._lock`'s shell/`_locked()` split
         # (D-007 of plan-2026-07-19T191147-4b664252) and
         # `CachingToolRegistry._cache_lock`. Iterating methods snapshot via
         # `list_tools()` and iterate the snapshot outside the lock, so the lock is
         # never held across a tool `execute_fn`, an LLM call or a user callback.
-        self._tools_lock = threading.Lock()
-        self._tools: dict[str, ToolDefinition] = {}
+        self._registry: NameRegistry[ToolDefinition] = NameRegistry("tools")
 
-    def register(self, tool: ToolDefinition) -> ToolRegistry:
-        """Register a tool definition. Returns self for chaining."""
+    def register(self, tool: ToolDefinition, *, replace: bool = False) -> ToolRegistry:
+        """Register a tool definition. Returns self for chaining.
+
+        A name that is already taken raises ``NameCollisionError`` and leaves the first
+        tool in place; ``replace=True`` replaces it (the tool keeps its position). The
+        guard matters: a tool built ungated must never silently take the place of one
+        that ``requires_approval``.
+        """
         if tool.execute_fn is None:
             raise ValueError(f"Tool '{tool.name}' must have an execute_fn")
         if tool.name == ContextKeys.NO_TOOL:
             raise ValueError(
                 f"Tool name '{tool.name}' is reserved (ContextKeys.NO_TOOL)"
             )
-        with self._tools_lock:
-            replaced = tool.name in self._tools
-            self._tools[tool.name] = tool
+        replaced = replace and tool.name in self._registry
+        self._registry.register(tool.name, tool, override=replace)
         if replaced:
-            logger.warning(
-                f"Tool '{tool.name}' already registered; replacing it (last wins)"
-            )
-        logger.debug(f"Registered tool: {tool.name}")
+            logger.debug(f"Replaced tool: {tool.name}")
+        else:
+            logger.debug(f"Registered tool: {tool.name}")
         return self
 
     def register_function(
@@ -85,12 +88,13 @@ class ToolRegistry:
         *,
         annotations: ToolAnnotations | None = None,
         timeout_seconds: float | None = None,
+        replace: bool = False,
     ) -> ToolRegistry:
         """Register a function as a tool. Returns self for chaining.
 
         ``annotations`` and ``timeout_seconds`` go to the ``ToolDefinition`` (see
         there). An inferred schema also gets an ``args_model``; an explicit
-        ``parameter_schema`` does not.
+        ``parameter_schema`` does not. ``replace`` is that of ``register``.
         """
         tool_name = name or callable_name(fn)
         tool_desc = description or fn.__doc__ or f"Tool: {tool_name}"
@@ -113,12 +117,11 @@ class ToolRegistry:
             execute_fn=fn,
             args_model=args_model,
         )
-        return self.register(tool)
+        return self.register(tool, replace=replace)
 
     def get(self, name: str) -> ToolDefinition:
         """Get a tool by name."""
-        with self._tools_lock:
-            tool = self._tools.get(name)
+        tool = self._registry.get(name)
         if tool is None:
             raise ToolNotFoundError(name)
         return tool
@@ -130,24 +133,20 @@ class ToolRegistry:
         ``to_prompt_description``/``get_json_schemas``/``to_classification_schema``)
         iterate the returned list, never the live dict, so a concurrent
         ``register()`` cannot raise ``RuntimeError: dictionary changed size during
-        iteration``. Never holds ``_tools_lock`` on return.
+        iteration``. Never holds the registry's lock on return.
         """
-        with self._tools_lock:
-            return list(self._tools.values())
+        return [tool for _, tool in self._registry.items()]
 
     @property
     def tool_names(self) -> list[str]:
-        """Get all registered tool names."""
-        with self._tools_lock:
-            return list(self._tools.keys())
+        """Get all registered tool names, in registration order."""
+        return [name for name, _ in self._registry.items()]
 
     def __len__(self) -> int:
-        with self._tools_lock:
-            return len(self._tools)
+        return len(self._registry.items())
 
     def __contains__(self, name: str) -> bool:
-        with self._tools_lock:
-            return name in self._tools
+        return name in self._registry
 
     @staticmethod
     def _validate_tool_params(
@@ -307,8 +306,7 @@ class ToolRegistry:
         # Single locked lookup instead of `in` + `[]`: the two-step form could see
         # the tool present and then KeyError when a concurrent caller replaced the
         # dict entry between the check and the read.
-        with self._tools_lock:
-            tool = self._tools.get(tool_call.tool_name)
+        tool = self._registry.get(tool_call.tool_name)
         if tool is None:
             return ToolResult(
                 tool_name=tool_call.tool_name,
@@ -388,6 +386,8 @@ class ToolRegistry:
         agent: Any,
         name: str,
         description: str,
+        *,
+        replace: bool = False,
     ) -> ToolRegistry:
         """Register an agent as a tool, enabling supervisor/orchestrator patterns.
 
@@ -401,6 +401,7 @@ class ToolRegistry:
             agent: An agent instance with a ``.run()`` method.
             name: Tool name for the registry.
             description: Description exposed to the LLM.
+            replace: As for ``register``.
 
         Returns:
             Self for chaining.
@@ -430,6 +431,7 @@ class ToolRegistry:
                 },
                 "required": ["task"],
             },
+            replace=replace,
         )
 
     def get_json_schemas(self) -> list[dict[str, Any]]:
@@ -503,13 +505,14 @@ class ToolRegistry:
             "confidence_threshold": Defaults.TOOL_CONFIDENCE_THRESHOLD,
         }
 
-    def register_python_tool(self, tool: Any) -> ToolRegistry:
+    def register_python_tool(self, tool: Any, *, replace: bool = False) -> ToolRegistry:
         """Register a ``PythonToolDefinition`` as a tool.
 
         Convenience method that calls ``tool.to_tool_definition()`` and
-        registers the result.  Returns *self* for chaining.
+        registers the result (``replace`` is that of ``register``).  Returns *self*
+        for chaining.
         """
-        return self.register(tool.to_tool_definition())
+        return self.register(tool.to_tool_definition(), replace=replace)
 
 
 def registry_from(tools: Iterable[Any]) -> ToolRegistry:
@@ -519,7 +522,7 @@ def registry_from(tools: Iterable[Any]) -> ToolRegistry:
     ``ConfiguredAgentBuilder.build``): each item is a ``ToolDefinition``, a
     ``@tool`` function (its ``_tool_definition``) or a plain function
     (``register_function``). Raises what ``register`` / ``register_function``
-    raise (a duplicate name, a bad signature, ``TypeError`` for a non-callable).
+    raise (a duplicate name: ``NameCollisionError``, a bad signature, ``TypeError`` for a non-callable).
     """
     registry = ToolRegistry()
     for item in tools:

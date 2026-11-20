@@ -16,8 +16,9 @@ Interface contract:
   (identity, ``is``). After ``freeze()`` it raises ``RegistryFrozenError``. A name must
   be a non-blank ``str`` (``TypeError`` and ``ValueError`` otherwise).
 - ``get(name, default=None)``, ``resolve(name)`` (``NameNotFoundError`` on a miss),
-  ``name in registry``, ``list()`` (sorted names; a pure read), ``name_of(obj)`` (the name
-  or ``None``), ``frozen``, ``namespace``.
+  ``name in registry``, ``list()`` (sorted names; a pure read), ``items()`` (``(name,
+  object)`` pairs in registration order, a snapshot; a replaced name keeps its first
+  position), ``name_of(obj)`` (the name or ``None``), ``frozen``, ``namespace``.
 - Entry points: when ``entry_point_group`` names a group, the group is read ONCE, on the
   first miss of ``get``, ``resolve`` or ``in``, or by ``load_entry_points()`` or
   ``freeze()`` (a frozen registry is complete). Each entry point ``name = module:attr``
@@ -164,6 +165,15 @@ class NameRegistry(Generic[T]):
         """The registered names, sorted. Loads nothing."""
         with self._lock:
             return sorted(self._objects)
+
+    def items(self) -> builtins.list[tuple[str, T]]:
+        """``(name, object)`` pairs in registration order, a snapshot. Loads nothing.
+
+        A replaced name keeps the position of its first registration. The returned list is
+        the caller's: the lock is released before it returns.
+        """
+        with self._lock:
+            return list(self._objects.items())
 
     def name_of(self, obj: object) -> str | None:
         """The name ``obj`` (this very object, by identity) is registered under, or ``None``."""

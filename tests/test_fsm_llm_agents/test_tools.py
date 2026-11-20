@@ -15,6 +15,7 @@ import pytest
 from pydantic import BaseModel
 
 from fsm_llm.agents.tools import normalize_tool_input, register_agent
+from fsm_llm.core.names import NameCollisionError
 from fsm_llm.tools import (
     ToolCall,
     ToolDefinition,
@@ -63,29 +64,18 @@ class TestToolRegistry:
         result = registry.register_function(_add, name="add", description="Add")
         assert result is registry
 
-    def test_register_duplicate_name_warns_and_last_wins(self):
-        """FB-07: an overwrite is surfaced as a warning; behaviour stays last-wins."""
-        from fsm_llm.logging import logger
-
+    def test_register_duplicate_name_raises_unless_replace(self):
+        """D-049: a taken name is refused; ``replace=True`` is the explicit act."""
         registry = ToolRegistry()
         first = ToolDefinition(name="add", description="first", execute_fn=_add)
         second = ToolDefinition(name="add", description="second", execute_fn=_add)
-        logger.enable("fsm_llm")
-        captured: list[str] = []
-        sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
-        try:
-            registry.register(first)
-            assert captured == []
+        registry.register(first)
+        with pytest.raises(NameCollisionError, match="add"):
             registry.register(second)
-        finally:
-            logger.remove(sink_id)
-            logger.disable("fsm_llm")
-
+        assert registry.get("add").description == "first"
+        registry.register(second, replace=True)
         assert len(registry) == 1
         assert registry.get("add").description == "second"
-        assert len(captured) == 1
-        assert "add" in captured[0]
-        assert "already registered" in captured[0]
 
     def test_register_without_execute_fn_raises(self):
         registry = ToolRegistry()
@@ -572,7 +562,7 @@ class TestToolRegistryConcurrency:
     TRIALS = 20
     TOOLS_PER_TRIAL = 40
 
-    def _run_writer_reader(self, registry, reader_fns, n_tools):
+    def _run_writer_reader(self, registry, reader_fns, n_tools, first=0):
         """Drive one writer thread against reader threads; return raised errors."""
         errors: list[BaseException] = []
         start = threading.Event()
@@ -581,7 +571,7 @@ class TestToolRegistryConcurrency:
         def writer():
             start.wait()
             try:
-                for i in range(n_tools):
+                for i in range(first, n_tools):
                     registry.register(_make_tool(i))
             except BaseException as exc:  # recorded for the assertion, not swallowed
                 errors.append(exc)
@@ -645,7 +635,7 @@ class TestToolRegistryConcurrency:
             assert result.success
 
         errors = self._run_writer_reader(
-            registry, [_execute_known], self.TOOLS_PER_TRIAL
+            registry, [_execute_known], self.TOOLS_PER_TRIAL, first=1
         )
         assert errors == [], f"concurrent execute raised: {errors!r}"
 

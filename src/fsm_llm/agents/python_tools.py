@@ -300,7 +300,7 @@ class PythonToolLoader:
         # name, so an alias loaded it twice. The first attribute in dir()
         # (alphabetical) order wins; a DIFFERENT function claiming the same
         # name is skipped with a warning (an alias of the same function is
-        # silent). Do NOT make this last-wins to mirror ToolRegistry.register:
+        # silent). Do NOT make this last-wins (ToolRegistry.register no longer is):
         # that would make the loaded function depend on attribute spelling in
         # the other direction and still hide the conflict.
         tool_attrs: dict[str, tuple[str, Any]] = {}

@@ -324,11 +324,12 @@ class MCPToolProvider:
             Number of tools registered (skipped and failed ones not counted).
         """
         # DECISION plan-2026-11-05T134105-5ed71cf2/D-014: skip a name already
-        # in the registry. Do NOT call `registry.register` for it:
-        # `ToolRegistry.register` is last-wins, so a server-chosen name
-        # silently replaced a local tool and its `requires_approval` gate (the
-        # MCP tool is built ungated), and `count` still counted it. Do NOT
-        # change `register` itself (documented public behaviour).
+        # in the registry. Do NOT call `registry.register` for it: it was
+        # last-wins, so a server-chosen name silently replaced a local tool
+        # and its `requires_approval` gate (the MCP tool is built ungated),
+        # and `count` still counted it. `register` now refuses a taken name
+        # (plan ace7a8c8/D-049), but keep this skip: it reports every skipped
+        # name once and keeps the count honest. Do NOT pass `replace=True`.
         count = 0
         skipped: list[str] = []
         for tool in self._tools:

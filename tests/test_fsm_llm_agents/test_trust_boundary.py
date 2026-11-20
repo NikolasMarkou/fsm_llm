@@ -982,6 +982,7 @@ class TestTimedOutApprovedCallRunsOnce:
             description="Irreversible action",
             parameter_schema={"properties": {"x": {"type": "string"}}},
             requires_approval=True,
+            replace=True,
         )
 
         def decide(request: Any) -> bool:
@@ -1277,7 +1278,7 @@ class TestFlaggedToolsFailClosed:
             return "BOOM"
 
         registry.register_function(
-            safe, name="safe", description="d", requires_approval=True
+            safe, name="safe", description="d", requires_approval=True, replace=True
         )
         assert agent._hitl_active is True
         agent.run("do it")

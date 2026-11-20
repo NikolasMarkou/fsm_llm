@@ -660,6 +660,7 @@ fsm_llm.core.names.NameRegistry class(Generic)
   def freeze(self) -> None
   property frozen
   def get(self, name: str, default: T | None = None) -> T | None
+  def items(self) -> builtins.list[tuple[str, T]]
   def list(self) -> builtins.list[str]
   def load_entry_points(self) -> None
   def name_of(self, obj: object) -> str | None
@@ -1151,7 +1152,7 @@ fsm_llm.agents.SemanticToolRegistry class(ToolRegistry)
   property embedded_tool_count
   property embedding_model
   def rebuild_embeddings(self) -> int
-  def register(self, tool: ToolDefinition) -> SemanticToolRegistry
+  def register(self, tool: ToolDefinition, *, replace: bool = False) -> SemanticToolRegistry
   def retrieve(self, query: str, top_k: int | None = None) -> list[ToolDefinition]
   def to_prompt_description(self, query: str | None = None, top_k: int | None = None) -> str
 fsm_llm.agents.StopReason class(str, Enum)
@@ -1201,10 +1202,10 @@ fsm_llm.agents.ToolRegistry class
   def get(self, name: str) -> ToolDefinition
   def get_json_schemas(self) -> list[dict[str, Any]]
   def list_tools(self) -> list[ToolDefinition]
-  def register(self, tool: ToolDefinition) -> ToolRegistry
-  def register_agent(self, agent: Any, name: str, description: str) -> ToolRegistry
-  def register_function(self, fn: Callable[..., Any], name: str | None = None, description: str | None = None, parameter_schema: dict[str, Any] | None = None, requires_approval: bool = False, *, annotations: ToolAnnotations | None = None, timeout_seconds: float | None = None) -> ToolRegistry
-  def register_python_tool(self, tool: Any) -> ToolRegistry
+  def register(self, tool: ToolDefinition, *, replace: bool = False) -> ToolRegistry
+  def register_agent(self, agent: Any, name: str, description: str, *, replace: bool = False) -> ToolRegistry
+  def register_function(self, fn: Callable[..., Any], name: str | None = None, description: str | None = None, parameter_schema: dict[str, Any] | None = None, requires_approval: bool = False, *, annotations: ToolAnnotations | None = None, timeout_seconds: float | None = None, replace: bool = False) -> ToolRegistry
+  def register_python_tool(self, tool: Any, *, replace: bool = False) -> ToolRegistry
   def to_classification_schema(self) -> dict[str, Any]
   def to_prompt_description(self) -> str
   property tool_names

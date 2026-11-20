@@ -756,9 +756,10 @@ class TestTimeoutEnforced:
         caller.start()
         try:
             _wait_for_thread("fsm-llm-tool-hold")
-            acquired = registry._tools_lock.acquire(timeout=1.0)
-            assert acquired, "_tools_lock held across the tool call"
-            registry._tools_lock.release()
+            lock = registry._registry._lock
+            acquired = lock.acquire(timeout=1.0)
+            assert acquired, "the registry lock is held across the tool call"
+            lock.release()
             registry.register_function(lambda: "x", name="other", description="d")
         finally:
             release.set()

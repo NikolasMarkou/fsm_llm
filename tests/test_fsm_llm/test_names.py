@@ -3,7 +3,7 @@
 Three parts: the primitive (``NameRegistry``: register, resolve, collisions, freeze, the leaf
 lock, lazy entry-point loading on the first miss), the list of every namespace with its sources,
 and the guard that no NEW private name table appears (a module-level dict that a ``register*``
-function mutates) beside the eight that remain and the row of the roadmap that retires each.
+function mutates) beside the seven that remain and the row of the roadmap that retires each.
 """
 
 from __future__ import annotations
@@ -130,6 +130,19 @@ class TestRegisterAndResolve:
         assert listed == ["alpha", "mid", "zeta"]
         listed.append("x")
         assert registry.list() == ["alpha", "mid", "zeta"]
+
+    def test_items_are_in_registration_order_and_a_snapshot(self):
+        registry: NameRegistry[_Thing] = NameRegistry("demo")
+        things = {name: _Thing(name) for name in ("zeta", "alpha", "mid")}
+        for name, thing in things.items():
+            registry.register(name, thing)
+        replacement = _Thing("again")
+        registry.register("zeta", replacement, override=True)
+        listed = registry.items()
+        assert [name for name, _ in listed] == ["zeta", "alpha", "mid"]
+        assert listed[0][1] is replacement
+        listed.append(("x", _Thing()))
+        assert len(registry.items()) == 3
 
     def test_the_error_classes_share_one_root_under_fsmerror(self):
         for error in (NameCollisionError, NameNotFoundError, RegistryFrozenError):
@@ -451,7 +464,6 @@ KNOWN_PRIVATE_TABLES: dict[str, tuple[str, str]] = {
     "STRATEGIES": ("reasoning/constants.py", "E3.3"),
     "_TYPE_MAP": ("reasoning/utilities.py", "E3.3"),
     "_ARTIFACT_SCHEMAS": ("agents/meta_prompts.py", "E4.6"),
-    "ToolRegistry": ("tools/registry.py", "0.17"),
 }
 
 _MUTATORS = {"update", "setdefault", "pop", "popitem", "clear", "__setitem__"}
@@ -603,7 +615,7 @@ class TestNoNewPrivateTable:
         assert symbol in _module_level_names(tree), (
             f"{symbol} is gone from {path}: drop its row from KNOWN_PRIVATE_TABLES"
         )
-        assert row.startswith("E") or row == "0.17", row
+        assert row.startswith("E"), row
         roadmap = (_SRC.parents[1] / "docs" / "2026_roadmap.md").read_text(
             encoding="utf-8"
         )

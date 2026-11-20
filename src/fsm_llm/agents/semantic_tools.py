@@ -127,7 +127,7 @@ class SemanticToolRegistry(ToolRegistry):
         self._default_top_k = top_k
         self._auto_embed = auto_embed
         # DECISION plan-2026-07-20T040150-876e7164/D-005 [STALE]: `_embeddings` gets its OWN
-        # non-reentrant lock, separate from the inherited `_tools_lock`, because the
+        # non-reentrant lock, separate from the registry's own lock (the `NameRegistry` of the base class), because the
         # two dicts are mutated at different times and holding one across the other
         # would create a lock-order dependency. Guard iteration as well as mutation:
         # `retrieve`'s `for ... in self._embeddings.items()` racing `register`'s write
@@ -140,9 +140,14 @@ class SemanticToolRegistry(ToolRegistry):
         self._embeddings_lock = threading.Lock()
         self._embeddings: dict[str, list[float]] = {}
 
-    def register(self, tool: ToolDefinition) -> SemanticToolRegistry:
-        """Register a tool and optionally compute its embedding."""
-        super().register(tool)
+    def register(
+        self, tool: ToolDefinition, *, replace: bool = False
+    ) -> SemanticToolRegistry:
+        """Register a tool and optionally compute its embedding.
+
+        A refused duplicate (``replace=False``) raises before anything is embedded.
+        """
+        super().register(tool, replace=replace)
         if self._auto_embed:
             self._embed_tool(tool)
         return self

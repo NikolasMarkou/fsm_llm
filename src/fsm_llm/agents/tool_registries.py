@@ -25,7 +25,13 @@ import time
 from typing import Any
 
 from fsm_llm.logging import logger
-from fsm_llm.tools import ToolCall, ToolRegistry, ToolResult, require_int_limit
+from fsm_llm.tools import (
+    ToolCall,
+    ToolNotFoundError,
+    ToolRegistry,
+    ToolResult,
+    require_int_limit,
+)
 
 
 def _freeze(value: Any) -> Any:
@@ -152,11 +158,11 @@ class RetryingToolRegistry(ToolRegistry):
         # of plan 944e2692; the registry cannot see the policy itself).
         if gated:
             return False
-        with self._tools_lock:
-            tool = self._tools.get(tool_call.tool_name)
-        if tool is None or tool.requires_approval:
+        try:
+            tool = self.get(tool_call.tool_name)
+        except ToolNotFoundError:
             return False
-        return tool.annotations.retry_safe
+        return not tool.requires_approval and tool.annotations.retry_safe
 
     def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
         """Run *tool_call*, re-running a failed retry-safe, ungated call.
