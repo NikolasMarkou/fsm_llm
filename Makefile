@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit api-snapshot decision-index decision-check changelog-check docs docs-serve docs-clean
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit api-snapshot decision-index decision-check changelog-check gate-step gate-push docs docs-serve docs-clean
 
 # Default target
 help: ## Show this help message
@@ -59,6 +59,13 @@ decision-check: ## Fail when a decision anchor has no line in plans/ANCHORS.md o
 # command in the lint job and tests/test_packaging.py::TestTheRealChangelog runs it on every pytest run.
 changelog-check: ## Check the CHANGELOG form: ### headings, compare links, the BREAKING marker spelling
 	python scripts/changelog_check.py check
+
+# The lean gates (scripts/gate.sh): the step gate before a commit, the push gate before a push (the pre-push hook).
+gate-step: ## Run the lean step gate on the working tree (scripts/gate.sh step)
+	scripts/gate.sh step
+
+gate-push: ## Run the lean push gate against origin/main (scripts/gate.sh push, the pre-push hook)
+	scripts/gate.sh push
 
 docs: ## Build the docs site into site/ (strict: any warning fails); needs `pip install --group docs -c constraints.txt`
 	NO_MKDOCS_2_WARNING=1 mkdocs build --strict

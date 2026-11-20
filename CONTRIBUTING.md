@@ -26,6 +26,8 @@ make format         # ruff format src/ tests/
 make type-check     # mypy on the fsm_llm package (src/fsm_llm/)
 make lint-imports   # import contracts in .importlinter (the Section 5.2 layers, kernel, litellm, testing, pytest, entry modules, ...)
 make audit          # scan site-packages for malicious .pth files
+make gate-step      # the lean step gate (scripts/gate.sh step), before a commit
+make gate-push      # the lean push gate (scripts/gate.sh push), the pre-push hook
 make build          # wheel and sdist
 pytest tests/test_fsm_llm/            # one suite (core)
 pytest -m "not slow"                  # skip the slow tests
@@ -33,7 +35,7 @@ pytest -m "not slow"                  # skip the slow tests
 
 - The default suite mocks the LLM: it needs no network and no model. Live tests need a reachable Ollama and skip without one.
 - CI (`.github/workflows/python-package.yml`) runs a `lint` job once (ruff lint and format check, mypy, the `.pth` audit, the import contracts, the decision-anchor gate and the workflow linters `actionlint` and `zizmor`), a `supply-chain` job (`pip-audit --skip-editable` over the installed environment, plus a canary that must see `pip-audit` fail on `tests/fixtures/canary-vulnerable-pins.txt`: never install or "fix" that file), a `dependency-review` job on pull requests (`actions/dependency-review-action`, fails on a high advisory) and a `test` matrix of legs: Linux on Python 3.11 to 3.15, Windows on 3.11 and 3.15 (macOS is not tested in CI). Every leg runs the `.pth` audit and pytest without the `slow`, `real_llm` and `integration` markers; the Linux 3.12 leg also measures branch coverage and runs the ratchet (`scripts/coverage_ratchet.py`). The Windows legs run `python -m` commands in bash, never `make`. Check an edit to a workflow with `uvx --from actionlint-py actionlint .github/workflows/*.yml` and `uvx --from zizmor zizmor --offline .github/workflows` (the lint job runs both at the pins of `constraints.txt`); every `uses:` takes a 40-hex SHA with its release tag in a comment, in every workflow file; `tests/test_fsm_llm_regression/test_ci_workflow.py` pins the matrix.
-- Pre-commit runs ruff (lint with `--fix`, and format) and the file hygiene hooks on commit, and a quick pytest run on push.
+- Pre-commit runs ruff (lint with `--fix`, and format) and the file hygiene hooks on commit, and the lean push gate (`scripts/gate.sh push`) on push. `make gate-step` is the same script for a step before a commit: ruff on the touched files, the import contracts, the decision anchors, the generated fixtures and one pytest process over the files that guard the invariants (name more with `scripts/gate.sh step --tests PATH...`). CI is the wide run.
 - A behaviour change needs a test that fails on the code before the change. Run it against the parent commit to confirm.
 - No document states a count of tests, test files, modules, lines, contracts or examples: measure with `pytest --collect-only -q | tail -1` (or `make test`). `tests/test_fsm_llm_regression/test_doc_count_ratchet.py` fails when a tracked `.md` gains one, so do not write one.
 - `tests/test_fsm_llm/test_docs_snippets.py` loads every fenced block that names `"initial_state"` in the first-touch docs. A full FSM snippet in the docs must be a valid FSM.
