@@ -9,13 +9,51 @@ import json
 
 from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_OK
 from fsm_llm.core.definitions.schema import (
+    EXECUTABLE_SCHEMA_ID,
     SCHEMA_VERSION_DEFAULT,
     SCHEMA_VERSION_OLDEST,
 )
+from fsm_llm.core.loaders import read_json_object
 from fsm_llm.logging import enable_library_logging, logger, setup_cli_logging
 
+from .result import FSMValidationResult
 from .upgrade import upgrade_fsm_file
 from .validator import validate_fsm_from_file
+
+
+def _executable_document(path: str) -> dict | None:
+    """The parsed object when the file's header names an executable, else ``None``.
+
+    The route is decided by the ``schema`` header, never by the extension. A file that is
+    not readable JSON or not an object is not an executable here: it takes the FSM path, which
+    keeps its own messages.
+    """
+    try:
+        data = read_json_object(path)
+    except Exception:  # OSError, ValueError, RecursionError, UnicodeDecodeError, ...
+        return None
+    return data if data.get("schema") == EXECUTABLE_SCHEMA_ID else None
+
+
+def _validate_executable(
+    path: str, data: dict, upgrade: bool
+) -> tuple[FSMValidationResult, bool]:
+    """``(report, upgrade refused)`` of an executable document.
+
+    The loader is imported here, not at module top: ``fsm_llm.core.verify.executable`` stays
+    out of ``sys.modules`` for an FSM file (the laziness pin). No resolver is given, so names
+    are not resolved. ``--upgrade`` never applies: an executable carries its own
+    ``schema_version`` and no file is rewritten.
+    """
+    from .executable import load_executable
+
+    refused = upgrade
+    if upgrade:
+        logger.warning(
+            f"Not upgrading '{path}': an executable document is never rewritten "
+            "(--upgrade rewrites an older FSM definition file only)"
+        )
+    return load_executable(data)[1], refused
 
 
 def main(fsm_path, upgrade: bool = False):
@@ -32,10 +70,15 @@ def main(fsm_path, upgrade: bool = False):
     # `setup_cli_logging("INFO")` before this, so no DEBUG record is printed.
     enable_library_logging()
 
-    upgrade_refused = upgrade and upgrade_fsm_file(fsm_path).refusal is not None
-
-    # Run validation
-    validation_result = validate_fsm_from_file(fsm_path)
+    executable = _executable_document(fsm_path)
+    if executable is not None:
+        validation_result, upgrade_refused = _validate_executable(
+            fsm_path, executable, upgrade
+        )
+    else:
+        upgrade_refused = upgrade and upgrade_fsm_file(fsm_path).refusal is not None
+        # Run validation
+        validation_result = validate_fsm_from_file(fsm_path)
 
     # Format output based on user preference
     output = json.dumps(validation_result.as_dict(), indent=2)
@@ -64,9 +107,18 @@ def main_cli():
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(description="Validate an FSM definition file")
+    parser = argparse.ArgumentParser(
+        description="Validate an FSM definition file or an executable document"
+    )
     parser.add_argument(
-        "--fsm", "-f", required=True, help="Path to FSM definition JSON file"
+        "--fsm",
+        "-f",
+        required=True,
+        help=(
+            "Path to an FSM definition JSON file, or to an executable document "
+            f'(its header says "schema": "{EXECUTABLE_SCHEMA_ID}"; routed by the header, '
+            "never by the extension)"
+        ),
     )
     parser.add_argument(
         "--upgrade",
@@ -76,7 +128,8 @@ def main_cli():
             f"definition version ({SCHEMA_VERSION_DEFAULT}) when it is an FSM "
             f"declaring {SCHEMA_VERSION_OLDEST} up to the current one. "
             "Never downgrades or touches another version (an omitted version is "
-            "left omitted); exits 1 when the upgrade was refused or failed"
+            "left omitted); exits 1 when the upgrade was refused or failed (an "
+            "executable document is never rewritten, so --upgrade on one exits 1)"
         ),
     )
     args = parser.parse_args()

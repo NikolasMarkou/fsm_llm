@@ -11,7 +11,9 @@ private helper is imported from its defining module, and the console script entr
 Modules: ``result`` (``FSMValidationResult``), ``validator`` (``FSMValidator`` and
 ``validate_fsm_from_file``), ``structure`` (``StructureMixin``: the structure, key and kind
 checks), ``graph`` (``GraphMixin``: complexity, cycles, paths), ``upgrade``
-(``upgrade_fsm_file``, ``UpgradeResult``), ``cli`` (``main``, ``main_cli``) and ``flow``.
+(``upgrade_fsm_file``, ``UpgradeResult``), ``cli`` (``main``, ``main_cli``), ``flow`` and
+``executable`` (``load_executable``, the load sequence of an executable envelope: lazy, imported by
+name and by ``cli`` inside the function, never re-exported here).
 """
 
 from .result import FSMValidationResult

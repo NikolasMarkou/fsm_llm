@@ -99,6 +99,7 @@ __all__ = [
     "scan_placeholders",
     "schema_text",
     "substitute_variables",
+    "variable_problems",
 ]
 
 #: The format version an omitted ``schema_version`` takes, and the oldest the table knows. Their
@@ -523,6 +524,27 @@ def scan_placeholders(node: Any) -> tuple[set[str], set[str]]:
     return leaves, keys
 
 
+def variable_problems(
+    envelope: ExecutableEnvelope, values: Mapping[str, Any]
+) -> list[str]:
+    """Every reason *values* cannot fill the declared variables of *envelope* (empty: they can).
+
+    A value for an undeclared name (a caller's input is never one), a declared name without a
+    value and a value that is not text. Messages name variables only, never a value.
+    """
+    declared = set(envelope.variables)
+    problems = []
+    if extra := sorted(set(values) - declared):
+        problems.append(f"variables {extra} are not declared by this executable")
+    if missing := sorted(declared - set(values)):
+        problems.append(f"declared variables {missing} have no value")
+    if bad := sorted(
+        n for n, v in values.items() if n in declared and not isinstance(v, str)
+    ):
+        problems.append(f"variables {bad} must be text")
+    return problems
+
+
 def instantiate_envelope(
     envelope: ExecutableEnvelope,
     *,
@@ -535,16 +557,8 @@ def instantiate_envelope(
         raise InstantiationError(
             "options are not accepted: no executable kind has an option schema yet"
         )
-    if extra := sorted(set(values) - set(envelope.variables)):
-        raise InstantiationError(
-            f"variables {extra} are not declared by this executable"
-        )
-    if missing := sorted(set(envelope.variables) - set(values)):
-        raise InstantiationError(f"declared variables {missing} have no value")
-    if bad := sorted(
-        name for name, value in values.items() if not isinstance(value, str)
-    ):
-        raise InstantiationError(f"variables {bad} must be text")
+    if problems := variable_problems(envelope, values):
+        raise InstantiationError("; ".join(problems))
     body = substitute_variables(envelope.body.fsm, values)
     try:
         definition = FSMDefinition(**body)

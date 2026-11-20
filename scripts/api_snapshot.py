@@ -50,6 +50,7 @@ MODULES = (
     "fsm_llm.core.codes",
     "fsm_llm.core.names",
     "fsm_llm.core.results",
+    "fsm_llm.core.verify.executable",
     "fsm_llm.core.verify.flow",
     "fsm_llm.frontmatter",
     "fsm_llm.okf",

@@ -93,6 +93,10 @@ MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
         "the executable envelope loads when a loader imports it; "
         "`core/definitions/__init__.py` does not re-export it"
     ),
+    "fsm_llm.core.verify.executable": (
+        "the load sequence loads when a caller imports it; `core/verify/cli.py` imports it "
+        "inside the function, `core/verify/__init__.py` not at all"
+    ),
 }
 
 # The child code: import the package from `root`, print every loaded `fsm_llm` module and the
