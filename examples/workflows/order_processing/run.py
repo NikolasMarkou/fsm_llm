@@ -29,6 +29,7 @@ Usage:
 
 import asyncio
 import os
+import sys
 from typing import Any
 
 from fsm_llm.workflows import (
@@ -122,7 +123,7 @@ def build_order_workflow(model: str) -> "WorkflowEngine":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     fsm_path = os.path.join(current_dir, "fsm_order_form.json")
 
-    with open(fsm_path) as f:
+    with open(fsm_path, encoding="utf-8") as f:
         fsm_definition = json.load(f)
 
     # Define the workflow using the DSL
@@ -274,7 +275,12 @@ def print_order_summary(ctx: dict) -> dict:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Error: OPENAI_API_KEY not set. Export it or use Ollama.")

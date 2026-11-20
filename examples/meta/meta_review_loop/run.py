@@ -14,12 +14,13 @@ This shows how to use the programmatic (non-interactive) meta builder
 API combined with quality assurance patterns.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/meta/meta_review_loop/run.py
 """
 
 import json
 import os
+import sys
 
 from dotenv import load_dotenv
 
@@ -40,7 +41,12 @@ def main():
         print('This example requires the agents extra: pip install "llm-fsm[agents]"')
         return
 
-    model = os.environ.get("LLM_MODEL") or "ollama_chat/bonsai-2:27b"
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
 
     print("=" * 60)
     print("Meta-Builder + MakerChecker Quality Review")

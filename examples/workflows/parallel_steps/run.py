@@ -7,7 +7,7 @@ ParallelStep type (asyncio.gather under the hood), then aggregating the
 results into a single context for a summary step.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/workflows/parallel_steps/run.py
 """
 

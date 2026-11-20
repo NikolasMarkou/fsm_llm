@@ -7,22 +7,28 @@ recall, forget, list_memories) to persist information across
 reasoning steps.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/agents/memory_agent/run.py
 """
 
 import os
+import sys
 
-from fsm_llm.memory import WorkingMemory
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, create_memory_tools
+from fsm_llm.memory import WorkingMemory
 
 
 def main():
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/<your-model>")
         return
 
     # Create shared working memory

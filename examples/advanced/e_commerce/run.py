@@ -16,6 +16,7 @@ product recommendation system when the customer needs product suggestions.
 """
 
 import os
+import sys
 from typing import Any
 
 from fsm_llm import API, ContextMergeStrategy
@@ -298,7 +299,7 @@ def run_stacking_example():
     main_fsm = create_main_customer_service_fsm()
     api = API.from_definition(
         main_fsm,
-        model=os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b"),
+        model=os.environ.get("LLM_MODEL"),
         temperature=0.7,
         max_tokens=200,
     )
@@ -492,11 +493,16 @@ if __name__ == "__main__":
     5. Advanced features like shared context keys and merge strategies
     """
 
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Warning: OPENAI_API_KEY not set.")
         print("Set your API key: export OPENAI_API_KEY='your-key-here'")
-        print("Or use Ollama: export LLM_MODEL=ollama_chat/bonsai-2:27b")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/<your-model>")
         exit(1)
 
     run_stacking_example()

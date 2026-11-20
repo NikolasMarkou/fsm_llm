@@ -11,6 +11,7 @@ This script extends the basic book recommendation system with additional feature
 import json
 import logging
 import os
+import sys
 from datetime import datetime
 
 from fsm_llm import API
@@ -28,9 +29,7 @@ logger = logging.getLogger("BookRecommender")
 
 
 class BookRecommendationSystem:
-    def __init__(
-        self, fsm_path, api_key, model="ollama_chat/bonsai-2:27b", temperature=0.7
-    ):
+    def __init__(self, fsm_path, api_key, model=None, temperature=0.7):
         """Initialize the book recommendation system."""
         self.fsm_path = fsm_path
         self.api_key = api_key
@@ -155,12 +154,17 @@ class BookRecommendationSystem:
 
 def main():
     # Get model and API key from environment
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key and "ollama" not in model.lower():
         print("Please set your OPENAI_API_KEY environment variable")
         print("Example: export OPENAI_API_KEY=your-api-key-here")
-        print("Or use Ollama: export LLM_MODEL=ollama_chat/bonsai-2:27b")
+        print("Or use Ollama: export LLM_MODEL=ollama_chat/<your-model>")
         return
 
     # Load the FSM definition from the JSON file

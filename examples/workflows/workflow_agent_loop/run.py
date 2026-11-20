@@ -14,12 +14,13 @@ The quality gate is implemented inside the agent step, which
 internally retries up to 2 times before passing output forward.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/workflows/workflow_agent_loop/run.py
 """
 
 import asyncio
 import os
+import sys
 from typing import Any
 
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
@@ -126,9 +127,7 @@ class AgentWithQualityGate(WorkflowStep):
     max_retries: int = 2
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-        model = context.get(
-            "_model", os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
-        )
+        model = context.get("_model", os.environ.get("LLM_MODEL"))
         best_output = ""
         best_score = 0.0
         tools_used: list = []
@@ -263,10 +262,15 @@ def build_workflow(model: str) -> WorkflowEngine:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/<your-model>")
         return
 
     print("=" * 60)

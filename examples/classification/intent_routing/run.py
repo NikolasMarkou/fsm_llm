@@ -15,6 +15,7 @@ Usage:
 """
 
 import os
+import sys
 
 from fsm_llm import (
     ClassificationPromptConfig,
@@ -94,7 +95,12 @@ def handle_clarification(message: str, entities: dict) -> str:
 
 
 def main():
-    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     is_ollama = "ollama" in model.lower()
 
     if not is_ollama and not os.getenv("OPENAI_API_KEY"):

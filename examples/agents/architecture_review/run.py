@@ -11,11 +11,12 @@ This pattern is useful for any task requiring structured analysis with
 quantitative scoring and completeness validation.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/agents/architecture_review/run.py
 """
 
 import os
+import sys
 
 from pydantic import BaseModel, Field
 
@@ -189,11 +190,16 @@ def evaluate_architecture_report(output: str, context: dict) -> EvaluationResult
 
 
 def main() -> None:
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/<your-model>")
         return
 
     config = AgentConfig(

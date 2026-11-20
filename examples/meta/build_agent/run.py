@@ -10,7 +10,7 @@ The meta-agent helps users understand which agent pattern best fits
 their use case and generates the configuration needed to instantiate it.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/meta/build_agent/run.py
 """
 
@@ -23,7 +23,12 @@ load_dotenv()
 
 
 def main():
-    model = os.environ.get("LLM_MODEL") or "ollama_chat/bonsai-2:27b"
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
 
     print(f"Using model: {model}")
     print("=" * 60)

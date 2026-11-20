@@ -28,7 +28,8 @@ Usage:
 """
 
 import os
-from datetime import datetime, timezone
+import sys
+from datetime import UTC, datetime
 from typing import Any
 
 from fsm_llm import (
@@ -342,7 +343,7 @@ def _track_transition(ctx: dict) -> dict:
     """Track state transitions for analytics."""
     metrics["state_transitions"].append(
         {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_turns": metrics["total_turns"],
         }
     )
@@ -361,7 +362,12 @@ def _count_turn(ctx: dict) -> dict:
 
 
 def main():
-    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.getenv("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
@@ -415,7 +421,7 @@ def main():
         print(f"  [Triage] Entities: {result.entities}")
 
     # Step 2: Start main FSM with classification context
-    metrics["conversation_start"] = datetime.now(timezone.utc).isoformat()
+    metrics["conversation_start"] = datetime.now(UTC).isoformat()
 
     initial_context = {
         "classified_intent": intent,
@@ -460,7 +466,7 @@ def main():
             metrics["specialist_sessions"].append(
                 {
                     "type": intent,
-                    "started": datetime.now(timezone.utc).isoformat(),
+                    "started": datetime.now(UTC).isoformat(),
                 }
             )
 

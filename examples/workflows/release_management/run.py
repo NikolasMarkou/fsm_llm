@@ -27,13 +27,14 @@ Usage:
     python run.py
 
     # Or with a local Ollama model:
-    export LLM_MODEL="ollama_chat/bonsai-2:27b"
+    export LLM_MODEL="ollama_chat/<your-model>"
     python run.py
 """
 
 import asyncio
 import os
 import random
+import sys
 from typing import Any
 
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
@@ -313,9 +314,7 @@ class ProductionDeployStep(WorkflowStep):
     error_step_id: str | None = None
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-        model = context.get(
-            "_model", os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
-        )
+        model = context.get("_model", os.environ.get("LLM_MODEL"))
         version = context.get("release_version", "v0.0.0")
         pod_count = context.get("pod_count_production", 12)
 
@@ -529,11 +528,16 @@ def build_release_workflow(model: str) -> WorkflowEngine:
 
 
 async def run():
-    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
 
     if not os.getenv("OPENAI_API_KEY") and "ollama" not in model.lower():
         print("Error: OPENAI_API_KEY not set. Export it or use Ollama.")
-        print("       export LLM_MODEL='ollama_chat/bonsai-2:27b'")
+        print("       export LLM_MODEL='ollama_chat/<your-model>'")
         return
 
     print("=" * 60)

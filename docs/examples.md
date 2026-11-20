@@ -14,7 +14,9 @@ python examples/basic/simple_greeting/run.py     # needs a model: an OpenAI key,
 ```
 
 Set the model first (`LLM_MODEL`, see the [Quick Start](quickstart.md)); an example makes real
-model calls.
+model calls. No example has a default model: a script that needs one and finds `LLM_MODEL` unset or
+blank exits 1 with one line on stderr. `fsm-llm-eval examples` passes the model to every script it
+runs, and a local `.env` read with `--env-file` is the place for a machine default.
 
 | Category | Highlights |
 |----------|------------|

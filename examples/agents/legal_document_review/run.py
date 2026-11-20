@@ -8,11 +8,12 @@ regulations, analyze individual clauses, verify overall compliance,
 and extract named entities from legal text.
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/agents/legal_document_review/run.py
 """
 
 import os
+import sys
 from typing import Annotated
 
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
@@ -214,11 +215,16 @@ def extract_entities(
 
 
 def main() -> None:
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
-        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/bonsai-2:27b")
+        print("Set OPENAI_API_KEY or use: export LLM_MODEL=ollama_chat/<your-model>")
         return
 
     # Register tools

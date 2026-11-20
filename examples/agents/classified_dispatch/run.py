@@ -17,6 +17,7 @@ Run:
 """
 
 import os
+import sys
 
 from fsm_llm import (
     ClassificationSchema,
@@ -181,7 +182,12 @@ def _build_creative_agent(model: str) -> PromptChainAgent:
 
 
 def main() -> None:
-    model = os.environ.get("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.environ.get("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():

@@ -12,7 +12,7 @@ Flow:
     No  → Standard Handler → Auto-Response → Notify
 
 Run:
-    export LLM_MODEL=ollama_chat/bonsai-2:27b
+    export LLM_MODEL=ollama_chat/<your-model>
     python examples/workflows/conditional_branching/run.py
 """
 

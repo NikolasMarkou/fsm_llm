@@ -28,6 +28,7 @@ Usage:
 """
 
 import os
+import sys
 
 from fsm_llm import API
 
@@ -36,7 +37,12 @@ FSM_PATH = os.path.join(CURRENT_DIR, "fsm.json")
 
 
 def main():
-    model = os.getenv("LLM_MODEL", "ollama_chat/bonsai-2:27b")
+    model = os.environ.get("LLM_MODEL")
+    if not (model or "").strip():
+        sys.exit(
+            "LLM_MODEL is not set: export it (for example ollama_chat/<your-model>), "
+            "or run `fsm-llm-eval examples`, which passes it."
+        )
     api_key = os.getenv("OPENAI_API_KEY")
 
     if not api_key and "ollama" not in model.lower():
