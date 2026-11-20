@@ -41,7 +41,7 @@ from typing import Any, NamedTuple
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from fsm_llm.agents.semantic_tools import EmbedTextsFn, cosine_similarity
-from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.definitions import FSMDefinition, definition_canonical
 from fsm_llm.core.state_kinds import declared_tool_names
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, iso_utc
@@ -144,15 +144,9 @@ class LibraryMatch(NamedTuple):
     embedded: bool = False
 
 
-def _canonical(definition: FSMDefinition) -> tuple[str, str]:
-    """``(digest, canonical JSON text)``: the recipe of ``API.process_fsm_definition``."""
-    text = json.dumps(definition.model_dump(exclude_defaults=True), sort_keys=True)
-    return hashlib.sha256(text.encode()).hexdigest(), text
-
-
 def digest_of(definition: FSMDefinition) -> str:
     """The 64-hex content digest of a typed definition (the library's id)."""
-    return _canonical(definition)[0]
+    return definition_canonical(definition)[0]
 
 
 def _words(text: str) -> list[str]:
@@ -363,7 +357,7 @@ class FSMLibrary:
         """
         if lifecycle not in (LIFECYCLE_DRAFT, LIFECYCLE_VERIFIED):
             raise SynthesisError(f"a new entry is draft or verified, not {lifecycle!r}")
-        digest, text = _canonical(definition)
+        digest, text = definition_canonical(definition)
         tools = declared_tool_names(definition.states.values())
         with self._lock:
             old = self._read_record(digest)

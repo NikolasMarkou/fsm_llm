@@ -95,8 +95,6 @@ bodies are unchanged.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import threading
 from collections.abc import Mapping
@@ -108,9 +106,8 @@ from fsm_llm.constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
     DEFAULT_TEMPERATURE,
-    FSM_ID_HASH_LENGTH,
 )
-from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition
+from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, fsm_id_of
 from fsm_llm.core.loaders import load_fsm_definition, load_fsm_from_file
 from fsm_llm.core.transition_evaluator import (
     TransitionEvaluator,
@@ -400,7 +397,7 @@ class API(
             )
 
         # DECISION plan-2026-09-20T114608-a8e47b88/D-016 (its dumped form
-        # refined by D-030 of plan 944e2692, below)
+        # refined by D-030 of plan 944e2692, now in definition_canonical)
         # ONE content hash, computed from fsm_def's model dump AFTER
         # construction, shared by all three input shapes (dict/
         # FSMDefinition/file path). Do NOT go back to a per-branch id
@@ -423,21 +420,7 @@ class API(
         # first restore post-upgrade -- an accepted, correct transition
         # cost per D-011's own "WARNING, not hard-fail" philosophy, not
         # a bug to work around. See decisions.md D-016.
-        # DECISION plan-2026-10-01T093600-944e2692/D-030 (refines D-016): the
-        # hash covers `model_dump(exclude_defaults=True)`, so a field left at
-        # its default (given explicitly or omitted) is not in it and adding an
-        # optional field to the models changes no id. Do NOT hash the full
-        # dump (every new optional field re-ids every FSM, as `completion`
-        # and `handler_only_keys` did), and do NOT use `exclude_unset` (an
-        # explicit default and an omitted field then hash differently) or
-        # `exclude_none` (an explicit None merges into a non-None default).
-        # See D-030.
-        content_hash = hashlib.sha256(
-            json.dumps(
-                fsm_def.model_dump(exclude_defaults=True), sort_keys=True
-            ).encode()
-        ).hexdigest()[:FSM_ID_HASH_LENGTH]
-        fsm_id = f"fsm_{fsm_def.name}_{content_hash}"
+        fsm_id = fsm_id_of(fsm_def)
 
         return fsm_def, fsm_id
 

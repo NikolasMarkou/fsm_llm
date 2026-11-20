@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import weakref
 from collections import deque
 from collections.abc import Iterable, Mapping
@@ -12,6 +14,7 @@ from pydantic import BaseModel, Field, model_validator
 from fsm_llm.constants import (
     DEFAULT_MAX_HISTORY_SIZE,
     DEFAULT_MAX_MESSAGE_LENGTH,
+    FSM_ID_HASH_LENGTH,
     MAX_PERSONA_LENGTH,
     MESSAGE_TRUNCATION_SUFFIX,
     has_internal_prefix,
@@ -289,6 +292,38 @@ class FSMDefinition(BaseModel):
             problem = definition_problem(self, state, evaluator, logic_referenced_keys)
             if problem is not None:
                 raise ValueError(f"State '{state.id}': {problem}")
+
+
+def definition_canonical(definition: FSMDefinition) -> tuple[str, str]:
+    """``(digest, canonical text)`` of *definition*: the one identity recipe.
+
+    The text is ``json.dumps`` of ``model_dump(exclude_defaults=True)`` with
+    sorted keys and the digest is the 64-hex sha256 of that very text. Takes a
+    loaded definition; never raises for a valid model.
+    """
+    # DECISION plan-2026-10-01T093600-944e2692/D-030 (refines D-016): the
+    # hash covers `model_dump(exclude_defaults=True)`, so a field left at
+    # its default (given explicitly or omitted) is not in it and adding an
+    # optional field to the models changes no id. Do NOT hash the full
+    # dump (every new optional field re-ids every FSM, as `completion`
+    # and `handler_only_keys` did), and do NOT use `exclude_unset` (an
+    # explicit default and an omitted field then hash differently) or
+    # `exclude_none` (an explicit None merges into a non-None default).
+    # See D-030.
+    text = json.dumps(definition.model_dump(exclude_defaults=True), sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest(), text
+
+
+def definition_digest(definition: FSMDefinition) -> str:
+    """The 64-hex content digest of *definition* (``definition_canonical``)."""
+    return definition_canonical(definition)[0]
+
+
+def fsm_id_of(definition: FSMDefinition) -> str:
+    """``fsm_<name>_<hex>``: the id ``API`` mints, the first
+    ``FSM_ID_HASH_LENGTH`` hex characters of ``definition_digest``."""
+    digest = definition_digest(definition)
+    return f"fsm_{definition.name}_{digest[:FSM_ID_HASH_LENGTH]}"
 
 
 def exchange_preview_lines(exchanges: list[dict[str, str]], width: int) -> list[str]:
