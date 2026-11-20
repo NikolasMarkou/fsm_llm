@@ -344,7 +344,7 @@ class TestResultKeyReaders:
         """Guards: the hook output is the rule the readers applied before the
         registry (`state.completion or state.synthesize`), for every corpus state."""
         from fsm_llm.core.definitions import handler_only_names
-        from fsm_llm.core.verify.flow import _result_key
+        from fsm_llm.core.state_kinds import kind_of
 
         checked = 0
         for name, loaded in self._loaded():
@@ -352,7 +352,7 @@ class TestResultKeyReaders:
             for state in loaded.states.values():
                 config = state.completion or state.synthesize
                 expected = config.result_key if config is not None else None
-                assert _result_key(state) == expected, (name, state.id)
+                assert kind_of(state).result_key(state) == expected, (name, state.id)
                 if expected is not None:
                     old.add(expected)
                     checked += 1
@@ -365,7 +365,6 @@ class TestResultKeyReaders:
         ("path", "name", "owner"),
         [
             ("core/definitions/fsm.py", "handler_only_names", None),
-            ("core/verify/flow.py", "_result_key", None),
             ("engine/api/stack.py", "_build_push_context", "StackMixin"),
         ],
     )

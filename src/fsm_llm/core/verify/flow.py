@@ -111,10 +111,6 @@ class FlowFinding:
     message: str
 
 
-def _result_key(state: State) -> str | None:
-    return kind_of(state).result_key(state)
-
-
 def _produced(
     state: State, handler_only: frozenset[str], results: frozenset[str]
 ) -> frozenset[str]:

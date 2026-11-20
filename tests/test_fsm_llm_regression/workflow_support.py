@@ -27,13 +27,11 @@ an assertion when its anchor is not in the text, so a mutant that no longer appl
 pass unseen): `_edit(old, new, count=1)` (at least `count` occurrences, replaces the first
 `count`), `_edit_nth(old, new, nth)` (only the 0-based `nth` occurrence), `_drop_step(name,
 nth=0)` (the `nth` step whose `- name:` line is exactly `name`, in a job at the usual
-indentation), `_drop_job(job_id)` (a job, to the next job or the end). `_unpin_checkout` and
-`_drop_comment` are plain `str -> str` mutants: the first checkout pin becomes a tag, the
-version comment after the first `actions/setup-python` pin goes.
+indentation), `_drop_job(job_id)` (a job, to the next job or the end).
 
 Running a script (the shell-script tests run the `run:` text of a workflow step in bash; the
-workflows themselves only ever run on `ubuntu-24.04`, so a machine without a working bash or
-without GNU find skips these tests with the reason, never fails them, and Windows skips them
+workflows themselves only ever run on `ubuntu-24.04`, so a machine without a working bash
+skips these tests with the reason, never fails them, and Windows skips them
 unconditionally: plan d7719b03 D-006 and D-009; the bare name `bash` that the tests run
 resolves, through `CreateProcess`, to WSL's launcher in System32 whatever `which` finds first):
 
@@ -46,17 +44,12 @@ resolves, through `CreateProcess`, to WSL's launcher in System32 whatever `which
   is installed. Elsewhere: why no usable bash is on `path` (default: the `PATH` of this
   process). It runs `bash -c 'echo ok'` and wants exactly `ok`; no `bash`, a non-zero exit,
   other output or a timeout is a problem. Cached per `PATH`. Never raises.
-- `gnu_find_problem(path=None) -> str | None`: the same for `find . -maxdepth 0 -printf x`
-  run through that bash (what the release script does); a BSD `find` is a problem. A missing
-  bash (and win32) is reported as the bash problem. Cached per `PATH`. Never raises.
-- `skip_unless_bash(path=None)` and `skip_unless_gnu_find(path=None)`: call the probe and
-  `pytest.skip(reason)` when it reports a problem. Call them in a test body or in the helper
+- `skip_unless_bash(path=None)`: calls the probe and `pytest.skip(reason)` when it reports a
+  problem. Call it in a test body or in the helper
   that runs a script, never at import time.
 
-Asserting (they raise `AssertionError`, so a test calls them as it would `assert`):
-`_assert_runners_pinned_with_timeouts(workflow)` (every job on `ubuntu-24.04` with an integer
-`timeout-minutes`), `_assert_multi_line_scripts_fail_fast(workflow)` (bash by default and
-`set -euo pipefail` in every multi-line `run`) and `_assert_mutant_caught(real, mutate, code,
+Asserting (it raises `AssertionError`, so a test calls it as it would `assert`):
+`_assert_mutant_caught(real, mutate, code,
 label, problems)` (the mutant changes the text and `problems(mutated)`, the module's own rule
 checker returning a set of codes, contains `code`).
 """
@@ -75,9 +68,6 @@ from typing import Any
 
 import pytest
 import yaml
-
-_SHA_CHECKOUT = re.compile(r"actions/checkout@[0-9a-f]{40}")
-
 
 # --------------------------------------------------------------------------------------
 # Reading the workflow
@@ -175,19 +165,6 @@ def _drop_job(job_id: str) -> Callable[[str], str]:
     return mutate
 
 
-def _unpin_checkout(text: str) -> str:
-    assert _SHA_CHECKOUT.search(text)
-    return _SHA_CHECKOUT.sub("actions/checkout@v7", text, count=1)
-
-
-def _drop_comment(text: str) -> str:
-    mutated = re.sub(
-        r"(actions/setup-python@[0-9a-f]{40})\s+# v[\d.]+", r"\1", text, count=1
-    )
-    assert mutated != text
-    return mutated
-
-
 # --------------------------------------------------------------------------------------
 # Running a script: LF-only writer and capability probes
 # --------------------------------------------------------------------------------------
@@ -250,39 +227,6 @@ def _bash_problem(path: str, systemroot: str) -> str | None:
     return None
 
 
-def gnu_find_problem(path: str | None = None) -> str | None:
-    """Why bash on *path* has no GNU ``find`` (``-printf``), or ``None``."""
-    if problem := _windows_problem():
-        return problem
-    return _gnu_find_problem(_search_path(path), os.environ.get("SYSTEMROOT", ""))
-
-
-@functools.cache
-def _gnu_find_problem(path: str, systemroot: str) -> str | None:
-    problem = _bash_problem(path, systemroot)
-    if problem:
-        return problem
-    found = which("bash", path=path)
-    env = {"PATH": path, **({"SYSTEMROOT": systemroot} if systemroot else {})}
-    try:
-        proc = subprocess.run(
-            [str(found), "-c", "find . -maxdepth 0 -printf x"],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=_PROBE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        return f"find cannot run: {exc}"
-    if proc.returncode != 0 or proc.stdout != "x":
-        return (
-            "find has no GNU -printf (BSD or Windows find): "
-            f"exit {proc.returncode}, {proc.stdout!r}, {proc.stderr.strip()[:80]!r}"
-        )
-    return None
-
-
 def skip_unless_bash(path: str | None = None) -> None:
     """Skip the calling test, with the reason, when `bash_problem` reports one."""
     problem = bash_problem(path)
@@ -290,33 +234,9 @@ def skip_unless_bash(path: str | None = None) -> None:
         pytest.skip(f"these tests run a workflow script in bash: {problem}")
 
 
-def skip_unless_gnu_find(path: str | None = None) -> None:
-    """Skip the calling test, with the reason, when `gnu_find_problem` reports one."""
-    problem = gnu_find_problem(path)
-    if problem:
-        pytest.skip(
-            f"this test runs the release script, which needs GNU find: {problem}"
-        )
-
-
 # --------------------------------------------------------------------------------------
 # Assertions the real-workflow and mutant tests share
 # --------------------------------------------------------------------------------------
-
-
-def _assert_runners_pinned_with_timeouts(workflow: dict[str, Any]) -> None:
-    for name, job in workflow["jobs"].items():
-        assert job["runs-on"] == "ubuntu-24.04", name
-        assert isinstance(job["timeout-minutes"], int), name
-
-
-def _assert_multi_line_scripts_fail_fast(workflow: dict[str, Any]) -> None:
-    assert workflow["defaults"]["run"]["shell"] == "bash"
-    for job in workflow["jobs"].values():
-        for step in _steps(job):
-            run = str(step.get("run", ""))
-            if "\n" in run.strip():
-                assert "set -euo pipefail" in run, step.get("name")
 
 
 def _assert_mutant_caught(

@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** `fsm_llm.quick_start(path, model)` is removed. It was `API.from_file(path, model=model)` and nothing else; call that.
 - **BREAKING:** `fsm_llm.agents.with_auto_memory(tools, config, memory, **kwargs)` is removed. It was `AutoMemoryReactAgent(tools=tools, config=config, memory=memory, **kwargs)`; call that.
 - **BREAKING:** `fsm_llm.logging.register_stream_handler(handler_id, sink, format, context)` is removed. Nothing in the repository called it; `setup_logging` tracks the stream handlers it adds.
+- `fsm_llm.core.verify.flow._result_key` (a private one-line wrapper of `kind_of(state).result_key(state)`, called by nothing in `src`) and the unused `outside_scope`, `CommentShare.percent` of `scripts/decision_index.py` and six dead helpers of `tests/test_fsm_llm_regression/workflow_support.py` (plan ace7a8c8, step 5.3).
 
 ### Fixed
 
