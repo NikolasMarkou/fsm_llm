@@ -22,7 +22,7 @@ from fsm_llm.agents import (
     SelfConsistencyAgent,
     ToolRegistry,
 )
-from fsm_llm.llm.interface import resolve_tool_model
+from fsm_llm.llm import resolve_model
 
 from ..collector import redact_context
 from ..constants import (
@@ -154,7 +154,7 @@ class AgentsMixin(_InstanceSurface):
         registry = _stub_registry(tools_config or []) if needs_tools else None
         collector = self._new_collector()
         config = AgentConfig(
-            model=resolve_tool_model(model),
+            model=resolve_model(model),
             max_iterations=max_iterations,
             timeout_seconds=timeout_seconds,
         )

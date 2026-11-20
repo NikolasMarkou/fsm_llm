@@ -14,7 +14,8 @@ Usage::
 
 Settings precedence: built-in defaults < a dataset's embedded ``config`` (``run``
 only) < ``--config FILE`` < explicit flags. The model is ``--model`` (or the
-config), else ``$LLM_MODEL`` (``--env-file`` fills it), else ``DEFAULT_TOOL_MODEL``.
+config), else ``$LLM_MODEL`` (``--env-file`` fills it), else one stderr line (the
+``ModelNotConfiguredError`` message) and exit 1: there is no default model.
 
 **Exit codes.** ``0`` success, also for low scores unless ``--fail-under`` is
 given; ``1`` usage error, bad config or dataset, unwritable output, or nothing
@@ -36,11 +37,12 @@ from fsm_llm.constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_INTERRUPTED,
     CLI_EXIT_OK,
-    DEFAULT_TOOL_MODEL,
 )
+from fsm_llm.core.definitions import ModelNotConfiguredError
+from fsm_llm.llm import resolve_model
 
 from .cases import TrialResult, create_run_dir, load_cases, run_cases
-from .config import EvalConfig, load_config, merge_config, resolve_model
+from .config import EvalConfig, load_config, merge_config
 from .constants import EXIT_BELOW_THRESHOLD, SCORE_LABELS
 from .examples import (
     ExampleResult,
@@ -74,9 +76,7 @@ class _Parser(argparse.ArgumentParser):
 def _add_common_options(parser: argparse.ArgumentParser) -> None:
     """Options every evaluation command shares. Every default is ``None``,
     so only flags the user actually passed override the config layers."""
-    parser.add_argument(
-        "--model", help=f"LLM model (default: $LLM_MODEL, else {DEFAULT_TOOL_MODEL})"
-    )
+    parser.add_argument("--model", help="LLM model (default: $LLM_MODEL; no built-in)")
     parser.add_argument("--workers", type=int, help="Parallel workers (default: 4)")
     parser.add_argument(
         "--output-dir", help="Run directory, used verbatim; must be new or empty"
@@ -204,7 +204,7 @@ def _cmd_examples(args: argparse.Namespace) -> int:
             print(f"  {t.name:45s} [{mode}, {stdin}]")
         return CLI_EXIT_OK
 
-    model = resolve_model(config)
+    model = resolve_model(config.model)
     run_dir = create_output_dir(config, model)
     print("FSM-LLM Evaluation Runner", _RULE, sep="\n")
     print(f"  Model:    {model}")
@@ -278,7 +278,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"  {case.id:45s} [{len(case.turns)} turns] {case.description}")
         return CLI_EXIT_OK
 
-    model = resolve_model(config)
+    model = resolve_model(config.model)
     run_dir = create_run_dir(config, model, args.dataset)
     print("FSM-LLM Conversation Evaluation", _RULE, sep="\n")
     print(f"  Model:    {model}")
@@ -326,8 +326,9 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
         - ``argv``: arguments WITHOUT the program name; ``None`` reads
           ``sys.argv[1:]``.
         - Returns the exit code (0, 1, 2 under ``--fail-under``, 130 on
-          Ctrl-C). ``EvalError`` (bad config or dataset, unwritable output) and
-          a missing ``--env-file`` are reported on stderr as exit 1, never raised.
+          Ctrl-C). ``EvalError`` (bad config or dataset, unwritable output),
+          ``ModelNotConfiguredError`` (no model named) and a missing
+          ``--env-file`` are reported on stderr as one line and exit 1, never raised.
         - Raises ``SystemExit`` only from argparse (``--help`` exits 0, a
           usage error exits 1).
     """
@@ -345,7 +346,7 @@ def main_cli(argv: Sequence[str] | None = None) -> int:
     try:
         apply_env_file(args)  # before any model is resolved
         return handler(args)
-    except (EvalError, FileNotFoundError) as exc:
+    except (EvalError, ModelNotConfiguredError, FileNotFoundError) as exc:
         print(f"{_PROG}: error: {exc}", file=sys.stderr)
         return CLI_EXIT_FAILURE
     except KeyboardInterrupt:  # before or after the runs (they handle their own)

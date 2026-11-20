@@ -1,26 +1,38 @@
-"""The no-model paths: what needs a model and what must not (review gate 1).
+"""The entry-point sweep: no path names a model the caller did not set (census D11).
 
-The library has no built-in model (plan d454fd62 D-005): ``llm.resolve_model``
-raises ``ModelNotConfiguredError`` when nothing names one. The documented rule
-is "an injected ``llm_interface`` needs no model". The root autouse fixture of
+There is no built-in model anywhere (plan d454fd62 D-005 for the core; plan
+ace7a8c8 D-048, roadmap 0.15, for ``fsm-llm-eval`` and the monitor too):
+``llm.resolve_model`` is the one resolver and raises ``ModelNotConfiguredError``
+when nothing names a model. The documented rule is "an injected
+``llm_interface`` needs no model". The root autouse fixture of
 ``tests/conftest.py`` sets ``LLM_MODEL`` for every test, which hid two
-regressions (the SOP registry and the eval runners, review gate 1 concerns 1
-and 2). Every case below deletes ``LLM_MODEL`` itself and then builds or runs a
-public entry point of every package that takes an injected interface (or that
-needs no LLM at all):
+regressions once (the SOP registry and the eval runners, review gate 1
+concerns 1 and 2). Every case below deletes ``LLM_MODEL`` itself and then
+builds, runs or launches a public entry point:
 
 - ``TestNoModelNeeded``: with an injected double (or no LLM) the call works;
 - ``TestModelStillRequired``: with nothing injected and nothing set the call
-  raises ``ModelNotConfiguredError``, the one message that says how to set one.
+  raises ``ModelNotConfiguredError``, the one message that says how to set one
+  (the library entries, the eval runners without a factory, the monitor
+  launches);
+- ``TestEveryCliWithoutAModel``: ``fsm-llm``, reasoning, meta, ``fsm-llm-eval``
+  ``run`` and ``examples`` exit 1 with that one stderr line, never a traceback;
+- ``TestMonitorRoutes``: the launch routes answer HTTP 400 with the message;
+  the dashboard itself starts without a model (``test_env_file_flag.py``);
+- ``TestPrecedence`` and ``TestNoPathNamesAModelTheCallerDidNotSet``: the
+  argument beats the environment, and no source module names a default.
 
-A new public constructor or runner that takes ``llm_interface`` gets one row in
-``_NO_MODEL_NEEDED`` (and, when it can also build its own interface, one row in
-``_MODEL_REQUIRED``). Fix a failing row in ``src/``, never here.
+A new public constructor, runner or launch route that takes ``llm_interface``
+or a model gets one row here. Fix a failing row in ``src/``, never here.
 """
 
 from __future__ import annotations
 
+import ast
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +59,10 @@ from fsm_llm.agents.meta_builders import AgentArtifactBuilder
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 from fsm_llm.eval import ConversationCase, EvalConfig, run_cases, run_dataset
-from fsm_llm.llm import resolve_model
+from fsm_llm.eval import __main__ as eval_cli
+from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.monitor import InstanceManager
+from fsm_llm.monitor.definitions import StubToolConfig
 from fsm_llm.reasoning import ReasoningEngine
 from fsm_llm.synthesis import (
     FSMSynthesizer,
@@ -515,9 +529,27 @@ def _need_synthesizer_by_model(tmp_path: Path) -> None:
     FSMSynthesizer(model=resolve_model())
 
 
-# Not here: eval without a factory and the monitor launch routes. They end on
-# ``DEFAULT_TOOL_MODEL`` (plan 51fde95b D-036); their tests are in
-# ``test_default_model_removed.py`` and ``tests/test_fsm_llm_eval``.
+def _need_eval_run_cases(tmp_path: Path) -> None:
+    case = ConversationCase(id="c", fsm=_FSM, turns=["hi"], expect={"final_state": "b"})
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    run_cases([case], EvalConfig(trials=1, workers=1), run_dir)
+
+
+def _need_eval_run_dataset(tmp_path: Path) -> None:
+    run_dataset(_write_dataset(tmp_path), output_root=str(tmp_path / "out"))
+
+
+def _need_monitor_launch_fsm(tmp_path: Path) -> None:
+    InstanceManager().launch_fsm(fsm_json=_FSM)
+
+
+def _need_monitor_launch_agent(tmp_path: Path) -> None:
+    InstanceManager().launch_agent(
+        task="x", tools_config=[StubToolConfig(name="t", description="d")]
+    )
+
+
 _MODEL_REQUIRED: dict[str, Any] = {
     "core: API.from_definition without an interface": _need_api,
     "core: Classifier without an interface": _need_classifier,
@@ -530,6 +562,10 @@ _MODEL_REQUIRED: dict[str, Any] = {
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
     "agents: default_llm_judge() without a backend": _need_judge_without_backend,
     "synthesis: FSMSynthesizer(model=resolve_model())": _need_synthesizer_by_model,
+    "eval: run_cases without a factory": _need_eval_run_cases,
+    "eval: run_dataset without a factory": _need_eval_run_dataset,
+    "monitor: InstanceManager.launch_fsm": _need_monitor_launch_fsm,
+    "monitor: InstanceManager.launch_agent": _need_monitor_launch_agent,
 }
 
 
@@ -541,47 +577,310 @@ class TestModelStillRequired:
         with pytest.raises(ModelNotConfiguredError):
             _MODEL_REQUIRED[name](tmp_path)
 
+    @pytest.mark.parametrize("blank", ["", "   "])
+    @pytest.mark.parametrize("name", sorted(_MODEL_REQUIRED))
+    def test_a_blank_model_counts_as_unset(
+        self, name: str, blank: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_LLM_MODEL, blank)
+        with pytest.raises(ModelNotConfiguredError):
+            _MODEL_REQUIRED[name](tmp_path)
 
-class TestTheToolModelFallbackStaysInEvalAndTheMonitor:
-    """D-036 of plan 51fde95b was held by review only (review D, R-D7): the bonsai
-    fallback is for ``fsm-llm-eval`` and the monitor launch routes. A core, agents,
-    reasoning or synthesis module that reads ``resolve_tool_model`` or
-    ``DEFAULT_TOOL_MODEL`` in code (not in a docstring or a comment) fails here."""
+    def test_the_eval_runners_build_no_run_directory_first(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ModelNotConfiguredError):
+            _need_eval_run_dataset(tmp_path)
+        assert not (tmp_path / "out").exists()
 
-    _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
-    _NAMES = frozenset({"resolve_tool_model", "DEFAULT_TOOL_MODEL"})
-    _DEFINITIONS = frozenset({"constants.py", "llm/interface.py"})
-    _USERS = frozenset(
-        {
-            "eval/config.py",
-            "eval/__main__.py",
-            "monitor/instance_manager/fsm.py",
-            "monitor/instance_manager/agent.py",
-            "monitor/server/routes_builder.py",
-        }
+
+# ---------------------------------------------------------------------------
+# The CLIs
+# ---------------------------------------------------------------------------
+
+_REPO = Path(__file__).resolve().parents[2]
+
+
+def _scrubbed_env() -> dict[str, str]:
+    """Only what a child needs; ``LLM_MODEL`` blank, no ``.env`` load."""
+    keep = ("PATH", "HOME", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL")
+    env = {key: os.environ[key] for key in keep if key in os.environ}
+    env[ENV_LLM_MODEL] = ""
+    env["LITELLM_MODE"] = "PRODUCTION"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONPATH"] = str(_REPO / "src")
+    return env
+
+
+def _child(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=_scrubbed_env(),
+        cwd=cwd,
+        check=False,
     )
 
-    def _readers(self) -> set[str]:
-        import ast
 
-        found = set()
-        for path in self._SRC.rglob("*.py"):
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                named = (
-                    (isinstance(node, ast.Name) and node.id in self._NAMES)
-                    or (isinstance(node, ast.alias) and node.name in self._NAMES)
-                    or (isinstance(node, ast.Attribute) and node.attr in self._NAMES)
-                )
-                if named:
-                    found.add(path.relative_to(self._SRC).as_posix())
-        return found
+def _one_line_exit_1(code: int, err: str) -> None:
+    assert code == 1, err
+    assert "Traceback" not in err
+    lines = [line for line in err.splitlines() if line.strip()]
+    assert len(lines) == 1, err
+    assert ModelNotConfiguredError.DEFAULT_MESSAGE in lines[0]
 
-    def test_only_eval_and_the_monitor_read_the_fallback(self) -> None:
-        assert self._readers() == self._DEFINITIONS | self._USERS
 
-    def test_resolve_model_still_raises_with_nothing_set(
+class TestEveryCliWithoutAModel:
+    """Exit 1 with the one message: the child processes run the real entry
+    modules with a scrubbed environment, the eval rows call ``main_cli``."""
+
+    def test_the_child_runs_the_checkout_under_test(self, tmp_path: Path) -> None:
+        proc = _child(["-c", "import fsm_llm;print(fsm_llm.__file__)"], tmp_path)
+        assert Path(proc.stdout.strip()).resolve().parent == (
+            _REPO / "src" / "fsm_llm"
+        ), proc.stderr
+
+    def test_fsm_llm_run(self, tmp_path: Path) -> None:
+        fsm_file = tmp_path / "f.json"
+        fsm_file.write_text("{}", encoding="utf-8")
+        proc = _child(["-m", "fsm_llm", "--fsm", str(fsm_file)], tmp_path)
+        _one_line_exit_1(proc.returncode, proc.stderr)
+
+    def test_reasoning(self, tmp_path: Path) -> None:
+        proc = _child(["-m", "fsm_llm.reasoning", "what is 2 + 2"], tmp_path)
+        _one_line_exit_1(proc.returncode, proc.stderr)
+
+    def test_meta(self, tmp_path: Path) -> None:
+        proc = _child(["-m", "fsm_llm.agents.meta_cli"], tmp_path)
+        _one_line_exit_1(proc.returncode, proc.stderr)
+
+    def test_eval_run(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+        code = eval_cli.main_cli(["run", str(_write_dataset(tmp_path))])
+        _one_line_exit_1(
+            code, capsys.readouterr().err.replace("fsm-llm-eval: error: ", "")
+        )
+
+    def test_eval_examples(self, capsys: pytest.CaptureFixture) -> None:
+        argv = [
+            "examples",
+            "--examples-dir",
+            str(_REPO / "examples"),
+            "--category",
+            "basic",
+        ]
+        code = eval_cli.main_cli(argv)
+        _one_line_exit_1(
+            code, capsys.readouterr().err.replace("fsm-llm-eval: error: ", "")
+        )
+
+    def test_eval_names_no_default_model_in_its_help(
+        self, capsys: pytest.CaptureFixture
+    ) -> None:
+        with pytest.raises(SystemExit):
+            eval_cli.main_cli(["run", "--help"])
+        help_text = capsys.readouterr().out
+        assert "bonsai" not in help_text and "ollama" not in help_text
+
+
+# ---------------------------------------------------------------------------
+# The monitor routes
+# ---------------------------------------------------------------------------
+
+
+class TestMonitorRoutes:
+    """A launch with no model is HTTP 400 with the one message; the request
+    models name no model themselves."""
+
+    @staticmethod
+    def _client() -> Any:
+        from fastapi.testclient import TestClient
+
+        from fsm_llm.monitor.server import app, configure
+
+        configure(manager=InstanceManager())
+        return TestClient(app)
+
+    def test_request_models_name_no_model(self) -> None:
+        from fsm_llm.monitor.definitions import (
+            BuilderStartRequest,
+            LaunchAgentRequest,
+            LaunchFSMRequest,
+        )
+
+        assert LaunchFSMRequest(fsm_json=_FSM).model is None
+        assert LaunchAgentRequest(task="x").model is None
+        assert BuilderStartRequest().model is None
+
+    @pytest.mark.parametrize("model", [None, " "])
+    def test_fsm_launch_is_400(self, model: str | None) -> None:
+        body: dict[str, Any] = {"fsm_json": _FSM}
+        if model is not None:
+            body["model"] = model
+        resp = self._client().post("/api/fsm/launch", json=body)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == ModelNotConfiguredError.DEFAULT_MESSAGE
+
+    def test_agent_launch_is_400(self) -> None:
+        body = {"task": "x", "tools": [{"name": "t", "description": "d"}]}
+        resp = self._client().post("/api/agent/launch", json=body)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == ModelNotConfiguredError.DEFAULT_MESSAGE
+
+    def test_builder_start_is_400_and_builds_no_agent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv(ENV_LLM_MODEL, raising=False)
+        import fsm_llm.agents.meta_builder as meta
+
+        built: list[object] = []
+        monkeypatch.setattr(
+            meta, "MetaBuilderAgent", lambda config: built.append(config)
+        )
+        resp = self._client().post("/api/builder/start", json={})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == ModelNotConfiguredError.DEFAULT_MESSAGE
+        assert built == []
+
+    def test_a_named_model_still_launches(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resp = self._client().post(
+            "/api/fsm/launch", json={"fsm_json": _FSM, "model": "named/model"}
+        )
+        assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Precedence: the argument beats the environment, the environment beats nothing
+# ---------------------------------------------------------------------------
+
+
+def _api_model(model: str | None) -> str | None:
+    return interface_model(API.from_definition(_FSM, model=model).llm_interface)
+
+
+def _classifier_model(model: str | None) -> str | None:
+    return Classifier(_SCHEMA, model=model).model
+
+
+def _agent_config_model(model: str | None) -> str | None:
+    return AgentConfig(model=model).model if model else AgentConfig().model
+
+
+def _reasoning_model(model: str | None) -> str | None:
+    return ReasoningEngine(model=model).model
+
+
+def _eval_label(model: str | None) -> str:
+    from fsm_llm.eval.cases import _run_model_label
+
+    return _run_model_label(EvalConfig(model=model), None)
+
+
+_PRECEDENCE = {
+    "core: API": _api_model,
+    "core: Classifier": _classifier_model,
+    "agents: AgentConfig": _agent_config_model,
+    "reasoning: ReasoningEngine": _reasoning_model,
+    "eval: the run label": _eval_label,
+}
+
+
+class TestPrecedence:
+    @pytest.mark.parametrize("name", sorted(_PRECEDENCE))
+    def test_the_environment_is_used_without_an_argument(
+        self, name: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_LLM_MODEL, "env/model")
+        assert _PRECEDENCE[name](None) == "env/model"
+
+    @pytest.mark.parametrize("name", sorted(_PRECEDENCE))
+    def test_the_argument_beats_the_environment(
+        self, name: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_LLM_MODEL, "env/model")
+        assert _PRECEDENCE[name]("arg/model") == "arg/model"
+
+
+# ---------------------------------------------------------------------------
+# No source module names a default
+# ---------------------------------------------------------------------------
+
+_SRC = _REPO / "src" / "fsm_llm"
+_REMOVED_NAMES = frozenset({"resolve_tool_model", "DEFAULT_TOOL_MODEL"})
+_REMOVED_DEFAULTS = frozenset({"DEFAULT_LLM_MODEL"})
+
+
+def _named_in_code(path: Path) -> set[str]:
+    """Identifiers of the removed defaults (not docstrings or comments), and any
+    code string constant that names the old default model."""
+    found: set[str] = set()
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        )
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    for node in ast.walk(tree):
+        name = None
+        if isinstance(node, ast.Name):
+            name = node.id
+        elif isinstance(node, ast.alias):
+            name = node.name
+        elif isinstance(node, ast.Attribute):
+            name = node.attr
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            name = node.name
+        if name in _REMOVED_NAMES | _REMOVED_DEFAULTS:
+            found.add(name)
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+            and "bonsai" in node.value
+        ):
+            found.add("a string constant naming bonsai")
+    return found
+
+
+class TestNoPathNamesAModelTheCallerDidNotSet:
+    def test_no_module_names_a_removed_default_in_code(self) -> None:
+        hits = {
+            path.relative_to(_SRC).as_posix(): sorted(names)
+            for path in sorted(_SRC.rglob("*.py"))
+            if (names := _named_in_code(path))
+        }
+        assert hits == {}
+
+    def test_the_removed_names_are_gone_from_their_modules(self) -> None:
+        import fsm_llm.constants
+        import fsm_llm.eval
+        import fsm_llm.eval.config
+        import fsm_llm.llm.interface
+
+        assert not hasattr(fsm_llm.constants, "DEFAULT_TOOL_MODEL")
+        assert not hasattr(fsm_llm.constants, "DEFAULT_LLM_MODEL")
+        assert not hasattr(fsm_llm.llm.interface, "resolve_tool_model")
+        assert not hasattr(fsm_llm.eval, "resolve_model")
+        assert not hasattr(fsm_llm.eval.config, "resolve_model")
+
+    def test_the_scan_sees_a_planted_default(self, tmp_path: Path) -> None:
+        planted = tmp_path / "m.py"
+        planted.write_text(
+            'from x import resolve_tool_model\nmodel = "ollama_chat/bonsai-2:27b"\n',
+            encoding="utf-8",
+        )
+        assert _named_in_code(planted) == {
+            "resolve_tool_model",
+            "a string constant naming bonsai",
+        }
+
+    def test_resolve_model_still_raises_with_nothing_set(self) -> None:
         with pytest.raises(ModelNotConfiguredError):
             resolve_model()

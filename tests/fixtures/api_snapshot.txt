@@ -1322,7 +1322,6 @@ fsm_llm.eval.model_slug def(model: str) -> str
 fsm_llm.eval.open_run_dir def(output_dir: PathLike | None, output_root: PathLike, model: str, cwd: PathLike | None = None) -> Path
 fsm_llm.eval.pass_rate def(k: int, n: int) -> dict[str, Any]
 fsm_llm.eval.read_rows def(path: Path) -> list[dict[str, Any]]
-fsm_llm.eval.resolve_model def(config: EvalConfig) -> str
 fsm_llm.eval.run_case_trial def(case: ConversationCase, config: EvalConfig, trial: int, llm_interface_factory: LLMInterfaceFactory | None = None, *, checks: Sequence[TrialCheck] = (), stop: Callable[[], bool] | None = None) -> TrialResult
 fsm_llm.eval.run_cases def(cases: Sequence[ConversationCase], config: EvalConfig, run_dir: Path, *, llm_interface_factory: LLMInterfaceFactory | None = None, progress: TrialProgressCallback | None = None, dataset: str | Path | None = None, checks: Sequence[TrialCheck] = ()) -> CaseReport
 fsm_llm.eval.run_dataset def(path: str | Path, *, config: EvalConfig | Mapping[str, Any] | str | Path | None = None, llm_interface_factory: LLMInterfaceFactory | None = None, checks: Sequence[TrialCheck] = (), progress: TrialProgressCallback | None = None, **overrides: Any) -> CaseReport

@@ -29,11 +29,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.engine.api.conversation import API
-from fsm_llm.llm import LLMInterface
-from fsm_llm.llm import resolve_model as resolve_named_model
+from fsm_llm.llm import LLMInterface, resolve_model
 
 from ._pool import run_interruptible
-from .config import EvalConfig, load_config, merge_config, resolve_model
+from .config import EvalConfig, load_config, merge_config
 from .constants import (
     CASES_EVALUATOR_NAME,
     INJECTED_MODEL_LABEL,
@@ -288,12 +287,12 @@ def _run_model_label(
           model, so no ``LLM_MODEL`` is needed and this never raises: the
           factory's own ``model`` attribute when it is a non-blank ``str`` (a
           callable object or a function carrying one), else the model the
-          config or the environment names (the strict ``llm.resolve_model``:
-          the bonsai default never labels an injected run), else
+          config or the environment names (``llm.resolve_model``), else
           ``INJECTED_MODEL_LABEL``. The label only names the run directory and
           the report; the interface answers whatever it is.
-        - Without one, ``resolve_model(config)``: the config, ``LLM_MODEL``,
-          else ``DEFAULT_TOOL_MODEL``; never raises.
+        - Without one, ``llm.resolve_model(config.model)``: the config, then
+          ``LLM_MODEL``; with neither it raises ``ModelNotConfiguredError``
+          (plan ace7a8c8 D-048: no default model).
     """
     # DECISION plan-2026-11-12T073150-d454fd62/D-025
     # Do NOT let ``resolve_model`` raise when a factory is given: it did so for
@@ -301,12 +300,12 @@ def _run_model_label(
     # gate 1, concern 2). Do NOT drop the named model either: a config or
     # environment model still labels a factory run that states none.
     if llm_interface_factory is None:
-        return resolve_model(config)
+        return resolve_model(config.model)
     named = getattr(llm_interface_factory, "model", None)
     if isinstance(named, str) and named.strip():
         return named.strip()
     try:
-        return resolve_named_model(config.model)
+        return resolve_model(config.model)
     except ModelNotConfiguredError:
         return INJECTED_MODEL_LABEL
 
@@ -317,7 +316,10 @@ def _llm_kwargs(
     """``API`` keyword arguments for one trial: the factory, else the LLM settings."""
     if llm_interface_factory is not None:
         return {"llm_interface": llm_interface_factory()}
-    kwargs: dict[str, Any] = {**config.llm_kwargs, "model": resolve_model(config)}
+    kwargs: dict[str, Any] = {
+        **config.llm_kwargs,
+        "model": resolve_model(config.model),
+    }
     if config.temperature is not None:
         kwargs["temperature"] = config.temperature
     if config.max_tokens is not None:
@@ -449,8 +451,8 @@ def run_cases(
         - Model: with ``llm_interface_factory`` no model is needed; the report's
           ``model`` is the factory's ``model`` attribute, else the model the
           config or ``LLM_MODEL`` names, else ``"injected"``. Without a factory
-          the model is ``resolve_model(config)``: the config, ``LLM_MODEL``,
-          else ``DEFAULT_TOOL_MODEL``.
+          the model is ``llm.resolve_model(config.model)``: the config, then
+          ``LLM_MODEL``, else ``ModelNotConfiguredError`` (no default).
     """
     # DECISION plan-2026-09-29T061903-581c2634/D-004
     # Trials run on threads in this process. Do NOT move them to a subprocess
@@ -505,12 +507,12 @@ def run_dataset(
           directory under ``output_root``); ``llm_interface_factory``,
           ``checks`` and ``progress`` are passed to :func:`run_cases`.
         - Raises ``EvalDatasetError``/``EvalConfigError`` for a bad dataset or
-          setting and ``EvalError`` when no run directory can be created; a
-          missing model is no error: without a factory the model is the one
-          named (``model=``, the dataset or config file, or ``LLM_MODEL``),
-          else ``DEFAULT_TOOL_MODEL``. With a factory no model is needed and
-          the run directory is labelled by the factory's ``model`` attribute,
-          else the named model, else ``injected``.
+          setting and ``EvalError`` when no run directory can be created;
+          without a factory the model must be named (``model=``, the dataset
+          or config file, or ``LLM_MODEL``), else ``ModelNotConfiguredError``
+          is raised before a run directory is created. With a factory no
+          model is needed and the run directory is labelled by the factory's
+          ``model`` attribute, else the named model, else ``injected``.
     """
     cases, embedded = load_cases(path)
     if isinstance(config, EvalConfig):

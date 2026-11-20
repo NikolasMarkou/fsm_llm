@@ -1,4 +1,4 @@
-.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit api-snapshot decision-index decision-check changelog-check gate-step gate-push docs docs-serve docs-clean
+.PHONY: help test lint format type-check lint-imports build clean install-dev coverage audit api-snapshot decision-index decision-check changelog-check gate-step gate-push monitor eval-examples docs docs-serve docs-clean
 
 # Default target
 help: ## Show this help message
@@ -66,6 +66,13 @@ gate-step: ## Run the lean step gate on the working tree (scripts/gate.sh step)
 
 gate-push: ## Run the lean push gate against origin/main (scripts/gate.sh push, the pre-push hook)
 	scripts/gate.sh push
+
+# Local runs that read the model from the gitignored .env (no command has a built-in model).
+monitor: ## Start the monitor dashboard with the model settings of .env (fsm-llm-monitor --env-file .env)
+	fsm-llm-monitor --env-file .env
+
+eval-examples: ## Score every example with the model of .env (fsm-llm-eval examples --env-file .env)
+	fsm-llm-eval examples --env-file .env
 
 docs: ## Build the docs site into site/ (strict: any warning fails); needs `pip install --group docs -c constraints.txt`
 	NO_MKDOCS_2_WARNING=1 mkdocs build --strict

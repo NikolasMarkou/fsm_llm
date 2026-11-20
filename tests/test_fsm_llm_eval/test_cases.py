@@ -15,7 +15,7 @@ from typing import ClassVar
 
 import pytest
 
-from fsm_llm.constants import DEFAULT_TOOL_MODEL
+from fsm_llm import ModelNotConfiguredError
 from fsm_llm.eval import (
     ConversationCase,
     EvalConfig,
@@ -667,8 +667,9 @@ class TestRunsNeedNoModelWithAFactory:
     The root autouse fixture sets ``LLM_MODEL`` for every test, so each test
     deletes it. ``run_cases`` and ``run_dataset`` label the run after the
     factory's ``model`` attribute, else a named model, else ``injected`` (the
-    strict resolver: the bonsai default never labels an injected run); without a
-    factory and without a model they run on ``DEFAULT_TOOL_MODEL``.
+    strict resolver, so no default model ever labels an injected run); without a
+    factory and without a model they raise ``ModelNotConfiguredError`` (plan
+    ace7a8c8 D-048, roadmap 0.15).
     """
 
     @pytest.fixture(autouse=True)
@@ -733,23 +734,28 @@ class TestRunsNeedNoModelWithAFactory:
         )
         assert report.model == "file-model"
 
-    def test_a_run_without_a_factory_or_a_model_uses_the_default(
+    def test_a_run_without_a_factory_or_a_model_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """Plan 51fde95b D-036: the bonsai default, not ModelNotConfiguredError."""
+        """Plan ace7a8c8 D-048: no default model; nothing is built or written."""
         monkeypatch.setattr(cases_mod, "API", _CapturingAPI)
         _CapturingAPI.seen = []
-        report = run_cases([_case()], EvalConfig(trials=1, workers=1), tmp_path)
-        assert report.model == DEFAULT_TOOL_MODEL
-        assert [kw["model"] for kw in _CapturingAPI.seen] == [DEFAULT_TOOL_MODEL]
+        with pytest.raises(ModelNotConfiguredError):
+            run_cases([_case()], EvalConfig(trials=1, workers=1), tmp_path)
+        assert _CapturingAPI.seen == []
+        assert list(tmp_path.iterdir()) == []
 
-    def test_run_dataset_without_a_factory_or_a_model_names_the_default(
+    def test_run_dataset_without_a_factory_or_a_model_raises_before_a_directory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr(cases_mod, "API", _CapturingAPI)
+        _CapturingAPI.seen = []
         dataset = _write(tmp_path / "d.json", [_case().model_dump()])
-        report = run_dataset(dataset, output_root=str(tmp_path / "out"), trials=1)
-        assert report.model == DEFAULT_TOOL_MODEL
+        out = tmp_path / "out"
+        with pytest.raises(ModelNotConfiguredError):
+            run_dataset(dataset, output_root=str(out), trials=1)
+        assert _CapturingAPI.seen == []
+        assert not out.exists()
 
 
 class _CapturingAPI:
@@ -802,18 +808,23 @@ class TestLLMSettingsReachTheAPI:
         assert "sk-secret-value" not in text
         assert json.loads(text)["config"]["llm_kwargs"] == {"api_key": "<not recorded>"}
 
-    def test_cli_without_a_model_announces_the_tool_default_and_the_help_says_so(
+    def test_cli_without_a_model_exits_1_with_one_line_and_the_help_names_no_default(
         self, tmp_path, offline_cli, capsys, monkeypatch
     ):
         monkeypatch.delenv("LLM_MODEL", raising=False)
         offline_cli(_passing())
         path = _write(tmp_path / "d.json", [_case().model_dump()])
         argv = ["run", str(path), "--output-dir", str(tmp_path / "o"), "--trials", "1"]
-        assert cli.main_cli(argv) == 0
-        assert f"Model:    {DEFAULT_TOOL_MODEL}" in capsys.readouterr().out
+        assert cli.main_cli(argv) == 1
+        err = capsys.readouterr().err
+        assert [line for line in err.splitlines() if line.strip()] == [
+            f"fsm-llm-eval: error: {ModelNotConfiguredError.DEFAULT_MESSAGE}"
+        ]
+        assert not (tmp_path / "o").exists()
         with pytest.raises(SystemExit):
             cli.main_cli(["run", "--help"])
-        assert DEFAULT_TOOL_MODEL in capsys.readouterr().out
+        help_text = capsys.readouterr().out
+        assert "bonsai" not in help_text and "ollama" not in help_text
 
     def test_cli_flags_set_temperature_and_max_tokens(self, tmp_path, offline_cli):
         offline_cli(_passing())

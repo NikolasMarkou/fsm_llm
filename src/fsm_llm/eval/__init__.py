@@ -33,7 +33,7 @@ from .cases import (
     run_dataset,
     write_case_report,
 )
-from .config import EvalConfig, load_config, merge_config, resolve_model
+from .config import EvalConfig, load_config, merge_config
 from .examples import (
     ExampleReport,
     ExampleResult,
@@ -89,7 +89,6 @@ __all__ = [
     "open_run_dir",
     "pass_rate",
     "read_rows",
-    "resolve_model",
     "run_case_trial",
     "run_cases",
     "run_dataset",

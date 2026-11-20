@@ -1,5 +1,5 @@
 """The provider-neutral LLM interface: ``LLMInterface``, ``tool_exchange``,
-``check_tool_transcript``, ``resolve_model`` and ``resolve_tool_model``, the ``complete`` response reader and the connection defaults.
+``check_tool_transcript`` and ``resolve_model`` (the one model resolver), the ``complete`` response reader and the connection defaults.
 
 Layer ``llm`` (plan d454fd62, step 73): split out of the old ``fsm_llm/llm/__init__.py`` (the old ``llm.py``); definitions unchanged.
 """
@@ -14,11 +14,7 @@ from contextlib import aclosing
 from typing import Any
 
 from fsm_llm.aio import aiterate, aoffload
-from fsm_llm.constants import (
-    DEFAULT_TOOL_MODEL,
-    ENV_LLM_MODEL,
-    MALFORMED_TOOL_CALL_MARKERS,
-)
+from fsm_llm.constants import ENV_LLM_MODEL, MALFORMED_TOOL_CALL_MARKERS
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
     CompletionRequest,
@@ -218,26 +214,6 @@ def resolve_model(model: str | None = None) -> str:
             if name and name != PLACEHOLDER_MODEL:
                 return name
     raise ModelNotConfiguredError()
-
-
-def resolve_tool_model(model: str | None = None) -> str:
-    """:func:`resolve_model`, then ``DEFAULT_TOOL_MODEL`` instead of raising.
-
-    Interface contract (callers: ``eval.resolve_model`` and the monitor launch
-    paths only; imported from ``fsm_llm.llm.interface``, not exported by the
-    package): the same arguments and blank rules as :func:`resolve_model`;
-    returns the first usable of *model*, ``$LLM_MODEL``, ``DEFAULT_TOOL_MODEL``.
-    Never raises.
-    """
-    # DECISION plan-2026-11-19T025425-51fde95b/D-036
-    # The bonsai default belongs to the eval CLI and the monitor, not to the
-    # core. Do NOT move the fallback into ``resolve_model``: ``API``,
-    # ``Classifier``, agents, reasoning and the other CLIs keep raising
-    # ``ModelNotConfiguredError`` (D-005 of plan d454fd62 stays).
-    try:
-        return resolve_model(model)
-    except ModelNotConfiguredError:
-        return DEFAULT_TOOL_MODEL
 
 
 def interface_model(llm: Any) -> str | None:

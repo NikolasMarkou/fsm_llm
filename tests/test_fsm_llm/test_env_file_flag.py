@@ -40,7 +40,6 @@ import pytest
 
 import fsm_llm
 from fsm_llm import cli_support
-from fsm_llm.constants import DEFAULT_TOOL_MODEL
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from tests.test_fsm_llm.support import _child_env
 
@@ -48,7 +47,6 @@ _REPO = Path(fsm_llm.__file__).resolve().parents[2]
 _DATASET = _REPO / "evaluation" / "datasets" / "simple_greeting_cases.json"
 _MESSAGE = ModelNotConfiguredError.DEFAULT_MESSAGE
 _NEEDS_A_MODEL = ("reasoning", "eval", "meta")
-_STRICT_WITHOUT_A_MODEL = ("reasoning", "meta")  # eval ends on DEFAULT_TOOL_MODEL
 _ALL = (*_NEEDS_A_MODEL, "monitor")
 
 
@@ -196,9 +194,10 @@ class TestEnvFileFlagOnEachCli:
         assert len(_lines(err)) == 1, err
 
 
-@pytest.mark.parametrize("cli", _STRICT_WITHOUT_A_MODEL)
+@pytest.mark.parametrize("cli", _NEEDS_A_MODEL)
 class TestNoModelAnywhere:
-    """The core resolver raises: one stderr line, exit 1."""
+    """The one resolver raises, whatever the CLI: one stderr line, exit 1
+    (plan ace7a8c8 D-048: ``fsm-llm-eval`` has no default model any more)."""
 
     def test_unset_model_exits_1_with_one_line_and_no_traceback(
         self, cli, monkeypatch, capsys
@@ -224,25 +223,6 @@ class TestNoModelAnywhere:
         code, _, err = _call(cli, [], monkeypatch, capsys)
         assert code == 1, err
         assert _MESSAGE in err
-
-
-class TestEvalWithoutAModel:
-    """Plan 51fde95b D-036: ``fsm-llm-eval`` ends on ``DEFAULT_TOOL_MODEL``."""
-
-    def test_unset_model_runs_on_the_tool_default(self, tmp_path, monkeypatch, capsys):
-        (tmp_path / ".env").write_text("LLM_MODEL=stale\n", encoding="utf-8")
-        code, out, err = _call("eval", [], monkeypatch, capsys, probe=True)
-        assert code == 0, err
-        assert _model_line(out) == f"MODEL={DEFAULT_TOOL_MODEL}"
-
-    def test_a_file_without_a_model_runs_on_the_tool_default(
-        self, tmp_path, monkeypatch, capsys
-    ):
-        env_file = _write_env(tmp_path, "SOME_OTHER_VARIABLE=1\n")
-        args = ["--env-file", str(env_file)]
-        code, out, err = _call("eval", args, monkeypatch, capsys, probe=True)
-        assert code == 0, err
-        assert _model_line(out) == f"MODEL={DEFAULT_TOOL_MODEL}"
 
 
 @pytest.mark.parametrize("cli", _NEEDS_A_MODEL)

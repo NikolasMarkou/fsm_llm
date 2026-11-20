@@ -37,7 +37,7 @@ Environment variables used by the library and the `fsm-llm` command:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, and raises `ModelNotConfiguredError` when neither is set (`fsm-llm-eval` and the monitor launch routes fall back to `ollama_chat/bonsai-2:27b`) |
+| `LLM_MODEL` | none | litellm model id. **Required by the `fsm-llm` CLI**; the `API` class uses it when no `model=` is passed, and raises `ModelNotConfiguredError` when neither is set (so do `fsm-llm-eval` and the monitor launch routes: no entry point has a default) |
 | `LLM_TEMPERATURE` | `0.5` | CLI only |
 | `LLM_MAX_TOKENS` | `1000` | CLI only |
 | `FSM_PATH` | none | not usable with `fsm-llm`: `--fsm` is checked first and is mandatory |

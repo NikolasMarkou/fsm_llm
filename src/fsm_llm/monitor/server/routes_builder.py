@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from fsm_llm.llm.interface import resolve_tool_model
+from fsm_llm.core.definitions import ModelNotConfiguredError
+from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
 
 from ..constants import MAX_ABANDONED_BUILDERS, MAX_BUILDER_SESSIONS
@@ -109,8 +110,13 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
             detail="fsm_llm.agents meta-builder not available",
         ) from None
 
+    try:
+        model = resolve_model(req.model)  # unset: no default, the one message
+    except ModelNotConfiguredError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
     config_kwargs: dict[str, Any] = {
-        "model": resolve_tool_model(req.model),  # unset: DEFAULT_TOOL_MODEL
+        "model": model,
         "temperature": req.temperature,
         "max_tokens": req.max_tokens,
     }

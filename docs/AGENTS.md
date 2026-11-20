@@ -57,7 +57,7 @@ A full FSM snippet has to pass the loader. Minimum per state: `id`, `description
 Facts the pages state that must stay in step with the code:
 
 - `API.__init__` defaults: `max_history_size=5`, `max_message_length=1000`, `handler_error_mode="continue"`, `max_fsm_cache_size=64`, keyword-only `executors=None` (internal, no builder setter).
-- `DEFAULT_MAX_STACK_DEPTH = 10`; the core has no default model: a missing model raises `ModelNotConfiguredError`; `DEFAULT_TOOL_MODEL` (`ollama_chat/bonsai-2:27b`) is the last tier of `fsm-llm-eval` and the monitor launch routes only.
+- `DEFAULT_MAX_STACK_DEPTH = 10`; there is no default model anywhere: a missing model raises `ModelNotConfiguredError` (`fsm-llm-eval` exits 1, a monitor launch answers 400).
 - Core step driver: `API.advance`, `advance_stream`, `run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None, seconds_exempt_states=())`, `run_until_terminal_stream`, `AdvanceResult`, `RunBudgetExceededError`.
 - Console scripts (`pyproject.toml`): `fsm-llm`, `fsm-llm-visualize`, `fsm-llm-validate`, `fsm-llm-monitor`, `fsm-llm-meta`, `fsm-llm-eval`, `fsm-llm-okf`, `fsm-llm-skills`.
 

@@ -270,11 +270,6 @@ ENV_LLM_TEMPERATURE = "LLM_TEMPERATURE"
 ENV_LLM_MAX_TOKENS = "LLM_MAX_TOKENS"
 ENV_FSM_PATH = "FSM_PATH"
 
-# The model `fsm-llm-eval` and the monitor launch routes use when neither the
-# caller nor `LLM_MODEL` names one (`llm.interface.resolve_tool_model`). The core
-# resolver `llm.resolve_model` does NOT use it and still raises.
-DEFAULT_TOOL_MODEL = "ollama_chat/bonsai-2:27b"
-
 # --------------------------------------------------------------
 # CLI Exit Codes (fsm-llm, fsm-llm-validate, fsm-llm-visualize)
 # --------------------------------------------------------------
