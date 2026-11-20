@@ -2,12 +2,13 @@
 
 | | |
 |---|---|
-| Document version | 4.0 |
+| Document version | 4.1 (v4.0 re-verified against main; changes in Section 16) |
 | Date | 2026-11-20 |
-| Baseline | fsm_llm `e53a796a` (v0.13.0 released 2026-11-17; main carries the unreleased changes listed in Section 4); txtai `fecd114` (PyPI 9.14.0, master 9.15.0 unreleased, 2026-11-19); deepseek-harness `2e39e70496` (tag `dsh-v0.2.2-rc.5`, 2026-11-18); NVIDIA-NeMo/labs-OO-Agents (NOOA) `a3aabc5b` (v0.0.12, 2026-11-20) |
+| Baseline | fsm_llm `0fb72162` (v0.13.0 released 2026-11-17; main carries the unreleased changes listed in Section 4); txtai `fecd114` (PyPI 9.14.0, master 9.15.0 unreleased, 2026-11-19); deepseek-harness `2e39e70496` (tag `dsh-v0.2.2-rc.5`, 2026-11-18); NVIDIA-NeMo/labs-OO-Agents (NOOA) `a3aabc5b` (v0.0.12, 2026-11-20) |
 | Method | Clones of all four repositories and the package indexes. Every number is a dated measurement from a command in Appendix A. Standards are checked against their own repositories (Appendix B) |
 | Planning basis | Dependency order only. No effort or calendar estimates |
 | Row identifiers | Stable. Code and import contracts cite them (`# retired by: roadmap 6.6`), so a row is marked done or superseded, never renumbered |
+| Status cells | Measured at the baseline commit. Keeping a status cell, a count or the baseline row true is a routine edit; changing a row's scope, dependencies or done-when is an owner decision |
 
 ## Contents
 
@@ -26,6 +27,7 @@
 13. [Compatibility and release policy](#13-compatibility-and-release-policy)
 14. [Out of scope](#14-out-of-scope)
 15. [Open decisions](#15-open-decisions)
+16. [Change log: v4.0 to v4.1](#16-change-log-v40-to-v41)
 - [Appendix A: Evidence](#appendix-a-evidence)
 - [Appendix B: References](#appendix-b-references)
 
@@ -37,26 +39,29 @@
 
 **In one line:** NOOA makes an agent a Python object; fsm_llm makes every agent, reasoning strategy, workflow and generated procedure a verifiable, durable executable that runs on one engine, writes one log and returns one result.
 
-**State of play.** Release 0.13.0 delivered the foundation: distribution on PyPI as `llm-fsm`, Python 3.11 to 3.15, layer packages held by import contracts and an 800-line module cap, a schema registry for definition fields, a closed reason-code vocabulary, a state-kind registry and public test doubles. Main adds the first slice of the durable runtime: an opt-in event log, fork and resume, core turn budgets, usage and privacy levels derived from events, an async LLM layer and async core turns. Runtime FSM synthesis ships with gates G1 to G7, a content-addressed library, a runner and a repair loop; its three pre-registered benchmark blocks are INCONCLUSIVE because one model played every role.
+**State of play.** Release 0.13.0 delivered the foundation: distribution on PyPI as `llm-fsm`, Python 3.11 to 3.15, layer packages held by import contracts and an 800-line module cap, a schema registry for definition fields, a closed reason-code vocabulary, a state-kind registry and public test doubles. Main adds the first slice of the durable runtime (an opt-in event log, fork and resume, core turn budgets, usage and privacy levels derived from events, an async LLM layer and async core turns), one definition identity recipe in core, and text fixtures of all 49 built-in agent and reasoning FSM cases, the safety net for converting them (E0.1). Runtime FSM synthesis ships with gates G1 to G7, a content-addressed library, a runner and a repair loop; its three pre-registered benchmark blocks are INCONCLUSIVE because one model played every role.
 
-**The problem now is consistency, not capability.** Three of the four runtime packages already run on core's step driver, yet each keeps its own definition format, selection mechanism, name table and result shape:
+**The problem now is consistency, not capability.** Three of the four runtime packages already run on core's step driver, yet the codebase keeps seven definition formats, nine private name tables and as many result shapes:
 
-| Package | Definition format | Selection | Result shape |
+| Where | Definition format | Selection or name table | Result shape |
 |---|---|---|---|
-| agents | Python builders `build_<x>_fsm(...)`; handlers attached in Python | the `_PATTERNS` dict | `AgentResult` (`success`, `stop_reason`) |
-| reasoning | module-level dicts plus `StrategySpec` | a classifier FSM, then the `ReasoningType` enum | `SolutionResult` |
-| synthesis | `FSMDefinition` JSON, content-addressed | library search by goal | `synthesis_result` dict |
-| workflows | Pydantic steps holding Python callables; `serialize()` writes a dict that nothing reads | a `WorkflowDefinition` object by id | `WorkflowInstance` status |
+| agents | Python builders `build_<x>_fsm(...)`; constructor arguments that are Python objects (`evaluation_fn`, `worker_factory`, `ChainStep.validation_fn`, swarm members); handlers attached in Python | `_PATTERNS` | `AgentResult` (`success`, `stop_reason`) |
+| agents, SOPs | YAML or JSON task templates naming a pattern, tools, an output schema and config overrides | `SOPRegistry`, `load_builtin_sops` | none of its own |
+| agents, meta-builder | Three artifact specs with hand-written schemas; the FSM spec has its own shape (`state_id`, `from_state`); nothing loads the workflow or agent artifact | `_SPEC_MODELS`, `_ARTIFACT_SCHEMAS` | `MetaBuildOutcome` |
+| reasoning | Module-level dicts plus `StrategySpec` | Classifier FSM, `ReasoningType`, `STRATEGIES`, `_TYPE_MAP` | `SolutionResult` |
+| synthesis | `FSMDefinition` JSON, content-addressed | Library search by goal | `synthesis_result` dict |
+| workflows | Pydantic steps holding Python callables; `serialize()` writes a dict that nothing reads | A `WorkflowDefinition` object by id | `WorkflowInstance` status |
+| monitor | `static/flows.json`: hand-drawn graphs of 12 agents and 5 workflows, missing `native_fc`, `parallel_react` and the meta-builder | `_AGENT_CLASSES` (7 patterns, keyed by class name), `_WORKFLOW_PRESETS` | none |
 
-So every cross-cutting capability (budgets, approval, durable resume, replay, serving, simulation, synthesis) is wired up to four times, and results do not compose. This roadmap replaces the four interfaces with one of each: one executable format, one registry of names, one run context, one result envelope and one event log. A capability added once to the engine, the registry or a state kind then works for every kind of executable, and every executable becomes servable, simulatable, resumable and synthesizable.
+So every cross-cutting capability (budgets, approval, durable resume, replay, serving, simulation, synthesis, visualization) is wired up once per format or not at all, the monitor launches only 7 of the 18 patterns (decisions D-001 and D-058 record why), and results do not compose. This roadmap replaces the seven formats with one of each: one executable format, one registry of names, one run context, one result envelope and one event log. A capability added once to the engine, the registry or a state kind then works for every kind of executable, and every executable becomes servable, simulatable, resumable, drawable and synthesizable.
 
 **Ten moves, in order of leverage:**
 
 | # | Move | Where |
 |---|---|---|
-| 1 | Finish the foundation: one model resolver, one result envelope, one name registry, macOS CI, upgrade guides | Phase 0 (0.2, 0.5, 0.15 to 0.17) |
-| 2 | Make the event log complete and the default: a producer for every event type, a run context for every runner, coded LLM and tool failures | Phase 1 (1.1, 1.14 to 1.16) |
-| 3 | Unify executables: one envelope for FSMs, strategies, patterns, procedures and workflows; a registry with hot reload and weighted routes; a `call` state kind; validation before any model call | Workstream E |
+| 1 | Finish the foundation: one model resolver, one result envelope, one name registry, module headroom, macOS CI, upgrade guides; close the bench-pin freeze that protects no live block | Phase 0 (0.2, 0.5, 0.15 to 0.18), E0.3 |
+| 2 | Make the event log complete, cheap and the default: a producer for every event type in product code (tool calls included), group commit off the event loop, message provenance, a run context for every runner, coded LLM and tool failures | Phase 1 (1.1, 1.14 to 1.18) |
+| 3 | Unify executables: one envelope that replaces all seven formats (FSMs, strategies, patterns and their presets, procedures, workflows, meta-builder artifacts); template and instance identity; a registry with hot reload and weighted routes; a `call` state kind with closed selection; validation before any model call | Workstream E |
 | 4 | Engineer the context window: references with bounded previews, a cache-stable prompt layout, compaction as a logged epoch | Phase 2 |
 | 5 | Ground conversations in calibrated evidence that routing reads only as handler-only facts | Phase 3 |
 | 6 | Author FSMs as typed Python classes that compile to the same IR | Workstream O |
@@ -82,6 +87,8 @@ So every cross-cutting capability (budgets, approval, durable resume, replay, se
 11. **One contract per concept.** One event log, one verifier, one simulator, one policy object, one code vocabulary, one result envelope, one name registry, one run context (Section 3).
 12. **Registries are values.** Each API, agent factory, engine, synthesizer and server takes the registry it uses; the module default is built once and can be frozen.
 13. **Shape by default, values by opt-in.** Shared stores keep names, types, codes and counts; values need an explicit setting.
+14. **Caller input is data, never definition text.** What a caller, a user or a parent run supplies enters as a declared input; it never fills instruction or persona text and never changes the identity a run records for its template.
+15. **Provenance travels with every message.** Each message records whether a human, a parent run, a remote client or the simulator sent it; only a policy approver answers an approval.
 
 ---
 ## 3. Core contracts
@@ -90,19 +97,19 @@ Every phase builds on these thirteen contracts. A feature that needs something o
 
 | ID | Contract | Definition | Status | Built by | Consumed by |
 |---|---|---|---|---|---|
-| C1 | Definition IR | `FSMDefinition` is the one FSM program. Every FSM inside an executable (C11) is an `FSMDefinition` that loads exactly as `API` loads it. JSON files, Python builders, Python classes (Workstream O) and synthesizer output are front ends. A schema registry records the version that introduced every FSM field and every envelope field | Partial: FSM fields versioned (definition version 4.2); envelope fields open | 0.12, E1.1, O1 | Verifier, visualizer, engine, synthesis, `oo`, registry |
+| C1 | Definition IR | `FSMDefinition` is the one FSM program. Every FSM inside an executable (C11) is an `FSMDefinition` that loads exactly as `API` loads it. JSON files, Python builders, Python classes (Workstream O), the meta-builder and synthesizer output are front ends. A schema registry records the version that introduced every FSM field and every envelope field. The identity of a definition is `definition_digest`, the 64-hex sha256 of its canonical dump; `fsm_id` (`fsm_<name>_<8 hex>`) is a cache key and a display name, never an identity | Partial: FSM fields versioned (definition version 4.2); one identity recipe in core (`definition_canonical`, `definition_digest`, `fsm_id_of`) used by `API` and `FSMLibrary`; envelope fields open | 0.12, E1.1, O1 | Verifier, visualizer, engine, synthesis, `oo`, registry |
 | C2 | State kinds and executors | A state has exactly one kind, derived from the config it carries: `conversation`, `completion`, `synthesize` (exist), `call` (E3), `reply` (O2), `codeact` (4.4). A kind declares its config model, the handler-only result key it writes, its read and write sets for G3, its liveness rule for G4, its sample values for G6a, and an executor. The executor protocol lives in `core`, the registry in `engine`. `synthesize` is a `call` whose target the synthesizer supplies | Partial: registry and `executors=` internal; `synthesize` needs a second driver | 0.14, E3.1, E3.5, O2, 4.4 | Engine, verifier, `oo`, synthesis |
 | C3 | Context namespaces | Public keys: extractable, typed by `context_schema`. Handler-only keys: written only by executors and handlers, never by extraction or classification. Internal keys: prefixes `_`, `system_`, `internal_`, `__`, never shown to a model. Every fact routing reads is a handler-only `<kind>_result` dict shaped by C13: a completion state's `result_key`, `synthesis_result`, `call_result`, `retrieval_result`, `decision_result`, `codeact_result` | Partial: handler-only names enforced; framework result keys closed to every channel | 0.16, E3.1, 3.4, 3.9, 4.4 | JsonLogic routing, G3 |
-| C4 | Event log | Append-only, versioned, one log per conversation tree. Every model-visible input is an event; large payloads are content-addressed blobs that also back value references. Two privacy levels: `shape` (names, types, codes, counts) and `values` (opt-in, secrets filtered at write). Sessions, monitor, token meter, usage, OTel, ATIF, synthesis traces, library counters and serve jobs are projections. Every run of every executable writes to it through C12 | Partial: opt-in through `API(event_log=)`; 14 of 21 event types produced | 1.1 to 1.13, E2.1 | Everything above `runtime` |
+| C4 | Event log | Append-only, versioned, one log per conversation tree. Every model-visible input is an event; large payloads are content-addressed blobs that also back value references. Every message event records its `source` (`user`, `run`, `remote_client`, `simulator`). Two privacy levels: `shape` (names, types, codes, counts) and `values` (opt-in, secrets filtered at write); a value filtered at write restores as absent, never as its placeholder. Writes commit in groups at checkpoint boundaries, off the event loop. Sessions, monitor, token meter, usage, OTel, ATIF, synthesis traces, library counters and serve jobs are projections. Every run of every executable writes to it through C12 | Partial: opt-in through `API(event_log=)`; product code emits 12 of 21 types (`tool/call` and `tool/result` only through the `EventLog.tool_call` helper, which no tool path calls); about 29 fsyncs and 76 ms of blocking I/O per logged turn on the loop thread | 1.1 to 1.13, 1.17, 1.18, E2.1 | Everything above `runtime` |
 | C5 | LLM interface | One `LLMInterface` with sync methods and async twins. Native providers speak Open Responses and Anthropic Messages; litellm is an optional provider. Retry and admission wrap the interface. Every request declares a purpose; every failure carries a closed code. Usage is a projection of events | Partial: async twins, native async litellm provider and usage projection ship | 1.5, 1.6, 1.13, 1.15, 5.4 | Engine, every runner |
-| C6 | Verifier | One module runs G1 (loads), G2 (structure), G3 (data flow), G4 (liveness), G5 (policy), G6a (dead edges) and the executable load sequence V1 to V6 (Section 6.5), returning one `GateReport` type | Partial: G1 to G6a in `core/verify`; executable checks open | E1.3 | CLI, engine, registry, `oo`, synthesis |
+| C6 | Verifier | One module runs G1 (loads), G2 (structure), G3 (data flow), G4 (liveness), G5 (policy), G6a (dead edges) and the executable load sequence V1 to V7 (Section 6.5), returning one `GateReport` type | Partial: G1 to G6a in `core/verify`; executable checks open | E1.3 | CLI, engine, registry, `oo`, synthesis |
 | C7 | Simulator | One goal- and persona-driven user simulator, with a judge model distinct from the executor and the compiler, that drives any executable through the Executable protocol (C11). G6b, evaluation, trace-to-eval, repair admission and benchmarks use it | Open: synthesis owns a private simulator that imports `eval` | 6.6 | Synthesis, eval |
 | C8 | Codes | Closed `str` enums: `Status` (`ok`, `failed`, `aborted`, `running`, `abstained`), `Reason`, `LlmFailureCode`, `ToolErrorCode`, `CompletionKind`. Wire values never change without a recorded breaking change. Callers branch on codes, never on message text | Partial: `Status`, `Reason` and `CompletionKind` exist; only `fsm_llm.testing` imports them | 0.13, 0.16, 1.15, 1.16 | Every result, event and tool outcome |
-| C9 | Policy | One policy object: approval mode (`ask`, `never`, `auto`), tool allow-list, sandbox profile, budgets (`max_steps`, `max_seconds`, tokens). `SynthesisPolicy` composes into it. Approvers are callables returning a coded outcome; a missing or failing approver fails closed; every request and outcome is an event. Operator files may tighten limits, never exceed the ceilings in code. The grant check stays in the tool executor | Partial: `policy` package holds approval and HITL; no single object, no approval events | 4.1, 4.2, E6.1 | Agents, executors, synthesis, serve |
-| C10 | Names and extension points | One `NameRegistry` primitive: namespaced names (`agents.tool_executor`), register, resolve, list, freeze, collisions refused unless a source is declared an override, lazy loading from entry-point groups `fsm_llm.<namespace>`. Namespaces: `executable_kinds`, `state_kinds`, `handlers`, `tools`, `callables`, `generators`, `gates`, `providers`, `stores`, `approvers`. Definitions reference names only, which keeps G5's "no code in a definition" true and makes every round trip exact | Open: `ToolRegistry`, `_PATTERNS`, handler wiring and workflow callables are separate tables | 0.17, E2.3, 5.5 | Engine, registry, `oo`, synthesis, serve |
-| C11 | Executable | One JSON envelope for `fsm`, `strategy`, `pattern`, `procedure` and `workflow`; one protocol (`instantiate`, `run`, `arun`, `resume`); one `ExecutableRegistry` with sources, atomic reload, retention by identity and weighted aliases (Section 6.5) | Open | E1, E2 | Agents, reasoning, workflows, synthesis, serve, eval |
+| C9 | Policy | One policy object: approval mode (`ask`, `never`, `auto`), tool allow-list, sandbox profile, budgets (`max_steps`, `max_seconds`, tokens). `SynthesisPolicy` composes into it. Approvers are callables returning a coded outcome; a missing or failing approver fails closed; every request and outcome is an event. Approvals are answered only by policy approvers, never by a parent run, a delegating model or a remote client (C4 `source`). Operator files may tighten limits, never exceed the ceilings in code. The grant check stays in the tool executor | Partial: `policy` package holds approval and HITL; no single object, no approval events | 4.1, 4.2, E6.1 | Agents, executors, synthesis, serve |
+| C10 | Names and extension points | One `NameRegistry` primitive: namespaced names (`agents.tool_executor`), register, resolve, list, freeze, collisions refused unless a source is declared an override, lazy loading from entry-point groups `fsm_llm.<namespace>`. Namespaces: `executable_kinds`, `executable_sources`, `state_kinds`, `handlers`, `tools`, `callables`, `generators`, `gates`, `providers`, `stores`, `approvers`. Definitions reference names only, which keeps G5's "no code in a definition" true and makes every round trip exact | Open: nine private tables (`_PATTERNS`, `SOPRegistry`, monitor `_AGENT_CLASSES` and `_WORKFLOW_PRESETS`, reasoning `STRATEGIES` and `_TYPE_MAP`, meta-builder `_ARTIFACT_SCHEMAS`, `ToolRegistry`, the internal state-kind `_EXECUTORS`), plus handler wiring per class and callables inside workflow steps | 0.17, E2.3, 5.5 | Engine, registry, `oo`, synthesis, serve, monitor |
+| C11 | Executable | One JSON envelope for `fsm`, `strategy`, `pattern` (presets included), `procedure` and `workflow`; one protocol (`instantiate`, `run`, `arun`, `resume`); one `ExecutableRegistry` with sources, atomic reload, template retention and weighted aliases (Section 6.5). Two identities: the template identity (digest of the canonical envelope) and the instance identity (`definition_digest` of the instantiated body, or the digest of a workflow body) | Open; its safety net exists: the E0.1 fixtures and the core identity recipe | E1, E2 | Agents, reasoning, workflows, synthesis, serve, eval, monitor |
 | C12 | Run context | One frozen value given to every run: LLM interface or factory, event log, policy, budget, registry, cancellation token, parent run reference and privacy level. Every runner accepts it; constructor keywords that set the same things build one. A child run derives its context from its parent: same log, narrowed budget, parent reference set | Open | 1.14 | Every runner, every executor, serve jobs |
-| C13 | Result envelope | `RunResult`: `status` and `reason` (C8), `outputs` (declared keys only), `answer`, `detail` (kind-specific), `identity` (content hash of what ran), `handle` (to resume or inspect). `success` is derived from `status`. `AgentResult`, `SolutionResult`, workflow outcomes, procedure runs and serve jobs expose it; every `<kind>_result` is a projection of it | Open | 0.16, E2.1 | Callers, routing, eval, serve, synthesis |
+| C13 | Result envelope | `RunResult`: `status` and `reason` (C8), `outputs` (declared keys only), `answer`, `detail` (kind-specific), `identity` (template and instance digests of what ran), `handle` (to resume or inspect). `success` is derived from `status`. `AgentResult`, `SolutionResult`, workflow outcomes, procedure runs and serve jobs expose it; every `<kind>_result` is a projection of it | Open | 0.16, E2.1 | Callers, routing, eval, serve, synthesis |
 
 **Rules that follow from the contracts:**
 
@@ -114,6 +121,8 @@ Every phase builds on these thirteen contracts. A feature that needs something o
 6. A new named building block is registered in a C10 namespace; no package keeps a private name table.
 7. A new runner takes a C12 context; it opens no log, policy or budget of its own.
 8. No parallel runner, loader or registry: a capability plugs into the engine, the registry or a state kind.
+9. Caller input never becomes definition text and never changes a template identity (Principle 14).
+10. A row that would push a module over 800 lines splits it first in a pure-move commit (`ast.dump` equal), as `synthesis/reply.py` was split (0.18).
 
 ---
 ## 4. Baseline: fsm_llm today
@@ -123,7 +132,7 @@ Every phase builds on these thirteen contracts. A feature that needs something o
 | Item | State |
 |---|---|
 | Released | v0.13.0, on PyPI as `llm-fsm` (2026-11-17), Apache-2.0; import package `fsm_llm`; console scripts `fsm-llm*` |
-| Main, unreleased | Opt-in event log (`fsm_llm.runtime`), `API.fork` and `API.resume`, per-conversation and per-frame turn budgets, usage folded from events, privacy levels and retention, `fsm_llm.aio`, async `LLMInterface` twins, native async litellm provider, async core turn surface (`aconverse`, `aadvance`, `astart_conversation`, async stream drivers), streaming `ProcedureRunner` |
+| Main, unreleased | Opt-in event log (`fsm_llm.runtime`), `API.fork` and `API.resume`, per-conversation and per-frame turn budgets, usage folded from events, privacy levels and retention, `fsm_llm.aio` (`run_sync`, `aoffload`), async `LLMInterface` twins, native async litellm provider, async core turn surface (`aconverse`, `aadvance`, `astart_conversation`, async stream drivers), streaming `ProcedureRunner`, the core identity recipe, the E0.1 fixtures |
 | Python | `requires-python >=3.11`; 3.11 to 3.15 classified. CI legs: Linux 3.11 to 3.15, Windows 3.11 and 3.15; macOS untested |
 | Core dependencies | loguru, litellm (`>=1.109.0,<2.0`), pydantic, python-dotenv, tenacity (litellm's sync retries import it), pyyaml |
 | Pins against the index | litellm 1.109.1 (index 1.110.2); mcp 2.2.0 (index 2.3.0 since 2026-10-02) |
@@ -139,10 +148,10 @@ Layer packages as held by `.importlinter`. A row may import every row below it; 
 | L7 | `monitor` | 6,540 | FastAPI dashboard, event-log browse, builder |
 | L7 | `eval` | 2,650 | Live runs, cases, statistics |
 | L6 | `agents` | 22,770 | Agent patterns, tools glue, HITL wiring, MCP client, A2A client, meta-builder, skills, semantic memory |
-| L6 | `synthesis` | 6,367 | Synthesizer, gates, library, runner, simulation, repair |
+| L6 | `synthesis` | 6,375 | Synthesizer, gates, library, runner, simulation, repair |
 | L6 | `workflows` | 5,242 | Async workflow engine, steps, DSL |
 | L6 | `reasoning` | 4,950 | Reasoning engine, strategies, classifier |
-| L4 | `engine` | 12,816 | `API`, FSM manager, turn pipeline, state kinds, stack, fork and resume, budgets, sessions |
+| L4 | `engine` | 12,787 | `API`, FSM manager, turn pipeline, state kinds, stack, fork and resume, budgets, sessions |
 | L4 (below engine) | `handlers` | 1,352 | Handler system, `HandlerErrorMode` |
 | L3 (above tools) | `policy` | 291 | Approval, HITL |
 | L3 | `context` | 2,679 | Prompt layout modules, compactor, filtering |
@@ -150,12 +159,13 @@ Layer packages as held by `.importlinter`. A row may import every row below it; 
 | L3 | `skills` | 919 | Agent Skills catalog |
 | L3 | `tools` | 1,983 | `ToolRegistry`, schemas, limits, truncation |
 | L2 | `runtime` | 3,903 | Event log, blobs, privacy, retention, checkpoint, stores, usage fold |
-| L1 | `llm` | 4,330 | `LLMInterface`, litellm provider, parsing, usage records |
-| L0 | `core` | 10,214 | Definitions and schema registry, JsonLogic, transition evaluation, state-kind specs, verifier, codes, redaction, visualizers |
+| L1 | `llm` | 4,317 | `LLMInterface`, litellm provider, parsing, usage records |
+| L0 | `core` | 10,255 | Definitions and schema registry, JsonLogic, transition evaluation, state-kind specs, verifier, codes, redaction, visualizers |
 | Kernel | `security`, `constants`, `logging`, `text`, `env`, `frontmatter`, `memory`, `cli_support`, `aio` | 2,053 in `security` | Read by every layer; import no layer |
+| Entry | `runner`, `__main__` | | The `fsm-llm` REPL and `python -m fsm_llm`; nothing imports them |
 | None | `testing` | 1,431 | Public doubles, scripted user, assertions; never imported by the library |
 
-Totals: `src` 96,084 lines; `tests` 228,479 lines; `examples` 22,123 lines. Largest module 799 lines (`reasoning/engine.py`). 814 in-code `# DECISION` lines; `plans/ANCHORS.md` 473 lines. Absent layer packages reserved by the contracts: `serve`, `simulation`, `oo`, `retrieval`.
+Totals: `src` 96,108 lines; `tests` 228,882 lines; `examples` 22,123 lines. Largest module 799 lines (`reasoning/engine.py`); four more sit within 23 lines of the cap (`synthesis/library.py` 785, `memory.py` 785, `workflows/dsl.py` 783, `llm/providers/litellm.py` 777), and open rows edit all five (0.18). 814 in-code `# DECISION` lines; `plans/ANCHORS.md` 473 lines. Absent layer packages reserved by the contracts: `serve`, `simulation`, `oo`, `retrieval`.
 
 Import debts named in the contracts: `synthesis.simulation` and `synthesis.repair` read `eval` (retired by 6.6 and P7.6); `synthesis.library` and `synthesis.synthesizer` read `agents.semantic_tools` (retired by 3.2); `agents.reasoning_react` reads `reasoning` (recorded as permanent, retirable by E4.2 once a pattern state can call a strategy by id).
 
@@ -170,6 +180,8 @@ Import debts named in the contracts: `synthesis.simulation` and `synthesis.repai
 
 What core already provides and every later item builds on: the step driver (`advance`, `run_until_terminal`, `run_until_terminal_stream`, async twins), per-frame budgets (`push_fsm(max_steps=, max_seconds=)`), the state-kind registry (`core/state_kinds.py` specs, `engine/kinds/` executors), the definition cache keyed by `fsm_id` (a changed definition is a new cache entry, which makes hot reload safe), and `fork` and `resume` on the event log.
 
+Around the four runners, three more definition formats and five more name tables grew (Section 1): SOP files (`agents/sop.py`, read with `yaml.safe_load` instead of the one YAML loader `frontmatter.load_yaml`), the meta-builder's artifact specs (only the FSM artifact runs; nothing loads the workflow or the agent artifact) and the monitor's `flows.json` with `_AGENT_CLASSES`. The monitor launches 7 of the 18 patterns; decisions D-001 [STALE] and D-058 record that the rest need constructor arguments a form cannot supply.
+
 ### 4.4 Strengths to preserve
 
 - **Deterministic control.** Rules decide transitions; the model extracts and talks. Every refactor keeps this.
@@ -178,19 +190,28 @@ What core already provides and every later item builds on: the step driver (`adv
 - **Security posture.** Internal prefixes and secret-looking values stay out of prompts; approval grants cannot be forged by the model; handler-only keys cannot be written by extraction; a restored session seeds only public keys; OKF, skill and generated text carry untrusted labels; event-log paths refuse symbolic links.
 - **Evaluation honesty.** Pre-registered blocks pinned to source hashes, Wilson intervals, inconclusive verdicts reported as such.
 - **Engineering gates.** Import contracts, the module-size cap, decision anchors, the API snapshot and the coverage ratchet make every change visible.
+- **A conversion safety net.** The E0.1 fixtures hold the insertion-order text, `fsm_id` and digest of all 49 built-in FSM cases, so a conversion that changes one character fails.
 - **Offline test depth.** The suite runs without a model; public doubles let user projects do the same.
 
 ### 4.5 Gaps
 
 | Area | Finding | Evidence | Addressed by |
 |---|---|---|---|
-| Event coverage | 14 of 21 event types have a producer; `extraction`, `extraction/miss`, `intent/out_of_scope`, `handler`, `approval/request`, `approval/outcome` and `compaction/epoch` have none, so approvals leave no audit record and synthesis diagnosis has no source for misses | `runtime/events.py` `PRODUCED_TYPES` | 1.1, 4.1 |
+| Event coverage | Product code emits 12 of 21 event types. `tool/call` and `tool/result` exist only through the `EventLog.tool_call` helper: no tool path (`ToolRegistry` execution, completion-state tools, the agent tool executor, `native_fc`) calls it, so tool calls are neither logged nor checkpointed. `extraction`, `extraction/miss`, `intent/out_of_scope`, `handler`, `approval/request`, `approval/outcome` and `compaction/epoch` have no producer at all, so approvals leave no audit record and synthesis diagnosis has no source for misses | `runtime/events.py` `PRODUCED_TYPES`; no caller of `EventLog.tool_call` in `src` | 1.1, 1.3, 4.1 |
+| Log cost | With the log on, writes and fsyncs run inline on the loop thread: about 29 fsyncs and 76 ms of blocking I/O per logged turn, against 0.5 ms with the log off; every appended conversation holds two descriptors and a lock until it ends | `CHANGELOG.md` (Unreleased, known limits) | 1.18 |
+| Log restore | A value redacted at write restores as the placeholder `<redacted>`, so a `missing` gate or `has_context` sees a fake value; the greeting of a new conversation is not logged as a request | `CHANGELOG.md` (Unreleased, known limits) | 1.1, 1.11 |
+| Provenance | Nothing records who sent a message: a delegated task, an MCP client's text and a simulated user all look like a human turn | `runtime/events.py` | 1.17 |
+| Identity | Builders write the task text into the FSM `description`, so every task mints a new `fsm_id`, which keeps 8 hex characters of the digest. A registry that retained every identity it served would grow without bound in a long-running server, and eval could not group runs by what ran | `agents/fsm_definitions/_common.py`, `core/definitions/fsm.py` | E2.1 |
+| Bench pins | Every s0 to s2 manifest pins 35 paths under the pre-0.3 layout (`src/agents/...`); none exists today, so no block can be re-reported, yet tool-event production is still held back to protect a recorded bench | `scripts/bench_data/synthesis/s*/manifest_*.json` | E0.3 |
+| Module headroom | Five modules within 23 lines of the cap, each edited by an open row | Section 4.2 | 0.18 |
 | Log as default | The log is opt-in (`API(event_log=)`); `fork` and `resume` raise without it | `engine/api/conversation.py` | 1.1 |
 | Run context | Agents and workflows take no event log, policy or budget object; `ReasoningEngine(**kwargs)` passes keywords through to its `API` | `reasoning/engine.py` `__init__` | 1.14 |
 | Result shapes | Four result shapes; `Status` and `Reason` are imported only by `fsm_llm.testing`; `StopReason` is a plain class of strings with no cancellation value | `agents/definitions.py`, `agents/constants/outcomes.py`, `core/codes.py` | 0.16 |
 | Model resolution | `llm.resolve_model` raises when no model is set, but `resolve_tool_model` falls back to `DEFAULT_TOOL_MODEL = "ollama_chat/bonsai-2:27b"` for eval and the monitor; a second `resolve_model` lives in `eval/config.py` | `constants.py:276`, `llm/interface.py`, `eval/config.py` | 0.15 |
-| Name tables | Patterns in `_PATTERNS`, tools in `ToolRegistry`, handlers wired in Python per class, workflow callables inside step models | `agents/__init__.py:154` | 0.17, Workstream E |
-| Definitions | Four formats and four selection mechanisms (4.3) | Section 4.3 | Workstream E |
+| Name tables | Nine private tables (C10); handlers wired in Python per class; workflow callables inside step models | `agents/__init__.py:154`, `agents/sop.py`, `monitor/instance_manager/` | 0.17, Workstream E |
+| Definitions | Seven formats (Section 1); two of the meta-builder's three artifacts have no loader; `flows.json` has drifted from the builders | Section 1 | Workstream E |
+| Pattern arguments | `evaluation_fn`, `worker_factory`, `ChainStep.validation_fn` and swarm members are Python objects, so neither the monitor nor a server can launch those patterns | `agents/evaluator_optimizer.py`, `agents/orchestrator.py`, `monitor/instance_manager/agent.py` (D-001, D-058) | E4.2 |
+| Meta-builder output | Model-written definitions are checked for shape and completeness only, not against a name allow-list, and the files it writes load later as operator configuration | `agents/meta_builder/assembly.py` | E4.6 |
 | Reasoning stack | A private forced pop duplicates core frame budgets | `reasoning/engine.py:674`, `reasoning/constants.py:457` | E3.3 |
 | Synthesize kind | A bare `API` leaves a `synthesize` state blocked; `ProcedureRunner` is a second driver with its own `end_conversation` | `synthesis/runner.py` | E3.5 |
 | Workflows | `serialize()` has no loader; instances live in memory and write no events | `workflows/definitions.py:326` | E5 |
@@ -208,6 +229,8 @@ What core already provides and every later item builds on: the step driver (`adv
 
 ---
 ## 5. Reference projects and standards
+
+All three repositories and every standard below were re-checked on 2026-11-20 at the commits in the baseline row; none moved since v4.0. The one new adoption is message provenance from the harness (Section 5.2).
 
 ### 5.1 txtai
 
@@ -240,6 +263,7 @@ TypeScript monorepo of 400 packages plus a Python SDK, release line `dsh-v0.2.2-
 | Session format with adjacent migrations; JSONL persistence; projections; SQLite query; single and batch append | `packages/session/*`, `packages/session-query`, `docs/persistence-catalog.md` | Adopt | 1.1, 1.2 |
 | Projection frames list every key one committed event changed | upgrade guide `projection-event-frames` | Adopt for monitor and AG-UI streams | 1.10, 5.8 |
 | Fork names its parent source (session id and exclusive prefix length); later parent events never extend the child | upgrade guide `session-fork-source` | Adopt in fork records | 1.4 |
+| A delegated task is recorded as a message from the parent agent, not a user message, so consumers that treat human input specially skip it | upgrade guide `subagent-initial-task-source` | Adopt as the `source` of message events | 1.17 |
 | Checkpoint policy | `packages/session/session-checkpoint-policy` | Adopt | 1.3 |
 | Retry with logged policy; explicit turn cancellation | `packages/llm/llm-retry` | Adopt | 1.5, 1.6 |
 | Closed LLM failure codes (built-in codes or `HTTP_<status>`); a provider refusal (`CONTENT_REFUSED`) distinct from a malformed response | upgrade guides `llm-error-builtin-codes`, `deepseek-refusal-code` | Adopt as `LlmFailureCode` | 1.15 |
@@ -319,7 +343,7 @@ src/fsm_llm/
 ├── __init__.py          # public API re-exports
 ├── core/                # L0: definitions and schema registry (C1); executable envelope models, generated JSON Schema
 │                        #   and RFC 6902 patch applier (C11); JsonLogic; transition evaluation; state-kind specs (C2);
-│                        #   verifier G1 to G6a and V1 to V6 (C6); codes (C8); RunResult (C13); NameRegistry (C10)
+│                        #   verifier G1 to G6a and V1 to V7 (C6); codes (C8); RunResult (C13); NameRegistry (C10)
 ├── llm/                 # L1: LLMInterface and async twins (C5); providers/ (open_responses, anthropic, litellm);
 │                        #   parsing; usage records; request purposes and failure codes
 ├── runtime/             # L2: event log and blobs (C4); privacy; retention; checkpoint; stores; usage fold;
@@ -334,12 +358,13 @@ src/fsm_llm/
 │                        #   RunContext (C12); executables/ (protocol, registry, resolver, FSM-kind adapters)
 ├── simulation/          # L5: user simulator and judge (C7)
 ├── oo/                  # L5: Python class front end
-├── agents/              # L6: patterns/*.json; handler library; PatternAgent; pattern adapter; a2a; meta-builder
+├── agents/              # L6: patterns/*.json and presets (former SOPs); handler library; PatternAgent;
+│                        #   pattern adapter; a2a; meta-builder emitting envelopes
 ├── reasoning/           # L6: strategies/*.json; strategy handlers; classifier over the registry
 ├── synthesis/           # L6: synthesizer; library (a registry source); compile targets; gate pipeline; repair
 ├── workflows/           # L6: engine; loader; callables; ExecutableStep; workflow adapter; schedules
 ├── serve/               # L7: app.yml; job service; MCP server; Open Responses and Chat Completions; AG-UI
-├── monitor/  eval/      # L7: dashboard and evaluation, both reading the event log
+├── monitor/  eval/      # L7: dashboard (launches and draws by executable id) and evaluation, both reading the log
 ├── testing/             # outside the layers: doubles, replay, simulator helpers
 └── (kernel)             # security/, constants, logging, text, env, frontmatter, memory, cli_support, aio
 ```
@@ -366,6 +391,7 @@ Enforced by `.importlinter`. Peers in one row import nothing from each other; sh
 Consequences:
 
 - The L6 packages never import each other. They meet through executable ids, the registry and the adapters each package registers in the `executable_kinds` namespace.
+- The engine never imports an L6 package to find its built-ins: each package declares a source in the `executable_sources` namespace (package data or an in-memory list), loaded on first registry use.
 - `serve` imports `engine` (registry, run context) and the MCP SDK, never `agents` or `reasoning`: a profile resolves to an executable by id, so serving adds no cross-package edge.
 - The named debts retire with 3.2 (`VectorStore` moves to `retrieval`) and 6.6 (the simulator moves to `simulation`). The edge `agents.reasoning_react -> reasoning` retires when the pattern becomes a file whose state calls a strategy by id (E4.2).
 
@@ -374,18 +400,21 @@ Consequences:
 Every executable runs the same way, whoever starts it (a caller, a `call` state, a workflow step, a serve job):
 
 ```text
-registry.resolve(id, conversation_id)     → event executable/resolve (id, version label, identity)
-executable.instantiate(options, variables) → variants applied, variables filled; the document passed V1 to V6 at load
-executable.run(inputs, context=RunContext) → event run/start (handle, identity, inputs by reference)
+registry.resolve(id, conversation_id)     → event executable/resolve (id, version label, template identity)
+executable.instantiate(options, variables) → variants applied, variables filled; the document passed V1 to V7 at load
+executable.run(inputs, context=RunContext) → event run/start (handle, template and instance identity,
+                                             instantiation record and inputs by reference, source)
     frame mode (fsm, strategy, procedure): push a stack frame on the caller's conversation; turns as below; pop at the end
     delegated mode (pattern, workflow): start an agent conversation or a workflow instance under a derived context
 → RunResult (C13)                          → event run/end; outputs copied by declared returns only
 ```
 
+A resumed run reads both identities from the log: it never re-resolves an alias, and it refuses a rebuilt instance whose digest differs from the logged one.
+
 Within a conversation, each user message is one turn:
 
 ```text
-event turn/start
+event turn/start (source)
 → engine resolves the state kind and its executor (C2)
 → conversation kind:
     Pass 1: llm/request (purpose extract) → llm/response → extraction, or extraction/miss and intent/out_of_scope
@@ -444,29 +473,41 @@ Every executable is one JSON document with a common header and a body discrimina
 |---|---|
 | `schema`, `schema_version` | Envelope format and version, registered like FSM fields, so a newer field in an older document warns or refuses exactly as FSM fields do |
 | `kind` | `fsm`, `strategy`, `pattern`, `procedure` or `workflow` |
-| `id`, `version` | Registry name and the author's version label. The content hash (the `fsm_id` for FSM kinds) is the identity the log records |
+| `id`, `version` | Registry name and the author's version label. The log records two identities: the template identity (digest of the canonical envelope) and the instance identity (`definition_digest` of the instantiated FSM body, or the digest of the canonical workflow body); `fsm_id` stays a cache key |
 | `contract` | Keys the executable reads and writes; checked at load against the data-flow analysis, so it cannot drift from the body |
 | `requires` | Every name the body uses, resolved at load |
 | `capabilities` | Closed vocabulary: `tools`, `hitl`, `streaming`, `strategy` (selectable by reasoning), `conversational` (talks to a user) |
 | `lifecycle` | `builtin`, `draft`, `verified`, `trusted`, `deprecated` |
-| `variables` | Text placeholders `{{name}}` filled at instantiation; an unresolved variable fails |
+| `variables` | Text placeholders `{{name}}` filled at instantiation from operator values (options, profile settings); an unresolved variable fails. A caller's task or message is never a variable value (Principle 14) |
+| `contract.input_templates` | `{"task": "Review {{file}} against {{criteria}}"}`: rendered from caller arguments into an input value, never into instruction text; the form SOP task templates take |
 
 | Kind | Body | Owner of the adapter |
 |---|---|---|
 | `fsm` | `{"fsm": FSMDefinition}` | `engine` |
 | `strategy` | `{"fsm": FSMDefinition, "strategy": {"aliases": [...], "results": {...}, "solution_key": "..."}}` | `engine` (FSM body); handlers from `reasoning` by name |
-| `pattern` | `{"fsm": FSMDefinition, "handlers": [{"handler": "...", "timing": "...", "states": [...], "priority": 0}], "answer_key": "...", "options": {...}, "variants": {"name": [patch ops]}}`, or `{"generator": "agents.prompt_chain", "options": {...}}` for a topology that depends on input | `agents` |
+| `pattern` | `{"fsm": FSMDefinition, "handlers": [{"handler": "...", "timing": "...", "states": [...], "priority": 0}], "answer_key": "...", "options_schema": {...}, "options": {...}, "variants": {"name": [patch ops]}}`; or `{"generator": "agents.prompt_chain", "options": {...}}` for a topology that depends on input; or a preset `{"extends": "<pattern id>", "options": {...}, "tools": [...]}` (former SOPs and the meta-builder's agent artifact) | `agents` |
 | `procedure` | `{"fsm": FSMDefinition, "provenance": {...}}` | `engine`; produced by `synthesis` |
 | `workflow` | `{"initial_step_id": "...", "steps": {...}}`, the form `WorkflowDefinition.serialize()` writes, with callables as registered names | `workflows` |
 
 `variants` are RFC 6902 patch lists selected by options at instantiation (`react` with `approval: true` applies the `approval` variant). A `generator` names a registered Python function whose output must be an `FSMDefinition` and is validated like any body. FSM states and workflow steps are never mixed in one graph: kinds compose through calls (an FSM state calls a workflow; a workflow step calls an FSM). The JSON Schema is generated from the Pydantic models, shipped as package data, held equal to the models by a test, and never edited by hand.
 
+Every constructor argument of today's agent classes maps onto the envelope, so every pattern becomes launchable by id:
+
+| Argument today | Envelope form |
+|---|---|
+| Plain data: `max_revisions`, `quality_threshold`, maker and checker instructions, debate personas, `num_rounds`, `max_depth` | `options`, validated by the pattern's `options_schema` |
+| A tool registry | `requires.tools` plus the run's tool sources |
+| `output_schema` (a Pydantic type) | A JSON Schema in `options` (O1) |
+| `evaluation_fn` (evaluator-optimizer) | A `callables` name, or an executable id whose result supplies the evaluation |
+| `worker_factory` (orchestrator), swarm members | Executable ids, run through `call` in delegated mode |
+| `ChainStep.validation_fn` (prompt chain) | A JsonLogic `valid_when` over the step's context; a `callables` name only where JsonLogic cannot express it |
+
 #### 6.5.2 Protocol
 
 | Member | Meaning |
 |---|---|
-| `id`, `kind`, `contract`, `identity` | From the envelope; `identity` is the content hash |
-| `instantiate(options, variables) -> Executable` | Applies variants and variables, validates the result |
+| `id`, `kind`, `contract`, `template_identity` | From the envelope |
+| `instantiate(options, variables) -> Instance` | Applies variants and variables, validates the result and fixes its `instance_identity` |
 | `run(inputs, *, context) -> RunResult` | Runs to the end under a C12 context and returns a C13 result |
 | `arun(inputs, *, context)` | The async twin |
 | `resume(handle, *, context)` | Continues a run after a crash, from the log |
@@ -477,11 +518,11 @@ Kind adapters implement it: `engine` owns `fsm`, `strategy` and `procedure`; `ag
 
 | Feature | Behaviour |
 |---|---|
-| Sources | Built-ins shipped as package data (`agents/patterns/*.json`, `reasoning/strategies/*.json`) or registered in memory by a package's adapter; user directories (`ExecutableRegistry.from_paths([...])`, `--executables DIR`); in-memory documents; the synthesis library |
+| Sources | Built-ins shipped as package data (`agents/patterns/*.json`, `reasoning/strategies/*.json`) or registered in memory by a package's adapter, each found through the `executable_sources` namespace; user directories (`ExecutableRegistry.from_paths([...])`, `--executables DIR`); in-memory documents; the synthesis library |
 | Lookup | `get(id)` for the current version; `get(id, version=...)`; `list(kind=..., capability=...)`; `metadata(id)` |
-| Reload | `reload()` re-reads every source, validates everything first, then swaps atomically; a file that fails is reported and its previous version stays served |
-| Retention | Every identity ever served stays resolvable by hash for the process lifetime, and on disk when a retention directory is set, so a running or resumed conversation keeps its definition |
-| Aliases | `{"id": "react", "route": {"react_v1": 0.5, "react_v2": 0.5}, "key": "conversation"}` assigns deterministically from a hash of the experiment name and the conversation id; the served identity is logged, so eval groups results by identity |
+| Reload | `reload()` re-reads every source, validates everything first, then swaps atomically; a file that fails is reported and its previous version stays served. Documents reload; Python code (handlers, tools, callables, generators) does not, so a changed implementation behind a name needs a restart |
+| Retention | Template identities ever served stay resolvable: in memory under an LRU bound, on disk when a retention directory is set; a template referenced by a run with a `run/start` and no `run/end` is pinned. Instances are never retained: they are rebuilt from the template and the logged instantiation record, and the rebuilt digest must equal the logged instance identity |
+| Aliases | `{"id": "react", "route": {"react_v1": 0.5, "react_v2": 0.5}, "key": "conversation"}` assigns deterministically from a hash of the experiment name and the conversation id; the served identity is logged, so eval groups results by identity; a resumed conversation reads its identity from the log and never re-rolls the route |
 | Collisions | A duplicate id from two sources is refused unless a source is declared an override |
 | Location | User directories, never the installed package directory (read-only in many installs and lost on upgrade) |
 
@@ -491,25 +532,27 @@ A state with a `call` config runs any registered executable from inside an FSM.
 
 | Field | Meaning |
 |---|---|
-| `target` | An executable id; or `target_key` plus `targets`: a handler-only key naming the target at run time and the closed list it may hold |
+| `target` | One executable id |
+| `choose` | Instead of `target`: `{"key": "<public key>", "targets": [...]}` or `"targets_from": {"capability": "strategy"}`, plus an optional `"fallback": "<id>"`. A classification extraction writes `key`; `targets_from` is resolved at instantiation into a closed list, so verification sees the list; a value outside it takes `fallback`, or fails with reason `unknown_target` when there is none; the id chosen lands in the result's `target` |
 | `inputs` | Parent keys passed in; nothing else is |
 | `returns` | `{parent_key: child_output}`; copied on success, non-`None` values only |
 | `on_failure` | The state an edge must reach for `failed` and `aborted` (a loader rule) |
-| `result_key` | Default `call_result`, handler-only, a C13 projection: `{status, reason, target, identity}` |
+| `result_key` | Default `call_result`, handler-only, a C13 projection: `{status, reason, target, template_identity, instance_identity}` |
 | `max_steps`, `max_seconds` | The child's budget, narrowed from the parent's context |
 
 Two modes, chosen by the target's kind:
 
 - **Frame mode** for FSM bodies (`fsm`, `strategy`, `procedure`): the child is pushed as a stack frame, driven by core's step driver and popped at its end. It is in the event log and resumes with the conversation.
-- **Delegated mode** for `pattern` and `workflow`: the adapter starts a child run whose handle is written to the log before it starts. The parent state waits on it; a resumed parent resumes the child by its handle.
+- **Delegated mode** for `pattern` and `workflow`: the adapter starts a child run whose handle is written to the log before it starts. The child never receives a user message: a target with the `conversational` capability is refused for delegated mode at load (conversational patterns run as frames once E4.7 lands). The child's first input is recorded with source `run` and the parent's handle. On each turn the executor polls the handle and never waits inside the turn lock; while the child is `running` the parent stays in the state and replies from its response instructions; the result lands on the first turn after the child ends; `max_seconds` bounds the wait. A resumed parent resumes the child by its handle.
 
 `synthesize` is a `call` whose target comes from the synthesizer and the library. The two share one executor body; `synthesize` keeps its fields and `synthesis_result`, which are wire contracts. The executor requests a push or pop that the turn's stack module applies, so the lock order, the rollback snapshot and the `stack/push` and `stack/pop` events stay where they are.
 
 #### 6.5.5 Agents, reasoning and workflows on the model
 
-- **Agents.** A handler library registers the existing handlers by name in the `handlers` namespace; each name maps to a factory that receives the run's tools, config and HITL objects. `PatternAgent` runs any `pattern` on `_standard_run`. `ReactAgent` and the other classes keep their names as thin subclasses bound to their id. A pattern whose tools need approval must bind `agents.approval_gate` or it is refused at creation; the grant check itself stays in the tool executor.
-- **Reasoning.** Strategies, the classifier and the orchestrator are files. The orchestrator pushes through a `call` state with `target_key` and `targets`. At the start of a solve the engine lists entries with the `strategy` capability whose contract reads only the problem keys and writes a solution key, builds the classifier's intents from them, and passes the same list as `targets`, so the model can choose only among them. `ReasoningType` stays the vocabulary of the built-ins; functions that return a strategy return `str` for user strategies.
+- **Agents.** A handler library registers the existing handlers by name in the `handlers` namespace; each name maps to a factory that receives the run's tools, config and HITL objects. `PatternAgent` runs any `pattern` on `_standard_run`. `ReactAgent` and the other classes keep their names as thin subclasses bound to their id. Presets (`extends`) replace SOP files (E4.5). A pattern whose tools need approval must bind `agents.approval_gate` or it is refused at creation; the grant check itself stays in the tool executor.
+- **Reasoning.** Strategies, the classifier and the orchestrator are files. The orchestrator pushes through a `call` state whose `choose` reads the classifier's key, takes `targets_from` the `strategy` capability and falls back to `analytical`, which supersedes the D-009 handler. The classifier's intents are built from the same resolved list (entries with the `strategy` capability whose contract reads only the problem keys and writes a solution key), so the model can choose only among them. `ReasoningType` stays the vocabulary of the built-ins; functions that return a strategy return `str` for user strategies.
 - **Workflows.** The workflow keeps its own engine (parallel branches, timers and external events have no FSM counterpart). An `ExecutableStep` runs any registered executable and maps its outputs back into the workflow context.
+- **Meta-builder.** It authors envelopes like any other front end: its FSM artifact is an `fsm`, its agent artifact a `pattern` preset, its workflow artifact a `workflow` body. The schemas it shows the model are generated from the envelope models. Its output is model-written, so it enters the registry as `draft` and passes V7 before promotion.
 
 #### 6.5.6 Validation before any model call
 
@@ -520,9 +563,10 @@ A document passes, in order:
 | V1 | JSON Schema (the generated file) and the Pydantic models |
 | V2 | The body loader of its kind: `FSMDefinition` load and `FSMValidator` for FSM bodies; the workflow loader and structure checks for workflows |
 | V3 | Name resolution: every handler, tool, callable, generator and executable in `requires` resolves, and every name the body uses is in `requires` |
-| V4 | Variants and variables: every variant applies to the base and the result validates; every placeholder is declared |
-| V5 | Contract: declared inputs and outputs agree with the flow analysis of the FSM body |
+| V4 | Variants, variables and input templates: every variant applies to the base and the result validates; every placeholder is declared; no input template renders into instruction or persona text |
+| V5 | Contract: declared inputs and outputs agree with the flow analysis of the FSM body; a delegated `call` target lacks the `conversational` capability |
 | V6 | Optional strict mode for registry loads: G3, G4 and G6a |
+| V7 | Model-written documents (synthesis and meta-builder output): every handler, tool, callable and executable name is on the policy allow-list; handler bindings and variants come from a template, never from the model |
 
 `fsm-llm-validate` reports every failure of a file at once. A registry load reports per file and keeps serving the rest.
 
@@ -532,7 +576,9 @@ A document passes, in order:
 |---|---|
 | Envelope models, generated JSON Schema, envelope version table, patch applier, `call` spec and verifier hooks, `RunResult`, `NameRegistry` | `core/` |
 | `Executable` protocol, `ExecutableRegistry`, resolver, FSM-kind adapters, `call` executor, `RunContext`, entry-point loading | `engine/` |
-| Handler library, `PatternAgent`, pattern adapter, pattern files | `agents/` |
+| Handler library, `PatternAgent`, pattern adapter, pattern files, presets, the `executable_sources` entries | `agents/` |
+| Envelope emission of meta-builder artifacts | `agents/meta_builder/` |
+| Launch and drawing by executable id | `monitor/` |
 | Strategy files, strategy handlers, classifier over the registry | `reasoning/` |
 | Workflow loader, callables, `ExecutableStep`, workflow adapter | `workflows/` |
 | Compile targets, policy and gate pipeline files, library as a registry source | `synthesis/` |
@@ -564,9 +610,10 @@ Every item has the same shape: what changes, where it lands, which contract (Sec
 | 0.14 | State-kind registry: the engine dispatches each state to the executor of its kind; `State.kind` derived from the config | `core/state_kinds.py`, `engine/kinds/` | C2, C6 | Partial: registry and `executors=` are internal | A third-party kind registers through the `state_kinds` namespace (0.17, 5.5) |
 | 0.15 | One model resolver: `llm.resolve_model(model)` is the only resolver; `resolve_tool_model`, `DEFAULT_TOOL_MODEL` and the copy in `eval/config.py` are removed; `fsm-llm-eval`, the monitor and every launch route take `--model` or `LLM_MODEL` and otherwise exit with the `ModelNotConfiguredError` message | `llm/interface.py`, `eval/config.py`, `monitor/` | C5 | Open | A test over every entry point finds no path that names a model the caller did not set |
 | 0.16 | One result envelope (C13): `core/results.py` defines `RunResult`; `AgentResult`, `SolutionResult`, workflow outcomes and synthesis runs expose it; `success` derives from `status`; `StopReason` becomes a `str` enum whose values keep their wire strings and map onto `Reason`; `Reason` gains `cancelled` | `core/`, `agents/`, `reasoning/`, `workflows/`, `synthesis/` | C8, C13 | Open | A test reads every public result type and finds the envelope; no library code branches on message text |
-| 0.17 | One name registry primitive (C10): `core/names.py` `NameRegistry[T]` with namespaces, freezing, override declarations and lazy entry-point loading. `ToolRegistry` is rebuilt on it; the handler library (E4.1), callables (E5.1), generators (E4.2), host gates (E6.1), state kinds and executable kinds (E2.3) use it | `core/names.py`, `tools/registry.py` | C10 | Open | `_PATTERNS` and every other private name table are gone; one test lists every namespace and its sources |
+| 0.17 | One name registry primitive (C10): `core/names.py` `NameRegistry[T]` with namespaces, freezing, override declarations and lazy entry-point loading. `ToolRegistry` is rebuilt on it; the handler library (E4.1), callables (E5.1), generators (E4.2), host gates (E6.1), state kinds, executable kinds and executable sources (E2.3) use it | `core/names.py`, `tools/registry.py` | C10 | Open | One test lists every namespace and its sources; the other eight private tables retire with E2.4, E3.3, E4.5, E4.6 and E5.1, and no new one is added |
+| 0.18 | Module headroom: before a row adds code to a module within 50 lines of the cap, a pure-move commit splits it (`ast.dump` equal, no behaviour change). Known now: `reasoning/engine.py` (E3.3, mostly deletions), `synthesis/library.py` (P7.2, E6.2), `memory.py`, `workflows/dsl.py` (E5.1), `llm/providers/litellm.py` (1.6, 1.15) | `src/fsm_llm/` | 0.4 | Partial: `synthesis/reply.py` split out of the synthesizer for its async twins | The module-size guard never fails on a feature commit |
 
-**Exit criteria:** nine CI legs on three operating systems; every result type on C13; every name table on C10; one model resolver; upgrade guides gated.
+**Exit criteria:** nine CI legs on three operating systems; every result type on C13; every name table on C10; one model resolver; upgrade guides gated; no feature commit fails the size guard.
 
 ### Phase 1: Durable, async runtime
 
@@ -583,28 +630,30 @@ Example event:
 
 | # | Change | Where | Builds on | Status | Done when |
 |---|---|---|---|---|---|
-| 1.1 | Append-only event log: content-addressed blobs, single and batch append, a read-only history query API for handlers and agents, a producer for every type, then the log as the source of truth for sessions. Types: `turn/start`, `llm/request`, `llm/response`, `provider/error`, `extraction`, `extraction/miss`, `intent/out_of_scope`, `transition`, `decision`, `handler`, `tool/call`, `tool/result`, `approval/request`, `approval/outcome`, `executor/start`, `executor/result`, `stack/push`, `stack/pop`, `context/record`, `compaction/epoch`, `turn/end`, plus `executable/resolve`, `run/start` and `run/end` (E2.1) | `runtime/events.py`; `engine` and executors emit | C4 | Partial: log, blobs, privacy and batch append ship opt-in; 14 of 21 types produced | Every type has a producer test; any past prompt rebuilds byte-identical; parity tests pass, then the log is the default |
+| 1.1 | Append-only event log: content-addressed blobs, single and batch append, a read-only history query API for handlers and agents, a producer for every type in product code, then the log as the source of truth for sessions. Every tool path (`ToolRegistry` execution, completion-state tools, the agent tool executor, `native_fc`) emits `tool/call` and `tool/result` through one wrapper; the greeting is logged as a request. Types: `turn/start`, `llm/request`, `llm/response`, `provider/error`, `extraction`, `extraction/miss`, `intent/out_of_scope`, `transition`, `decision`, `handler`, `tool/call`, `tool/result`, `approval/request`, `approval/outcome`, `executor/start`, `executor/result`, `stack/push`, `stack/pop`, `context/record`, `compaction/epoch`, `turn/end`, plus `executable/resolve`, `run/start` and `run/end` (E2.1) | `runtime/events.py`; `engine`, `tools` and executors emit | C4, E0.3 | Partial: log, blobs, privacy and batch append ship opt-in; product code emits 12 of 21 types; tool calls and the greeting are not logged | Every type has a producer test in product code; any past prompt, the greeting included, rebuilds byte-identical; parity tests pass, then the log is the default |
 | 1.2 | Session persistence as projections: JSONL (optional zstd) and SQLite; versioned format with adjacent migrations; a reader for `FileSessionStore` snapshots; completion transcripts included | `runtime/stores/` | 1.1 | Partial: JSONL log and `EventLogSessionStore` ship; SQLite query projection open | A migration test across log format versions passes; old snapshots load |
-| 1.3 | Checkpoint before every LLM call and every side-effecting tool call; a tool in flight during a crash recovers as `unknown` and is never retried automatically | `runtime/checkpoint.py` | 1.1 | Partial | `kill -9` mid-turn, restart, the conversation resumes with consistent history |
+| 1.3 | Checkpoint before every LLM call and every side-effecting tool call; a tool in flight during a crash recovers as `unknown` and is never retried automatically | `runtime/checkpoint.py` | 1.1 | Partial: the rule exists for `tool/call` events, which no real tool call emits yet | `kill -9` mid-turn and mid-tool, restart, the conversation resumes with consistent history and the tool reported `unknown` |
 | 1.4 | `API.fork(conversation_id, at_turn)` and `API.resume(conversation_id)`. A fork records its parent source (`conversation_id` and exclusive `end_seq`); later parent events never extend the child. Time-travel view in the monitor | `engine/api/forks.py`, `monitor/` | 1.1 | Partial: fork, resume and stack restore ship (they need a log); parent source and monitor view open | A fork reproduces history up to the chosen turn and stays unchanged when the parent continues |
 | 1.5 | Async-first: async twins keep the sync names; sync methods are wrappers; cancellation through the C12 token | `llm/`, `engine/api`, `agents/`, `reasoning/`, `synthesis/`, `workflows/` | C5, C12 | Partial: `fsm_llm.aio`, async `LLMInterface` twins, native async litellm provider and the async core turn surface ship; `Agent.arun`, `ReasoningEngine.asolve_problem`, `FSMSynthesizer.aobtain` and `ProcedureRunner` twins are open (E7.1) | FastAPI serving without thread pools; concurrent calls on one conversation serialize; cancellation leaves a consistent log |
-| 1.6 | Retry policy per provider, each attempt logged before backoff; admission control with shared pacing and overload cooldown across coroutines and processes | `runtime/retry.py`, `runtime/admission.py` | C5 | Open | Retries and throttling visible in the log; a load test against a rate-limited mock stays within limits |
+| 1.6 | Retry policy per provider, each attempt logged before backoff; admission control with shared pacing and overload cooldown across coroutines and processes | `runtime/retry.py`, `runtime/admission.py` | C5, 0.18 | Open | Retries and throttling visible in the log; a load test against a rate-limited mock stays within limits |
 | 1.7 | Core turn budgets: `max_steps` and `max_seconds` per conversation and per pushed frame, reported as `budget_spent` | `engine/` | C8, C9 | Done | Met: `API(max_steps=, max_seconds=)`, `push_fsm(max_steps=, max_seconds=)`; the synthesis runner's own counter is gone |
 | 1.8 | Workflow instances persisted on the log; a declarative step subset with a JSON loader | `workflows/` | 1.1 | Open; delivered by E5.1 and E5.3 | See E5 |
 | 1.9 | Record and replay: fixtures keyed by a canonical request hash over the layout segments (timestamps and ids excluded); replay fails on any unmatched request | `testing/replay.py` | 1.1, 2.3 | Open | The replay suite runs keyless in default CI |
 | 1.10 | OpenTelemetry spans generated from events, GenAI conventions pinned to a commit of `semantic-conventions-genai`; W3C trace context propagated into MCP `_meta` and A2A calls; the monitor reads the log; live frames list every key one event changed | `runtime/exporters/otel.py`, `monitor/` | 1.1 | Partial: the monitor browses a log; its OTel exporter still reads its own collector | One trace per turn with LLM spans and token counts; a call into an MCP server joins the trace |
-| 1.11 | Privacy levels `shape` and `values`, a redaction hook, explicit retention | `runtime/privacy.py`, `runtime/retention.py` | C4 | Done | Met: `PrivacyLevel`, `EventLog(privacy=, redact=)`, `EventLog.prune` |
+| 1.11 | Privacy levels `shape` and `values`, a redaction hook, explicit retention; a value redacted at write restores as absent, with a `redacted` marker in the history query, never as the placeholder, so a gate that needs it asks again | `runtime/privacy.py`, `runtime/retention.py`, `runtime/stores/` | C4 | Partial: `PrivacyLevel`, `EventLog(privacy=, redact=)` and `EventLog.prune` ship; a redacted value restores as `<redacted>` | A `missing` gate after resume sees a redacted key as missing |
 | 1.12 | ATIF v1.8 trajectory export from events | `runtime/exporters/atif.py` | 1.1 | Open | Exports validate with Harbor's validator on a Python 3.12+ leg |
 | 1.13 | Usage as a projection of `llm/response` and `provider/error`; `reset_usage()` moves a marker | `runtime/usage.py`, `llm/usage.py` | C4, C5 | Done | Met |
 | 1.14 | Run context (C12): `engine/context.py` `RunContext`, frozen, holding the LLM interface or a factory, event log, policy, budget, registry, cancellation token, parent run reference and privacy level. `API`, `BaseAgent`, `ReasoningEngine`, `ProcedureRunner`, the workflow engine and serve jobs accept `context=`; their existing keywords build one; `derive(...)` narrows the budget and sets the parent for a child run | `engine/context.py`, every runner | C4, C9, C12 | Open | An agent run, a reasoning solve and a workflow instance started under one context write to one log, stop on one cancellation and share one budget (one test per runner) |
-| 1.15 | Request purpose and LLM failure codes: every `llm/request` carries a `purpose` (`extract`, `classify`, `tie_break`, `reply`, `complete`, `summarize`, `compile`, `simulate`, `judge`, `embed`); every `provider/error` carries an `LlmFailureCode` (`timeout`, `rate_limited`, `auth`, `context_overflow`, `content_refused`, `malformed_response`, `transport`, `http_<status>`); usage folds by purpose | `llm/`, `runtime/usage.py`, `core/codes.py` | C5, C8 | Open | Cost per purpose reported from the log; a refusal and a malformed reply are distinct codes in a recorded fixture |
+| 1.15 | Request purpose and LLM failure codes: every `llm/request` carries a `purpose` (`extract`, `classify`, `tie_break`, `reply`, `complete`, `summarize`, `compile`, `simulate`, `judge`, `embed`); every `provider/error` carries an `LlmFailureCode` (`timeout`, `rate_limited`, `auth`, `context_overflow`, `content_refused`, `malformed_response`, `transport`, `http_<status>`); usage folds by purpose | `llm/`, `runtime/usage.py`, `core/codes.py` | C5, C8, 0.18 | Open | Cost per purpose reported from the log; a refusal and a malformed reply are distinct codes in a recorded fixture |
 | 1.16 | Tool outcome codes: every `tool/result` carries a C8 `status`; a failure carries `error: {name, code}` with a `ToolErrorCode` (`invalid_args`, `unknown_tool`, `denied`, `timeout`, `sandbox_violation`, `execution_failed`); a cut observation carries `truncated: true` independent of `error` | `tools/`, `policy/`, `agents/` | C8, C9 | Open | Analytics and synthesis diagnosis read codes only; a truncated successful call is `ok` with `truncated` |
+| 1.17 | Message provenance: every user-message event and every input to a run carries `source` (`user`; `run` with the parent handle; `remote_client` with the client id; `simulator`). Delegated tasks are `run`; MCP and HTTP messages are `remote_client`. Consumers: trace-to-eval simulates only `user` turns (6.4); an approval answer from anything but a policy approver is refused (4.1); `run` and `remote_client` text carries the untrusted label | `runtime/events.py`, `engine/`, `serve/` | C4, C9 | Open | A delegated child's first message, an MCP message and a simulated turn are distinct in the log; a parent model cannot answer a child's approval |
+| 1.18 | Log I/O off the event loop: appends go to one writer task per log; fsync in groups at checkpoint boundaries (before an LLM call, before a side-effecting tool call, at turn end) instead of per event; writer handles released at turn end under an LRU bound instead of held until the conversation ends | `runtime/log.py`, `runtime/stores/` | 1.3, 1.5 | Open: about 29 fsyncs and 76 ms of blocking I/O per logged turn on the loop thread | Blocking I/O per logged turn on the loop stays within the 6.5 budget; the `kill -9` test of 1.3 still passes; open descriptors stay bounded with 1,000 idle conversations |
 
-**Exit criteria:** the log is the default with a producer for every type; crash-safe resume, fork and keyless replay in CI; every runner takes a run context; usage, failures and costs come from events.
+**Exit criteria:** the log is the default with a producer for every type; crash-safe resume, fork and keyless replay in CI; every runner takes a run context; usage, failures and costs come from events; a logged turn does not stall the loop; every message names its source.
 
 ### Workstream E: One executable model
 
-Starts once Phase 0 lands 0.16 and 0.17. E0 and E1 change no runtime behaviour.
+E0.1 is done; E1 starts once Phase 0 lands 0.16 and 0.17. E0 and E1 change no runtime behaviour.
 
 **Goal:** one format and one substrate for agents, reasoning, synthesis and workflows (Section 6.5), so any capability added to the engine, the registry or a state kind works for every kind of executable.
 
@@ -621,30 +670,35 @@ Starts once Phase 0 lands 0.16 and 0.17. E0 and E1 change no runtime behaviour.
 | T8 | A running executable, its stack and its delegated children resume after a crash | E3.2, E5.3 |
 | T9 | The registry serves `react_v1` or `react_v2` behind one name, deterministically per conversation | E2.2 |
 | T10 | Every definition is validated and every name resolved before any model call | E1.3 |
+| T11 | One format replaces seven: SOP files become presets, meta-builder artifacts are envelopes, the monitor launches and draws by id | E2.4, E4.5, E4.6, E5.1 |
+| T12 | Every run records what ran (template and instance identity) and who asked (provenance) | E2.1, 1.17 |
 
 | # | Change | Where | Builds on | Status | Done when |
 |---|---|---|---|---|---|
-| E0.1 | Snapshot the canonical JSON and `fsm_id` of every built-in pattern (over a parameter matrix per builder) and every reasoning FSM | `tests/fixtures/` | none | Open | Fixtures committed; a test rebuilds and compares them |
+| E0.1 | Snapshot the canonical JSON and `fsm_id` of every built-in pattern (over a parameter matrix per builder) and every reasoning FSM | `tests/executables_corpus.py`, `tests/fixtures/executables/` | none | Done | Met: 49 cases (38 agent, 11 reasoning) as insertion-order text fixtures; `index.json` holds the golden hash, `fsm_id` and digest; regenerated only by `python -m tests.executables_corpus --write`; the identity recipe moved to core first |
 | E0.2 | Inventory the decision anchors in every module E touches: each travels with its code, is superseded by a named new decision in the same commit, or is unaffected | `plans/ANCHORS.md` | 0.5 | Open | Every anchor has a disposition |
-| E0.3 | List the `SRC_PINS` files of `scripts/synthesis_bench.py` that E changes; blocks s0 to s2 can no longer be re-reported; `scripts/bench_data/` is not edited | `scripts/` | 6.8 | Open | The owner accepts the consequence (Section 15) |
+| E0.3 | Close the bench-pin freeze: archive s0 to s2 as reported; record that no live block pins the current layout; delete the reasons that hold product changes back for a recorded bench (tool events in `ToolRegistry` and `native_fc`); `scripts/bench_data/` is not edited | `scripts/`, `CHANGELOG.md` | 6.8 | Open; the evidence is in: every s0 to s2 manifest pins 35 paths under `src/agents/...` and `src/synthesis/...`, none of which exists | A test fails when a registered block pins a path that is missing or no longer matches; open decision 3 is closed |
 | E1.1 | Envelope and body models (a discriminated union on `kind`), the envelope version table beside `FIELD_VERSIONS`, a JSON Schema generated from the models and held equal to them by a test | `core/definitions/executable.py`, `core/definitions/schemas/` | C1, C11, 0.12 | Open | Every E0.1 definition wrapped in an envelope round-trips; a newer field in an older document warns or refuses like an FSM field |
 | E1.2 | The RFC 6902 patch applier moves to `core/definitions/patch.py`; synthesis repair and pattern variants share it | `core/definitions/patch.py` | none | Open | Synthesis repair tests unchanged |
-| E1.3 | The load sequence V1 to V6; `fsm-llm-validate` reads executables and reports every failure of a file at once | `core/verify/` | C6 | Open | One test per step refuses a bad document before any model call |
-| E2.1 | `Executable` protocol, FSM-kind adapters, `ExecutableRegistry` (sources, lookup, atomic reload, retention); event types `executable/resolve`, `run/start` (handle, identity, inputs by reference) and `run/end` (the C13 result) | `engine/executables/` | C11, C12, C13, 1.14 | Open | A reload serves the new identity to new conversations while a running one finishes on the old; a failing file keeps its previous version |
+| E1.3 | The load sequence V1 to V7; `fsm-llm-validate` reads executables and reports every failure of a file at once | `core/verify/` | C6 | Open | One test per step refuses a bad document before any model call |
+| E2.1 | `Executable` protocol, FSM-kind adapters, `ExecutableRegistry` (sources, lookup, atomic reload, template retention with pins for unfinished runs); event types `executable/resolve` (id, version label, template identity), `run/start` (handle, template and instance identity, instantiation record and inputs by reference, source) and `run/end` (the C13 result) | `engine/executables/` | C11, C12, C13, 1.14 | Open | A reload serves the new identity to new conversations while a running one finishes on the old; a failing file keeps its previous version; 10,000 runs with distinct tasks retain one template; a resumed run rebuilds its instance and matches the logged digest |
 | E2.2 | Aliases with weighted routes, deterministic per experiment name and conversation id; the served identity logged | `engine/executables/registry.py` | E2.1 | Open | Assignment is reproducible; eval groups results by identity |
-| E2.3 | The `executable_kinds` namespace loaded lazily through entry points | `pyproject.toml`, `engine/` | 0.17 | Open | The import-laziness test is unchanged; a kind with no installed adapter fails with a named error |
-| E2.4 | Built-in executables on today's runners: `agents` registers one `pattern` per built-in pattern, `reasoning` one `strategy` per strategy and the `reasoning.solve` entry, the meta-builder a `conversational` pattern, each in memory with lifecycle `builtin`. E3 and E4 later replace their bodies with files under the same ids | `agents/`, `reasoning/` | E2.1, E2.3 | Open | `registry.get("react").run(...)` and `registry.get("reasoning.solve").run(...)` return C13 results; the MCP server (5.3) runs on them |
-| E3.1 | `call` kind spec, loader rule (a failure edge must exist) and G3, G4 and G6a hooks | `core/state_kinds.py`, `core/verify/` | C2, C6 | Open | A missing failure edge is refused; the flow analysis sees inputs and returns |
-| E3.2 | Executor stack requests applied by the turn's stack module; the frame-mode `call` executor | `engine/kinds/call.py`, `engine/turn/` | E3.1 | Open | A parent branches on `call_result.status`; the lock-order test is unchanged; a fork in the middle of a child resumes it |
-| E3.3 | Strategies, classifier and orchestrator as files under `reasoning/strategies/`; the orchestrator's push is a `call` with `target_key` and `targets`; `_StrategyStack`, `MAX_SUB_FSM_STEPS` and `merge_reasoning_results` are deleted; the analytical fallback stays in the handler that writes the selected type | `reasoning/` | E3.2, E0.1 | Open | Every E0.1 reasoning fixture reproduced byte for byte; replies in the same order; a strategy over budget ends `aborted` and the solve still answers |
+| E2.3 | The `executable_kinds` and `executable_sources` namespaces loaded lazily through entry points | `pyproject.toml`, `engine/` | 0.17 | Open | The import-laziness test is unchanged; a kind with no installed adapter fails with a named error |
+| E2.4 | Built-in executables on today's runners, declared through `executable_sources`: `agents` registers one `pattern` per built-in pattern, `reasoning` one `strategy` per strategy and the `reasoning.solve` entry, the meta-builder a `conversational` pattern, each in memory with lifecycle `builtin`. Patterns whose constructors still need Python objects declare them in `requires.callables` and are refused by serve and the monitor until E4.2. The monitor launches and draws agents by executable id; `_AGENT_CLASSES` and the agent half of `flows.json` are removed. E3 and E4 later replace the bodies with files under the same ids | `agents/`, `reasoning/`, `monitor/` | E2.1, E2.3 | Open | `registry.get("react").run(...)` and `registry.get("reasoning.solve").run(...)` return C13 results; the monitor draws every registered pattern from its instantiated FSM; the MCP server (5.3) runs on them |
+| E3.1 | `call` kind spec with `target` and `choose`, loader rule (a failure edge must exist; a delegated target lacks `conversational`) and G3, G4 and G6a hooks | `core/state_kinds.py`, `core/verify/` | C2, C6 | Open | A missing failure edge, a `choose` that resolves to no closed list and a conversational delegated target are each refused; the flow analysis sees inputs and returns |
+| E3.2 | Executor stack requests applied by the turn's stack module; the frame-mode `call` executor; the delegated-mode executor with the polling semantics of Section 6.5.4, active once a kind's adapter is registered (patterns E4.1, workflows E5.2) | `engine/kinds/call.py`, `engine/turn/` | E3.1 | Open | A parent branches on `call_result.status`; the lock-order test is unchanged; a fork in the middle of a child resumes it; a delegated child past `max_seconds` ends `aborted` and the parent takes its failure edge |
+| E3.3 | Strategies, classifier and orchestrator as files under `reasoning/strategies/`; the orchestrator's push is a `call` with `choose` and fallback `analytical`, superseding the D-009 handler in a recorded decision; `_StrategyStack`, `MAX_SUB_FSM_STEPS`, `merge_reasoning_results` and `_TYPE_MAP` are deleted | `reasoning/` | E3.2, E0.1 | Open | Every E0.1 reasoning fixture reproduced byte for byte; replies in the same order; a strategy over budget ends `aborted` and the solve still answers |
 | E3.4 | Selection over the registry (Section 6.5.5); streaming `solve_problem` on `run_until_terminal_stream` | `reasoning/` | E2.1, E3.3 | Open | A registered user strategy is chosen by the classifier and by `--type`; a stream yields strategy replies before the solve ends |
 | E3.5 | `synthesize` on the shared `call` executor body (P7.1): the target comes from the synthesizer and library; fields and `synthesis_result` unchanged; a definition with a `synthesize` state and no synthesizer registered fails to load with a named error | `synthesis/`, `engine/kinds/` | E3.2 | Open | The concierge example runs on a bare `API`; the runner's bookkeeping and its `end_conversation` are removed |
-| E4.1 | Handler library: `agents.tool_executor`, `agents.think_turn_limiter`, `agents.forced_conclusion`, `agents.approval_gate`, `agents.trace_recorder`, `agents.run_guard` and the rest of `agents/handlers/` registered by name; `PatternAgent` runs any `pattern` on `_standard_run` | `agents/handlers/library.py`, `agents/pattern_agent.py` | 0.17 | Open | A pattern file using only library handlers runs a tool loop end to end |
-| E4.2 | Built-in patterns as files with variants and one generator (`agents.prompt_chain`); each `build_<x>_fsm` becomes `instantiate` on its file and returns the same dict; `ReasoningReactAgent` becomes a pattern whose state calls a strategy by id | `agents/patterns/`, `agents/fsm_definitions/` | E1, E3.2, E4.1, E0.1 | Open | Every E0.1 agent fixture reproduced byte for byte; the `agents -> reasoning` edge is gone |
+| E4.1 | Handler library: `agents.tool_executor`, `agents.think_turn_limiter`, `agents.forced_conclusion`, `agents.approval_gate`, `agents.trace_recorder`, `agents.run_guard` and the rest of `agents/handlers/` registered by name; `PatternAgent` runs any `pattern` on `_standard_run` and registers the pattern adapter | `agents/handlers/library.py`, `agents/pattern_agent.py` | 0.17 | Open | A pattern file using only library handlers runs a tool loop end to end |
+| E4.2 | Built-in patterns as files with variants and one generator (`agents.prompt_chain`); each `build_<x>_fsm` becomes `instantiate` on its file and returns the same dict; every constructor argument maps per Section 6.5.1 (data to `options`, `evaluation_fn` to a callable name or an executable id, `worker_factory` and swarm members to executable ids, `ChainStep.validation_fn` to JsonLogic); `ReasoningReactAgent` becomes a pattern whose state calls a strategy by id; D-001 [STALE] and D-058 are superseded | `agents/patterns/`, `agents/fsm_definitions/` | E1, E3.2, E4.1, E0.1 | Open | Every E0.1 agent fixture reproduced byte for byte; all 18 entries of `_PATTERNS` launch by id from the monitor and from `fsm-llm-serve`; the `agents -> reasoning` edge is gone |
 | E4.3 | `create_agent(pattern, tools=, registry=)` resolves through the registry; user directories (`ExecutableRegistry.from_paths`, `--executables DIR`); a pattern whose tools need approval and that does not bind `agents.approval_gate` is refused at creation | `agents/` | E2.1, E4.2 | Open | `create_agent("my_pattern")` works from a user directory; the refusal is tested |
 | E4.4 | Composition hooks (`before_run`, `on_iteration`, `after_run`) bindable by name; `VerifiedReactAgent` and `AutoMemoryReactAgent` become presets | `agents/` | E4.1 | Open | Their tests and the HITL suite pass unchanged |
-| E5.1 | Workflow loader and the `callables` namespace; the declarative step subset of 1.8 | `workflows/loader.py`, `workflows/callables.py` | 0.17, E1.1 | Open | `load(serialize(w)) == w` for every step type with named callables |
-| E5.2 | `ExecutableStep` (`target`, `inputs`, `returns`, `success_step_id`, `error_step_id`); `target` by name on `AgentStep` and `ConversationStep`; the workflow adapter; delegated-mode `call` | `workflows/steps/executable.py`, `engine/kinds/call.py` | E2.1, E3.2 | Open | A JSON workflow runs a strategy, a pattern and a library procedure and merges their outputs; an FSM `call` runs a workflow |
+| E4.5 | SOPs as presets: an SOP becomes a `pattern` preset (`extends`, `options`, `tools`, `input_templates` from `task_template`, `config_overrides` as options); `SOPRegistry` and `load_builtin_sops` become a registry source; files read through `frontmatter.load_yaml`; a converting reader keeps SOP files loadable for one minor release, with an upgrade guide | `agents/sop.py`, `agents/presets/` | E1.1, E2.1, E4.2 | Open | Every built-in SOP runs by id with the same rendered task; an SOP whose template would render into instruction text is refused |
+| E4.6 | The meta-builder emits envelopes: the FSM artifact as `fsm`, the agent artifact as a `pattern` preset, the workflow artifact as a `workflow` body (after E5.1); the schemas shown to the model are generated from the envelope models, replacing `_FSM_SCHEMA`, `_WORKFLOW_SCHEMA` and `_AGENT_SCHEMA`; output enters as `draft` through V1 to V7; `fsm-llm-meta` writes envelope files | `agents/meta_builder/`, `agents/meta_builders/`, `agents/meta_prompts.py` | E1.3, E4.5, E5.1 | Open | Each artifact type loads into the registry and runs; an unknown name or a handler binding in model output is refused |
+| E4.7 | Frame-scoped handler bindings: a pattern pushed in frame mode attaches its handlers on push and detaches them on pop, so `conversational` patterns such as the meta-builder run as frames under a `call` | `engine/`, `agents/` | E3.2, E4.1 | Open | A parent FSM calls the meta-builder by id, the user talks to it, and its artifact returns through `returns` |
+| E5.1 | Workflow loader and the `callables` namespace; the declarative step subset of 1.8; the monitor's `_WORKFLOW_PRESETS` and the workflow half of `flows.json` become registered `workflow` documents | `workflows/loader.py`, `workflows/callables.py`, `monitor/` | 0.17, 0.18, E1.1 | Open | `load(serialize(w)) == w` for every step type with named callables; the monitor draws every registered workflow; `flows.json` is gone |
+| E5.2 | `ExecutableStep` (`target`, `inputs`, `returns`, `success_step_id`, `error_step_id`); `target` by name on `AgentStep` and `ConversationStep`; the workflow adapter, which lets a delegated `call` (E3.2) run a workflow | `workflows/steps/executable.py`, `workflows/adapter.py` | E2.1, E3.2 | Open | A JSON workflow runs a strategy, a pattern and a library procedure and merges their outputs; an FSM `call` runs a workflow |
 | E5.3 | Delegated-run handles written before start; `Executable.resume(handle)`; workflow instances persisted on the log (1.8) | `workflows/`, `engine/executables/` | 1.1, E5.2 | Open | A killed process resumes a parent conversation and its child workflow from the log |
 | E6.1 | `SynthesisPolicy.from_json` and `to_json` (ceilings stay in `synthesis/constants.py`; a file may tighten, never exceed); a gate pipeline file: G1 to G5 and G6a present and in order, host gates by name after G6a, G6b and G7 by policy; files loaded through `security.resolve_within`, never written by a model | `synthesis/policy.py`, `synthesis/gates.py` | C9, 0.17 | Open | A file that drops or reorders a mandatory gate or exceeds a ceiling is refused; a host gate's failure enters the repair message |
 | E6.2 | Library entries as `procedure` executables; the library is a registry source (with P7.2) | `synthesis/library.py` | E2.1 | Open | A verified procedure is callable by id from a `call` state and a workflow step |
@@ -654,7 +708,7 @@ Starts once Phase 0 lands 0.16 and 0.17. E0 and E1 change no runtime behaviour.
 | E7.2 | Parallel agents and the swarm on asyncio tasks | `agents/` | E7.1 | Open | No `ThreadPoolExecutor` in `agents`; cancellation reaches every branch |
 | E7.3 | Concurrent G6b trials under admission control | `synthesis/` | E7.1, 1.6 | Open | Trials overlap and respect the admission limit |
 
-**Exit criteria:** every built-in pattern, strategy and procedure is a file in one envelope, validated before any model call, served by one registry; a workflow, an FSM and an agent call each other by id; no package keeps a private driver for child runs.
+**Exit criteria:** every built-in pattern, strategy and procedure is a file in one envelope, validated before any model call, served by one registry; a workflow, an FSM and an agent call each other by id; no package keeps a private driver for child runs; no definition format outside the envelope remains; every run records its template and instance identity.
 
 ### Phase 2: Context engineering
 
@@ -770,7 +824,7 @@ conversation.passport_no                    # typed read of extracted context
 
 | # | Change | Where | Builds on | Status | Done when |
 |---|---|---|---|---|---|
-| 4.1 | Policy and approval: modes `ask` (human or machine answerers), `never` (reject; CI and unattended runs) and `auto` (a machine answerer such as an LLM reviewer); permission presets; coded outcomes; every request and outcome an `approval/request` and `approval/outcome` event; real HITL for REWOO, PlanExecute, ParallelReact and native_fc; `synthesis.reviewer_from_hitl` becomes a policy approver | `policy/`, `agents/` | C8, C9, 1.1 | Partial: `policy` holds approval and HITL; no single object, no approval events | Every gated call has an audited request and a coded outcome; a missing answerer fails closed |
+| 4.1 | Policy and approval: modes `ask` (human or machine answerers), `never` (reject; CI and unattended runs) and `auto` (a machine answerer such as an LLM reviewer); permission presets; coded outcomes; every request and outcome an `approval/request` and `approval/outcome` event; real HITL for REWOO, PlanExecute, ParallelReact and native_fc; `synthesis.reviewer_from_hitl` becomes a policy approver; an answer whose source is not a policy approver (a parent run, a delegating model, a remote client) is refused with reason `untrusted_source` | `policy/`, `agents/` | C8, C9, 1.1, 1.17 | Partial: `policy` holds approval and HITL; no single object, no approval events | Every gated call has an audited request and a coded outcome; a missing answerer fails closed |
 | 4.2 | Sandbox seam with subprocess and container backends and an optional NVIDIA OpenShell backend; session-scoped writable directories; profiles referenced by the policy; `PythonToolLoader` runs tool files out of process | `policy/sandbox/` | C9 | Open | Tool files run outside the host process; escape tests pass |
 | 4.3 | Opt-in workspace toolset (read, write, edit, glob, grep, bash). Read-only tools annotated concurrency-safe so executors may run them in parallel; writes gated by 4.1; paths confined by `security.resolve_within`; the write boundary is the run's working directory, so a nested working directory or worktree narrows it and the enclosing repository needs an explicit grant | `tools/workspace.py` | 4.1, 1.16 | Open | Path-escape, boundary, policy and parallel-read tests pass |
 | 4.4 | Code as action on one sandboxed Python runtime with two program formats: `program` (one-shot; SDK generated from `ToolRegistry`; per-run call allowance; parallel-safe subcalls) and `scoped-repl` (persistent bindings; arguments by reference with previews; typed `return_result` validated against the declared output). A versioned bootstrap handshake: the host refuses an older revision before any program runs. Environment initializers run before model code. Output over budget is truncated while execution continues (`truncated` separate from `error`); required completion values are never truncated. Exposed as the `codeact` state kind writing `codeact_result` and as a `codeact` pattern. AST checks are defense in depth, never the boundary | `policy/sandbox/`, `engine/kinds/codeact.py`, `agents/patterns/codeact.json` | 2.2, 4.2, C2, C3, E4.1 | Open | On a multi-tool suite `codeact` beats `react` and `native_fc` on success, or on tokens at equal success; a failing initializer prevents every program effect; a stale bootstrap is refused |
@@ -787,9 +841,9 @@ conversation.passport_no                    # typed read of extracted context
 
 | # | Change | Where | Builds on | Status | Done when |
 |---|---|---|---|---|---|
-| 5.1 | `app.yml`, Pydantic-validated with unknown keys refused: `server`, `llm`, `registry` (executable directories, library), `tools` (named sources: a Python directory through `PythonToolLoader`, skills, OKF bundles, an upstream MCP server), `policy` and `profiles`. A profile binds an executable id, its options, tool sources, budgets and an approval allow-list. Paths confined by `security.resolve_within` relative to the file; YAML read by `frontmatter.load_yaml`; every profile built and checked at startup | `serve/config.py`, `serve/profiles.py` | C9, C10, C11, 0.15 | Open | One file boots the server; an unknown key, a path escape, a missing executable and an approval-required tool without an allow-list each fail startup |
+| 5.1 | `app.yml`, Pydantic-validated with unknown keys refused: `server`, `llm`, `registry` (executable directories, library), `tools` (named sources: a Python directory through `PythonToolLoader`, skills, OKF bundles, an upstream MCP server), `policy` and `profiles`. A profile binds an executable id, its options, tool sources, budgets and an approval allow-list. Secrets only by environment-variable name (`*_env` fields), never inline and never echoed back; paths confined by `security.resolve_within` relative to the file; YAML read by `frontmatter.load_yaml`; every profile built and checked at startup | `serve/config.py`, `serve/profiles.py` | C9, C10, C11, 0.15 | Open | One file boots the server; an unknown key, a path escape, a missing executable and an approval-required tool without an allow-list and an inline secret each fail startup |
 | 5.2 | HTTP surfaces. Primary: Open Responses 2026-04-24 `POST /v1/responses`, stateful through `previous_response_id`, `model` naming a profile; HTTP streaming first, then the WebSocket transport and `/v1/responses/compact` (after 2.5). Compatibility: `/v1/chat/completions` with a stated contract (conversation id in `metadata`, only the final user message consumed, a request whose earlier messages disagree with the log refused with a code) | `serve/responses.py`, `serve/chat.py` | 1.1, 1.5, 5.1 | Open | The Open Responses compliance suite passes for the supported subset; an OpenAI client drives an FSM through both routes |
-| 5.3 | MCP server on the 2026-07-28 specification, in two slices (detail below). Slice A: streamable HTTP; profile tools over the registry; every run and every turn a job handle; bearer token; loopback by default; Origin allow-list. Slice B: Tasks extension for runs; MRTR slot filling for conversational profiles; stdio; OAuth 2.0 and OIDC authorization; jobs as projections of the log | `serve/service.py`, `serve/jobs.py`, `serve/mcp.py`, `serve/cli.py` | 5.1, E2.4, 4.8, C12, C13 | Open | Slice A: an MCP host lists profiles, starts a run, polls it, holds a three-turn conversation and cancels a long run (`aborted`, `cancelled`); no token gives 401, a foreign Origin 403, a non-loopback bind without a key exits 1. Slice B: a host fills a multi-slot FSM through MRTR with no session; any instance behind a round-robin balancer answers |
+| 5.3 | MCP server on the 2026-07-28 specification, in two slices (detail below). Slice A: streamable HTTP; profile tools over the registry; every run and every turn a job handle; bearer token; loopback by default; Origin allow-list. Slice B: Tasks extension for runs; MRTR slot filling for conversational profiles; stdio; OAuth 2.0 and OIDC authorization; jobs as projections of the log | `serve/service.py`, `serve/jobs.py`, `serve/mcp.py`, `serve/cli.py` | 5.1, E2.4, 4.8, 1.17, C12, C13 | Open | Slice A: an MCP host lists profiles, starts a run, polls it, holds a three-turn conversation and cancels a long run (`aborted`, `cancelled`); no token gives 401, a foreign Origin 403, a non-loopback bind without a key exits 1. Slice B: a host fills a multi-slot FSM through MRTR with no session; any instance behind a round-robin balancer answers |
 | 5.4 | Native providers: an Open Responses client (OpenAI, Ollama, vLLM, OpenRouter, LM Studio, Hugging Face) and an Anthropic Messages client; litellm becomes an extra and tenacity leaves core with it | `llm/providers/` | C5, 1.15 | Open | Core installs and runs without litellm; conformance tests pass on recorded fixtures |
 | 5.5 | Entry-point plugins for every C10 namespace (`executable_kinds` ships first with E2.3) | `core/names.py`, `engine/` | 0.17 | Open | A third-party package adds a provider, a state kind and an executable kind with no core edit |
 | 5.6 | A2A on `a2a-sdk`, protocol v1.0.1: parts identified by their field, agent card with `supportedInterfaces`, signed agent cards verified, version header, trace context; v1.1 (task history, event filtering, bidirectional streaming, structured elicitation) adopted behind an upgrade guide once final; ACP later | `agents/a2a/` | 1.10, C11 | Open | Interop test against the A2A CLI or reference implementation |
@@ -818,7 +872,8 @@ Every tool call returns at once; nothing blocks on a model. State lives in handl
 | Storage | Slice A keeps jobs in a registry under one lock with a TTL sweep for finished jobs and idle conversations; Slice B derives them from `run/start` and `run/end`, so a restarted server lists them |
 | Capacity | `max_concurrent_jobs`, `max_conversations`, `max_input_chars`; over capacity is refused with a code, never queued without bound; ids from `secrets.token_urlsafe` |
 | Concurrency | Slice A runs sync runners on a bounded worker pool, one fresh runner per job so a stop reaches exactly one run; after E7 jobs are `arun` tasks and the pool is removed |
-| Caller control | The caller picks a profile and gives a task or a message. It never sets the model, tools, budgets, instructions or code. Caller context passes `strip_caller_context(drop_internal=True)` and the size cap |
+| Caller control | The caller picks a profile and gives a task or a message. It never sets the model, tools, budgets, instructions or code. Caller context passes `strip_caller_context(drop_internal=True)` and the size cap; every caller message is logged with source `remote_client` |
+| Launchable profiles | A profile names a registered executable id. Before E4.2, a pattern that declares `requires.callables` with no registered callable is refused at startup; after E4.2 every pattern is servable |
 | Approval | Operator policy only: a profile's allow-list becomes its approval policy; an approval-required tool with no allow-list fails startup; the calling model approves nothing |
 | Errors | A failure returns a generic message and an `error_id`; provider text is never returned |
 | Transport security | Binds 127.0.0.1 by default; a non-loopback bind without a key is refused; bearer token checked with `security.api_key_matches`; `Origin` allow-list against DNS rebinding |
@@ -834,11 +889,11 @@ Every tool call returns at once; nothing blocks on a model. State lives in handl
 | 6.1 | Nightly live matrix: a hosted frontier model, a hosted mid-tier model and a small local model; budget cap; small subset nightly, full matrix weekly; models always explicit | CI, `eval/` | 5.4, 0.15 | Open | Results published per run |
 | 6.2 | Verify end state, not text: final state, extracted context, transition path, C13 codes, side effects; retire the 0 to 4 regex scorer | `eval/` | C8, C13, 1.1 | Open | Scores agree with manual review on a sampled set |
 | 6.3 | Public FSM-conformance benchmark: scripted conversations, expected state paths, pass@k and pass^k with Wilson intervals through `run_cases`; hidden test split; per-model leaderboard | `eval/benchmark/` | 6.2 | Open | Dataset and table published |
-| 6.4 | Trace-to-eval: any `values`-level logged session becomes a regression case (deterministic parts replayed, user turns simulated) | `eval/`, `testing/` | 1.11, 6.6 | Open | One CLI command |
-| 6.5 | CI budgets on replay fixtures: LLM calls per turn, tokens per turn, cached-token share, framework overhead per turn (provider time excluded) | CI | 1.9, 2.4 | Open | A regression fails the build |
+| 6.4 | Trace-to-eval: any `values`-level logged session becomes a regression case (deterministic parts replayed, `user`-source turns simulated, `run` and `remote_client` turns replayed as recorded) | `eval/`, `testing/` | 1.11, 1.17, 6.6 | Open | One CLI command |
+| 6.5 | CI budgets on replay fixtures: LLM calls per turn, tokens per turn, cached-token share, framework overhead per turn (provider time excluded), blocking log I/O per turn on the event loop | CI | 1.9, 1.18, 2.4 | Open | A regression fails the build |
 | 6.6 | One simulator (C7) in `simulation/`: personas; goals seeded from logged sessions; paired, repeated comparisons; a judge distinct from executor and compiler; it drives any executable through the protocol (C11), so FSMs, patterns, strategies and workflows are all simulatable. G6b, repair admission and trace-to-eval use it | `simulation/` | C7, C11, E2.1 | Open | Simulated runs reproduce logged outcome rates within interval; the `synthesis -> eval` debt is retired |
 | 6.7 | Per-model capability tests: typed extraction per field type, tie-break choice and calibration, Pass 2 instruction following, typed `return_result`, synthesis compile success | `eval/capabilities/` | 6.1 | Open | Capability table published per model |
-| 6.8 | Benchmark discipline: pre-registration with sha256 source pins for every published number; each claim names its block; held-out tasks never used to fix defects; results grouped by executable identity | `scripts/bench_data/`, `EVALUATE.md` | E2.2 | Partial: pre-registration and pins are practice | README quality claims cite a registered block run on at least three models |
+| 6.8 | Benchmark discipline: pre-registration with sha256 source pins for every published number; each claim names its block; held-out tasks never used to fix defects; results grouped by template identity and options | `scripts/bench_data/`, `EVALUATE.md` | E2.2 | Partial: pre-registration and pins are practice | README quality claims cite a registered block run on at least three models |
 
 **Exit criteria:** README quality claims cite registered blocks on at least three models.
 
@@ -851,14 +906,14 @@ An agent acts as a compiler and the FSM is a verified program. When a conversati
 
 ### 8.2 What exists
 
-`fsm_llm.synthesis`: 6,367 lines, documented in `src/fsm_llm/synthesis/README.md` and `docs/synthesis.md`.
+`fsm_llm.synthesis`: 6,375 lines, documented in `src/fsm_llm/synthesis/README.md` and `docs/synthesis.md`.
 
 | Component | State | Where |
 |---|---|---|
-| Synthesizer: `FSMSynthesizer.compile` and `obtain`; one request per round; gate failures returned as text for up to `max_repair_rounds`; a reply cut at `max_tokens` is a failed round; near-miss hints from the library; optional classification rule | Shipped, sync | `synthesizer.py`, `prompts.py` |
+| Synthesizer: `FSMSynthesizer.compile` and `obtain`; one request per round; gate failures returned as text for up to `max_repair_rounds`; a reply cut at `max_tokens` is a failed round; near-miss hints from the library; optional classification rule | Shipped, sync; reply judging split into `reply.py` for the async twins | `synthesizer.py`, `prompts.py`, `reply.py` |
 | Data flow and liveness (G3, G4) for every FSM | Shipped in core | `core/verify/flow.py` |
 | Policy (G5 allow-list) and an injected `abort` terminal gated on a handler-only key | Shipped | `policy.py` |
-| Library: content-addressed by sha256 of the canonical definition; lifecycle `draft`, `verified`, `trusted`, `deprecated`; signature filter, then exact goal match or cosine at or above `reuse_min_score`; hits re-verified; a deprecated digest refused | Shipped; last writer wins across processes | `library.py` |
+| Library: content-addressed by `definition_digest`, the core identity recipe; lifecycle `draft`, `verified`, `trusted`, `deprecated`; signature filter, then exact goal match or cosine at or above `reuse_min_score`; hits re-verified; a deprecated digest refused | Shipped; last writer wins across processes | `library.py` |
 | Runner: pushes the child with declared inputs under engine budgets; merges return keys on success only; `run_stream` and `converse_stream`; `provider_error` decided from the log position | Shipped as a second driver | `runner.py` |
 | Agent tools `obtain_procedure` and `run_procedure` (stops a procedure that waits for a user) | Shipped | `tools.py` |
 | G6a dead edges (dry run through the real evaluator) and G6b simulation (happy path plus model-written scenarios) | Shipped; simulator private to synthesis | `dryrun.py`, `simulation.py` |
@@ -880,7 +935,7 @@ What this does and does not show:
 - No block shows a synthesized FSM beating ReAct. In s1 and s2 the arms are within one task on a saturated set.
 - With one model there is no strong and cheap split, so no cost saving could appear; S was the most expensive arm (compile plus more than 1,000 simulation calls per block). Reuse worked: 31 of 48 S rows in s1 and s2 made no compile call.
 - s1 and s2 ran on the same tasks after fixes made from earlier failures, so the gain from 6 to 15 of 16 is in-sample.
-- Later synthesis fixes edit pinned files, and Workstream E edits more, so s0 to s2 cannot be re-reported. The next registered block pins the new layout (P7.9).
+- Every s0 to s2 manifest pins 35 paths under the pre-0.3 layout (`src/agents/...`, `src/synthesis/...`); none exists today, so no block can be re-reported, and no registered block pins the current layout (E0.3). The next registered block pins the layout it runs (P7.9).
 
 ### 8.4 Gates
 
@@ -954,7 +1009,7 @@ The `synthesize` state keeps its fields and its `synthesis_result`; a host may i
 | # | Change | Where | Builds on | Status | Done when |
 |---|---|---|---|---|---|
 | P7.1 | `synthesize` driven by the engine through the `call` executor body | `synthesis/`, `engine/kinds/` | E3.5 | Open; delivered by E3.5 | The concierge example runs on a bare `API` |
-| P7.2 | Library on the runtime store: records, run counters, traces, scenarios and patches become events and SQLite projections; counters update atomically across processes; a corrupt record is quarantined and reported; the library is a registry source (E6.2) | `synthesis/library.py`, `runtime/stores/` | 1.1, 1.2, E6.2 | Open | Two processes on one library keep exact counters; a corrupt record leaves every other procedure retrievable |
+| P7.2 | Library on the runtime store: records, run counters, traces, scenarios and patches become events and SQLite projections; counters update atomically across processes; a corrupt record is quarantined and reported; the library is a registry source (E6.2) | `synthesis/library.py`, `runtime/stores/` | 1.1, 1.2, E6.2, 0.18 | Open | Two processes on one library keep exact counters; a corrupt record leaves every other procedure retrievable |
 | P7.3 | Signals from events: `provider/error` codes replace usage heuristics; diagnosis gains rules for `extraction/miss` and `intent/out_of_scope` | `synthesis/diagnose.py` | 1.1, 1.15 | Partial: `provider_error` decided from the log position; miss and out-of-scope events have no producer | An outage is never diagnosed as a procedure fault; seeded out-of-scope and malformed-extraction defects are diagnosed |
 | P7.4 | Lean imports: `synthesis` imports only L0 to L5 | `synthesis/` | 3.2, 6.6 | Open | No ignore line names `synthesis`; `import fsm_llm.synthesis` loads no agent pattern |
 | P7.5 | Tool-using procedures: `completion` states inside procedures run through the tool executor under the policy and sandbox; G5's allow-list and G7 stay mandatory | `synthesis/`, `engine/kinds/completion.py` | 4.1, 4.2, 1.16 | Open | `completion_unsupported` is retired; a procedure that calls an allow-listed tool runs with an audited approval |
@@ -983,6 +1038,8 @@ Admission requires, in order: G1 to G6b on the patched child; replay of the pare
 - The goal is untrusted caller text. It reaches the strong model only inside a fenced block, cut to 2,000 characters, control characters stripped, and `[ ] < >` replaced so it cannot spell a marker.
 - Model-written text never becomes a setting. G5 is an allow-list; persona, model, prompt settings and regular expressions are refused. Generated text shown to a model or a person carries a fixed untrusted label.
 - A model-written definition may name only handlers, tools, callables and executables on the policy allow-list; handler bindings and variants of a pattern target are copied from the template, never generated.
+- The meta-builder's output is model-written too: it enters as `draft` and passes the same name allow-list (V7, E4.6).
+- A goal, task or message never becomes definition text, so it never changes a template identity (Principle 14).
 - Return keys are the only way data leaves a child, and only on success. No goal, compile text, reply or provider text enters an exception, finding, result or trace.
 - The abort path hangs on a key no extraction can write.
 - Synthesis depth defaults to 1.
@@ -1051,7 +1108,7 @@ Items 1 to 3 are implemented. Item 4 has not been measured. Before any public cl
 
 ```mermaid
 flowchart LR
-  P0[Phase 0 remainder: 0.15 to 0.17] --> P1[Phase 1 remainder: 1.1, 1.14 to 1.16]
+  P0[Phase 0 remainder: 0.15 to 0.18, E0.3] --> P1[Phase 1 remainder: 1.1, 1.14 to 1.18]
   P0 --> E1[E0, E1 envelope and validation]
   P1 --> E2[E2 registry and built-in executables]
   E1 --> E2
@@ -1061,6 +1118,8 @@ flowchart LR
   E3 --> E5[E5 workflows as executables]
   E4 --> E6[E6 synthesis targets and operator files]
   E5 --> E6
+  E4 --> E47[E4.5 to E4.7 presets, meta-builder envelopes, frame bindings]
+  E5 --> E47
   P1 --> P2[Phase 2 context]
   P1 --> P3[Phase 3 retrieval]
   P2 --> P4[Phase 4 policy, sandbox, codeact]
@@ -1088,14 +1147,14 @@ flowchart LR
 
 ### 10.2 Critical path
 
-0.16 and 0.17 → 1.1 and 1.14 → E1 → E2 → E3 → 6.6 → P7.6 → P7.9 block A. The event log (1.1) and the registry (E2.1) gate more items than anything else; protect both from scope creep. E2.4 is the cheapest leverage point: it makes every existing runner an executable under the same ids that the files of E3 and E4 later fill, so serving, evaluation by identity and the run context land before the conversions finish.
+E0.3 → 0.16 and 0.17 → 1.1 (tool events included), 1.14 and 1.18 → E1 → E2 → E3 → 6.6 → P7.6 → P7.9 block A. The event log (1.1 with 1.18) and the registry (E2.1) gate more items than anything else; protect both from scope creep. E0.3 is the cheapest unblock: the freeze it closes protects no live block, yet it keeps tool calls out of the log. E2.4 is the cheapest leverage point: it makes every existing runner an executable under the ids that the files of E3 and E4 later fill, so serving, the monitor, evaluation by identity and the run context land before the conversions finish.
 
 ### 10.3 Tracks
 
 | Track | Scope | Entry |
 |---|---|---|
 | A Platform | Phases 0 to 6 | Now |
-| E Executables | Workstream E | E0 now; E1 after 0.16 and 0.17; E2 after 1.14 |
+| E Executables | Workstream E | E0.1 done; E0.2 and E0.3 now; E1 after 0.16 and 0.17; E2 after 1.14 |
 | O Authoring | Workstream O | O1 after Phase 0; O4 and O5 after Phase 1 |
 | S Synthesis hardening | P7.1 to P7.9 | Per the graph |
 
@@ -1103,7 +1162,7 @@ O3 lands before P7.7 so that approvers review generated FSMs as classes. E0.1 la
 
 ### 10.4 Cut order
 
-If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 1.12, E6.4, E7.3. Never defer 1.1, 1.14, 0.16, 0.17, E1, E2, 6.6 or 6.8: every later claim depends on them.
+If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 1.12, E6.4, E7.3, E4.7. Never defer E0.3, 1.1, 1.14, 1.18, 0.16, 0.17, E1, E2, 6.6 or 6.8: every later claim depends on them.
 
 ---
 
@@ -1114,18 +1173,23 @@ If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 
 | Install path | `pip install llm-fsm` | Same, tested on three operating systems | Release CI |
 | Python versions in CI | 5 on Linux, 2 on Windows, 0 on macOS | 5 on Linux, 2 each on Windows and macOS; 4 after October 2027 | CI matrix |
 | Largest module | 799 lines | 800 or fewer | Module-size guard |
+| Modules within 25 lines of the cap | 5 | Split before a feature lands in them | 0.18 |
 | Import debts | 3 named groups plus 1 permanent edge | 0 | `.importlinter` |
 | Model resolvers | 2, one with a silent default | 1, no default | Test (0.15) |
 | Public result types on C13 | 0 of 4 | All | Test (0.16) |
-| Name tables on the shared registry | 0 | All | Test (0.17) |
-| Event types with a producer | 14 of 21 | All, plus `executable/resolve`, `run/start`, `run/end` | Producer tests (1.1) |
+| Private name tables | 9 | 0 (one `NameRegistry`) | Test (0.17, E2.4, E4.5, E4.6, E5.1) |
+| Event types emitted by product code | 12 of 21 (tool calls only through a helper no tool path calls) | All, plus `executable/resolve`, `run/start`, `run/end` | Producer tests (1.1) |
 | Event log | Opt-in, core `API` only | Default for every runner through C12 | 1.1, 1.14 |
+| Blocking log I/O per logged turn on the loop | About 76 ms, 29 fsyncs | Within the 6.5 budget | 1.18 |
+| Messages with a recorded source | 0 | All | 1.17 |
 | Approval decisions logged | 0 | All | 4.1 |
 | LLM requests with a purpose; failures with a code | 0 | All | 1.15 |
 | Async surface | LLM layer and core turns | Every runner and every adapter | API snapshot, E7.1 |
-| Definition formats | 4 | 1 envelope | E1.1 |
+| Definition formats | 7 | 1 envelope (FSM JSON inside it) | E1.1, E4.5, E4.6, E5.1 |
+| Patterns launchable by id from the monitor and serve | 7 of 18 (monitor) | 18 of 18 | E2.4, E4.2 |
+| Identity recorded per run | None | Template and instance identity on every `run/start` | E2.1 |
 | Built-ins defined as files | FSM examples only | Every built-in pattern and strategy; procedures and declarative workflows | E3.3, E4.2, E5.1, E6.2 |
-| Byte equality of converted definitions | Not measured | 100% of E0.1 fixtures | E0.1 test |
+| Byte equality of converted definitions | Fixtures for 49 cases committed; no conversion yet | 100% of E0.1 fixtures | E0.1 test |
 | Validation before model calls | FSM loader and validator | Every executable, every name resolved | E1.3 |
 | Prompt reconstructability | Partial (opt-in log) | 100% of `llm/request` events rebuild byte-identical prompts | Log test |
 | Observation cap | 2,000 characters | References with bounded previews | 2.2 |
@@ -1146,8 +1210,11 @@ If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | Making the event log the default destabilizes the core or costs latency and disk | Medium | High | Strangler approach: producers first, parity tests against session snapshots, then the switch; `shape` privacy for shared stores; retention policy; overhead budget in 6.5 |
+| A logged turn stalls an async server for tens of milliseconds | High | High | 1.18 before the log becomes the default; the 6.5 budget gates it |
+| Per-task identities exhaust memory in a long-running server | High | Medium | Retain templates, rebuild instances (E2.1); a test runs 10,000 distinct tasks against one template |
+| A delegated child blocks or deadlocks its parent's turns | Medium | High | Poll per turn, never wait inside the turn lock; `max_seconds` on every delegated call; conversational targets refused for delegated mode |
 | Executor stack requests (E3.2) break the lock order, rollback or the log fold | Medium | High | The stack module applies the requests; lock-order, fork, resume and fold tests gate E3.2 |
-| A converted definition changes a prompt by one character | High | Medium | Byte equality with the E0.1 fixtures before any builder or dict is deleted |
+| A converted definition changes a prompt by one character | High | Medium | Byte equality with the committed E0.1 fixtures (49 cases) before any builder or dict is deleted |
 | Pattern files weaken HITL | Low | High | The grant check stays in the tool executor; a missing approval gate is refused at creation; the HITL suite runs unchanged |
 | Reload breaks a running or resumed conversation | Medium | High | Identity-keyed cache and retention; resume checks the recomputed identity |
 | A user strategy or pattern returns keys the caller does not expect | Medium | Medium | The contract is checked against the flow analysis at load; `returns` copies only declared keys |
@@ -1163,6 +1230,8 @@ If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 
 | Phase 7 does not beat the offline baseline in experiment v2 | Medium | Medium | Falsifier in Section 8.9; ship the verifier and library as developer tools |
 | Same-model judging inflates gate results | High | Medium | Independent judge required (P7.6); gate reports name every model |
 | Generated definitions behave unsafely | Low | High | G5 allow-list, G7, depth 1, untrusted labels, abort key, return-key-only merge, template-copied handler bindings, full logging |
+| Folding SOP files and meta-builder artifacts breaks user files | Medium | Medium | A converting reader for one minor release and an upgrade guide (E4.5, E4.6) |
+| Meta-builder output names arbitrary handlers or tools | Medium | High | Enters as `draft`; V7 name allow-list; promotion needs approval (E4.6) |
 | Nightly hosted-model evals are expensive | High | Low | Budget cap; small nightly subset, full matrix weekly |
 | Benchmark overfitting | Medium | Medium | Hidden split; held-out tasks never used for fixes (6.8) |
 | The Python front end invites arbitrary code in routing | Medium | High | Guards compile to JsonLogic or fail to compile; no runtime fallback |
@@ -1178,20 +1247,21 @@ If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 
 
 | Topic | Policy |
 |---|---|
-| Versioning | Semantic versioning. Mapping by content: 0.14 = the unreleased runtime slice on main plus 0.15 to 0.17, 1.14 to 1.16, E0 and E1; 0.15 = 1.1 complete with the log as default, E2, E3 (P7.1), 4.8, 5.1, 5.3 slice A, 5.9; 0.16 = E4, E5, 1.5 complete, 1.6, 1.9, P7.2 to P7.4; 0.17 = Phases 2 and 3, O1 to O3, E6, 6.6; 0.18 = Phase 4, E7, O4, O5, P7.5 to P7.8, 5.3 slice B; 1.0 = Phase 5 complete plus a registered Phase 6 benchmark on three models. `fsm_llm.synthesis` stays experimental until experiment v2 reports |
+| Versioning | Semantic versioning. Mapping by content: 0.14 = the unreleased runtime slice on main plus 0.15 to 0.18, 1.14 to 1.17, E0 and E1; 0.15 = 1.1 and 1.18 complete with the log as default, E2, E3 (P7.1), 4.8, 5.1, 5.3 slice A, 5.9; 0.16 = E4 (E4.5 to E4.7 included), E5, 1.5 complete, 1.6, 1.9, P7.2 to P7.4; 0.17 = Phases 2 and 3, O1 to O3, E6, 6.6; 0.18 = Phase 4, E7, O4, O5, P7.5 to P7.8, 5.3 slice B; 1.0 = Phase 5 complete plus a registered Phase 6 benchmark on three models. `fsm_llm.synthesis` stays experimental until experiment v2 reports |
 | Breaking changes | Clean breaks per the repository's renaming procedure; every `**BREAKING:**` changelog entry links an upgrade guide (0.5) |
 | No shims | Moves are recorded in `tests/fixtures/module_path_map.json`. Paths the examples import stay packages that re-export their names: `fsm_llm.agents.fsm_definitions`, `fsm_llm.agents.definitions`, `fsm_llm.agents.tools`, `fsm_llm.agents.python_tools`, and the public names of `fsm_llm.agents`, `fsm_llm.reasoning` and `fsm_llm.workflows`. `build_<x>_fsm` keeps returning the same dict |
 | Deprecation | Before 1.0, at least one minor release of warnings; after 1.0, one full minor cycle |
 | FSM definition schema | Versioned through `version`; each field registered with the version that introduced it; additive fields bump the minor; the validator accepts every 4.x; `fsm-llm-validate --upgrade` rewrites old definitions; 5.0 is reserved for the first breaking change and none is planned |
 | Executable envelope schema | `schema_version` 1.x, additive only; the generated JSON Schema ships as package data |
+| SOP files | Loaded through a converting reader for one minor release after E4.5, then only as presets; the upgrade guide shows the conversion |
 | Event and session formats | Versioned with adjacent migrations; readers keep old formats loadable |
-| Wire strings | Context-key values, reason and status codes, `StopReason` values, `ReasoningType` values, `fsm_id`, `synthesis_result`, REST and WebSocket fields and serialized tags change only as a recorded breaking change. New: `call_result`, `executable/resolve`, `run/start`, `run/end`, request purposes, `LlmFailureCode`, `ToolErrorCode` |
+| Wire strings | Context-key values, reason and status codes, `StopReason` values, `ReasoningType` values, `fsm_id`, `synthesis_result`, REST and WebSocket fields and serialized tags change only as a recorded breaking change. New: `call_result`, `executable/resolve`, `run/start`, `run/end`, the message `source` values, `template_identity`, `instance_identity`, reasons `unknown_target` and `untrusted_source`, request purposes, `LlmFailureCode`, `ToolErrorCode` |
 | Python support | Add a new CPython version within one month of its release; drop a version at its end of life (3.11 in October 2027) |
 | Release cadence | Minor release roughly monthly; patches as needed; SBOM and attestations on every release |
 | Authoring surfaces | FSM JSON is the canonical IR inside the envelope; Python classes and synthesized procedures compile to it; the schema versions govern all three |
 | Optional integrations | `fsm_llm[nooa]` and `fsm_llm[txtai]` declare their own markers and never constrain core support |
 | Protocol targets | MCP 2026-07-28; A2A v1.0.1; Open Responses 2026-04-24; AG-UI 1.0; ATIF v1.8; OTel GenAI conventions at a pinned commit. A newer target is adopted with an upgrade guide |
-| Benchmark pins | A change to a pinned file voids re-reporting of the blocks that pin it; the next registered block pins the new layout |
+| Benchmark pins | A change to a pinned file voids re-reporting of the blocks that pin it. s0 to s2 are void already (they pin the pre-0.3 layout), so no live block constrains code today; the next registered block pins the layout it runs, and a test refuses a block whose pins name missing paths |
 
 ---
 
@@ -1208,6 +1278,7 @@ If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 
 | Python methods as the routing layer | Routing stays JsonLogic so it can be verified, drawn and synthesized |
 | Python inside JSON (inline code, expressions beyond JsonLogic) | Principle 9 and G5's "no code in a definition" |
 | One graph mixing FSM states and workflow steps | Calls across kinds give the same composition without a new execution model |
+| A delegated child that talks to the user | Conversational executables run in frame mode (E4.7); a delegated child takes its input from the parent only |
 | Gate code as JSON | Gates are code; their order, parameters and host gates are data (E6.1) |
 | A model choosing handler bindings | Bindings come from templates and operator files only |
 | Definition files dropped into the installed package | User directories instead (Section 6.5.3) |
@@ -1225,11 +1296,59 @@ If capacity is short, defer in this order: 5.6 to 5.8, 4.6, 4.7, O5, P7.8, 3.7, 
 |---|---|---|---|
 | 1 | Name of the FSM state kind that runs an executable | `call`, `invoke`, `subroutine` | `call` |
 | 2 | Strategy-returning functions return `str` for user strategies, changing their annotated return type | Accept as a recorded breaking change; or keep `ReasoningType` and wrap user strategies | Accept |
-| 3 | Blocks s0 to s2 can no longer be re-reported once E changes pinned files | Accept; or freeze the pinned files | Accept |
+| 3 | Blocks s0 to s2 can no longer be re-reported once E changes pinned files | Accept; or freeze the pinned files | Closed by evidence: they pin the pre-0.3 layout and are void already (E0.3) |
 | 4 | Whether the `workflow` compile target (E6.4) ships before 6.6 drives workflows | Ship capped at `draft`; or wait | Wait |
 | 5 | When the event log becomes the default | 0.15 with `shape` privacy for shared stores; or 1.0 | 0.15 |
 | 6 | MCP server authorization beyond a bearer token | OAuth 2.0 and OIDC in slice B; or bearer only behind a gateway | Slice B |
-| 7 | Whether the meta-builder becomes a `conversational` pattern file or stays a class behind an in-memory executable | File; or class | Class until E4 lands |
+| 7 | Whether the meta-builder becomes a `conversational` pattern file or stays a class behind an in-memory executable | File; or class | Class until E4.7 lands, then a file |
+| 8 | Fsync policy of the event log | Group commit at checkpoint boundaries and turn end; or every event | Group commit, every event as a strict opt-in |
+| 9 | Where caller task text lives in a pattern instance | Only in a declared input (it leaves the FSM `description`: a recorded re-id of every agent `fsm_id` and a reviewed regeneration of the E0.1 fixtures); or in `description`, with grouping by template identity | Template identity now; move the text with E4.2 |
+| 10 | Whether `fallback` in `choose` is open to every selector or only to reasoning | Every selector; or reasoning only | Every selector |
+
+---
+
+## 16. Change log: v4.0 to v4.1
+
+### 16.1 Baseline
+
+| Item | v4.0 | v4.1 |
+|---|---|---|
+| fsm_llm | `e53a796a`; `src` 96,084 lines; `tests` 228,479 | `0fb72162`; 96,108 and 228,882; core identity recipe, `aio.aoffload`, `synthesis/reply.py`, E0.1 fixtures |
+| txtai, deepseek-harness, NOOA, package indexes, standards | As listed | Re-checked on 2026-11-20; unchanged |
+
+### 16.2 Corrections
+
+| v4.0 statement | Verified | Change |
+|---|---|---|
+| Four definition formats | Seven: SOP files, the meta-builder's artifact specs and the monitor's `flows.json` were missed | Section 1, 4.3, E2.4, E4.5, E4.6, E5.1 |
+| Name tables are `ToolRegistry`, `_PATTERNS`, handler wiring and workflow callables | Nine private tables, including two in the monitor | C10, 0.17 |
+| 14 of 21 event types produced | 12 in product code; tool calls only through a helper no tool path calls | C4, 1.1, 1.3 |
+| `fsm_id` is the identity the log records | 8 hex characters, and it changes per task because the task text sits in `description` | C1, C11, 6.5, E2.1 |
+| Every identity ever served is retained for the process lifetime | Unbounded with per-task identities | Template retention, derived instances (6.5.3) |
+| `target_key` is a handler-only key | A classification writes the choice; the mapping sits in a reasoning-only handler | `choose` (6.5.4) |
+| Delegated mode: the parent state waits | No turn semantics; a conversational child cannot receive user messages | 6.5.4, E3.2, E4.7 |
+| s0 to s2 become void once E edits pinned files | Void since 0.3; the freeze protects nothing | E0.3, decision 3 |
+| Privacy levels done | A redacted value restores as its placeholder | 1.11 Partial |
+| Built-ins registered by the L6 packages | The engine had no import-free way to find them | `executable_sources` |
+
+### 16.3 Additions
+
+| Kind | Items |
+|---|---|
+| Rows | 0.18, 1.17, 1.18, E4.5, E4.6, E4.7 |
+| Targets and checks | T11, T12, V7 |
+| Rules | Principles 14 and 15; contract rules 9 and 10 |
+| Decisions | 8, 9, 10 |
+| Adopted from references | Message provenance (harness `subagent-initial-task-source`) |
+
+### 16.4 Status changes
+
+| Row | v4.0 | v4.1 |
+|---|---|---|
+| E0.1 | Open | Done |
+| 1.11 | Done | Partial |
+| 1.3 | Partial | Partial, with the remaining work named |
+| 0.18 | none | Partial |
 
 ---
 
@@ -1239,19 +1358,30 @@ Commands run from the root of each clone on 2026-11-20.
 
 ```bash
 # fsm_llm
-git log -1 --format='%h %cd' --date=short                          # e53a796a 2026-11-20
+git log -1 --format='%h %cd' --date=short                          # 0fb72162 2026-11-20
 git describe --tags --abbrev=0                                     # v0.13.0
-find src -name '*.py' | xargs cat | wc -l                          # 96,084
-find tests -name '*.py' | xargs cat | wc -l                        # 228,479
+find src -name '*.py' | xargs cat | wc -l                          # 96,108
+find tests -name '*.py' | xargs cat | wc -l                        # 228,882
 find examples -name '*.py' | xargs cat | wc -l                     # 22,123
 for d in src/fsm_llm/*/; do echo $d $(find $d -name '*.py' | xargs cat | wc -l); done   # Section 4.2
-find src -name '*.py' | xargs wc -l | sort -rn | sed -n 2p         # 799 src/fsm_llm/reasoning/engine.py
+find src -name '*.py' | xargs wc -l | sort -rn | sed -n 2,6p      # 799 reasoning/engine.py; 785 synthesis/library.py; 785 memory.py; 783 workflows/dsl.py; 777 llm/providers/litellm.py
 grep -rn "# DECISION" src --include=*.py | wc -l                   # 814
 wc -l plans/ANCHORS.md                                             # 473
 grep -n "^requires-python\|Programming Language :: Python :: 3\." pyproject.toml
 grep -n "macOS is not tested" CHANGELOG.md                         # CI legs
 grep -n "^mcp\|^litellm" constraints.txt                           # mcp==2.2.0, litellm==1.109.1
 sed -n '/^PRODUCED_TYPES/,/^)/p' src/fsm_llm/runtime/events.py     # 14 of the 21 EventType members
+grep -rn "\.tool_call(" src/fsm_llm --include=*.py                 # none: no tool path calls the helper
+sed -n '/## \[Unreleased\]/,/## \[0.13.0\]/p' CHANGELOG.md | grep -n "nown limit"   # 29 fsyncs and 76 ms; <redacted> restore; greeting
+python -c "import json; print(len(json.load(open('tests/fixtures/executables/index.json'))))"   # 49 (38 agents, 11 reasoning)
+grep -n "^def definition_canonical\|^def definition_digest\|^def fsm_id_of" src/fsm_llm/core/definitions/fsm.py
+grep -n "task_description\[:_MAX_DESC\]" src/fsm_llm/agents/fsm_definitions/_common.py   # task text in description
+grep -n "class SOPRegistry\|yaml.safe_load" src/fsm_llm/agents/sop.py
+grep -n "^_AGENT_CLASSES\|D-001\|D-058" src/fsm_llm/monitor/instance_manager/agent.py   # 7 classes
+python -c "import json; d=json.load(open('src/fsm_llm/monitor/static/flows.json')); print({k: len(v) for k, v in d.items()})"   # agents 12, workflows 5
+grep -n "^_FSM_SCHEMA\|^_WORKFLOW_SCHEMA\|^_AGENT_SCHEMA\|^_ARTIFACT_SCHEMAS" src/fsm_llm/agents/meta_prompts.py
+grep -rn "agent_type" src/fsm_llm --include=*.py | grep -v meta_         # no loader of the agent artifact
+grep -c '"src/agents/\|"src/synthesis/' scripts/bench_data/synthesis/s*/manifest_*.json   # pre-0.3 paths in every manifest
 grep -rln "core.codes" src/fsm_llm --include=*.py                  # codes.py and testing/ only
 grep -n "^DEFAULT_TOOL_MODEL" src/fsm_llm/constants.py             # line 276
 grep -rn "def resolve_model\|def resolve_tool_model" src/fsm_llm   # llm/interface.py, eval/config.py
@@ -1289,6 +1419,7 @@ ls docs/upgrade-guide/v0.2.2-rc.2 docs/upgrade-guide/v0.2.2-rc.3 docs/upgrade-gu
 #   workspace-write-boundary-follows-root
 ls docs/upgrade-guide/v0.2.2-alpha.2                               # llm-error-builtin-codes,
 #   llm-request-purpose-declarations, projection-event-frames
+ls docs/upgrade-guide/v0.2.2-rc.3                                   # subagent-initial-task-source
 
 # NVIDIA-NeMo/labs-OO-Agents (NOOA)
 git log -1 --format='%h %cd' --date=short                          # a3aabc5b 2026-11-20
