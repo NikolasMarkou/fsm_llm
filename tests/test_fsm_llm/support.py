@@ -1520,3 +1520,28 @@ def _plain_state(**fields: Any) -> State:
         "transitions": [{"target_state": "t", "description": "go"}],
     }
     return State(**{**base, **fields})
+
+
+def executor_table_snapshot() -> dict[str, Any]:
+    """The module table of state executors as a plain ``{kind name: executor}`` dict.
+
+    The table is a ``NameRegistry`` (plan ace7a8c8, D-045): a test that proves it untouched
+    compares two snapshots.
+    """
+    from fsm_llm.engine.kinds import registry
+
+    table = registry._EXECUTORS
+    return {name: table.resolve(name) for name in table.list()}
+
+
+def executor_table_copy() -> Any:
+    """A new registry with the entries of the module table, safe to register into.
+
+    Put it in place for one test with ``monkeypatch.setattr(ex, "_EXECUTORS", executor_table_copy())``.
+    """
+    from fsm_llm.core.names import NameRegistry
+
+    copy: NameRegistry[Any] = NameRegistry("state_kinds")
+    for name, executor in executor_table_snapshot().items():
+        copy.register(name, executor)
+    return copy

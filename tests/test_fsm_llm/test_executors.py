@@ -27,6 +27,7 @@ from fsm_llm.engine import kinds
 from fsm_llm.engine.kinds import registry as ex
 from fsm_llm.testing import final_reply
 from tests.test_fsm_llm.support import _plain_state
+from tests.test_fsm_llm.support import executor_table_copy as copy_of_table
 from tests.test_fsm_llm.test_completion_state import (
     _RESULT,
     _api,
@@ -420,7 +421,7 @@ class TestExecutorTable:
         assert type(ex.executor_for(state)) is ex.ConversationExecutor
 
     def test_register_executor_adds_and_replaces(self, monkeypatch):
-        monkeypatch.setattr(ex, "_EXECUTORS", dict(ex._EXECUTORS))
+        monkeypatch.setattr(ex, "_EXECUTORS", copy_of_table())
         marker = sk.KindSpec(name="marker", config_field="marker")
         monkeypatch.setattr(sk, "KINDS", (*sk.KINDS, marker))
         state = SimpleNamespace(completion=None, synthesize=None, marker={"x": 1})
@@ -472,7 +473,7 @@ class _Recorder(ex.CompletionExecutor):
 
 class TestDispatchThroughATurn:
     def _run(self, monkeypatch, executor, replies):
-        monkeypatch.setattr(ex, "_EXECUTORS", dict(ex._EXECUTORS))
+        monkeypatch.setattr(ex, "_EXECUTORS", copy_of_table())
         ex.register_executor("completion", executor)
         llm = _ScriptedLLM(*replies)
         api = _api(_tool_fsm(), llm)

@@ -652,6 +652,23 @@ fsm_llm.core.codes.Status class(str, Enum)
 fsm_llm.core.codes.approval_code def(approved: bool | None, *, errored: bool = False) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_stop_reason def(stop_reason: str) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_tool_status def(tool_status: str) -> tuple[Status, Reason | None]
+# fsm_llm.core.names
+fsm_llm.core.names.NameCollisionError class(NameRegistryError)
+fsm_llm.core.names.NameNotFoundError class(NameRegistryError)
+fsm_llm.core.names.NameRegistry class(Generic)
+  def __init__(self, namespace: str, *, entry_point_group: str | None = None) -> None
+  def freeze(self) -> None
+  property frozen
+  def get(self, name: str, default: T | None = None) -> T | None
+  def list(self) -> builtins.list[str]
+  def load_entry_points(self) -> None
+  def name_of(self, obj: object) -> str | None
+  property namespace
+  def register(self, name: str, obj: T, *, override: bool = False) -> None
+  def resolve(self, name: str) -> T
+fsm_llm.core.names.NameRegistryError class(FSMError)
+  def __init__(self, message: str, *, namespace: str | None = None, name: str | None = None, details: dict[str, Any] | None = None)
+fsm_llm.core.names.RegistryFrozenError class(NameRegistryError)
 # fsm_llm.core.results
 fsm_llm.core.results.Identity class(BaseModel)
   field template_identity: str | None = None

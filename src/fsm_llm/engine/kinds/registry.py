@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 
 from fsm_llm.core.definitions import State
+from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.state_kinds import get_kind, kind_of
 
 from .base import StateExecutor
@@ -21,19 +22,23 @@ _CONVERSATION = ConversationExecutor()
 
 _CONVERSATION_KIND = "conversation"
 
-# Kind name -> executor. ``synthesize`` is passive and has no entry: it runs as
+# Kind name -> executor: the ``state_kinds`` namespace of the name registry (plan ace7a8c8,
+# D-045; it names no entry-point group yet, that wiring is roadmap E2.3 and 5.5).
+# ``synthesize`` is passive and has no entry: it runs as
 # conversation through ``executor_for``'s fallback (a bare ``converse`` on it
 # stays BLOCKED, D-002 of plan 2cefeb61), which also honours a per-instance
 # override of ``conversation``.
-_EXECUTORS: dict[str, StateExecutor] = {
-    _CONVERSATION_KIND: _CONVERSATION,
-    "completion": CompletionExecutor(),
-}
+_EXECUTORS: NameRegistry[StateExecutor] = NameRegistry("state_kinds")
+_EXECUTORS.register(_CONVERSATION_KIND, _CONVERSATION)
+_EXECUTORS.register("completion", CompletionExecutor())
 
 
 def register_executor(kind_name: str, executor: StateExecutor) -> None:
-    """Register (or replace) the executor of the kind named ``kind_name``."""
-    _EXECUTORS[kind_name] = executor
+    """Register (or replace) the executor of the kind named ``kind_name``.
+
+    One executor instance cannot serve two kind names (``NameCollisionError``).
+    """
+    _EXECUTORS.register(kind_name, executor, override=True)
 
 
 def check_executors(
@@ -99,10 +104,10 @@ def executor_for(
     # (review gate 1, concern 11). A real synthesize executor registers under
     # its own name and then wins.
     name = kind_of(state).name
-    for table in (executors, _EXECUTORS):
-        if table is not None and name in table:
-            return table[name]
-    for table in (executors, _EXECUTORS):
-        if table is not None and _CONVERSATION_KIND in table:
-            return table[_CONVERSATION_KIND]
+    for kind in (name, _CONVERSATION_KIND):
+        if executors is not None and kind in executors:
+            return executors[kind]
+        module_executor = _EXECUTORS.get(kind)
+        if module_executor is not None:
+            return module_executor
     return _CONVERSATION

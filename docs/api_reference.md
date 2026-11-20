@@ -579,6 +579,21 @@ result.identity.template_identity    # None: identity is always an Identity, its
 
 `RunResult(status, reason, outputs, answer, detail, identity, handle)` is the one envelope of what a run reports (contract C13): `status` and `reason` come from the closed vocabularies above, `outputs` holds the declared keys, `detail` is kind-specific and never branched on by library code, `handle` is an id to resume or inspect the run. `Identity(template_identity, instance_identity)` carries the digest of the template that was loaded and of the instantiated body that ran; either may be `None`. Both models are frozen and refuse an unknown keyword (`RunResult(success=True)` raises). Import by name; `import fsm_llm` does not load the module. The result types of the agents, workflows and synthesis project onto it in later releases.
 
+### The name registry (`fsm_llm.core.names`)
+
+```python
+from fsm_llm.core.names import NameRegistry
+
+kinds: NameRegistry[object] = NameRegistry("state_kinds")
+kinds.register("conversation", executor)
+kinds.resolve("conversation") is executor   # True; a miss raises NameNotFoundError
+kinds.name_of(executor)                     # "conversation" (by identity, or None)
+kinds.register("conversation", other)       # NameCollisionError: pass override=True to replace
+kinds.freeze()                              # register now raises RegistryFrozenError
+```
+
+`NameRegistry[T](namespace, *, entry_point_group=None)` maps names to objects inside one namespace (contract C10: `state_kinds` today, later `executable_kinds`, `executable_sources`, `callables` and the rest). A taken name is refused unless `override=True`; one object under a second name is always refused, so `name_of` is unambiguous. `list()` is a sorted pure read. When `entry_point_group` is set (for example `"fsm_llm.state_kinds"`), the group is read once, on the first miss of `get`, `resolve` or `in`, by `load_entry_points()` or by `freeze()`: each entry `name = module:attr` registers its object without overriding, a failing entry is warned once and skipped. One leaf lock guards the table and no loader or logger runs under it. A registry is a plain instance (a module constant when global, a local when per run). Import by name; the engine's state-kind table is its first user, and `src` holds one test that lists every namespace and fails on a new private name table.
+
 A machine-checked list of the public names of the packages, with signatures, is the test fixture `tests/fixtures/api_snapshot.txt`; contributors regenerate it with `make api-snapshot` after a deliberate public change (a regression test fails until they do).
 
 ## Logging (`fsm_llm`)

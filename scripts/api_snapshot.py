@@ -48,6 +48,7 @@ MODULES = (
     "fsm_llm",
     "fsm_llm.skills",
     "fsm_llm.core.codes",
+    "fsm_llm.core.names",
     "fsm_llm.core.results",
     "fsm_llm.core.verify.flow",
     "fsm_llm.frontmatter",

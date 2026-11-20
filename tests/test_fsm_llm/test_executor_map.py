@@ -36,6 +36,8 @@ from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import registry as ex
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.testing import MockLLM2Interface
+from tests.test_fsm_llm.support import executor_table_copy as copy_of_table
+from tests.test_fsm_llm.support import executor_table_snapshot as snapshot
 
 _KIND = "reply_marker"
 
@@ -158,10 +160,10 @@ def _run(api: API) -> tuple[str, dict[str, Any]]:
 def marker_kind(monkeypatch):
     """The test kind's spec in the registry for one test; the module executor
     table must come out of the test as it went in."""
-    before = dict(ex._EXECUTORS)
+    before = snapshot()
     monkeypatch.setattr(sk, "KINDS", (*sk.KINDS, _MARKER_SPEC))
     yield
-    assert ex._EXECUTORS == before
+    assert snapshot() == before
 
 
 class TestARuntimeKindEndToEnd:
@@ -191,11 +193,11 @@ class TestARuntimeKindEndToEnd:
         assert state == "marker"
 
     def test_the_module_table_is_unchanged_by_a_per_api_map(self, marker_kind):
-        before = dict(ex._EXECUTORS)
+        before = snapshot()
         API.from_definition(
             _definition(), llm_interface=_llm(), executors={_KIND: _MarkerExecutor()}
         )
-        assert ex._EXECUTORS == before
+        assert snapshot() == before
         assert _KIND not in ex._EXECUTORS
 
 
@@ -214,9 +216,12 @@ class TestIsolation:
         assert "marker" not in _run(api_plain)[1]
         assert (first.extract_calls, second.extract_calls) == (1, 1)
 
-    def test_a_per_api_executor_wins_over_the_module_table(self, marker_kind):
-        ex.register_executor(_KIND, _MarkerExecutor("module"))
-        try:
+    def test_a_per_api_executor_wins_over_the_module_table(
+        self, marker_kind, monkeypatch
+    ):
+        with monkeypatch.context() as patch:
+            patch.setattr(ex, "_EXECUTORS", copy_of_table())
+            ex.register_executor(_KIND, _MarkerExecutor("module"))
             from_module = API.from_definition(_definition(), llm_interface=_llm())
             own = API.from_definition(
                 _definition(),
@@ -225,8 +230,6 @@ class TestIsolation:
             )
             assert _run(from_module)[1]["marker"] == "module"
             assert _run(own)[1]["marker"] == "own"
-        finally:
-            del ex._EXECUTORS[_KIND]
 
     def test_a_builtin_kind_can_be_replaced_for_one_api_only(self):
         counting = _CountingConversation()
@@ -239,7 +242,7 @@ class TestIsolation:
         _run(replaced)
         _run(untouched)
         assert counting.extract_calls == 1
-        assert ex._EXECUTORS["conversation"] is not counting
+        assert ex._EXECUTORS.resolve("conversation") is not counting
 
     def test_the_map_is_a_read_only_copy(self, marker_kind):
         given: dict[str, ex.StateExecutor] = {_KIND: _MarkerExecutor("one")}
@@ -326,10 +329,10 @@ class TestRefusals:
             )
 
     def test_a_refused_map_leaves_the_module_table_alone(self):
-        before = dict(ex._EXECUTORS)
+        before = snapshot()
         with pytest.raises(ValueError):
             _build_api({"nope": ex.ConversationExecutor()})
-        assert ex._EXECUTORS == before
+        assert snapshot() == before
 
 
 class _RecordingConversation(ex.ConversationExecutor):
@@ -373,15 +376,14 @@ class TestPassiveKindsRunAsTheInstancesConversation:
     def test_without_a_map_both_fall_back_to_the_module_conversation_entry(
         self, marker_kind
     ):
-        module_conversation = ex._EXECUTORS["conversation"]
+        module_conversation = ex._EXECUTORS.resolve("conversation")
         assert ex.executor_for(_synthesize_state()) is module_conversation
         assert ex.executor_for(_definition().states["marker"]) is module_conversation
 
     def test_a_map_without_conversation_does_not_hide_the_module_entry(self):
         other = ex.CompletionExecutor()
-        assert (
-            ex.executor_for(_synthesize_state(), {"completion": other})
-            is (ex._EXECUTORS["conversation"])
+        assert ex.executor_for(_synthesize_state(), {"completion": other}) is (
+            ex._EXECUTORS.resolve("conversation")
         )
 
     def test_the_per_api_entry_of_the_kind_itself_still_wins(self):
@@ -392,7 +394,7 @@ class TestPassiveKindsRunAsTheInstancesConversation:
     def test_a_module_executor_of_the_kind_beats_the_per_api_conversation_entry(
         self, monkeypatch
     ):
-        monkeypatch.setattr(ex, "_EXECUTORS", dict(ex._EXECUTORS))
+        monkeypatch.setattr(ex, "_EXECUTORS", copy_of_table())
         registered = ex.ConversationExecutor()
         ex.register_executor("synthesize", registered)
         mine = ex.ConversationExecutor()
