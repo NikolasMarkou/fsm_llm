@@ -84,8 +84,8 @@ async def aoffload(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
     it raises. Async mode: ``asyncio.to_thread``, so the worker reads a copy of the caller's
     Context (a ``ContextVar`` set by the caller is visible there), and a cancelled await
     returns at once while the worker runs ``fn`` to its end (its late result is dropped).
-    Sync mode (``SYNC`` set by ``run_sync``): ``fn`` runs inline on the caller's thread,
-    there being no loop to hop to and a worker started from here would run it elsewhere.
+    Sync mode (``SYNC`` set by ``run_sync``): ``fn`` runs inline on the caller's thread
+    (there is no loop to hop to).
     Use ``acall`` instead when the object has an ``a`` twin or a test may patch the name.
     """
     if SYNC.get():

@@ -4,7 +4,7 @@ The reply judge of the synthesizer: one model reply to one gate report.
 ``_judge`` reads a compile reply (cut off or not JSON is one G1 finding, a wrong
 closing bracket is repaired once, D-097; extraction instructions are named, D-096)
 and runs the gates. Moved out of ``synthesizer.py`` unchanged (plan ace7a8c8 D-004);
-every function here is synchronous, makes no model call and never raises on a reply.
+every function here is synchronous and makes no model call.
 """
 
 from __future__ import annotations
