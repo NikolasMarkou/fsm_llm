@@ -19,7 +19,7 @@ from collections.abc import (
 )
 from contextlib import aclosing, contextmanager
 
-from fsm_llm.aio import acall, acall_stream, iterate_sync, run_sync
+from fsm_llm.aio import SYNC, acall, acall_stream, iterate_sync, run_sync
 from fsm_llm.core.definitions import (
     AdvanceResult,
     FSMDefinition,
@@ -36,10 +36,23 @@ from .surface import _ApiSurface
 _BeforeStep = Callable[[int], Awaitable[None] | None]
 
 
+async def _await(awaitable: Awaitable[None]) -> None:
+    await awaitable
+
+
 async def _call_hook(before_step: _BeforeStep, step: int) -> None:
-    """Call ``before_step(step)`` and await what it returns when that is awaitable."""
+    """Call ``before_step(step)`` and await what it returns when that is awaitable.
+
+    In sync mode the awaitable is stepped with ``run_sync``: one that really suspends raises
+    ``SuspendedInSyncModeError`` here, inside the round generator (a bare ``await`` leaves the
+    generator "running" and the caller gets a ``RuntimeError`` from its ``aclose``).
+    """
     result = before_step(step)
-    if inspect.isawaitable(result):
+    if not inspect.isawaitable(result):
+        return
+    if SYNC.get():
+        run_sync(_await(result))
+    else:
         await result
 
 

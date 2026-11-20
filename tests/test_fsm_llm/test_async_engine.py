@@ -26,7 +26,7 @@ from unittest.mock import patch
 import pytest
 
 from fsm_llm import API, FileSessionStore
-from fsm_llm.aio import run_sync
+from fsm_llm.aio import SuspendedInSyncModeError, run_sync
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FSMError,
@@ -655,6 +655,32 @@ class TestInterleaveAndRefusal:
         ]
         assert await api.aconverse("three", cid) == "ok"
 
+    async def test_close_during_a_live_turn_leaves_an_owned_event_log_open(
+        self, tmp_path
+    ):
+        """``close()`` from a sibling task is refused by the gate for the conversation whose turn
+        is suspended; it must not close an OWNED log under that turn: the turn finishes with its
+        ``llm/response`` and ``turn/end`` written, the next turn works, and a second ``close()``
+        after the turn closes the log. Kills: a ``close`` that closes the log after a refused end
+        (the turn ends on a dangling ``llm/request``, the next turn raises ``LogWriteError``), a
+        ``close`` that never closes it (the second call leaves the log open)."""
+        llm = _Gated(default_response="ok")
+        api = API.from_definition(_CHAT(), llm_interface=llm, event_log=str(tmp_path))
+        cid, _ = await api.astart_conversation()
+        llm.arm()
+        turn = asyncio.create_task(api.aconverse("one", cid))
+        await asyncio.wait_for(llm.entered.wait(), 10)  # a bound: a hang fails the row
+        api.close()
+        assert not api.event_log._closed
+        llm.release.set()
+        assert await turn == "ok"
+        kinds = [e["type"] for e in api.event_log.read(cid)]
+        assert kinds[-1] == "turn/end" and kinds.count("turn/start") == 1
+        assert await api.aconverse("two", cid) == "ok"
+        log = api.event_log
+        api.close()
+        assert log._closed and not api.list_active_conversations()
+
 
 # ----------------------------------------------------------------------------------------------
 # Step 3.2: streams (aconverse_stream, aadvance_stream and the sync names over them)
@@ -939,3 +965,28 @@ class TestRunLoops:
             "b",
         ]  # the child ran in between
         assert offered and got_api.get_stack_depth(_CID) == 1
+
+    def test_a_sync_run_with_a_suspending_async_hook_raises_the_kernel_error(self):
+        """The sync run loops step the hook's coroutine with ``run_sync``: one that really
+        suspends raises ``SuspendedInSyncModeError``, as an ordinary error inside the round
+        generator, and the conversation is free for the next turn. One that does not suspend
+        runs. Kills: a hook awaited bare in sync mode (a bare ``RuntimeError`` "aclose():
+        asynchronous generator is already running" comes out), a hook never awaited."""
+        api, _, cid = _run_api(ScriptedLLM)
+        seen: list[int] = []
+
+        async def suspends(n):
+            seen.append(n)
+            await asyncio.sleep(0)
+
+        async def quiet(n):
+            seen.append(-n)
+
+        with pytest.raises(SuspendedInSyncModeError):
+            api.run_until_terminal(cid, max_steps=2, before_step=suspends)
+        with pytest.raises(SuspendedInSyncModeError):
+            list(api.run_until_terminal_stream(cid, max_steps=2, before_step=suspends))
+        assert seen == [1, 1]
+        assert not api.fsm_manager._conversation_locks[cid].locked()
+        assert api.run_until_terminal(cid, max_steps=2, before_step=quiet)
+        assert seen[2:] == [-1, -2]

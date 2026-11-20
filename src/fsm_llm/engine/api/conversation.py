@@ -110,7 +110,7 @@ from fsm_llm.constants import (
     DEFAULT_TEMPERATURE,
     FSM_ID_HASH_LENGTH,
 )
-from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition
 from fsm_llm.core.loaders import load_fsm_definition, load_fsm_from_file
 from fsm_llm.core.transition_evaluator import (
     TransitionEvaluator,
@@ -481,15 +481,27 @@ class API(
         return self.llm_interface
 
     def close(self) -> None:
-        """Clean up all active conversations and release resources."""
+        """Clean up all active conversations and release resources.
+
+        A conversation whose turn is still running refuses its end
+        (``ConversationBusyError``, a WARNING here): then an owned event log stays OPEN, so the
+        turn can write its end; call ``close()`` again after the turn.
+        """
+        busy = False
         for conversation_id in self.list_active_conversations():
             try:
                 self.end_conversation(conversation_id)
             except Exception as e:
+                busy = busy or isinstance(e, ConversationBusyError)
                 logger.warning(
                     f"Error ending conversation {conversation_id} during cleanup: {e!s}"
                 )
-        close_event_log(self)
+        if busy:
+            logger.warning(
+                "Event log left open: a turn is still running; close() again"
+            )
+        else:
+            close_event_log(self)
 
     def __enter__(self):
         """Context manager entry."""

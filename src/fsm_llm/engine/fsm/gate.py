@@ -98,6 +98,15 @@ class TurnGate:
 
     def _hand_over(self) -> None:
         """The gate has no holder: give it to the oldest waiter, else leave it free."""
+        # DECISION plan-2026-11-19T193704-f150ec28/D-015
+        # The LAST release hands the gate to the oldest waiter DIRECTLY: it makes that
+        # waiter's ticket the owner, so the gate is never free in between. Do NOT write
+        # this as `self._owner = None; self._cond.notify_all()` (the releaser, a loop of
+        # turns holding the GIL, retakes the gate before the woken waiter runs, and a
+        # blocked reader starves: 98 reads against about 3,000 in the seam test), do NOT
+        # replace the queue by a reserved flag (a waiter that timed out leaves the gate
+        # reserved for nobody), and do NOT let the releaser's own non-blocking claim
+        # succeed while a waiter is queued. See decisions.md D-015.
         if not self._queue:
             self._owner = None
             return
