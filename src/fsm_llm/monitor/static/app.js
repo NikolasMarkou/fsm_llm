@@ -343,6 +343,7 @@ dashboard.loadDashboardConfig();
 dashboard.refreshInstances();
 dashboard.refreshActivityTable();
 visualizer.initVizDivider();
+visualizer.initVizEditor();
 setInterval(updateClock, 1000);
 updateClock();
 

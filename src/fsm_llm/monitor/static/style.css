@@ -1846,6 +1846,54 @@ button.btn.btn-warning:hover {
     outline: none;
 }
 
+/* The JSON editor: a coloured pre behind a transparent-text textarea; both share one box model so the lines match. */
+.json-editor {
+    position: relative;
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    background: var(--bg);
+}
+
+.json-editor textarea,
+.json-overlay {
+    box-sizing: border-box;
+    margin: 0;
+    border: none;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    tab-size: 2;
+    line-height: 1.5;
+    padding: var(--space-3);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: normal;
+    overflow-y: scroll;
+}
+
+.json-editor textarea {
+    position: relative;
+    flex: 1;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--text);
+}
+
+.json-editor textarea::placeholder { color: var(--text-dim); }
+.json-editor textarea::selection { background: var(--primary-dim); color: transparent; }
+
+.json-overlay {
+    position: absolute;
+    inset: 0;
+    overflow-x: hidden;
+    pointer-events: none;
+    color: var(--text);
+    background: transparent;
+    scrollbar-color: transparent transparent;
+}
+
+.json-overlay::after { content: "\A"; }
+
 
 .viz-divider {
     width: 6px;

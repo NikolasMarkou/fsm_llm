@@ -16,11 +16,12 @@ const _NUMBER = '+-.0123456789eE';
  * Split valid JSON text into `{type, text}` tokens (type: key, string, number, bool, null, punct), one linear
  * scan with no recursion and no regex, so a deeply nested array costs no stack. Whitespace belongs to the
  * punct run beside it and no character is ever dropped: `tokens.map(t => t.text).join('')` equals `text`.
- * Returns null for a non-string, a text over JSON_HIGHLIGHT_MAX_CHARS, or a text that does not parse.
+ * Returns null for a non-string, a text over JSON_HIGHLIGHT_MAX_CHARS, or (unless `lenient`) a text that does not parse.
+ * `lenient` colours whatever the scan finds, for an editor whose text is invalid JSON most of the time it is being typed.
  */
-export function tokenizeJson(text) {
+export function tokenizeJson(text, lenient = false) {
     if (typeof text !== 'string' || text.length > JSON_HIGHLIGHT_MAX_CHARS) return null;
-    try { JSON.parse(text); } catch { return null; }
+    if (!lenient) { try { JSON.parse(text); } catch { return null; } }
     const tokens = [];
     const n = text.length;
     let i = 0;
@@ -53,9 +54,9 @@ export function tokenizeJson(text) {
  * Fill `el` with `text`: one `span.json-<type>` per token when `text` is valid JSON within the size cap,
  * else the text as it is. Either way `el.textContent === text`. Returns true when it coloured.
  */
-export function renderJson(el, text) {
+export function renderJson(el, text, lenient = false) {
     const plain = String(text ?? '');
-    const tokens = tokenizeJson(plain);
+    const tokens = tokenizeJson(plain, lenient);
     if (!tokens) {
         el.textContent = plain;
         return false;
@@ -75,4 +76,28 @@ export function renderJson(el, text) {
 export function highlightJsonIn(root) {
     if (!root) return;
     for (const el of root.querySelectorAll(`.${JSON_VIEW_CLASS}`)) renderJson(el, el.textContent);
+}
+
+/**
+ * Colour the text of an editable `textarea` while it stays the editable, copyable source: a `pre.json-overlay`
+ * behind it (the textarea text is transparent, its caret and selection stay) is refilled by `renderJson` on every
+ * `input` event and follows its scroll. A value set from code fires no `input`, so dispatch one after it.
+ * Returns the overlay, or null without a textarea. Nodes are built by `renderJson`: textContent only.
+ */
+export function attachJsonOverlay(textarea) {
+    if (!textarea || !textarea.parentNode || textarea.dataset.jsonOverlay) return null;
+    textarea.dataset.jsonOverlay = '1';
+    const wrap = document.createElement('div');
+    wrap.className = 'json-editor';
+    const overlay = document.createElement('pre');
+    overlay.className = 'json-overlay';
+    overlay.setAttribute('aria-hidden', 'true');
+    textarea.parentNode.insertBefore(wrap, textarea);
+    wrap.appendChild(overlay);
+    wrap.appendChild(textarea);
+    const sync = () => renderJson(overlay, textarea.value, true);
+    textarea.addEventListener('input', sync);
+    textarea.addEventListener('scroll', () => { overlay.scrollTop = textarea.scrollTop; overlay.scrollLeft = textarea.scrollLeft; });
+    sync();
+    return overlay;
 }

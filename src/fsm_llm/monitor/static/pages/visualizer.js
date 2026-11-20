@@ -3,6 +3,7 @@
 import { state } from '../services/state.js';
 import { fetchJson } from '../services/api.js';
 import { $, esc, showToast } from '../utils/dom.js';
+import { attachJsonOverlay } from '../utils/json_highlight.js';
 import { renderGraph } from '../utils/graph.js';
 
 let _vizStatusTimer = null;
@@ -176,6 +177,7 @@ export async function useFSMPreset(presetId) {
     try {
         const data = await fetchJson(`/api/preset/fsm/${encodeURIComponent(presetId)}`);
         $('viz-fsm-json').value = JSON.stringify(data, null, 2);
+        $('viz-fsm-json').dispatchEvent(new Event('input'));
         visualizeFSM();
     } catch (e) {
         console.error('useFSMPreset:', e);
@@ -184,6 +186,11 @@ export async function useFSMPreset(presetId) {
 }
 
 // --- Split-Pane Resize ---
+
+/** Colour the FSM source editor (the textarea stays the editable text). */
+export function initVizEditor() {
+    attachJsonOverlay($('viz-fsm-json'));
+}
 
 export function initVizDivider() {
     const divider = $('viz-divider');

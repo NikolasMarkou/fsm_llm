@@ -1,6 +1,6 @@
 // JSON colouring (plan 51fde95b D-040): tokens, byte equality, escaping, fallback, the size cap, deep nesting.
 import { El, out } from './stub.mjs';
-import { tokenizeJson, renderJson, highlightJsonIn, JSON_HIGHLIGHT_MAX_CHARS } from '../static/utils/json_highlight.js';
+import { tokenizeJson, renderJson, highlightJsonIn, attachJsonOverlay, JSON_HIGHLIGHT_MAX_CHARS } from '../static/utils/json_highlight.js';
 
 // Record every created tag and every innerHTML write: the renderer may build `span` nodes and nothing else.
 const tags = [], writes = [];
@@ -62,6 +62,20 @@ highlightJsonIn({ querySelectorAll: sel => { asked = sel; return [a, b]; } });
 highlightJsonIn(null);
 const into = { asked, a: [a.textContent, (a.children ?? []).length], b: [b.textContent, (b.children ?? []).length] };
 
+// The editor overlay: lenient colouring of text that is invalid while it is typed, byte for byte, refilled on input.
+const lenientKept = bad.every(text => { const t = tokenizeJson(text, true); return t !== null && t.map(x => x.text).join('') === text; });
+const halfTyped = '{"a": 1, "b": [tru';
+const lenientTypes = (tokenizeJson(halfTyped, true) ?? []).map(t => `${t.type}:${t.text}`);
+const listeners = {};
+const ta = { dataset: {}, value: halfTyped, scrollTop: 0, scrollLeft: 0, placed: [], addEventListener: (type, fn) => { listeners[type] = fn; } };
+ta.parentNode = { insertBefore: (node, ref) => ta.placed.push([node.className, ref === ta]) };
+const overlay = attachJsonOverlay(ta);
+const firstFill = [overlay.textContent, (overlay.children ?? []).length > 0];
+ta.value = '{"b": [1]}'; listeners.input();
+const afterInput = [overlay.textContent, (overlay.children ?? []).map(c => c.className).includes('json-key')];
+ta.scrollTop = 7; ta.scrollLeft = 3; listeners.scroll();
+const overlayRow = { first: firstFill, input: afterInput, scrolled: [overlay.scrollTop, overlay.scrollLeft], placed: ta.placed, again: attachJsonOverlay(ta), none: attachJsonOverlay(null), aria: overlay.attrs['aria-hidden'], cls: overlay.className };
+
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const keyedOk = ['key:"k"', 'key:"sp"', 'string:"b:c"'].every(t => keyedTokens.includes(t)) && keyedTokens.filter(t => t === 'string:"k"').length === 1 && !keyedTokens.includes('key:"b:c"');
 const checks = {
@@ -74,6 +88,8 @@ const checks = {
     sizeCap: JSON_HIGHLIGHT_MAX_CHARS === 200000 && same(capRow, [true, true, true, false]),
     deepNesting: same(deepRow, [[true, 1, true], [true, 60003, true]]) && deepFast,
     htmlStaysText: xss.text && xss.spansOnly && xss.innerHTMLWrites === 0 && writes.length === 0,
+    lenientKeepsBytes: lenientKept && tokenizeJson('{"a" 1', false) === null && lenientTypes[1] === 'key:"a"' && lenientTypes.includes('number:1') && lenientTypes[lenientTypes.length - 1].endsWith('tru'),
+    editorOverlay: same(overlayRow.first, [halfTyped, true]) && same(overlayRow.input, ['{"b": [1]}', true]) && same([overlayRow.scrolled], [[7, 3]]) && same(overlayRow.placed, [['json-editor', true]]) && overlayRow.again === null && overlayRow.none === null && overlayRow.aria === 'true' && overlayRow.cls === 'json-overlay',
     highlightIn: into.asked === '.json-view' && same(into.a, ['{"a": 1}', 5]) && same(into.b, ['not json', 0]),
 };
 out(checks);
