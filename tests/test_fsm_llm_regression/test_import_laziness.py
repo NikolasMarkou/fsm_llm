@@ -85,9 +85,11 @@ ON_REQUEST = (
 #: Third-party packages a core import must not pull in (the extras bring them).
 HEAVY_THIRD_PARTY = ("pytest", "fastapi", "uvicorn", "mcp", "opentelemetry")
 #: Dotted modules (a package name stands for itself and everything below it) that must not be
-#: in `sys.modules` after `import fsm_llm`, each with the reason. Empty at first: the steps that
+#: in `sys.modules` after `import fsm_llm`, each with the reason. The steps that
 #: create the envelope, its loader, the run context and the executable registry add their row.
-MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {}
+MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
+    "fsm_llm.core.results": "the result envelope (C13) loads when a runner or a caller imports it",
+}
 
 # The child code: import the package from `root`, print every loaded `fsm_llm` module and the
 # heavy third-party packages that came with it, as one JSON object.

@@ -1,15 +1,22 @@
 """The shared vocabulary of run statuses, reason codes and completion kinds.
 
-Three closed vocabularies, each a ``str`` enum whose values are the strings
-already on the wire, so a member and its string are interchangeable for ``==``,
-hashing, ``in``, ``json.dumps`` and pydantic:
+Five closed vocabularies, each a ``str`` enum whose values are the strings
+already on the wire (or, for ``Lifecycle`` and ``MessageSource``, the strings of
+the envelope and the event log), so a member and its string are interchangeable
+for ``==``, hashing, ``in``, ``json.dumps`` and pydantic:
 
 - ``Status``: how a run or a step ended (``ok``, ``failed``, ``aborted``,
   ``running``, ``abstained``).
 - ``Reason``: why, when a status needs one. The 15 reason codes of
-  ``fsm_llm.synthesis`` in their pinned order, plus ``needs_user_input``.
+  ``fsm_llm.synthesis`` in their pinned order, plus ``needs_user_input`` and
+  ``cancelled`` (a run stopped from outside).
 - ``CompletionKind``: the ``kind`` of a ``CompletionResponse`` (``calls``,
   ``final``, ``malformed``).
+- ``Lifecycle``: the lifecycle claim of an executable or a library procedure
+  (``draft``, ``verified``, ``trusted``, ``deprecated``, ``builtin``). A claim,
+  never authorization.
+- ``MessageSource``: who sent a message or an input (``user``, ``run``,
+  ``remote_client``, ``simulator``). Vocabulary only: no producer writes it yet.
 
 Three small pure mappers translate the agents' own vocabularies into it.
 They take plain strings or a bool and import nothing, so this module has no
@@ -31,6 +38,8 @@ from typing import TypeVar
 
 __all__ = [
     "CompletionKind",
+    "Lifecycle",
+    "MessageSource",
     "Reason",
     "Status",
     "approval_code",
@@ -82,6 +91,8 @@ class Reason(str, Enum):
     order. ``NEEDS_USER_INPUT`` is the 16th: ``synthesis.tools`` writes it but
     it is not in the pinned ``REASONS`` tuple (a bench manifest pins that
     file), so a test asserts the difference rather than hiding it.
+    ``CANCELLED`` is the 17th: a run ended from outside (``aborted`` with this
+    reason); no synthesis string names it.
     """
 
     INPUTS_MISSING = "inputs_missing"
@@ -100,6 +111,7 @@ class Reason(str, Enum):
     BUDGET_SPENT = "budget_spent"
     UNEXPECTED_ERROR = "unexpected_error"
     NEEDS_USER_INPUT = "needs_user_input"
+    CANCELLED = "cancelled"
 
     @classmethod
     def from_string(cls, value: Reason | str) -> Reason:
@@ -118,6 +130,46 @@ class CompletionKind(str, Enum):
     def from_string(cls, value: CompletionKind | str) -> CompletionKind:
         """The member for a member or an exact value; ``ValueError`` otherwise."""
         return _parse(cls, value, "completion kind")
+
+
+class Lifecycle(str, Enum):
+    """The lifecycle claim of an executable or a library procedure.
+
+    The first four members equal ``fsm_llm.synthesis.constants.LIFECYCLES`` in
+    order (``draft`` to ``deprecated``); ``BUILTIN`` is the fifth: a built-in
+    executable that ships in code. It is a claim of its source, never an
+    authorization.
+    """
+
+    DRAFT = "draft"
+    VERIFIED = "verified"
+    TRUSTED = "trusted"
+    DEPRECATED = "deprecated"
+    BUILTIN = "builtin"
+
+    @classmethod
+    def from_string(cls, value: Lifecycle | str) -> Lifecycle:
+        """The member for a member or an exact value; ``ValueError`` otherwise."""
+        return _parse(cls, value, "lifecycle")
+
+
+class MessageSource(str, Enum):
+    """Who sent a message or an input to a run (roadmap C4 and 1.17).
+
+    Vocabulary only: no event or run input records it yet. ``RUN`` is a parent
+    run (a delegated task), ``REMOTE_CLIENT`` a caller over a protocol,
+    ``SIMULATOR`` the user simulator.
+    """
+
+    USER = "user"
+    RUN = "run"
+    REMOTE_CLIENT = "remote_client"
+    SIMULATOR = "simulator"
+
+    @classmethod
+    def from_string(cls, value: MessageSource | str) -> MessageSource:
+        """The member for a member or an exact value; ``ValueError`` otherwise."""
+        return _parse(cls, value, "message source")
 
 
 _STOP_REASON_CODES: dict[str, tuple[Status, Reason | None]] = {

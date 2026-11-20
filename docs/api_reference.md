@@ -549,10 +549,10 @@ fsm-llm-validate --fsm path.json [--upgrade]
 
 `--upgrade` validates the file first and rewrites it in place to `SCHEMA_VERSION_DEFAULT` only when it loads as an FSM definition and declares a `version` of the form `N.M` from `SCHEMA_VERSION_OLDEST` (`"4.0"`) up to, but not including, the default (`"4.0"`, `"4.1"`). Everything else is left byte-identical: a file that is not valid UTF-8 JSON, not a JSON object (a `package.json`, say), not an FSM definition, with duplicate keys (a rewrite would drop one), with a non-string `version`, with a version below 4.0 or not of the form `N.M` (`"3.0"`, `"1.3.0"`, `"v4.1"`, which may be the author's own revision string), or with a current or newer (`"5.0"`) version, so it never downgrades. An omitted `version` already means the default, so it is left omitted. A refused or failed upgrade (every case above except the current, newer or omitted version, plus an I/O failure) is logged and the command exits 1 although the JSON report is still printed; a current, newer or omitted version is nothing to do and the exit code is the validation's. A file declaring `"3.0"` (some of the shipped examples do) must have its `version` edited by hand, because the registry does not know the shape below 4.0. A deeply nested file is a refusal, never a traceback. A second run changes nothing (no write, mtime kept). The write is atomic (a same-directory temp file, fsync, `os.replace`), keeps the file mode and follows a symlink to its target. Rewriting normalises the file: indent 2, LF line endings, numbers re-serialised (`1e2` becomes `100.0`), key order and non-ASCII text kept. The new version is the default, so the file's `fsm_id` and library digest change. stdout stays the JSON report only. `fsm-llm --mode validate` does not take `--upgrade`.
 
-## Status, reason and completion-kind vocabulary (`fsm_llm.core.codes`)
+## Status, reason, completion-kind, lifecycle and message-source vocabulary (`fsm_llm.core.codes`)
 
 ```python
-from fsm_llm.core.codes import CompletionKind, Reason, Status, approval_code, status_of_stop_reason, status_of_tool_status
+from fsm_llm.core.codes import CompletionKind, Lifecycle, MessageSource, Reason, Status, approval_code, status_of_stop_reason, status_of_tool_status
 
 Status.from_string("ok")            # Status.OK; "bogus", "", None raise ValueError naming the values
 Status.OK == "ok"                   # True: a str, Enum, so == , hashing, `in` and json.dumps work as for the string
@@ -561,10 +561,23 @@ status_of_tool_status("rejected")        # (Status.FAILED, Reason.APPROVAL_DENIE
 approval_code(None)                      # (Status.FAILED, Reason.APPROVAL_REQUIRED)
 ```
 
-- `Status`: `ok`, `failed`, `aborted`, `running`, `abstained` (`abstained` is new vocabulary with no earlier source string; only `status_of_tool_status("skipped")` produces it, and the `STATUS_*` constants of `fsm_llm.synthesis` map to the other members). `Reason`: the reason codes of `fsm_llm.synthesis` in their pinned order, plus `needs_user_input` (written by `synthesis.tools`, outside the pinned `REASONS` tuple). `CompletionKind`: `calls`, `final`, `malformed` (the `kind` of a `CompletionResponse` and of a completion-state result).
+- `Status`: `ok`, `failed`, `aborted`, `running`, `abstained` (`abstained` is new vocabulary with no earlier source string; only `status_of_tool_status("skipped")` produces it, and the `STATUS_*` constants of `fsm_llm.synthesis` map to the other members). `Reason`: the reason codes of `fsm_llm.synthesis` in their pinned order, plus `needs_user_input` (written by `synthesis.tools`, outside the pinned `REASONS` tuple) and `cancelled` (a run stopped from outside, `aborted` with this reason; no synthesis string names it). `Lifecycle`: `draft`, `verified`, `trusted`, `deprecated` (the four `fsm_llm.synthesis` lifecycle strings, in order) and `builtin` (a claim of the source, never an authorization). `MessageSource`: `user`, `run`, `remote_client`, `simulator` (vocabulary only: no event or run input records it yet). `CompletionKind`: `calls`, `final`, `malformed` (the `kind` of a `CompletionResponse` and of a completion-state result).
 - The values are the strings already on the wire. The modules that own them (`synthesis.constants`, the agents constants, `CompletionResponse`) keep their strings; `tests/test_fsm_llm/test_codes.py` reads them and fails on drift. `core/definitions/fsm.py` takes the statuses of its `synthesize` sample results from `Status`.
 - The mappers are pure and lossy by design, and each says so in its docstring: a spent `max_iterations` becomes `aborted` with `budget_spent` (the budget kind stays in `stop_reason`); an approval timeout is folded into denied. A timed-out tool call (`unknown`) is deliberately refused with `ValueError`, never mapped to `failed`: the call may still take effect, and `failed` reads as safe to run again.
 - Import it by name; `fsm_llm/__init__.py` does not load it. In messages use `.value`, not an f-string of a member.
+
+### The result envelope (`fsm_llm.core.results`)
+
+```python
+from fsm_llm.core.codes import Reason, Status
+from fsm_llm.core.results import Identity, RunResult
+
+result = RunResult(status=Status.ABORTED, reason=Reason.CANCELLED, handle="conv-1")
+result.success                       # False: derived from status, never stored or passed
+result.identity.template_identity    # None: identity is always an Identity, its digests may be None
+```
+
+`RunResult(status, reason, outputs, answer, detail, identity, handle)` is the one envelope of what a run reports (contract C13): `status` and `reason` come from the closed vocabularies above, `outputs` holds the declared keys, `detail` is kind-specific and never branched on by library code, `handle` is an id to resume or inspect the run. `Identity(template_identity, instance_identity)` carries the digest of the template that was loaded and of the instantiated body that ran; either may be `None`. Both models are frozen and refuse an unknown keyword (`RunResult(success=True)` raises). Import by name; `import fsm_llm` does not load the module. The result types of the agents, workflows and synthesis project onto it in later releases.
 
 A machine-checked list of the public names of the packages, with signatures, is the test fixture `tests/fixtures/api_snapshot.txt`; contributors regenerate it with `make api-snapshot` after a deliberate public change (a regression test fails until they do).
 

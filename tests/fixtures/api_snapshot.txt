@@ -614,6 +614,17 @@ fsm_llm.core.codes.CompletionKind class(str, Enum)
   CompletionKind.CALLS = 'calls'
   CompletionKind.FINAL = 'final'
   CompletionKind.MALFORMED = 'malformed'
+fsm_llm.core.codes.Lifecycle class(str, Enum)
+  Lifecycle.DRAFT = 'draft'
+  Lifecycle.VERIFIED = 'verified'
+  Lifecycle.TRUSTED = 'trusted'
+  Lifecycle.DEPRECATED = 'deprecated'
+  Lifecycle.BUILTIN = 'builtin'
+fsm_llm.core.codes.MessageSource class(str, Enum)
+  MessageSource.USER = 'user'
+  MessageSource.RUN = 'run'
+  MessageSource.REMOTE_CLIENT = 'remote_client'
+  MessageSource.SIMULATOR = 'simulator'
 fsm_llm.core.codes.Reason class(str, Enum)
   Reason.INPUTS_MISSING = 'inputs_missing'
   Reason.RETURN_KEYS_MISSING = 'return_keys_missing'
@@ -631,6 +642,7 @@ fsm_llm.core.codes.Reason class(str, Enum)
   Reason.BUDGET_SPENT = 'budget_spent'
   Reason.UNEXPECTED_ERROR = 'unexpected_error'
   Reason.NEEDS_USER_INPUT = 'needs_user_input'
+  Reason.CANCELLED = 'cancelled'
 fsm_llm.core.codes.Status class(str, Enum)
   Status.OK = 'ok'
   Status.FAILED = 'failed'
@@ -640,6 +652,19 @@ fsm_llm.core.codes.Status class(str, Enum)
 fsm_llm.core.codes.approval_code def(approved: bool | None, *, errored: bool = False) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_stop_reason def(stop_reason: str) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_tool_status def(tool_status: str) -> tuple[Status, Reason | None]
+# fsm_llm.core.results
+fsm_llm.core.results.Identity class(BaseModel)
+  field template_identity: str | None = None
+  field instance_identity: str | None = None
+fsm_llm.core.results.RunResult class(BaseModel)
+  field status: Status required
+  field reason: Reason | None = None
+  field outputs: dict[str, Any] = factory
+  field answer: str | None = None
+  field detail: dict[str, Any] = factory
+  field identity: Identity = factory
+  field handle: str | None = None
+  property success
 # fsm_llm.core.verify.flow
 fsm_llm.core.verify.flow.FlowFinding class
   def __init__(self, analysis: str, code: str, state: str, message: str) -> None

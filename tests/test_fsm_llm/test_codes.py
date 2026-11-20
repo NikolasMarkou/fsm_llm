@@ -18,6 +18,8 @@ from fsm_llm.agents.constants import StopReason, ToolRunStatus
 from fsm_llm.core import codes
 from fsm_llm.core.codes import (
     CompletionKind,
+    Lifecycle,
+    MessageSource,
     Reason,
     Status,
     approval_code,
@@ -29,7 +31,7 @@ from fsm_llm.core.definitions import fsm as definitions
 from fsm_llm.synthesis import constants as synth_constants
 from fsm_llm.synthesis import tools as synth_tools
 
-_ENUMS = [Status, Reason, CompletionKind]
+_ENUMS = [Status, Reason, CompletionKind, Lifecycle, MessageSource]
 
 
 def _public_values(cls: type) -> dict[str, str]:
@@ -58,11 +60,19 @@ class TestMembers:
             "abstained",
         ]
 
-    def test_reason_values_are_the_pinned_tuple_then_needs_user_input(self):
+    def test_reason_values_are_the_pinned_tuple_then_two_more(self):
         values = [m.value for m in Reason]
-        assert len(values) == 16
+        assert len(values) == 17
         assert values[:15] == list(synth_constants.REASONS)
         assert values[15] == "needs_user_input"
+        assert values[16] == "cancelled"
+
+    def test_cancelled_is_outside_the_pinned_reasons(self):
+        # `cancelled` is run-level vocabulary (roadmap 0.16, 4.8): no synthesis
+        # string names it, so the pinned tuple stays 15 long.
+        assert Reason.CANCELLED.value == "cancelled"
+        assert "cancelled" not in synth_constants.REASONS
+        assert Reason.from_string("cancelled") is Reason.CANCELLED
 
     def test_needs_user_input_is_outside_the_pinned_reasons(self):
         # `needs_user_input` is written by `synthesis.tools` but is not in the
@@ -75,6 +85,36 @@ class TestMembers:
     def test_completion_kind_members_and_values(self):
         assert [m.name for m in CompletionKind] == ["CALLS", "FINAL", "MALFORMED"]
         assert [m.value for m in CompletionKind] == ["calls", "final", "malformed"]
+
+    def test_lifecycle_members_and_values(self):
+        assert [m.name for m in Lifecycle] == [
+            "DRAFT",
+            "VERIFIED",
+            "TRUSTED",
+            "DEPRECATED",
+            "BUILTIN",
+        ]
+        assert [m.value for m in Lifecycle] == [
+            "draft",
+            "verified",
+            "trusted",
+            "deprecated",
+            "builtin",
+        ]
+
+    def test_message_source_members_and_values(self):
+        assert [m.name for m in MessageSource] == [
+            "USER",
+            "RUN",
+            "REMOTE_CLIENT",
+            "SIMULATOR",
+        ]
+        assert [m.value for m in MessageSource] == [
+            "user",
+            "run",
+            "remote_client",
+            "simulator",
+        ]
 
     @pytest.mark.parametrize("enum", _ENUMS)
     def test_members_are_snake_case_with_upper_names(self, enum):
@@ -127,6 +167,12 @@ class TestAgainstThePinnedVocabularies:
         assert Status.FAILED == synth_constants.STATUS_FAILED
         assert Status.ABORTED == synth_constants.STATUS_ABORTED
         assert Status.RUNNING == synth_constants.STATUS_RUNNING
+
+    def test_lifecycle_starts_with_the_synthesis_lifecycles_in_order(self):
+        values = [m.value for m in Lifecycle]
+        assert values[:4] == list(synth_constants.LIFECYCLES)
+        assert values[4] == "builtin"
+        assert "builtin" not in synth_constants.LIFECYCLES
 
     def test_completion_kind_equals_the_response_literal(self):
         annotation = CompletionResponse.model_fields["kind"].annotation
@@ -258,7 +304,13 @@ class TestSource:
 
     def test_messages_use_value_not_member_formatting(self):
         tree = ast.parse(self._SOURCE)
-        member_names = {"Status", "Reason", "CompletionKind"}
+        member_names = {
+            "Status",
+            "Reason",
+            "CompletionKind",
+            "Lifecycle",
+            "MessageSource",
+        }
 
         def _names_a_member(node: ast.AST) -> bool:
             return any(
@@ -283,6 +335,8 @@ class TestSource:
         assert sorted(codes.__all__) == sorted(
             [
                 "CompletionKind",
+                "Lifecycle",
+                "MessageSource",
                 "Reason",
                 "Status",
                 "approval_code",
