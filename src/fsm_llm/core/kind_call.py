@@ -19,7 +19,7 @@ Interface contract:
   zero-argument callable returning ``{result key: label}`` of the whole
   definition (``state_kinds.owned_result_keys``), called only when the edge
   rules passed. The four wording parameters name the kind in the messages:
-  *kind* (``synthesize``), *producer* (``the runner``), *outcome* (``the
+  *kind* (``synthesize``), *producer* (``the runner`` for synthesize: loader wording recorded as wire text), *outcome* (``the
   procedure``) and *return_entry* (``return_keys``, the label of the
   *return_names* list). Never raises on a loaded state.
 - ``CALL_SAMPLES``: the sample results the loader runs a call state's edges on (``None`` is
@@ -59,7 +59,7 @@ _RUNNING = "running"
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-034 and
 # plan-2026-11-10T194139-2cefeb61/D-035: an edge of a synthesize state may
-# read the result key OR a handler-only key (the runner's injected abort
+# read the result key OR a handler-only key (the injected abort
 # edge, handler-only `procedure_abort`, sits on every state of a compiled
 # procedure, nested synthesize states included), and is then RUN on four
 # sample results by the real evaluator. Do NOT
@@ -90,23 +90,23 @@ def check_result_edges(
 
     1. Every transition must read the state's ``result_key`` (a condition that
        requires it or reads it in its logic) or a ``handler_only_keys`` entry
-       (only a handler or the runner writes one; the runner's injected abort
+       (only a handler or the producer writes one; the injected abort
        edge is of this kind). This is necessary, not enough (rule 2 runs the
        edges); it also catches an edge on an unrelated key, which the samples
        of rule 2 cannot see.
     2. The real evaluator (``TransitionEvaluator.transition_passes``, never a
        copy of its logic) runs the state's edges on the four sample results,
-       shaped as the runner writes them (``status`` of ``running``, ``failed``
+       shaped as the producer (an executor) writes them (``status`` of ``running``, ``failed``
        or ``aborted``, or no result at all). No edge may pass the absent or the
-       ``running`` sample (it would fire before the runner has decided), and an
+       ``running`` sample (it would fire before the producer has decided), and an
        edge to ``on_failure`` must pass the ``failed`` sample and an edge to it
        the ``aborted`` sample (or the parent is stranded after a failure). An
        edge on a handler-only key alone passes no sample: fine, but it cannot
        be the failure edge.
-    3. Host keys a state returns or takes may not be runner-owned: a
+    3. Host keys a state returns or takes may not be producer-owned: a
        return key merged by ``pop_fsm`` would write a value the child's model
        extracted over a handler-only key, a synthesize result or a completion
-       result; an input named like a result would be overwritten by the runner.
+       result; an input named like a result would be overwritten by the producer.
        (A completion ``messages_key`` is internal-prefixed and so can never be a
        public return key.)
     """

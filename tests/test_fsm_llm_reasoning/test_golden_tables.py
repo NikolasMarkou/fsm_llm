@@ -75,14 +75,6 @@ def _hash(value: object) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _every_key_filled() -> dict[str, str]:
-    return {
-        value: f"v:{name}"
-        for name, value in vars(ContextKeys).items()
-        if name.isupper() and isinstance(value, str)
-    }
-
-
 def _results_maps() -> dict[str, dict[str, str]]:
     """Each strategy's parent key to child key map, the keys a call state merges on its pop."""
     return {name: strategy_facts(name)["results"] for name in STRATEGY_ORDER}

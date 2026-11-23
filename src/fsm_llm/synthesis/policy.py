@@ -4,8 +4,9 @@ Synthesis policy: the limits, the G5 policy gate and abort injection.
 A compile is model-written JSON, so it is untrusted. This module holds the
 closed rules every compile must meet (``check_policy``, gate G5), the one
 decision about when a human must approve it (``needs_approval``), and the
-silent ``abort`` terminal the runner relies on (``inject_abort`` and its exact
-inverse ``strip_abort``). Pure functions over plain dicts: no LLM, no I/O, no
+silent ``abort`` terminal (``inject_abort`` and its exact inverse ``strip_abort``;
+inert since the engine bounds the child by its frame budget, left as shipped by
+plan baa37f40 D-042). Pure functions over plain dicts: no LLM, no I/O, no
 logging. Nothing here raises on a hostile compile except ``inject_abort``,
 which is only called after the gates passed.
 
@@ -121,7 +122,7 @@ def _rate(name: str, value: Any, *, open_low: bool = False) -> float:
 class SynthesisPolicy:
     """The closed rules for one synthesizer.
 
-    Interface contract (callers: the compiler, G5, the runner, the tools):
+    Interface contract (callers: the compiler, G5, the executor, the tools):
         Every integer limit must be an ``int`` (not a ``bool``, ``float`` or
         ``str``) from its minimum (1; ``max_repair_rounds`` 0) to ``2**63 - 1``.
         ``max_fields_per_state`` caps the distinct key names one state

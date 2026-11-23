@@ -22,10 +22,9 @@ Interface contract:
   fresh on every call (a caller may mutate it); ``KeyError`` for a name not in
   ``STRATEGY_ORDER``.
 - ``solution_keys()``: the ``solution_key`` of every strategy, in ``STRATEGY_ORDER``.
-- ``strategy_id(name)`` and ``strategy_name(target_id)``: the executable id of a strategy
-  (``reasoning.<name>``, the target id a ``call`` state names) and its inverse; ``strategy_name``
-  returns ``None`` for an id that is not ``reasoning.`` plus a ``STRATEGY_ORDER`` name. The one
-  spelling of the id: ``executables`` and the engine both read it here (a leaf they may import).
+- ``strategy_id(name)``: the executable id of a strategy (``reasoning.<name>``, the target id a
+  ``call`` state names). The one spelling of the id: ``executables`` and the engine both read it
+  here (a leaf they may import).
 """
 
 from __future__ import annotations
@@ -70,14 +69,6 @@ _ID_PREFIX = "reasoning."
 def strategy_id(name: str) -> str:
     """The executable id of the strategy *name* (a ``ReasoningType`` value)."""
     return f"{_ID_PREFIX}{name}"
-
-
-def strategy_name(target_id: object) -> str | None:
-    """The strategy name of a target id ``reasoning.<name>``, else ``None``. Never raises."""
-    if not isinstance(target_id, str) or not target_id.startswith(_ID_PREFIX):
-        return None
-    name = target_id[len(_ID_PREFIX) :]
-    return name if name in STRATEGY_ORDER else None
 
 
 @cache

@@ -57,16 +57,10 @@ class ContextKeys:
 
     # Domain analysis
     PROBLEM_DOMAIN = "problem_domain"
-    DOMAIN_INDICATORS = "domain_indicators"
-    PROBLEM_STRUCTURE = "problem_structure"
-    STRUCTURAL_ELEMENTS = "structural_elements"
 
     # Strategy selection
     REASONING_STRATEGY = "reasoning_strategy"
-    STRATEGY_RATIONALE = "strategy_rationale"
     CLASSIFIED_PROBLEM_TYPE = "classified_problem_type"
-    REASONING_REQUIREMENTS = "reasoning_requirements"
-    KEY_CHALLENGES = "key_challenges"
     RECOMMENDED_REASONING_TYPE = "recommended_reasoning_type"
     STRATEGY_JUSTIFICATION = "strategy_justification"
     ALTERNATIVE_APPROACHES = "alternative_approaches"
@@ -110,56 +104,21 @@ class ContextKeys:
     CALCULATION_ERROR = "calculation_error"
 
     # Analytical reasoning
-    COMPONENTS = "components"
-    ATTRIBUTES = "attributes"
-    RELATIONSHIPS = "relationships"
-    COMPONENT_ANALYSIS = "component_analysis"
-    DATA_REQUIREMENTS = "data_requirements"
-    PATTERNS = "patterns"
-    CAUSAL_LINKS = "causal_links"
-    DEPENDENCIES = "dependencies"
     INTEGRATED_ANALYSIS = "integrated_analysis"
 
     # Deductive reasoning
-    PREMISES = "premises"
-    ASSUMPTIONS = "assumptions"
     LOGICAL_STEPS = "logical_steps"
-    INTERMEDIATE_CONCLUSIONS = "intermediate_conclusions"
     CONCLUSION = "conclusion"
-    LOGICAL_VALIDITY = "logical_validity"
 
     # Inductive reasoning
     OBSERVATIONS = "observations"
-    DATA_POINTS = "data_points"
-    COMMONALITIES = "commonalities"
-    TRENDS = "trends"
-    HYPOTHESIS = "hypothesis"
-    SUPPORTING_EVIDENCE = "supporting_evidence"
-    TEST_RESULTS = "test_results"
-    COUNTER_EXAMPLES = "counter_examples"
-    GENERALIZATION_STRENGTH = "generalization_strength"
 
     # Creative reasoning
-    PERSPECTIVES = "perspectives"
-    REFRAMINGS = "reframings"
     CREATIVE_IDEAS = "creative_ideas"
-    UNCONVENTIONAL_APPROACHES = "unconventional_approaches"
-    COMBINATIONS = "combinations"
-    NOVEL_SOLUTIONS = "novel_solutions"
     BEST_CREATIVE_SOLUTION = "best_creative_solution"
-    INNOVATION_RATING = "innovation_rating"
 
     # Critical reasoning
-    CLAIMS = "claims"
-    ARGUMENTS = "arguments"
-    EVIDENCE_QUALITY = "evidence_quality"
-    EVIDENCE_GAPS = "evidence_gaps"
-    LOGICAL_ANALYSIS = "logical_analysis"
-    FALLACIES = "fallacies"
-    ALTERNATIVE_EXPLANATIONS = "alternative_explanations"
-    COUNTER_ARGUMENTS = "counter_arguments"
     CRITICAL_ASSESSMENT = "critical_assessment"
-    CONFIDENCE_RATING = "confidence_rating"
 
     # Hybrid reasoning
     PROBLEM_ASPECTS = "problem_aspects"
@@ -172,9 +131,7 @@ class ContextKeys:
     NOVEL_APPROACHES = "novel_approaches"
     EVALUATION_RESULTS = "evaluation_results"
     INTEGRATED_SOLUTION = "integrated_solution"
-    REASONING_SYNTHESIS_NOTES = "reasoning_synthesis_notes"
     FINAL_HYBRID_SOLUTION = "final_hybrid_solution"
-    REASONING_SYNTHESIS = "reasoning_synthesis"
 
     # Deductive sub-FSM result keys
     DEDUCTIVE_CONCLUSION = "deductive_conclusion"
@@ -182,47 +139,11 @@ class ContextKeys:
     # Inductive sub-FSM result keys
     INDUCTIVE_HYPOTHESIS = "inductive_hypothesis"
 
-    # Critical sub-FSM result keys
-    ASSESSMENT_CONFIDENCE = "assessment_confidence"
-
-    # Abductive reasoning
-    SURPRISING_ELEMENTS = "surprising_elements"
-    POTENTIAL_HYPOTHESES = "potential_hypotheses"
-    HYPOTHESIS_RATIONALES = "hypothesis_rationales"
-    HYPOTHESIS_EVALUATIONS = "hypothesis_evaluations"
-    EVALUATION_CRITERIA = "evaluation_criteria"
-    BEST_HYPOTHESIS = "best_hypothesis"
-    SELECTION_JUSTIFICATION = "selection_justification"
-    CONFIDENCE_IN_EXPLANATION = "confidence_in_explanation"
-    NEXT_STEPS_FOR_VALIDATION = "next_steps_for_validation"
-
     # Abductive sub-FSM result keys
     BEST_EXPLANATION = "best_explanation"
-    EXPLANATION_CONFIDENCE = "explanation_confidence"
-
-    # Analogical reasoning
-    TARGET_PROBLEM_DESCRIPTION = "target_problem_description"
-    KEY_FEATURES_OF_TARGET = "key_features_of_target"
-    POTENTIAL_ANALOGS = "potential_analogs"
-    RATIONALE_FOR_CHOICE = "rationale_for_choice"
-    SIMILARITY_CRITERIA_USED = "similarity_criteria_used"
-    SELECTED_ANALOG = "selected_analog"
-    ANALOGICAL_MAPPING = "analogical_mapping"
-    IDENTIFIED_SIMILARITIES = "identified_similarities"
-    IDENTIFIED_DIFFERENCES = "identified_differences"
-    TRANSFERRED_INSIGHTS_OR_SOLUTIONS = "transferred_insights_or_solutions"
-    POTENTIAL_INFERENCES = "potential_inferences"
-    ANALOGY_STRENGTHS = "analogy_strengths"
-    ANALOGY_WEAKNESSES_OR_LIMITATIONS = "analogy_weaknesses_or_limitations"
-    ADAPTED_SOLUTION_OR_UNDERSTANDING = "adapted_solution_or_understanding"
-    ANALOGY_CONFIDENCE_RATING = "analogy_confidence_rating"
 
     # Analogical sub-FSM result keys
     ANALOGICAL_SOLUTION = "analogical_solution"
-    ANALOGY_CONFIDENCE = "analogy_confidence"
-
-    # Hybrid sub-FSM result keys
-    HYBRID_SYNTHESIS_SUMMARY = "hybrid_synthesis_summary"
 
     # Calculation error details
     CALCULATION_ERROR_DETAILS = "calculation_error_details"
@@ -238,13 +159,8 @@ RETRY_CLEARED_KEYS: tuple[str, ...] = (
     ContextKeys.PROPOSED_SOLUTION,
     ContextKeys.KEY_INSIGHTS,
     ContextKeys.VALIDATION_RESULT,
-    # The calculator's outcome is the merge's of THIS attempt (D-052 of plan
-    # 51fde95b): a stale error or result, or a caller's claim, never survives.
     ContextKeys.CALCULATION_RESULT,
     ContextKeys.CALCULATION_ERROR_DETAILS,
-    # The call record of THIS attempt (plan baa37f40 D-031): the call executor skips a
-    # record that already belongs to its state, so a retry would never run the strategy
-    # again without the clear.
     ContextKeys.CALL_RESULT,
 )
 
@@ -261,8 +177,6 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.REASONING_TYPE_SELECTED,
     ContextKeys.CLASSIFIED_PROBLEM_TYPE,
     ContextKeys.HYBRID_LOOP_COUNT,
-    # Only the strategy merge writes the calculator's outcome (D-052): a bulk
-    # reply must not claim a result that becomes the answer.
     ContextKeys.CALCULATION_RESULT,
     ContextKeys.CALCULATION_ERROR_DETAILS,
 )

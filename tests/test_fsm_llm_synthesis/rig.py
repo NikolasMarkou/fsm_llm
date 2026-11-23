@@ -60,8 +60,6 @@ REPLIES = {
 }
 CANARIES = ("CANARY-CONTEXT", "CANARY-USER", "CANARY-MODEL")
 
-TraceSink = Callable[[str, dict[str, Any]], None]
-
 
 class ExecutorDriver:
     """The executor's driver: the ``API`` itself, plus the host's two steps the engine does not
