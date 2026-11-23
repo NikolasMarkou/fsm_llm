@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Generator
+from contextlib import closing
 from typing import Any
 
 from fsm_llm import (
@@ -49,6 +51,7 @@ from .handlers import (
     retries_exhausted,
 )
 from .selection import classification_intents
+from .stream import SolveStream
 from .utilities import get_reasoning_fsm
 
 #: What ``ReasoningEngine.model`` shows when an injected interface states no model.
@@ -459,104 +462,210 @@ class ReasoningEngine:
             included (chained from ``RunBudgetExceededError``)
         """
         check_turn_limits(max_steps, max_seconds)
-        with self._solve_lock:
-            return self._solve_problem_locked(
-                problem,
-                initial_context,
-                self._solve_steps if max_steps is None else max_steps,
-                max_seconds,
-            )
+        solve = self._solve(
+            problem, initial_context, max_steps, max_seconds, stream=False
+        )
+        try:
+            next(solve)
+        except StopIteration as done:
+            result: tuple[str, dict[str, Any]] = done.value
+            return result
+        raise AssertionError("a solve that streams nothing yielded")  # pragma: no cover
 
-    def _solve_problem_locked(
+    def solve_problem_stream(
+        self,
+        problem: str,
+        initial_context: dict[str, Any] | None = None,
+        *,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
+    ) -> SolveStream:
+        """
+        Solve a problem and stream its replies as they arrive (plan baa37f40 D-036).
+
+        The same solve as ``solve_problem`` (one body), driven by ``run_until_terminal_stream``:
+        iterating the returned ``SolveStream`` yields the start greeting and every chunk of
+        every step, the replies of a pushed strategy FSM included, while the strategy runs;
+        ``.result()`` is the ``(solution, trace_info)`` tuple once the iterator ended. The limits
+        are checked now (``ValueError``); nothing else runs, and the solve lock of the engine is
+        not taken, before the first ``next()``. The lock is held until the stream ends, fails or
+        is closed (``close()``, a ``with`` block, or dropping the stream), and the orchestrator
+        conversation is ended on each of those ways out.
+
+        :param problem: The problem statement
+        :param initial_context: Optional initial context
+        :param max_steps: As in ``solve_problem``
+        :param max_seconds: As in ``solve_problem``
+        :return: The ``SolveStream``; iterating it raises what ``solve_problem`` raises
+        :raises ValueError: If a limit is not a valid run limit (before any model call)
+        """
+        check_turn_limits(max_steps, max_seconds)
+        return SolveStream(
+            self._solve(problem, initial_context, max_steps, max_seconds, stream=True)
+        )
+
+    # DECISION plan-2026-11-23T122249-baa37f40/D-036
+    # ONE body serves `solve_problem` (`stream=False`: never yields, `run_until_terminal`, the
+    # request bytes of the parent) and `solve_problem_stream` (`stream=True`: yields the chunks of
+    # `run_until_terminal_stream`). The lock is taken HERE, inside the generator, in a `with`: an
+    # unstarted stream holds nothing, and every way a generator ends (exhaustion, an error,
+    # `close()`, finalisation) releases it. Do NOT take or release the lock outside this `with`
+    # (a hand-written release that is not in a `finally` leaks it on an abandoned stream), do NOT
+    # end the conversation before the run stream is closed (it stays claimed until then, so
+    # `_run_streaming` closes it first), do NOT narrow the last `except` back to the two
+    # interrupts (a `GeneratorExit` from `close()` and a `CancelledError` from a model call must
+    # end the conversation too), and do NOT give `solve_problem` another driver than
+    # `run_until_terminal`.
+    def _solve(
         self,
         problem: str,
         initial_context: dict[str, Any] | None,
+        max_steps: int | None,
+        max_seconds: float | None,
+        *,
+        stream: bool,
+    ) -> Generator[str, None, tuple[str, dict[str, Any]]]:
+        """The one solve body; returns ``(solution, trace_info)`` and yields chunks only when
+        ``stream`` is true. Holds ``_solve_lock`` from its first step to its end."""
+        steps = self._solve_steps if max_steps is None else max_steps
+        with self._solve_lock:
+            # Initialize context (copy to avoid mutating caller's dict)
+            context = dict(initial_context) if initial_context else {}
+            # The strategy keys are the engine's own (D-058, D-060).
+            dropped = [
+                key for key in SOLVE_DRIVER_KEYS if context.pop(key, None) is not None
+            ]
+            if dropped:
+                logger.warning(
+                    f"initial_context keys set by the engine only, ignored: {dropped}"
+                )
+            context[ContextKeys.PROBLEM_STATEMENT] = problem
+            context[ContextKeys.REASONING_TRACE] = []
+            context[ContextKeys.RETRY_COUNT] = 0
+
+            started = time.monotonic()
+            # Start orchestrator
+            conversation_id, initial_response = self.orchestrator.start_conversation(
+                context
+            )
+            log = _solve_log(conversation_id)
+            log.info(f"Started reasoning process: {conversation_id}")
+
+            try:
+                if stream:
+                    responses = yield from self._run_streaming(
+                        conversation_id, initial_response, steps, max_seconds
+                    )
+                else:
+                    # One message-free run drives the orchestrator, every strategy FSM its
+                    # `execute_reasoning` call pushes (and pops) and every retry.
+                    results = self.orchestrator.run_until_terminal(
+                        conversation_id, max_steps=steps, max_seconds=max_seconds
+                    )
+                    # a pushed child's greeting rides on the reply of the step that pushed it
+                    responses = [initial_response] + [
+                        result.response
+                        for result in results
+                        if result.response is not None
+                    ]
+            except RunBudgetExceededError as e:
+                # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
+                # unfinished solve raises, never returns a fallback string as the
+                # solution.
+                raise self._failed_solve(
+                    conversation_id,
+                    f"Reasoning did not finish within {e.limit} {e.budget}",
+                ) from e
+            except Exception as e:
+                raise self._failed_solve(
+                    conversation_id, f"Reasoning execution failed: {e}"
+                ) from e
+            except BaseException:
+                # An interrupt, a cancel and the close of a stream reach the caller
+                # unwrapped, but end what the solve opened.
+                _end_quietly(self.orchestrator, conversation_id)
+                raise
+
+            # Get final context BEFORE ending the conversation (end_conversation
+            # removes the instance, making get_data fail).
+            try:
+                final_context = self.orchestrator.get_data(conversation_id)
+                solution = self.output_formatter.extract_final_solution(
+                    final_context, self._solution_keys
+                )
+
+                # Build trace info
+                trace_steps = final_context.get(ContextKeys.REASONING_TRACE, [])
+                reasoning_types = self._extract_reasoning_types(
+                    final_context, trace_steps
+                )
+
+                trace_info = ReasoningTrace(
+                    steps=trace_steps,
+                    reasoning_types_used=set(reasoning_types),
+                    final_confidence=final_context.get(
+                        ContextKeys.SOLUTION_CONFIDENCE, 0.0
+                    ),
+                    execution_time_seconds=time.monotonic() - started,
+                )
+
+                log.info(
+                    LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps)
+                )
+
+                trace_dump = trace_info.model_dump()
+                return solution, {
+                    "reasoning_trace": trace_dump,
+                    "summary": self.output_formatter.format_reasoning_summary(
+                        trace_dump
+                    ),
+                    "final_context": final_context,
+                    "all_responses": responses,
+                }
+            finally:
+                # Always clean up the conversation, even if post-processing raises
+                _end_quietly(self.orchestrator, conversation_id)
+
+    def _run_streaming(
+        self,
+        conversation_id: str,
+        initial_response: str,
         max_steps: int,
         max_seconds: float | None,
-    ) -> tuple[str, dict[str, Any]]:
-        """Internal solve logic, must be called while holding ``_solve_lock``."""
-        # Initialize context (copy to avoid mutating caller's dict)
-        context = dict(initial_context) if initial_context else {}
-        # The strategy keys are the engine's own (D-058, D-060).
-        dropped = [
-            key for key in SOLVE_DRIVER_KEYS if context.pop(key, None) is not None
-        ]
-        if dropped:
-            logger.warning(
-                f"initial_context keys set by the engine only, ignored: {dropped}"
-            )
-        context[ContextKeys.PROBLEM_STATEMENT] = problem
-        context[ContextKeys.REASONING_TRACE] = []
-        context[ContextKeys.RETRY_COUNT] = 0
+    ) -> Generator[str, None, list[str]]:
+        """Drive the run with ``run_until_terminal_stream``, yielding every chunk.
 
-        started = time.monotonic()
-        # Start orchestrator
-        conversation_id, initial_response = self.orchestrator.start_conversation(
-            context
-        )
-        log = _solve_log(conversation_id)
-        log.info(f"Started reasoning process: {conversation_id}")
+        Contract: yields the start greeting when it is not empty, then each chunk of each step;
+        returns the ``all_responses`` list of the solve: the greeting, then one text per step that
+        spoke, the concatenation of that step's chunks (the steps are told apart by the
+        ``before_step`` hook, one bucket per step number, so the reply and the greeting a call
+        pushed at the end of the step, which the stream yields as ``"\n<greeting>"``, concatenate
+        to the string ``advance`` returns). The run stream is closed before this generator ends,
+        however it ends, so the conversation is free to be ended.
+        """
+        steps: dict[int, list[str]] = {}
+        current: list[str] = []
 
-        try:
-            # One message-free run drives the orchestrator, every strategy FSM its
-            # `execute_reasoning` call pushes (and pops) and every retry.
-            results = self.orchestrator.run_until_terminal(
-                conversation_id, max_steps=max_steps, max_seconds=max_seconds
-            )
-        except RunBudgetExceededError as e:
-            # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
-            # unfinished solve raises, never returns a fallback string as the
-            # solution.
-            raise self._failed_solve(
+        def begin_step(step: int) -> None:
+            nonlocal current
+            current = steps.setdefault(step, [])
+
+        if initial_response:
+            yield initial_response
+        with closing(
+            self.orchestrator.run_until_terminal_stream(
                 conversation_id,
-                f"Reasoning did not finish within {e.limit} {e.budget}",
-            ) from e
-        except Exception as e:
-            raise self._failed_solve(
-                conversation_id, f"Reasoning execution failed: {e}"
-            ) from e
-        except (KeyboardInterrupt, SystemExit):
-            # The caller's signal reaches it unwrapped, but ends what it opened.
-            _end_quietly(self.orchestrator, conversation_id)
-            raise
-        # a pushed child's greeting rides on the reply of the step that pushed it
-        responses = [initial_response] + [
-            result.response for result in results if result.response is not None
+                max_steps=max_steps,
+                max_seconds=max_seconds,
+                before_step=begin_step,
+            )
+        ) as chunks:
+            for chunk in chunks:
+                current.append(chunk)
+                yield chunk
+        return [initial_response] + [
+            "".join(texts) for texts in steps.values() if texts
         ]
-
-        # Get final context BEFORE ending the conversation (end_conversation
-        # removes the instance, making get_data fail).
-        try:
-            final_context = self.orchestrator.get_data(conversation_id)
-            solution = self.output_formatter.extract_final_solution(
-                final_context, self._solution_keys
-            )
-
-            # Build trace info
-            trace_steps = final_context.get(ContextKeys.REASONING_TRACE, [])
-            reasoning_types = self._extract_reasoning_types(final_context, trace_steps)
-
-            trace_info = ReasoningTrace(
-                steps=trace_steps,
-                reasoning_types_used=set(reasoning_types),
-                final_confidence=final_context.get(
-                    ContextKeys.SOLUTION_CONFIDENCE, 0.0
-                ),
-                execution_time_seconds=time.monotonic() - started,
-            )
-
-            log.info(LogMessages.PROBLEM_SOLVED.format(steps=trace_info.total_steps))
-
-            trace_dump = trace_info.model_dump()
-            return solution, {
-                "reasoning_trace": trace_dump,
-                "summary": self.output_formatter.format_reasoning_summary(trace_dump),
-                "final_context": final_context,
-                "all_responses": responses,
-            }
-        finally:
-            # Always clean up the conversation, even if post-processing raises
-            _end_quietly(self.orchestrator, conversation_id)
 
     def _failed_solve(
         self, conversation_id: str, message: str

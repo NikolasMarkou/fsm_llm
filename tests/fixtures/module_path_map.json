@@ -1147,6 +1147,7 @@
     "fsm_llm.reasoning.handlers",
     "fsm_llm.reasoning.selection",
     "fsm_llm.reasoning.strategy_files",
+    "fsm_llm.reasoning.stream",
     "fsm_llm.reasoning.utilities",
     "fsm_llm.runner",
     "fsm_llm.runtime",

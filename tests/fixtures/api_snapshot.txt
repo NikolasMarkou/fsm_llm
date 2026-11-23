@@ -1831,6 +1831,7 @@ fsm_llm.reasoning.ReasoningEngine class
   def __init__(self, model: str | None = None, *, registry: ExecutableRegistry | None = None, **kwargs)
   def close(self) -> None
   def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, dict[str, Any]]
+  def solve_problem_stream(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> SolveStream
 fsm_llm.reasoning.ReasoningError class(FSMError)
 fsm_llm.reasoning.ReasoningExecutionError class(ReasoningError)
   def __init__(self, message: str, reasoning_type: str | None = None, **kwargs)
@@ -1869,6 +1870,10 @@ fsm_llm.reasoning.ReasoningType class(str, Enum)
   ReasoningType.CREATIVE = 'creative'
   ReasoningType.CRITICAL = 'critical'
   ReasoningType.HYBRID = 'hybrid'
+fsm_llm.reasoning.SolveStream class(Iterator)
+  def __init__(self, solve: Generator[str, None, SolveResult]) -> None
+  def close(self) -> None
+  def result(self) -> SolveResult
 fsm_llm.reasoning.ValidationResult class(TimestampedModel)
   field timestamp: datetime = factory
   field is_valid: bool required

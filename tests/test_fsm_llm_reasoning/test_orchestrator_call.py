@@ -138,7 +138,8 @@ class TestTheOrchestratorFile:
 
 
 class TestTheDeletedNamesStayDeleted:
-    """The push machinery went with its code (D-031); a solve has no `before_step` hook."""
+    """The push machinery went with its code (D-031); no solve pushes or pops a strategy by hand
+    (the one `before_step` hook of the stream only marks the steps, plan baa37f40 D-036)."""
 
     def test_the_engine_module_has_none_of_it(self) -> None:
         for name in ("_StrategyStack", "_ordered_responses"):
@@ -147,7 +148,10 @@ class TestTheDeletedNamesStayDeleted:
             engine_module.ReasoningEngine, "_prepare_reasoning_execution"
         )
         source = Path(engine_module.__file__).read_text(encoding="utf-8")
-        assert "before_step" not in source and "push_fsm" not in source
+        assert "push_fsm" not in source and "pop_fsm" not in source
+        # the only hook is the stream's step marker: a hook that pushed or popped is the
+        # `_StrategyStack` of D-053 again
+        assert source.count("before_step=begin_step") == 1
 
     def test_an_engine_keeps_no_table_of_strategy_definitions(self) -> None:
         engine = _engine(_ScriptedLLM({}))

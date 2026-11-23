@@ -43,6 +43,7 @@ from .exceptions import (
     ReasoningExecutionError,
     ReasoningRegistryError,
 )
+from .stream import SolveStream
 from .utilities import get_available_reasoning_types
 
 
@@ -65,6 +66,7 @@ __all__ = [
     # Main classes
     "ReasoningEngine",
     "ReasoningType",
+    "SolveStream",
     # Models
     "ReasoningStep",
     "ReasoningTrace",
