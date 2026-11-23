@@ -7,6 +7,7 @@ fsm_llm.API class
   def aconverse_stream(self, user_message: str, conversation_id: str) -> AsyncGenerator[str, None]
   def advance(self, conversation_id: str) -> AdvanceResult
   def advance_stream(self, conversation_id: str) -> Iterator[str]
+  def apush_fsm(self, conversation_id: str, new_fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str], context_to_pass: dict[str, Any] | None = None, return_context: dict[str, Any] | None = None, shared_context_keys: list[str] | None = None, preserve_history: bool = False, inherit_context: bool = True, *, max_steps: int | None = None, max_seconds: float | None = None) -> str
   def arun_until_terminal(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], Awaitable[None] | None] | None = None, seconds_exempt_states: Collection[str] = ()) -> tuple[AdvanceResult, ...]
   def arun_until_terminal_stream(self, conversation_id: str, *, max_steps: int, max_seconds: float | None = None, before_step: Callable[[int], Awaitable[None] | None] | None = None, seconds_exempt_states: Collection[str] = ()) -> AsyncGenerator[str, None]
   def astart_conversation(self, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None, _suppress_start: bool = False, _conversation_id: str | None = None) -> tuple[str, str]

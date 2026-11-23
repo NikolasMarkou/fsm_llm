@@ -3,7 +3,8 @@ the top-of-stack resolver, and the two public stack types ``FSMStackFrame`` and 
 
 Layer ``engine`` (plan d454fd62, step 81): split out of the old ``fsm_llm.api``; the method bodies
 are unchanged. ``_stack_lock`` is a plain non-reentrant ``Lock``, never held across an ``FSMManager``
-call (the anchors below).
+call or an await (the anchors below). ``apush_fsm`` is the one push body (plan baa37f40, step 9) and
+``push_fsm`` its ``run_sync`` wrapper.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from fsm_llm.aio import acall, run_sync
 from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.core.definitions import FSMDefinition, FSMError
 from fsm_llm.core.state_kinds import kind_of
@@ -105,7 +107,51 @@ class StackMixin(_ApiSurface):
         own manager conversation, never shared with the parent), instead of the ``API``
         default (``None``: the default, itself no limit); ``ValueError`` before anything is
         registered when invalid. The push greeting is not a turn and is not counted.
+
+        ``run_sync`` over ``apush_fsm``, the one body: it needs no event loop, and a patch of
+        the manager's sync ``start_conversation`` still intercepts it.
         """
+        return run_sync(
+            self.apush_fsm(
+                conversation_id,
+                new_fsm_definition,
+                context_to_pass,
+                return_context,
+                shared_context_keys,
+                preserve_history,
+                inherit_context,
+                max_steps=max_steps,
+                max_seconds=max_seconds,
+            )
+        )
+
+    # DECISION plan-2026-11-23T122249-baa37f40/D-020
+    # `apush_fsm` is the ONE push body and `push_fsm` the thin `run_sync` wrapper over it (supersedes
+    # plan f150ec28 D-014/D-015, which cut the async twin by a size rule). Do NOT write a second sync
+    # body, and do NOT hop the sync name to a worker thread: a greeting inside a push awaits its model
+    # call on the loop like `astart_conversation`. Do NOT hold `_stack_lock` across the manager await
+    # (a plain thread lock held by a suspended task blocks every sibling that needs the stack, and
+    # the loop thread with it). Do NOT catch `BaseException` or `CancelledError` here: no await sits
+    # between the manager returning and the frame append, so a cancel can only land in the greeting,
+    # where the manager's own arm ends the half-started child and the `finally` below clears the
+    # in-flight id and the temp definition; the cancel must reach the caller. See D-020.
+    async def apush_fsm(
+        self,
+        conversation_id: str,
+        new_fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str],
+        context_to_pass: dict[str, Any] | None = None,
+        return_context: dict[str, Any] | None = None,
+        shared_context_keys: list[str] | None = None,
+        preserve_history: bool = False,
+        inherit_context: bool = True,
+        *,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
+    ) -> str:
+        """The async twin of ``push_fsm`` (the body): the greeting of the pushed FSM awaits its
+        model call, so the loop runs other tasks meanwhile. Same arguments, same return and
+        the same errors; a cancel in the greeting leaves no child, no in-flight id and the
+        parent as it was, and is never swallowed."""
         budget = budget_kwargs(self, max_steps, max_seconds)
         with self._stack_lock:
             if conversation_id not in self.conversation_stacks:
@@ -139,9 +185,14 @@ class StackMixin(_ApiSurface):
                 child_definition=processed_fsm_def,
             )
 
+            response: str
             with child_event_scope(self, conversation_id):
-                new_conversation_id, response = self.fsm_manager.start_conversation(
-                    processed_fsm_id, initial_context=initial_context, **budget
+                new_conversation_id, response = await acall(
+                    self.fsm_manager,
+                    "start_conversation",
+                    processed_fsm_id,
+                    initial_context=initial_context,
+                    **budget,
                 )
             with self._stack_lock:
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-011

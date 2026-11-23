@@ -779,6 +779,11 @@
       "delta": 1,
       "reason": "D-061, D-059, D-069 (plan ace7a8c8 step 29.3): anchors for the agent executables HITL rule, the FsmInstance cancel and cleanup rule and the workflow loader class-table rule (review warning 5)",
       "token": "plan-2026-11-20T055240-ace7a8c8/D-069"
+    },
+    {
+      "delta": 1,
+      "reason": "D-020 (plan baa37f40 step 9): the new anchor on API.apush_fsm, the one push body (supersedes the cut of apush_fsm in plan f150ec28 D-015)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-020"
     }
   ]
 }
