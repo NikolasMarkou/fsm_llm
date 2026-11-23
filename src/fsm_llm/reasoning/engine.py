@@ -29,6 +29,7 @@ from fsm_llm.logging import logger
 from .constants import (
     RETRY_CLEARED_KEYS,
     SOLVE_DRIVER_KEYS,
+    ClassifierStates,
     ContextKeys,
     Defaults,
     ErrorMessages,
@@ -51,7 +52,13 @@ from .handlers import (
     register_strategy_handlers,
     retries_exhausted,
 )
-from .selection import ANALYTICAL, StrategyChoice, find_choice, strategy_choices
+from .selection import (
+    ANALYTICAL,
+    StrategyChoice,
+    classification_intents,
+    find_choice,
+    strategy_choices,
+)
 from .utilities import get_reasoning_fsm
 
 #: What ``ReasoningEngine.model`` shows when an injected interface states no model.
@@ -157,6 +164,18 @@ class ReasoningEngine:
         ]
         choose["targets"] = [choice.target_id for choice in self._choices]
         choose["fallback"] = self._analytical.target_id
+        # DECISION plan-2026-11-23T122249-baa37f40/D-034
+        # The classifier's closed intents are derived from the SAME list as `choose.targets`
+        # just above (`classification_intents(self._choices)`, at most 15, `analytical` kept):
+        # with the built-in registry they equal the file, so no byte moves. Do NOT build the
+        # intents from another list or filter them on this path (the model could pick a
+        # strategy the call refuses, or miss one it lists), and do NOT type the strategy names
+        # into `extraction_instructions` or `purpose` again.
+        (entry,) = self.classifier_fsm["states"][ClassifierStates.RECOMMEND_STRATEGY][
+            "classification_extractions"
+        ]
+        entry["intents"] = classification_intents(self._choices)
+        entry["fallback_intent"] = self._analytical.name
         call = (
             FSMDefinition(**self.main_fsm)
             .states[OrchestratorStates.EXECUTE_REASONING]

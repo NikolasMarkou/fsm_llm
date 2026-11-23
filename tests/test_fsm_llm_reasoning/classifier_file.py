@@ -7,13 +7,14 @@ Plan baa37f40 step 5b (decision D-019, owner order D-017, roadmap E3.4 slice b):
 typed: ``python -m tests.test_fsm_llm_reasoning.classifier_file --write`` rewrites only
 ``body.fsm.states.recommend_strategy`` of the envelope as canonical text (``json.dumps(indent=2,
 ensure_ascii=True)``, one final newline, LF), and the rows of ``test_classifier_intents.py`` pin
-file equals derivation. Step 17b moves the derivation into ``reasoning/selection.py`` (from the
-registry); this module then derives the same entry from the built-in registry.
+file equals derivation. Since step 17b (D-034) the intents come from ``reasoning/selection.py``
+(``classification_intents`` over the choices of the built-in registry), the same function the
+engine uses over its own registry, so the file and the engine cannot disagree.
 
 Interface contract:
 
-- ``intents()``: the nine ``{name, description}`` dicts in ``STRATEGY_ORDER``; ``description`` is
-  ``capped_line(strategy_facts(name)["description"], DESCRIPTION_CAP)``.
+- ``intents()``: the nine ``{name, description}`` dicts in ``STRATEGY_ORDER``, from
+  ``selection.classification_intents(selection.builtin_choices())``.
 - ``entry()``: the one ``classification_extractions`` entry (a fresh dict).
 - ``derive(document)``: a deep copy of an envelope with ``recommend_strategy`` rewritten;
   idempotent. ``KeyError`` when the state is missing.
@@ -28,8 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fsm_llm.reasoning.strategy_files import STRATEGY_ORDER, strategy_facts
-from fsm_llm.text import capped_line
+from fsm_llm.reasoning.selection import builtin_choices, classification_intents
 
 CLASSIFIER_PATH = (
     Path(__file__).resolve().parents[2]
@@ -44,7 +44,6 @@ STATE_ID = "recommend_strategy"
 FIELD_NAME = "recommended_reasoning_type"
 FALLBACK_INTENT = "analytical"
 CONFIDENCE_THRESHOLD = 0.6
-DESCRIPTION_CAP = 300
 CONTEXT_KEYS = (
     "problem_statement",
     "problem_type",
@@ -70,15 +69,7 @@ EXTRACTION_INSTRUCTIONS = (
 
 def intents() -> list[dict[str, str]]:
     """The strategies as closed intents, in ``STRATEGY_ORDER``."""
-    return [
-        {
-            "name": name,
-            "description": capped_line(
-                strategy_facts(name)["description"], DESCRIPTION_CAP
-            ),
-        }
-        for name in STRATEGY_ORDER
-    ]
+    return classification_intents(builtin_choices())
 
 
 def entry() -> dict[str, Any]:

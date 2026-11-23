@@ -834,6 +834,11 @@
       "delta": 1,
       "reason": "plan baa37f40 step 17 D-033: new anchor on strategy_choices (the one eligibility rule of a reasoning solve)",
       "token": "plan-2026-11-23T122249-baa37f40/D-033"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 step 17b D-034: new anchor on the intents assignment of the engine (one list for the call and the classifier)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-034"
     }
   ]
 }

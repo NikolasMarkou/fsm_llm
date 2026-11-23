@@ -19,6 +19,12 @@ Interface contract:
   that equals a name or an earlier alias is dropped with a WARNING (names win). Never raises for a
   registry it can read; the id is only a registry key, no target is ever resolved by a string
   import.
+- ``classification_intents(choices)``: the closed intents of the classifier as ``{name,
+  description}`` dicts, derived from the SAME ``choices`` the call's ``choose.targets`` came from
+  (plan baa37f40 step 17b, D-034): in list order, at most ``MAX_CLASSIFICATION_INTENTS`` (15);
+  when more are eligible the first 15 are kept and, if ``analytical`` is not among them, the 15th
+  is replaced by it; ``ValueError`` when no choice is named ``analytical``. The description of a
+  choice is already one control-stripped line, so a description cannot forge another intent line.
 - ``find_choice(choices, text)``: the choice a spelling names (the name or an alias, case and
   padding ignored; a name beats an alias), or ``None``.
 - ``builtin_choices()``: the choices of the nine built-ins, from one private cached tuple (a fresh
@@ -35,7 +41,10 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from fsm_llm.core.codes import Lifecycle
-from fsm_llm.core.definitions import ASCII_IDENTIFIER_PATTERN
+from fsm_llm.core.definitions import (
+    ASCII_IDENTIFIER_PATTERN,
+    MAX_CLASSIFICATION_INTENTS,
+)
 from fsm_llm.logging import logger
 from fsm_llm.text import capped_line
 
@@ -51,6 +60,7 @@ __all__ = [
     "StrategyChoice",
     "builtin_choices",
     "choices_for",
+    "classification_intents",
     "find_choice",
     "strategy_choices",
 ]
@@ -179,6 +189,19 @@ def find_choice(choices: list[StrategyChoice], text: str) -> StrategyChoice | No
         if key in choice.aliases:
             return choice
     return None
+
+
+def classification_intents(choices: list[StrategyChoice]) -> list[dict[str, str]]:
+    """The classifier's closed intents derived from *choices* (see the module docstring)."""
+    kept = choices[:MAX_CLASSIFICATION_INTENTS]
+    if not any(choice.name == ANALYTICAL for choice in kept):
+        analytical = next((c for c in choices if c.name == ANALYTICAL), None)
+        if analytical is None:
+            raise ValueError(
+                f"no strategy named {ANALYTICAL!r}: the fallback intent must be in the list"
+            )
+        kept = [*choices[: MAX_CLASSIFICATION_INTENTS - 1], analytical]
+    return [{"name": c.name, "description": c.description} for c in kept]
 
 
 @cache
