@@ -81,6 +81,10 @@ _AS_MAIN = (
     "class Engine:\n"
     "    def __init__(self, *a, **k):\n"
     "        pass\n"
+    "    def __enter__(self):\n"
+    "        return self\n"
+    "    def __exit__(self, *exc_info):\n"
+    "        return None\n"
     "    def solve_problem(self, *a, **k):\n"
     "        if MODE == 'interrupt':\n"
     "            raise KeyboardInterrupt\n"
@@ -109,17 +113,17 @@ class TestEveryErrorIsOneStderrLine:
         )
 
     @pytest.mark.parametrize(
-        ("mode", "argv", "text"),
+        ("mode", "argv", "text", "code"),
         [
-            ("fail", (), "error: engine exploded"),
-            ("interrupt", (), "interrupted by user"),
+            ("fail", (), "error: engine exploded", 1),
+            ("interrupt", (), "interrupted by user", 130),  # plan baa37f40 D-035
         ],
         ids=["failed-solve", "ctrl-c"],
     )
-    def test_one_line_and_no_logger_record(self, mode, argv, text) -> None:
+    def test_one_line_and_no_logger_record(self, mode, argv, text, code) -> None:
         completed = self._run(mode, *argv)
         lines = [ln for ln in completed.stderr.splitlines() if ln.strip()]
-        assert completed.returncode == 1, completed.stderr
+        assert completed.returncode == code, completed.stderr
         assert len(lines) == 1, completed.stderr
         assert lines[0].startswith("python -m fsm_llm.reasoning: ")
         assert text in lines[0] and "ERROR" not in lines[0] and "|" not in lines[0]

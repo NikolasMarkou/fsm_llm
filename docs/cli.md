@@ -152,8 +152,18 @@ Solves a problem with one of the reasoning strategies and prints the answer with
 a model.
 
 ```bash
-python -m fsm_llm.reasoning "problem" [--type T] [--model M] [--env-file PATH]
+python -m fsm_llm.reasoning "problem" [--type T] [--executables DIR] [--model M] [--env-file PATH]
 ```
+
+`--executables DIR` adds the strategy documents (`*.json`) of a directory to the nine built-in
+strategies. It is read first: `--type` takes the name of any eligible strategy of that registry
+(a name, never an alias) and anything else is a usage error (exit 2); `--list-types` prints the
+same registry; the classifier can choose them too. A file that cannot be read, or whose id is a
+built-in one (it never replaces it), is one `warning:` line on stderr and is skipped, and a
+directory that does not exist is an `error:` line and exit 1. A document that is not an eligible
+strategy (not `deprecated`, a name that is an ASCII identifier, contract inputs within the four
+problem keys) is skipped as well; run with `--verbose` to see why. Ctrl-C ends the run with the
+interrupt exit code of the common rules above and closes the engine.
 
 Other options: `--context JSON`, `--output text|json|detailed`, `--save FILE`, `--verbose`,
 `--quiet`, `--list-types` and `--version`.

@@ -67,6 +67,7 @@ python -m fsm_llm.reasoning "Why might sales drop in summer?" --type abductive -
 python -m fsm_llm.reasoning "Compare a city to a cell" --model ollama_chat/qwen3.5:4b --save results.json
 python -m fsm_llm.reasoning "Explain a rainbow" --env-file .env   # LLM_MODEL from a file
 python -m fsm_llm.reasoning --list-types
+python -m fsm_llm.reasoning "Plan a launch" --executables my_strategies --type my_strategy   # your own strategy documents
 ```
 
 ```python
@@ -100,5 +101,6 @@ The command line also takes `--context '{"audience": "child"}'` (extra context a
 - `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy; a value that names none is warned and ignored.
 - A strategy the registry cannot resolve fails the call (`failed/unknown_target`), the solve goes on without it and never runs another style in its place; the fallback `analytical` applies only to a choice outside the closed list of the registry's eligible strategies.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.
+- `--executables DIR` adds the strategy documents (`*.json`) of a directory to the nine built-ins: `--type` accepts their names (any other name is a usage error, exit 2), `--list-types` lists them, and the classifier can pick them. A file that cannot be read, or that reuses a built-in id, is one warning line on stderr and is not used; a directory that does not exist is an error (exit 1). Ctrl-C ends the run with exit 130 and closes the engine.
 - `--list-types` prints its table and solutions print on stdout; an error is one line `python -m fsm_llm.reasoning: error: ...` on stderr. `--verbose` turns on the engine's own log records.
 - In `--output json` and in `.json` save files, `reasoning_types_used` is a sorted list of type names.

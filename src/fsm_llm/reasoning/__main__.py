@@ -10,9 +10,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fsm_llm.cli_support import (
+    CLI_EXIT_INTERRUPTED,
     add_env_file,
     apply_env_file,
     escape_unencodable_output,
@@ -21,11 +22,16 @@ from fsm_llm.cli_support import (
 from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.logging import logger, setup_cli_logging
+from fsm_llm.text import capped_line
 
 from .__version__ import __version__
-from .constants import ContextKeys, ReasoningType
+from .constants import ContextKeys
 from .engine import ReasoningEngine
+from .executables import load_strategy_registry
 from .utilities import get_available_reasoning_types
+
+if TYPE_CHECKING:
+    from fsm_llm.engine.executables import ExecutableRegistry
 
 # ============================================================================
 # CONSTANTS
@@ -72,15 +78,17 @@ def setup_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=f"FSM-LLM Reasoning Engine v{__version__}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
+        epilog="""
 Examples:
   %(prog)s "What is 2 + 2?"
   %(prog)s "Design a recommendation system" --type analytical
-  %(prog)s "Explain why the sky is blue" --context '{{"audience": "child"}}'
+  %(prog)s "Explain why the sky is blue" --context '{"audience": "child"}'
   %(prog)s --list-types
   %(prog)s "Solve this logic puzzle" --output detailed --save results.json
+  %(prog)s "Plan a launch" --executables my_strategies --type my_strategy
 
-Available reasoning types: {", ".join([rt.value for rt in ReasoningType])}
+Run --list-types for the available reasoning types (with --executables DIR it also lists
+the strategies found in DIR).
         """,
     )
 
@@ -96,9 +104,15 @@ Available reasoning types: {", ".join([rt.value for rt in ReasoningType])}
     reasoning_group.add_argument(
         "--type",
         "-t",
-        choices=[rt.value for rt in ReasoningType],
         metavar="TYPE",
-        help="Force a specific reasoning type (see --list-types for options)",
+        help="Force a specific reasoning type, by name (see --list-types for options)",
+    )
+    reasoning_group.add_argument(
+        "--executables",
+        type=Path,
+        metavar="DIR",
+        help="Directory of strategy documents (*.json) to choose from beside the "
+        "built-in strategies",
     )
     reasoning_group.add_argument(
         "--context",
@@ -383,14 +397,21 @@ def _save_as_text(
 # ============================================================================
 
 
-def display_available_reasoning_types() -> None:
-    """Print all available reasoning types with descriptions to stdout."""
+def display_available_reasoning_types(
+    reasoning_types: dict[str, str] | None = None,
+) -> None:
+    """Print all available reasoning types with descriptions to stdout.
+
+    ``reasoning_types`` is the name -> description table to print (``main`` passes the one of
+    its registry); ``None`` is the nine built-ins.
+    """
     # Product output: print(), never the logger (the `fsm_llm` disable would
     # drop it when main() is called in-process). Same rule as runner.py D-018.
     print("Available Reasoning Types")
     print(CLIDefaults.SECTION_SEPARATOR)
 
-    reasoning_types = get_available_reasoning_types()
+    if reasoning_types is None:
+        reasoning_types = get_available_reasoning_types()
 
     # Calculate column width for alignment
     max_name_length = max(len(name) for name in reasoning_types.keys())
@@ -408,16 +429,23 @@ def display_available_reasoning_types() -> None:
 
 
 def solve_problem_with_engine(
-    problem: str, initial_context: dict[str, Any], model: str | None, verbose: bool
+    problem: str,
+    initial_context: dict[str, Any],
+    model: str | None,
+    verbose: bool,
+    registry: ExecutableRegistry | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Initialize the reasoning engine and solve the problem.
+
+    The engine is closed on every way out (a solve, an error, Ctrl-C).
 
     Args:
         problem: Problem statement to solve
         initial_context: Initial context for reasoning
         model: LLM model to use; ``None`` reads env ``LLM_MODEL``
         verbose: Whether to enable verbose logging
+        registry: The registry the solve chooses its strategy from (``None``: the built-ins)
 
     Returns:
         tuple[str, dict[str, Any]]: Solution and trace information
@@ -431,20 +459,42 @@ def solve_problem_with_engine(
     if verbose:
         logger.info(f"Initializing reasoning engine with model: {model}")
 
-    engine = ReasoningEngine(model=model)
+    with ReasoningEngine(model=model, registry=registry) as engine:
+        # Solve problem
+        if verbose:
+            logger.info("Starting problem solving process...")
+            logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
 
-    # Solve problem
-    if verbose:
-        logger.info("Starting problem solving process...")
-        logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
-
-    solution, trace_info = engine.solve_problem(problem, initial_context)
+        solution, trace_info = engine.solve_problem(problem, initial_context)
 
     if verbose:
         logger.info(CLIDefaults.SUBSECTION_SEPARATOR)
         logger.info("Problem solving completed successfully")
 
     return solution, trace_info
+
+
+def load_registry(directory: Path | None) -> ExecutableRegistry | None:
+    """The registry of ``--executables DIR``, or ``None`` when the option is not given.
+
+    Contract: the nine built-ins plus the ``*.json`` strategy documents of *directory*
+    (``executables.load_strategy_registry``); a built-in id in a file is refused, never
+    replaced. Each file that could not be read and each collision is ONE stderr line
+    ``python -m fsm_llm.reasoning: warning: <label>: <why>`` and the run goes on. Raises
+    ``FileNotFoundError`` (one ``error:`` line, exit 1, in ``main``) when *directory* is not an
+    existing directory.
+    """
+    if directory is None:
+        return None
+    if not directory.is_dir():
+        raise FileNotFoundError(f"--executables {directory}: not an existing directory")
+    registry, report = load_strategy_registry([directory])
+    for label, reasons in report.failed.items():
+        for reason in reasons:
+            report_error(_PROG, f"warning: {label}: {capped_line(reason, 300)}")
+    for collision in report.collisions:
+        report_error(_PROG, f"warning: {capped_line(collision, 300)}")
+    return registry
 
 
 def main() -> int:
@@ -474,9 +524,19 @@ def main() -> int:
             # solve_problem_with_engine: without --verbose the CLI stays quiet.
             setup_cli_logging("INFO")
 
+        # The strategies of --executables are read first: --type and --list-types follow the
+        # registry (the built-ins when there is none)
+        registry = load_registry(args.executables)
+        types = get_available_reasoning_types(registry=registry)
+        if args.type is not None and args.type not in types:
+            parser.error(
+                f"argument --type/-t: invalid choice: {args.type!r} "
+                f"(choose from {', '.join(repr(name) for name in types)})"
+            )
+
         # Handle information commands
         if args.list_types:
-            display_available_reasoning_types()
+            display_available_reasoning_types(types)
             return 0
 
         # Validate required arguments
@@ -492,7 +552,7 @@ def main() -> int:
 
         # Solve the problem
         solution, trace_info = solve_problem_with_engine(
-            args.problem, initial_context, args.model, args.verbose
+            args.problem, initial_context, args.model, args.verbose, registry
         )
 
         # Format and display output
@@ -510,7 +570,7 @@ def main() -> int:
 
     except KeyboardInterrupt:
         report_error(_PROG, "interrupted by user")
-        return 1
+        return CLI_EXIT_INTERRUPTED
 
     except argparse.ArgumentError as e:
         report_error(_PROG, f"error: {e}")

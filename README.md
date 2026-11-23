@@ -578,7 +578,7 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 | `fsm-llm-skills <validate\|list\|show> PATH...` | Check (`--strict` for API portability), list and read Agent Skills folders |
 | `fsm-llm-eval examples [--category C] [--fail-under PCT] [--env-file PATH]` | Score every example 0 to 4 |
 | `fsm-llm-eval run <dataset.json\|.jsonl> [--trials N] [--env-file PATH]` | Run scripted conversations and report pass rates |
-| `python -m fsm_llm.reasoning "problem" [--type T] [--model M] [--env-file PATH]` | Solve a problem with the reasoning engine (no console script) |
+| `python -m fsm_llm.reasoning "problem" [--type T] [--executables DIR] [--model M] [--env-file PATH]` | Solve a problem with the reasoning engine (no console script) |
 
 The CLIs that call a model need one: `--model/-m NAME`, else `LLM_MODEL` in the environment, else the file given with `--env-file PATH` (the process environment wins over the file); with none they print one `Error:` line and exit 1. `fsm-llm-monitor` starts without a model, and its launch routes answer 400 until one is set. The commands that call no model (`fsm-llm-okf`, `fsm-llm-skills`, `fsm-llm-validate`, `fsm-llm-visualize`) have no `--env-file`. Exit codes: 0 ok, 1 failure, 130 Ctrl-C; `fsm-llm-eval` exits 2 below `--fail-under`. Every option is on the [command-line page](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/cli.md).
 

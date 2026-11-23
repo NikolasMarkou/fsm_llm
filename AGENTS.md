@@ -114,7 +114,7 @@ fsm-llm-visualize --fsm <path.json> [--format ascii|mermaid|dot]  # Diagram
 fsm-llm-validate --fsm <path.json> [--upgrade]  # Validate FSM definition (--upgrade validates first, rewrites a file of any version from 4.0 up to below the default (4.0, 4.1 and 4.2 today); exit 1 if refused)
 fsm-llm-monitor [--env-file PATH]     # Web dashboard at http://127.0.0.1:8420
 fsm-llm-meta [--model M] [--env-file PATH]  # Interactive artifact builder (fsm_llm.agents.meta_cli)
-python -m fsm_llm.reasoning "problem" [--type T] [--model M] [--env-file PATH]    # Reasoning CLI (no console script)
+python -m fsm_llm.reasoning "problem" [--type T] [--executables DIR] [--model M] [--env-file PATH]    # Reasoning CLI (no console script)
 fsm-llm-eval examples [--category C] [--fail-under PCT] [--env-file PATH]  # Score every example 0-4
 fsm-llm-eval run <dataset.json|.jsonl> [--trials N] [--env-file PATH]     # Scripted conversation evals
 fsm-llm-okf <validate|list|show|search|export>  # Open Knowledge Format bundles

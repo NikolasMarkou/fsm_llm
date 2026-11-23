@@ -37,7 +37,8 @@ Interface contract:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import os
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from fsm_llm.aio import aoffload
@@ -51,7 +52,7 @@ from fsm_llm.core.definitions.executable import (
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.context import RunContext
-from fsm_llm.engine.executables import ExecutableRegistry
+from fsm_llm.engine.executables import ExecutableRegistry, ReloadReport
 from fsm_llm.engine.executables.adapters import FsmBodyExecutable
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
 
@@ -65,6 +66,7 @@ __all__ = [
     "SOLVE_ID",
     "SolveExecutable",
     "builtin_executables",
+    "load_strategy_registry",
     "strategy_id",
     "strategy_registry",
 ]
@@ -202,7 +204,26 @@ def strategy_registry() -> ExecutableRegistry:
     objects are the ones ``builtin_executables()`` builds, so a strategy resolves with the
     same identities in either place. Never raises for a packaged file.
     """
-    registry = ExecutableRegistry()
+    return _with_builtins(ExecutableRegistry())
+
+
+def load_strategy_registry(
+    paths: Iterable[str | os.PathLike[str]],
+) -> tuple[ExecutableRegistry, ReloadReport]:
+    """The nine built-ins plus the executable documents of *paths* (the CLI's ``--executables``).
+
+    Contract: *paths* are files or directories of ``*.json`` (``ExecutableRegistry`` rules: a
+    directory contributes its files in sorted order, a symbolic link is skipped, a path that
+    does not exist contributes nothing). The built-ins are registered FIRST, so a document whose
+    id collides with one is refused and never replaces it. Returns the new registry and the
+    ``ReloadReport`` of the read: ``failed`` maps each unreadable or invalid file to its
+    reasons, ``collisions`` lists the refusals. Never raises for a bad file (it is reported).
+    """
+    registry = _with_builtins(ExecutableRegistry(paths))
+    return registry, registry.reload()
+
+
+def _with_builtins(registry: ExecutableRegistry) -> ExecutableRegistry:
     for name in STRATEGY_ORDER:
         # FsmBodyExecutable satisfies the Executable protocol (its attributes are read-only)
         registry.register(_strategy_executable(name))  # type: ignore[arg-type]
