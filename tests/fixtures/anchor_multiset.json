@@ -754,6 +754,11 @@
       "delta": 1,
       "reason": "D-065: the new anchor above the default BaseAgent.arun (X6.1), a new decision with its own anchor",
       "token": "plan-2026-11-20T055240-ace7a8c8/D-065"
+    },
+    {
+      "delta": 1,
+      "reason": "D-066: the new anchor above FSMSynthesizer.aapproval (X6.2), a new decision with its own anchor",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-066"
     }
   ]
 }

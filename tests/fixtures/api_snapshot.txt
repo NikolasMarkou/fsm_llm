@@ -1902,6 +1902,9 @@ fsm_llm.synthesis.FSMLibrary class
   def verify(self, digest: str) -> LibraryRecord
 fsm_llm.synthesis.FSMSynthesizer class
   def __init__(self, llm: LLMInterface | None = None, *, model: str | None = None, policy: SynthesisPolicy | None = None, library: FSMLibrary | None = None, reviewer: Callable[[ProcedureApprovalRequest], bool] | None = None, embed: EmbedTextsFn | None = None, simulator: Simulator | None = None, clock: Callable[[], float] = monotonic) -> None
+  def aapproval(self, goal: str, return_keys: tuple[str, ...], result: CompileResult) -> str | None
+  def acompile(self, goal: str, *, inputs: Sequence[str] = (), return_keys: Sequence[str]) -> CompileResult
+  def aobtain(self, goal: str, *, inputs: Sequence[str] = (), return_keys: Sequence[str], min_lifecycle: str = 'verified') -> Procedure
   def approval(self, goal: str, return_keys: tuple[str, ...], result: CompileResult) -> str | None
   def compile(self, goal: str, *, inputs: Sequence[str] = (), return_keys: Sequence[str]) -> CompileResult
   def obtain(self, goal: str, *, inputs: Sequence[str] = (), return_keys: Sequence[str], min_lifecycle: str = 'verified') -> Procedure

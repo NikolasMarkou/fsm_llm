@@ -23,6 +23,7 @@ gate G7.
 
 from __future__ import annotations
 
+import inspect
 import re
 import time
 from collections.abc import Callable, Sequence
@@ -30,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fsm_llm.agents.semantic_tools import EmbedTextsFn
+from fsm_llm.aio import acall, aoffload, run_sync
 from fsm_llm.constants import SKILL_DEFANG
 from fsm_llm.core.definitions import (
     ASCII_IDENTIFIER_PATTERN,
@@ -324,17 +326,32 @@ class FSMSynthesizer:
         one) the keys the procedure must hand back; both are identifier-only
         public names. At most ``1 + policy.max_repair_rounds`` calls.
         """
-        ins, keys = _checked(goal, inputs, return_keys)
-        return self._compile(goal, ins, keys, None)
+        return run_sync(self.acompile(goal, inputs=inputs, return_keys=return_keys))
 
-    def _compile(
+    async def acompile(
+        self,
+        goal: str,
+        *,
+        inputs: Sequence[str] = (),
+        return_keys: Sequence[str],
+    ) -> CompileResult:
+        """The async body of ``compile`` (same contract; ``compile`` is its ``run_sync`` wrapper).
+
+        The strong model is awaited (``acall``: its ``acomplete`` twin, else a worker thread) and a
+        ``simulator`` runs on a worker thread (it has no async twin). A cancel ends the compile at its
+        await and stores nothing; a worker already running keeps going and its result is dropped.
+        """
+        ins, keys = _checked(goal, inputs, return_keys)
+        return await self._acompile(goal, ins, keys, None)
+
+    async def _acompile(
         self,
         goal: str,
         ins: tuple[str, ...],
         keys: tuple[str, ...],
         reference: dict[str, Any] | None,
     ) -> CompileResult:
-        """``compile`` after the argument checks; ``reference`` is the stored near
+        """``acompile`` after the argument checks; ``reference`` is the stored near
         miss (a definition dict) for ``compile_messages`` (or ``None``)."""
         policy = self.policy
         if policy.require_simulation and self.simulator is None:
@@ -355,7 +372,7 @@ class FSMSynthesizer:
                 messages=messages, max_tokens=policy.max_compile_tokens
             )
             try:
-                reply = self.llm.complete(request)
+                reply = await acall(self.llm, "complete", request)
             except LLMResponseError as e:
                 raise SynthesisError(
                     "the strong model call failed", {"rounds": failed}
@@ -365,7 +382,9 @@ class FSMSynthesizer:
             if report.definition is not None and report.injected is not None:
                 if self.simulator is not None:
                     runs += 1
-                    simulation = self.simulator.run(
+                    simulation = await acall(
+                        self.simulator,
+                        "run",
                         report.definition,
                         goal=goal,
                         inputs=ins,
@@ -434,11 +453,37 @@ class FSMSynthesizer:
         ``draft`` is verified, a ``deprecated`` one raises
         ``SynthesisRefusedError`` (``lifecycle_too_low``).
         """
+        return run_sync(
+            self.aobtain(
+                goal,
+                inputs=inputs,
+                return_keys=return_keys,
+                min_lifecycle=min_lifecycle,
+            )
+        )
+
+    async def aobtain(
+        self,
+        goal: str,
+        *,
+        inputs: Sequence[str] = (),
+        return_keys: Sequence[str],
+        min_lifecycle: str = LIFECYCLE_VERIFIED,
+    ) -> Procedure:
+        """The async body of ``obtain`` (same contract; ``obtain`` is its ``run_sync`` wrapper).
+
+        The library ``search`` and ``near_misses`` (a directory scan and the embedder) and the
+        reviewer run on worker threads in async mode; the library WRITES stay inline and happen
+        only after the compile passed and the approval answered, so a cancel before them stores
+        nothing, and a worker a cancel left behind (a reviewer a human still holds) never writes.
+        """
         ins, keys = _checked(goal, inputs, return_keys)
         policy, library = self.policy, self.library
         started, before = self._clock(), _meter(self.llm)
         if library is not None:
-            for match in library.search(
+            for match in await acall(
+                library,
+                "search",
                 goal,
                 inputs_available=ins,
                 return_keys=keys,
@@ -480,8 +525,8 @@ class FSMSynthesizer:
                         "library",
                         seconds=self._since(started),
                     )
-        reference = self._reference(goal, ins, keys, min_lifecycle)
-        result = self._compile(goal, ins, keys, reference)
+        reference = await self._areference(goal, ins, keys, min_lifecycle)
+        result = await self._acompile(goal, ins, keys, reference)
         digest = digest_of(result.definition)
         if library is not None:
             # a deprecated digest is refused BEFORE the reviewer is asked and
@@ -490,7 +535,7 @@ class FSMSynthesizer:
                 _refuse_deprecated(library.get_record(digest))
             except LibraryError:
                 pass  # absent (or corrupt: `put` raises it below)
-        approver = self.approval(goal, keys, result)
+        approver = await acall(self, "approval", goal, keys, result)
         saved: LibraryRecord | None = None
         if library is not None:
             saved = library.put(
@@ -524,7 +569,7 @@ class FSMSynthesizer:
             _spent(result.usage, before),
         )
 
-    def _reference(
+    async def _areference(
         self, goal: str, ins: Sequence[str], keys: Sequence[str], min_lifecycle: str
     ) -> dict[str, Any] | None:
         """The stored near miss for the compile prompt: the definition of the best
@@ -535,7 +580,9 @@ class FSMSynthesizer:
         if library is None:
             return None
         try:
-            for match in library.near_misses(
+            for match in await acall(
+                library,
+                "near_misses",
                 goal,
                 inputs_available=ins,
                 return_keys=keys,
@@ -558,29 +605,43 @@ class FSMSynthesizer:
         """G7 for a gate-passed ``result``: ``None`` when neither the policy nor
         a ``completion`` tool needs approval, the approver label when the
         reviewer said exactly ``True``, else ``SynthesisRefusedError``."""
+        return run_sync(self.aapproval(goal, return_keys, result))
+
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-066
+    # The reviewer is a bare sync callable (a human may hold it): async mode runs it with
+    # ``aoffload`` on a worker, never inline on the loop. Nothing is stored or approved before it
+    # answers ``True`` and a cancel leaves a worker that may say yes late: its verdict is dropped and
+    # ``aobtain`` writes inline only AFTER this returns. Do NOT call the reviewer inline, do NOT
+    # ``put`` before approval, and do NOT await an awaitable verdict (it is a denial, D-028).
+    async def aapproval(
+        self, goal: str, return_keys: tuple[str, ...], result: CompileResult
+    ) -> str | None:
+        """The async body of ``approval``; the reviewer runs on a worker thread (see ``_areview``)."""
         if not needs_approval(result.data, self.policy):
             return None
         request = _approval_request(
             goal, return_keys, result, digest_of(result.definition)
         )
-        self._review(request)
+        await self._areview(request)
         return _APPROVER
 
     def _since(self, started: float) -> float:
         return round(self._clock() - started, 3)
 
-    def _review(self, request: ProcedureApprovalRequest) -> None:
+    async def _areview(self, request: ProcedureApprovalRequest) -> None:
         """G7: return only when the reviewer says exactly ``True``."""
         if self.reviewer is None:
             raise SynthesisRefusedError(
                 "approval is required and no reviewer is set", REASON_APPROVAL_REQUIRED
             )
         try:
-            verdict = self.reviewer(request)
+            verdict = await aoffload(self.reviewer, request)
         except Exception as e:
             raise SynthesisRefusedError(
                 "the reviewer failed", REASON_REVIEWER_ERROR
             ) from e
+        if inspect.iscoroutine(verdict):
+            verdict.close()  # an async reviewer is a denial, never awaited
         if verdict is not True:
             raise SynthesisRefusedError(
                 "the reviewer did not approve", REASON_APPROVAL_DENIED
