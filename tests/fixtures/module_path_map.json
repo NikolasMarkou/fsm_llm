@@ -1218,6 +1218,7 @@
     "fsm_llm.workflows.exceptions",
     "fsm_llm.workflows.loader",
     "fsm_llm.workflows.models",
-    "fsm_llm.workflows.step_factories"
+    "fsm_llm.workflows.step_factories",
+    "fsm_llm.workflows.steps.executable"
   ]
 }

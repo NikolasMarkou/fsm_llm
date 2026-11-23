@@ -7,8 +7,8 @@ dotted path): ``base`` (``WorkflowStep``, the one base with ``extra="forbid"``),
 and one module per group of step kinds: ``routing`` (``AutoStep``,
 ``ConditionStep``, ``SwitchStep``), ``calls`` (``APIStep``, ``LLMStep``),
 ``waits`` (``WaitEventStep``, ``TimerStep``), ``conversation``
-(``ConversationStep``), ``agent`` (``AgentStep``) and ``composite``
-(``ParallelStep``, ``RetryStep``). A private name is imported from its
+(``ConversationStep``), ``agent`` (``AgentStep``), ``executable``
+(``ExecutableStep``) and ``composite`` (``ParallelStep``, ``RetryStep``). A private name is imported from its
 defining module (``fsm_llm.workflows.steps.helpers._STEP_EXECUTOR``); a patch
 aims at the module that performs the lookup (for example
 ``fsm_llm.workflows.steps.conversation.API``), never the package.
@@ -19,6 +19,7 @@ from .base import WorkflowStep
 from .calls import APIStep, LLMStep
 from .composite import ParallelStep, RetryStep
 from .conversation import ConversationStep
+from .executable import ExecutableStep
 from .routing import AutoStep, ConditionStep, SwitchStep
 from .waits import TimerStep, WaitEventStep
 
@@ -28,6 +29,7 @@ __all__ = [
     "AutoStep",
     "ConditionStep",
     "ConversationStep",
+    "ExecutableStep",
     "LLMStep",
     "ParallelStep",
     "RetryStep",

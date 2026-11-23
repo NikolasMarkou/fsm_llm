@@ -712,6 +712,7 @@ source_modules =
     fsm_llm.workflows.steps.calls
     fsm_llm.workflows.steps.composite
     fsm_llm.workflows.steps.conversation
+    fsm_llm.workflows.steps.executable
     fsm_llm.workflows.steps.helpers
     fsm_llm.workflows.steps.routing
     fsm_llm.workflows.steps.waits

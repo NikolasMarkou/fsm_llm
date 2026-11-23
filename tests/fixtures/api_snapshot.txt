@@ -2120,6 +2120,21 @@ fsm_llm.workflows.EventListener class(BaseModel)
   field timeout_step_id: str | None = None
   field step_id: str | None = None
   def is_expired(self) -> bool
+fsm_llm.workflows.ExecutableStep class(WorkflowStep)
+  field step_id: str required
+  field name: str required
+  field description: str = ''
+  field timeout_seconds: float | None = None
+  field target: str required
+  field registry: Any required
+  field callables: Any | None = None
+  field inputs: dict[str, str] = factory
+  field returns: dict[str, str] = factory
+  field success_step_id: str = ''
+  field error_step_id: str | None = None
+  field max_steps: int | None = None
+  field max_seconds: float | None = None
+  def execute(self, context: dict[str, Any]) -> WorkflowStepResult
 fsm_llm.workflows.LLMStep class(WorkflowStep)
   field step_id: str required
   field name: str required
@@ -2316,6 +2331,7 @@ fsm_llm.workflows.create_event_driven_workflow def(workflow_id: str, name: str, 
 fsm_llm.workflows.create_linear_workflow def(workflow_id: str, name: str, steps: list[WorkflowStep], description: str = '') -> WorkflowDefinition
 fsm_llm.workflows.create_workflow def(workflow_id: str, name: str, description: str = '') -> WorkflowDefinition
 fsm_llm.workflows.create_workflow_builder def(workflow_id: str, name: str, description: str = '') -> WorkflowBuilder
+fsm_llm.workflows.executable_step def(step_id: str, name: str, target: str, registry: Any, inputs: dict[str, str] | None = None, returns: dict[str, str] | None = None, success_step_id: str = '', error_step_id: str | None = None, callables: Any = None, max_steps: int | None = None, max_seconds: float | None = None, description: str = '', timeout_seconds: float | None = None) -> ExecutableStep
 fsm_llm.workflows.llm_step def(step_id: str, name: str, llm_interface: Any, prompt_template: str, context_mapping: dict[str, str] | None = None, output_mapping: dict[str, str] | None = None, next_step_id: str = '', error_step_id: str | None = None, description: str = '', timeout_seconds: float | None = None, system_prompt: str | None = None) -> LLMStep
 fsm_llm.workflows.load_workflow def(document: Mapping[str, Any], *, objects: NameRegistry[Any], step_classes: Iterable[type[WorkflowStep]] | None = None) -> WorkflowDefinition
 fsm_llm.workflows.parallel_step def(step_id: str, name: str, steps: list[WorkflowStep], next_step_id: str, error_step_id: str | None = None, aggregation_function: Callable | None = None, description: str = '', timeout_seconds: float | None = None) -> ParallelStep

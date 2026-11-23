@@ -73,8 +73,8 @@ from .models import (
     WorkflowStepResult,
 )
 
-# Factories of the agent, retry and switch steps
-from .step_factories import agent_step, retry_step, switch_step
+# Factories of the agent, executable, retry and switch steps
+from .step_factories import agent_step, executable_step, retry_step, switch_step
 
 # Step implementations
 from .steps import (
@@ -83,6 +83,7 @@ from .steps import (
     AutoStep,
     ConditionStep,
     ConversationStep,
+    ExecutableStep,
     LLMStep,
     ParallelStep,
     RetryStep,
@@ -127,6 +128,7 @@ __all__ = [
     "RetryStep",
     "SwitchStep",
     "ConversationStep",
+    "ExecutableStep",
     # Definition & Validation
     "WorkflowDefinition",
     "load_workflow",
@@ -151,6 +153,7 @@ __all__ = [
     "parallel_step",
     "conversation_step",
     "agent_step",
+    "executable_step",
     "retry_step",
     "switch_step",
     "create_linear_workflow",

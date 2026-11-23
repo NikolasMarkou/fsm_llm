@@ -1,8 +1,8 @@
 """
-Factories of the step types that wrap an agent, another step, or a key.
+Factories of the step types that wrap an agent, an executable, another step, or a key.
 
-``agent_step``, ``retry_step`` and ``switch_step`` build ``AgentStep``,
-``RetryStep`` and ``SwitchStep``. They sit apart from ``dsl.py`` so that module
+``agent_step``, ``executable_step``, ``retry_step`` and ``switch_step`` build ``AgentStep``,
+``ExecutableStep``, ``RetryStep`` and ``SwitchStep``. They sit apart from ``dsl.py`` so that module
 keeps headroom under the module-size cap (roadmap 0.18); the package
 ``fsm_llm.workflows`` re-exports them.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .steps import AgentStep, RetryStep, SwitchStep, WorkflowStep
+from .steps import AgentStep, ExecutableStep, RetryStep, SwitchStep, WorkflowStep
 
 
 def agent_step(
@@ -55,6 +55,59 @@ def agent_step(
         error_step_id=error_step_id,
         description=description,
         input_mapping=input_mapping or {},
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def executable_step(
+    step_id: str,
+    name: str,
+    target: str,
+    registry: Any,
+    inputs: dict[str, str] | None = None,
+    returns: dict[str, str] | None = None,
+    success_step_id: str = "",
+    error_step_id: str | None = None,
+    callables: Any = None,
+    max_steps: int | None = None,
+    max_seconds: float | None = None,
+    description: str = "",
+    timeout_seconds: float | None = None,
+) -> ExecutableStep:
+    """Create an ``ExecutableStep`` that runs the executable ``target`` of ``registry``.
+
+    Args:
+        step_id: Unique step identifier.
+        name: Human-readable step name.
+        target: Id of the executable in ``registry``.
+        registry: An ``ExecutableRegistry`` (anything with ``get(id)``).
+        inputs: INPUT ``{executable_input: workflow_key}`` mapping.
+        returns: OUTPUT ``{workflow_key: executable_output}`` mapping (no internal-prefixed key).
+        success_step_id: State to transition to on success.
+        error_step_id: State to transition to when the run is not ``ok`` (otherwise the
+            instance FAILS).
+        callables: A ``NameRegistry`` of namespace ``callables`` for a code-backed executable.
+        max_steps: Step budget of the one run.
+        max_seconds: Time budget of the one run.
+        description: Step description.
+        timeout_seconds: Optional time limit of the step in seconds (cancels the run).
+
+    Returns:
+        Configured ExecutableStep instance.
+    """
+    return ExecutableStep(
+        step_id=step_id,
+        name=name,
+        target=target,
+        registry=registry,
+        inputs=inputs or {},
+        returns=returns or {},
+        success_step_id=success_step_id,
+        error_step_id=error_step_id,
+        callables=callables,
+        max_steps=max_steps,
+        max_seconds=max_seconds,
+        description=description,
         timeout_seconds=timeout_seconds,
     )
 

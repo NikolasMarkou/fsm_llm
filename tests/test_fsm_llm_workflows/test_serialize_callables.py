@@ -308,7 +308,9 @@ class TestDefaultSerializeIsUnchanged:
 
         for step in GOLDEN["steps"].values():
             walk(step)
-        assert tags == set(steps.__all__) - {"WorkflowStep"}
+        # ExecutableStep is newer than the parent the golden was captured from: it has no golden of
+        # the old bytes, and its default and named forms are pinned in test_executable_step.py
+        assert tags == set(steps.__all__) - {"WorkflowStep", "ExecutableStep"}
 
 
 class TestSerializeNamesCallables:

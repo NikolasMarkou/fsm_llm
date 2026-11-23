@@ -44,9 +44,14 @@ _STEP_CALLABLE_EXCLUDE_FIELDS = frozenset(
 
 
 # The fields a document names instead of holding: the five callable fields above plus the
-# step's agent (``Field(exclude=True)``, so the default dump never carried it). Read by the
+# step's agent and an ``ExecutableStep``'s ``registry`` and ``callables`` (``Field(exclude=True)``, so the
+# default dump never carried them). Read by the
 # naming path of ``serialize(callables=)`` and by ``loader.load_workflow``: one table.
-_NAMED_OBJECT_FIELDS = _STEP_CALLABLE_EXCLUDE_FIELDS | {"agent"}
+_NAMED_OBJECT_FIELDS = _STEP_CALLABLE_EXCLUDE_FIELDS | {
+    "agent",
+    "registry",
+    "callables",
+}
 
 
 def check_callables_registry(registry: object) -> NameRegistry[Any]:

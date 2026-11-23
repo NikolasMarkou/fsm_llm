@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import Field, ValidationError
 
+from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.workflows import (
     WorkflowEngine,
     auto_step,
@@ -1112,6 +1113,7 @@ _STEP_MODULE_OF = {
     "TimerStep": "waits",
     "ConversationStep": "conversation",
     "AgentStep": "agent",
+    "ExecutableStep": "executable",
     "ParallelStep": "composite",
     "RetryStep": "composite",
 }
@@ -1144,6 +1146,7 @@ def _minimal_step_kwargs() -> dict[str, dict[str, Any]]:
         "TimerStep": {"delay_seconds": 1, "next_step_id": "n"},
         "ConversationStep": {"fsm_definition": {"x": 1}},
         "AgentStep": {"agent": MagicMock()},
+        "ExecutableStep": {"target": "t", "registry": ExecutableRegistry()},
         "ParallelStep": {"steps": [inner], "next_step_id": "n"},
         "RetryStep": {"step": inner},
     }
@@ -1151,12 +1154,17 @@ def _minimal_step_kwargs() -> dict[str, dict[str, Any]]:
 
 class TestWorkflowStepsPackageLayout:
     """``workflows/steps.py`` is a package at the same dotted path: the base in
-    one module, the 11 kinds in six modules by what they do."""
+    one module, the step kinds in modules by what they do."""
 
-    def test_the_facade_exports_exactly_the_twelve_public_names(self):
+    def test_the_facade_exports_exactly_the_public_step_names(self):
         import fsm_llm.workflows.steps as facade
 
         assert sorted(facade.__all__) == sorted(_STEP_MODULE_OF)
+        # registry-driven: the loader's step-class table is derived from the facade, so a new
+        # step class must appear in the table above and in the loader, with no count to edit
+        from fsm_llm.workflows.loader import builtin_step_classes
+
+        assert set(builtin_step_classes()) == set(_STEP_MODULE_OF) - {"WorkflowStep"}
         namespace: dict = {}
         exec("from fsm_llm.workflows.steps import *", namespace)
         assert set(_STEP_MODULE_OF) <= set(namespace)
