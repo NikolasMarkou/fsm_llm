@@ -235,9 +235,9 @@
     "sha256": "aedd000dba3f897707b774a8bcc2ffdf0f15a3edf7d8c831d6aa05cc2f250e72"
   },
   "reasoning/orchestrator": {
-    "digest64": "2f49ccea2c5b5ea3283c25245b59c18a6404cbe53bae0bdef823caab9fce88aa",
-    "fsm_id": "fsm_reasoning_orchestrator_2f49ccea",
-    "sha256": "82c88f57cb8bd0f8f442315a9f63825c3da47adf09c84639ea2d2f6e12136437"
+    "digest64": "c3df9655ad8192f8c5258f51570c0f9096fb48131fa4ca266ecd4c8e7ad8c2dc",
+    "fsm_id": "fsm_reasoning_orchestrator_c3df9655",
+    "sha256": "61df4d31274f48839c2e149dfafa313b53e9678c964871440df2dbcd565b87af"
   },
   "reasoning/simple_calculator": {
     "digest64": "be3a08266ee90cd86d6de630ec281e91e6facf04753a8a4869a3a40faeceabe7",

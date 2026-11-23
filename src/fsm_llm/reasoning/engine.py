@@ -382,18 +382,33 @@ class ReasoningEngine:
     # orchestrator extracts `constraints`. Do NOT drop the default (every solve with no
     # caller constraints would end `failed/inputs_missing` and skip its strategy), do
     # NOT take the name from `reasoning_strategy` (a model value), and do NOT overwrite
-    # a caller's `constraints`.
+    # a caller's `constraints`. D-043 (review iter1, concerns 1 and 2): when the classifier
+    # never ran (a `problem_type` in the starting context is never an UPDATE) the choice is
+    # written here, the preferred strategy else the fallback. Do NOT drop that (a caller's
+    # `--type` would be ignored, as at HEAD before D-043) and do NOT take
+    # `preferred_reasoning_type` out of the orchestrator's `handler_only_keys` (a bulk reply
+    # could then pick the strategy over the classifier).
     def _select_reasoning_type(self, context: dict[str, Any]) -> dict[str, Any]:
         """On entry to ``execute_reasoning``: name the strategy the call will run.
 
         :param context: Current context
         :return: ``reasoning_type_selected`` (the strategy name of the target
-            ``chosen_target`` picks), plus ``constraints = []`` when absent
+            ``chosen_target`` picks), plus ``constraints = []`` when absent and
+            ``classified_problem_type`` when the classifier did not run
         """
-        target = chosen_target(self._call_config, context)
+        delta: dict[str, Any] = {}
+        if not context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE):
+            chosen = _strategy_for(
+                self._analytical.name,
+                context.get(ContextKeys.PREFERRED_REASONING_TYPE),
+                self._choices,
+                self._analytical,
+            )
+            delta[ContextKeys.CLASSIFIED_PROBLEM_TYPE] = chosen.target_id
+        target = chosen_target(self._call_config, {**context, **delta})
         selected = self._names.get(str(target), str(target))
         logger.info(LogMessages.STRATEGY_EXECUTING.format(type=selected))
-        delta: dict[str, Any] = {ContextKeys.REASONING_TYPE_SELECTED: selected}
+        delta[ContextKeys.REASONING_TYPE_SELECTED] = selected
         if context.get(ContextKeys.CONSTRAINTS) is None:
             delta[ContextKeys.CONSTRAINTS] = []
         return delta

@@ -168,18 +168,22 @@ class TestHandlerOnlyKeys:
     """D-054 of plan 944e2692: the orchestrator's handler-owned keys."""
 
     def test_orchestrator_list(self):
-        assert set(ORCHESTRATOR_HANDLER_ONLY_KEYS) == {
-            "validation_result",
-            "validation_checks",
-            "max_retries_reached",
-            "retry_count",
-            "solution_confidence",
-            "reasoning_type_selected",
-            "classified_problem_type",
-            "hybrid_loop_count",  # F3: a model claim must not reach final_context
-            "calculation_result",  # D-052 of plan 51fde95b: no bulk claim is the answer
-            "calculation_error_details",
-        }
+        assert (
+            set(ORCHESTRATOR_HANDLER_ONLY_KEYS)
+            == {
+                "validation_result",
+                "validation_checks",
+                "max_retries_reached",
+                "retry_count",
+                "solution_confidence",
+                "reasoning_type_selected",
+                "classified_problem_type",
+                "hybrid_loop_count",  # F3: a model claim must not reach final_context
+                "calculation_result",  # D-052 of plan 51fde95b: no bulk claim is the answer
+                "calculation_error_details",
+                "preferred_reasoning_type",  # review iter1: a bulk claim must not pick the strategy
+            }
+        )
 
     def test_the_fsm_definitions_carry_them(self):
         assert get_reasoning_fsm("orchestrator")["handler_only_keys"] == list(

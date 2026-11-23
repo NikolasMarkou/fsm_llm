@@ -326,6 +326,51 @@ class TestTheChoice:
         assert _the_call(context)["target"] == "reasoning.hybrid"
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "hybrid"
 
+    def test_a_callers_problem_type_does_not_cancel_the_preferred_type(self) -> None:
+        """A `problem_type` in the starting context keeps the classifier from running (it fires
+        on an UPDATE); the entry handler still writes the choice, so `--type` and a caller's
+        `preferred_reasoning_type` are honoured, as at the parent (review iter1, concern 1).
+        Kills: the entry handler no longer writing the choice when it is unset."""
+        llm = _ScriptedLLM(_HYBRID_SCRIPT)
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM,
+            {
+                ContextKeys.PREFERRED_REASONING_TYPE: "hybrid",
+                ContextKeys.PROBLEM_TYPE: "logic puzzle",
+            },
+        )
+        context = trace_info["final_context"]
+
+        assert [
+            r.call_type for r in llm.completions
+        ] == []  # the classifier did not run
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.hybrid"
+        assert _the_call(context)["target"] == "reasoning.hybrid"
+        assert context[ContextKeys.REASONING_TYPE_SELECTED] == "hybrid"
+
+    def test_an_unknown_preferred_type_with_a_problem_type_runs_the_fallback(
+        self,
+    ) -> None:
+        llm = _ScriptedLLM({**_VALID_SCRIPT, **_script("analytical")})
+        engine = _engine(llm)
+        result: list[Any] = []
+
+        warned = _warnings(
+            lambda: result.append(
+                engine.solve_problem(
+                    _PROBLEM,
+                    {
+                        ContextKeys.PREFERRED_REASONING_TYPE: "no such type",
+                        ContextKeys.PROBLEM_TYPE: "logic puzzle",
+                    },
+                )
+            )
+        )
+        context = result[0][1]["final_context"]
+
+        assert "names no known strategy" in warned
+        assert _the_call(context)["target"] == "reasoning.analytical"
+
     def test_an_unknown_preferred_type_warns_and_the_classified_one_runs(self) -> None:
         llm = _ScriptedLLM(_VALID_SCRIPT)
         engine = _engine(llm)
@@ -381,6 +426,21 @@ class TestTheChoice:
         assert llm.field_requests(ContextKeys.CLASSIFIED_PROBLEM_TYPE) == []
         assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.deductive"
         assert _the_call(context)["target"] == "reasoning.deductive"
+        assert ContextKeys.BEST_CREATIVE_SOLUTION not in context
+
+    def test_a_model_reply_cannot_claim_the_preferred_type(self) -> None:
+        """D-054 (review iter1, concern 2): `preferred_reasoning_type` wins over the classifier
+        in `_strategy_for`, so a bulk reply that claims it must be dropped like the choice key.
+        Kills: the key taken out of the orchestrator's `handler_only_keys`."""
+        llm = _ClaimingLLM(
+            _VALID_SCRIPT, claims={ContextKeys.PREFERRED_REASONING_TYPE: "creative"}
+        )
+        _solution, trace_info = _engine(llm).solve_problem(_PROBLEM)
+        context = trace_info["final_context"]
+
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.deductive"
+        assert _the_call(context)["target"] == "reasoning.deductive"
+        assert context.get(ContextKeys.PREFERRED_REASONING_TYPE) is None
         assert ContextKeys.BEST_CREATIVE_SOLUTION not in context
 
 

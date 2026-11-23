@@ -25,7 +25,8 @@
         "classified_problem_type",
         "hybrid_loop_count",
         "calculation_result",
-        "calculation_error_details"
+        "calculation_error_details",
+        "preferred_reasoning_type"
       ],
       "states": {
         "problem_analysis": {

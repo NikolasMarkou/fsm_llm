@@ -42,8 +42,9 @@ _ALIAS_PROBES = (
 _GOLDEN_FSMS = {
     # Re-baselined on purpose (D-031 of plan baa37f40, step 15): `execute_reasoning` is a `call`
     # state with `choose`, `reasoning_push_pending` left `handler_only_keys`; the 51fde95b D-052
-    # re-baseline (calculator keys in `handler_only_keys`) is inside it.
-    "orchestrator": "82c88f57cb8bd0f8f442315a9f63825c3da47adf09c84639ea2d2f6e12136437",
+    # re-baseline (calculator keys in `handler_only_keys`) is inside it. Re-baselined again on
+    # purpose (D-043 of plan baa37f40, step 27.1): `preferred_reasoning_type` is handler-only.
+    "orchestrator": "61df4d31274f48839c2e149dfafa313b53e9678c964871440df2dbcd565b87af",
     # Re-baselined on purpose (D-019 of plan baa37f40, step 5b): `recommend_strategy` classifies
     # through the nine closed intents; `test_classifier_intents` pins the file to its derivation.
     "classifier": "fe187a5446ca7564f7de07a9335169ff24c3de91b2f2ceee94818cff69bc29a5",
