@@ -804,6 +804,31 @@
       "delta": 1,
       "reason": "plan baa37f40 D-026: new anchor on _settle_after (the end settle never loses the committed turn), a gain",
       "token": "plan-2026-11-23T122249-baa37f40/D-026"
+    },
+    {
+      "delta": -1,
+      "reason": "step 15 of plan baa37f40 (D-031): the push machinery was deleted with its code (D-029 of plan ace7a8c8): the anchors of _prepare_reasoning_execution (5980fbb7/D-006, d9092060/D-004, 089d0ec7/D-009) and the second 944e2692/D-053 (_StrategyStack) are gone, the one at the retry clear stays; two D-031 anchors are new",
+      "token": "plan-2026-09-12T065608-089d0ec7/D-009"
+    },
+    {
+      "delta": -1,
+      "reason": "step 15 of plan baa37f40 (D-031): the push machinery was deleted with its code (D-029 of plan ace7a8c8): the anchors of _prepare_reasoning_execution (5980fbb7/D-006, d9092060/D-004, 089d0ec7/D-009) and the second 944e2692/D-053 (_StrategyStack) are gone, the one at the retry clear stays; two D-031 anchors are new",
+      "token": "plan-2026-10-01T093600-944e2692/D-053"
+    },
+    {
+      "delta": -1,
+      "reason": "step 15 of plan baa37f40 (D-031): the push machinery was deleted with its code (D-029 of plan ace7a8c8): the anchors of _prepare_reasoning_execution (5980fbb7/D-006, d9092060/D-004, 089d0ec7/D-009) and the second 944e2692/D-053 (_StrategyStack) are gone, the one at the retry clear stays; two D-031 anchors are new",
+      "token": "plan-2026-11-05T185903-5980fbb7/D-006"
+    },
+    {
+      "delta": 2,
+      "reason": "step 15 of plan baa37f40 (D-031): the push machinery was deleted with its code (D-029 of plan ace7a8c8): the anchors of _prepare_reasoning_execution (5980fbb7/D-006, d9092060/D-004, 089d0ec7/D-009) and the second 944e2692/D-053 (_StrategyStack) are gone, the one at the retry clear stays; two D-031 anchors are new",
+      "token": "plan-2026-11-23T122249-baa37f40/D-031"
+    },
+    {
+      "delta": -1,
+      "reason": "step 15 of plan baa37f40 (D-031): the push machinery was deleted with its code (D-029 of plan ace7a8c8): the anchors of _prepare_reasoning_execution (5980fbb7/D-006, d9092060/D-004, 089d0ec7/D-009) and the second 944e2692/D-053 (_StrategyStack) are gone, the one at the retry clear stays; two D-031 anchors are new",
+      "token": "plan_2026-05-29_d9092060/D-004"
     }
   ]
 }

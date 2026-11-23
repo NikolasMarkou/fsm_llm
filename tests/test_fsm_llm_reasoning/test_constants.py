@@ -95,8 +95,10 @@ class TestContextKeys:
         assert ContextKeys.SOLUTION_CONFIDENCE == "solution_confidence"
 
     def test_execution_control_keys(self):
-        assert ContextKeys.REASONING_PUSH_PENDING == "reasoning_push_pending"
+        # the push flag and the pushed FSM are gone: the call state pushes (D-031)
+        assert not hasattr(ContextKeys, "REASONING_PUSH_PENDING")
         assert not hasattr(ContextKeys, "REASONING_FSM_TO_PUSH")
+        assert ContextKeys.CALL_RESULT == "call_result"
         assert ContextKeys.REASONING_TYPE_SELECTED == "reasoning_type_selected"
         assert ContextKeys.RETRY_COUNT == "retry_count"
         assert ContextKeys.MAX_RETRIES_REACHED == "max_retries_reached"
@@ -122,7 +124,8 @@ class TestHandlerNames:
 
     def test_all_names(self):
         assert HandlerNames.ORCHESTRATOR_CLASSIFIER == "OrchestratorProblemClassifier"
-        assert HandlerNames.ORCHESTRATOR_EXECUTOR == "OrchestratorStrategyExecutor"
+        assert HandlerNames.ORCHESTRATOR_SELECTOR == "OrchestratorStrategySelector"
+        assert not hasattr(HandlerNames, "ORCHESTRATOR_EXECUTOR")
         assert HandlerNames.ORCHESTRATOR_VALIDATOR == "OrchestratorSolutionValidator"
         assert HandlerNames.REASONING_TRACER == "ReasoningTracer"
         assert HandlerNames.CONTEXT_PRUNER == "ContextPruner"
@@ -144,10 +147,13 @@ class TestDefaults:
         assert Defaults.CONTEXT_PRUNE_THRESHOLD == 8000
 
     def test_solve_steps_budget_is_cumulative(self):
-        """D-013: orchestrator steps plus one full strategy run per attempt."""
+        """D-013: orchestrator steps plus one full strategy run per attempt. The strategy
+        budget is ``call.max_steps`` of ``execute_reasoning`` in the orchestrator file
+        (``MAX_SUB_FSM_STEPS`` is gone, D-031); step 16 of plan baa37f40 computes it."""
+        call = get_reasoning_fsm("orchestrator")["states"]["execute_reasoning"]["call"]
+        assert not hasattr(Defaults, "MAX_SUB_FSM_STEPS")
         assert Defaults.MAX_SOLVE_STEPS == (
-            Defaults.MAX_TOTAL_STEPS
-            + (Defaults.MAX_RETRIES + 1) * Defaults.MAX_SUB_FSM_STEPS
+            Defaults.MAX_TOTAL_STEPS + (Defaults.MAX_RETRIES + 1) * call["max_steps"]
         )
         assert Defaults.MAX_SOLVE_STEPS == 170
 
@@ -167,7 +173,6 @@ class TestHandlerOnlyKeys:
             "solution_confidence",
             "reasoning_type_selected",
             "classified_problem_type",
-            "reasoning_push_pending",
             "hybrid_loop_count",  # F3: a model claim must not reach final_context
             "calculation_result",  # D-052 of plan 51fde95b: no bulk claim is the answer
             "calculation_error_details",
@@ -196,7 +201,9 @@ class TestErrorMessages:
     """Test error message templates."""
 
     def test_format_strings(self):
-        assert "{type}" in ErrorMessages.INVALID_REASONING_TYPE
+        assert not hasattr(
+            ErrorMessages, "INVALID_REASONING_TYPE"
+        )  # the dead branch is gone
         assert "{name}" in ErrorMessages.FSM_NOT_FOUND
 
     def test_plain_messages(self):
@@ -230,7 +237,7 @@ class TestLogMessages:
         assert "{model}" in LogMessages.ENGINE_INITIALIZED
         assert "{context}" in LogMessages.CLASSIFICATION_STARTED
         assert "{type}" in LogMessages.CLASSIFICATION_COMPLETE
-        assert "{name}" in LogMessages.FSM_PUSHED
+        assert not hasattr(LogMessages, "FSM_PUSHED")  # the call state pushes (D-031)
         assert "{steps}" in LogMessages.PROBLEM_SOLVED
 
 

@@ -370,52 +370,6 @@ class TestContextManager:
         result = ContextManager.extract_relevant_context(source, ["key"], max_size=100)
         assert "key" not in result  # key removed because it exceeds budget
 
-    def test_merge_analytical_results(self):
-        results = ContextManager.merge_reasoning_results(
-            {},
-            {
-                ContextKeys.KEY_INSIGHTS: ["insight1"],
-                ContextKeys.INTEGRATED_ANALYSIS: "analysis",
-            },
-            ReasoningType.ANALYTICAL.value,
-        )
-        assert ContextKeys.KEY_INSIGHTS in results
-        assert ContextKeys.INTEGRATED_ANALYSIS in results
-        assert f"{ReasoningType.ANALYTICAL.value}_reasoning_completed" in results
-
-    def test_merge_deductive_results(self):
-        results = ContextManager.merge_reasoning_results(
-            {},
-            {ContextKeys.CONCLUSION: "therefore X", ContextKeys.LOGICAL_VALIDITY: True},
-            ReasoningType.DEDUCTIVE.value,
-        )
-        assert ContextKeys.DEDUCTIVE_CONCLUSION in results
-        assert ContextKeys.LOGICAL_VALIDITY in results
-
-    def test_merge_simple_calculator_results(self):
-        results = ContextManager.merge_reasoning_results(
-            {},
-            {ContextKeys.CALCULATION_RESULT: 42},
-            ReasoningType.SIMPLE_CALCULATOR.value,
-        )
-        assert results[ContextKeys.CALCULATION_RESULT] == 42
-        assert results[ContextKeys.PROPOSED_SOLUTION] == 42
-
-    def test_merge_filters_none_values(self):
-        results = ContextManager.merge_reasoning_results(
-            {},
-            {ContextKeys.KEY_INSIGHTS: None, ContextKeys.INTEGRATED_ANALYSIS: None},
-            ReasoningType.ANALYTICAL.value,
-        )
-        assert ContextKeys.KEY_INSIGHTS not in results
-        assert ContextKeys.INTEGRATED_ANALYSIS not in results
-
-    def test_merge_all_reasoning_types(self):
-        """All reasoning types should produce a completion flag."""
-        for rt in ReasoningType:
-            results = ContextManager.merge_reasoning_results({}, {}, rt.value)
-            assert f"{rt.value}_reasoning_completed" in results
-
 
 class TestOutputFormatter:
     """Test OutputFormatter utility class."""

@@ -11,7 +11,7 @@ Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilit
 
 Tests call static methods and model constructors directly with small context dicts keyed by `ContextKeys` constants, or drive whole solves on a scripted interface (`test_engine_scripted.py`). Further techniques recur:
 
-- Bare engine: `object.__new__(ReasoningEngine)` plus a hand-set `engine.reasoning_fsms` dict, then call `engine._prepare_reasoning_execution(context)` (`test_engine.py::TestReasoningTypeFallback`).
+- The strategy choice is two small functions: `engine._strategy_for(recommended, preferred)` (a module function, no engine needed) and `engine._select_reasoning_type(context)` on a real engine built with a scripted interface (`test_engine.py`); a missing or over-budget strategy is injected by patching `executables.strategy_registry` before the engine is built (`test_engine_scripted.py::_registry_with`).
 - Source assertions: `inspect.getsource(...)` on `ReasoningEngine`, `ReasoningEngine._classify_problem`, `ReasoningEngine._solve_problem_locked`, the `engine` module, and the `handlers` module, then string checks (`test_engine.py`, `test_handlers.py`, `test_constants.py`, `test_cli_output.py`).
 - Subprocess probe: `test_cli_logging.py` runs `sys.executable -c _PROBE`. The probe imports `fsm_llm.reasoning.__main__`, replaces `solve_problem_with_engine` with a stub that logs `I-PROBE` (info) and `D-PROBE` (debug) from a namespace named `fsm_llm.reasoning.engine`, sets `sys.argv` to `['fsm-llm-reasoning', 'what is 2+2?', '-o', 'json', ...]`, and exits with `m.main()`.
 
@@ -43,10 +43,10 @@ Tests call static methods and model constructors directly with small context dic
 - `ReasoningHandlers.validate_solution(context) -> dict`: sets `VALIDATION_RESULT`, `SOLUTION_CONFIDENCE`, `VALIDATION_CHECKS` (`has_solution`, `has_insights`, `sufficient_detail`, `addresses_problem`), `RETRY_COUNT`, `MAX_RETRIES_REACHED`. Callable on the class or an instance.
 - `ReasoningHandlers.update_reasoning_trace(context) -> dict`: appends `{"from", "to", "context_snapshot", ...}` from `_previous_state`/`_current_state`.
 - `ReasoningHandlers.prune_context(context) -> dict`: returns only the updated keys; `{}` under threshold.
-- `ContextManager.extract_relevant_context(source_context, target_keys, max_size=None) -> dict` and `ContextManager.merge_reasoning_results(orchestrator_context, sub_fsm_context, reasoning_type) -> dict`.
+- `ContextManager.extract_relevant_context(source_context, target_keys, max_size=None) -> dict`.
 - `OutputFormatter.extract_final_solution(context) -> str` and `OutputFormatter.format_reasoning_summary(trace_info) -> str`.
 - `map_reasoning_type(str) -> str`: case-insensitive, unknown maps to `"analytical"`.
-- `ReasoningEngine._prepare_reasoning_execution(context)` reads `ContextKeys.PREFERRED_REASONING_TYPE`, writes `REASONING_TYPE_SELECTED` and `REASONING_PUSH_PENDING` (`ContextKeys.REASONING_FSM_TO_PUSH` is pinned absent).
+- `ReasoningEngine._select_reasoning_type(context)` writes `REASONING_TYPE_SELECTED` and defaults `CONSTRAINTS`; `_classify_problem` writes `CLASSIFIED_PROBLEM_TYPE` as the target id and reads `ContextKeys.PREFERRED_REASONING_TYPE` (`ContextKeys.REASONING_PUSH_PENDING` and `REASONING_FSM_TO_PUSH` are pinned absent).
 - `fsm_llm.reasoning.__main__._format_json_output(solution, trace_info)` and `_save_as_json(save_path, problem, solution, trace_info)`.
 
 ## Data shapes
@@ -69,7 +69,7 @@ Model behaviour pinned in `test_definitions.py`:
 - Missing reasoning FSM: fall back to ANALYTICAL only, with warning text `Falling back to analytical reasoning`; if ANALYTICAL is also missing, or only another type (for example DEDUCTIVE) exists, raise `ReasoningExecutionError`. Never substitute an arbitrary type.
 - `extract_relevant_context` with `max_size` removes keys until `len(json.dumps(result, default=str)) <= max_size`; keys whose value is `None` or absent are dropped.
 - `extract_final_solution`: `FINAL_SOLUTION` beats every other key; falls back to `PROPOSED_SOLUTION`, then must find each merged result key (`INTEGRATED_ANALYSIS`, `DEDUCTIVE_CONCLUSION`, `INDUCTIVE_HYPOTHESIS`, `BEST_CREATIVE_SOLUTION`, `CRITICAL_ASSESSMENT`, `CALCULATION_RESULT`, `FINAL_HYBRID_SOLUTION`, `BEST_EXPLANATION`, `ANALOGICAL_SOLUTION`). `MAX_RETRIES_REACHED` alone gives `ErrorMessages.MAX_RETRIES_EXCEEDED`; empty context gives text containing "no explicit solution".
-- `merge_reasoning_results` writes `<type>_reasoning_completed` for every `ReasoningType`, drops `None` values, maps deductive `CONCLUSION` to `DEDUCTIVE_CONCLUSION`, and for `simple_calculator` copies `CALCULATION_RESULT` into `PROPOSED_SOLUTION`.
+- A strategy returns the keys of its `results` map (one table, pinned by the `results_maps` hash of `test_golden_tables.py`), which core `settle` merges (`test_call_settle.py::TestTheTargetsOwnOutputMap`).
 - `validate_solution`: `simple_calculator` strategy accepts short answers and relaxes `has_insights`; a solution shorter than `MIN_SOLUTION_LENGTH` fails; failure increments `RETRY_COUNT`; `RETRY_COUNT == MAX_RETRIES` sets `MAX_RETRIES_REACHED`; empty `PROBLEM_STATEMENT` makes `addresses_problem` follow `has_solution`.
 - `update_reasoning_trace` adds nothing without both state keys, snapshots only specific `ContextKeys` (never `_`-prefixed or arbitrary keys), and keeps length at most `MAX_TRACE_STEPS + 1`.
 - `prune_context` never returns `PROBLEM_STATEMENT` or `PROPOSED_SOLUTION` (preserved keys).

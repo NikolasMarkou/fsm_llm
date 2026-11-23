@@ -203,9 +203,15 @@ class TestScriptedSolve:
         context = trace_info["final_context"]
 
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
-        assert context["deductive_reasoning_completed"] is True
+        # the call state pushed the strategy, popped it and wrote ONE record (D-031)
+        record = context[ContextKeys.CALL_RESULT]
+        assert (record["status"], record["state"]) == ("ok", "execute_reasoning")
+        assert record["target"] == "reasoning.deductive" and record["reason"] is None
+        assert record["template_identity"] and record["instance_identity"]
         assert context[ContextKeys.DEDUCTIVE_CONCLUSION] == "Socrates is mortal"
-        assert not context.get(ContextKeys.REASONING_PUSH_PENDING)
+        # the flags of the old merge and the push flag are gone
+        assert "deductive_reasoning_completed" not in context
+        assert "reasoning_push_pending" not in context
         assert _visited(trace_info)[-1] == OrchestratorStates.FINAL_ANSWER
 
     def test_no_user_exchange_and_no_continue_message(self, monkeypatch):
@@ -315,28 +321,71 @@ _STUCK_FSM: dict[str, Any] = {
 }
 
 
-class TestForcedPop:
-    """A strategy FSM that never ends is popped after MAX_SUB_FSM_STEPS."""
+def _registry_with(monkeypatch: pytest.MonkeyPatch, **fsms: dict[str, Any]) -> None:
+    """Make every engine built from now on resolve the named strategies to ``fsms`` instead
+    (a name missing from ``fsms`` keeps its built-in; a ``None`` value drops the strategy).
+    The engine reads ``strategy_registry`` at construction, so the patch must come first."""
+    import copy
 
-    def test_sub_fsm_is_force_popped_and_the_solve_finishes(self):
+    from fsm_llm.core.verify.executable import load_executable
+    from fsm_llm.engine.executables import ExecutableRegistry, FsmBodyExecutable
+    from fsm_llm.reasoning import executables
+    from fsm_llm.reasoning.strategy_files import STRATEGY_ORDER, load_document
+
+    def build() -> ExecutableRegistry:
+        registry = ExecutableRegistry()
+        for name in STRATEGY_ORDER:
+            if name in fsms and fsms[name] is None:
+                continue
+            if name not in fsms:
+                registry.register(executables._strategy_executable(name))
+                continue
+            document = load_document(name)
+            document["body"]["fsm"] = copy.deepcopy(fsms[name])
+            envelope, report = load_executable(document)
+            assert envelope is not None and report.is_valid, report.errors
+            registry.register(FsmBodyExecutable(envelope))
+        return registry
+
+    monkeypatch.setattr(executables, "strategy_registry", build)
+
+
+def _the_call(context: dict[str, Any]) -> dict[str, Any]:
+    record = context[ContextKeys.CALL_RESULT]
+    assert isinstance(record, dict)
+    return record
+
+
+class TestForcedPop:
+    """A strategy FSM that never ends spends its frame budget (``call.max_steps``)."""
+
+    def test_an_over_budget_strategy_aborts_and_the_solve_still_answers(
+        self, monkeypatch
+    ):
+        _registry_with(monkeypatch, deductive=_STUCK_FSM)
         llm = _ScriptedLLM(_VALID_SCRIPT)
         engine = _engine(llm)
-        engine.reasoning_fsms[ReasoningType.DEDUCTIVE] = _STUCK_FSM
+        steps = engine._call_config.max_steps
 
-        _solution, trace_info = engine.solve_problem(_PROBLEM)
+        solution, trace_info = engine.solve_problem(_PROBLEM)
         context = trace_info["final_context"]
 
-        # Every sub step replies from `wait` (the first step moves `gather`
-        # to `wait`), so the Pass-2 calls carrying its marker count the steps.
+        # Every step of the child replies from `wait` (the first one moves `gather` to
+        # `wait`), so the Pass-2 calls carrying its marker count the steps it was given.
         wait_replies = [
             r
             for r in llm.requests
             if isinstance(r, ResponseGenerationRequest)
             and "WAIT-MARKER" in r.system_prompt
         ]
-        assert len(wait_replies) == Defaults.MAX_SUB_FSM_STEPS
-        assert context["deductive_reasoning_completed"] is True
+        assert steps == 30 and len(wait_replies) == steps
+        record = _the_call(context)
+        assert (record["status"], record["reason"]) == ("aborted", "budget_spent")
+        assert record["target"] == "reasoning.deductive"
+        assert "deductive_conclusion" not in context  # partial results are dropped
+        assert solution == _VALID_SCRIPT["final_solution"]
         assert _visited(trace_info)[-1] == OrchestratorStates.FINAL_ANSWER
+        assert engine.orchestrator.list_active_conversations() == []
 
 
 class _ClaimingLLM(_ScriptedLLM):
@@ -467,7 +516,8 @@ class TestHybridLoopCounter:
         assert _replies_from(llm, "identify_components") == passes
         assert _replies_from(llm, HYBRID_EVALUATION_STATE) == passes
         assert _replies_from(llm, "finalize_hybrid") == 1
-        assert context["hybrid_reasoning_completed"] is True
+        assert _the_call(context)["status"] == "ok"
+        assert _the_call(context)["target"] == "reasoning.hybrid"
         assert context[ContextKeys.FINAL_HYBRID_SOLUTION] == "Socrates is mortal"
 
 
@@ -507,7 +557,8 @@ class TestHybridRefinementReExtracts:
         llm, context = self._solve()
 
         passes = 1 + Defaults.MAX_HYBRID_LOOPS
-        assert context["hybrid_reasoning_completed"] is True
+        assert _the_call(context)["target"] == "reasoning.hybrid"
+        assert _the_call(context)["status"] == "ok"
         assert _replies_from(llm, HYBRID_EVALUATION_STATE) == passes
         assert _replies_from(llm, "finalize_hybrid") == 1
 
@@ -628,21 +679,6 @@ class TestHandlerFailuresStopTheSolve:
         assert engine.orchestrator.list_active_conversations() == []
         assert engine.classifier.list_active_conversations() == []
 
-    def test_no_strategy_definitions_fails_the_solve(self):
-        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
-        del engine.reasoning_fsms[ReasoningType.DEDUCTIVE]
-        del engine.reasoning_fsms[ReasoningType.ANALYTICAL]
-
-        with pytest.raises(ReasoningExecutionError) as info:
-            engine.solve_problem(_PROBLEM)
-
-        assert any(
-            isinstance(e, ReasoningExecutionError)
-            and "No reasoning FSM definitions available" in str(e)
-            for e in _causes(info.value)[1:]
-        )
-        assert engine.orchestrator.list_active_conversations() == []
-
     def test_a_validator_crash_fails_the_solve_at_once(self, monkeypatch):
         def _always_crash(context: dict[str, Any]) -> dict[str, Any]:
             raise _HandlerCrash("validate_solution crashed")
@@ -659,6 +695,29 @@ class TestHandlerFailuresStopTheSolve:
         assert any(isinstance(e, _HandlerCrash) for e in chain), chain
         # Not the step budget hiding the real error after 170 free steps.
         assert not any(isinstance(e, RunBudgetExceededError) for e in chain)
+        assert engine.orchestrator.list_active_conversations() == []
+
+
+class TestAMissingStrategy:
+    """D-031 supersedes 089d0ec7/D-009: a strategy the registry cannot resolve fails the CALL
+    (``failed/unknown_target``), the failure edge runs and the solve goes on without it. No
+    other strategy is substituted: the fallback applies to a value outside the closed list only."""
+
+    def test_the_call_fails_and_no_other_strategy_runs(self, monkeypatch):
+        _registry_with(monkeypatch, deductive=None)
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        engine = _engine(llm)
+
+        solution, trace_info = engine.solve_problem(_PROBLEM)
+        context = trace_info["final_context"]
+
+        record = _the_call(context)
+        assert (record["status"], record["reason"]) == ("failed", "unknown_target")
+        assert record["target"] == "reasoning.deductive"
+        assert solution == _VALID_SCRIPT["final_solution"]
+        # the analytical strategy (the fallback id) did not stand in
+        assert ContextKeys.INTEGRATED_ANALYSIS not in context
+        assert ContextKeys.DEDUCTIVE_CONCLUSION not in context
         assert engine.orchestrator.list_active_conversations() == []
 
 
@@ -852,33 +911,45 @@ class TestCalculatorEvaluatesTheExpression:
             _engine(_ScriptedLLM(_CALC_SCRIPT)).solve_problem("What is 15% of 240?")
 
 
-class TestCallerCannotDriveThePush:
-    """Review pass 15 note 9: the push hook's driver keys are dropped from a
-    caller's initial_context."""
+class TestCallerCannotDriveTheStrategy:
+    """Review pass 15 note 9: the engine's strategy keys are dropped from a caller's
+    initial_context, and a forged call record cannot skip or redirect the call (D3)."""
 
-    def test_a_caller_push_flag_alone_does_not_break_the_solve(self):
+    def test_a_stale_push_flag_of_an_older_caller_does_not_break_the_solve(self):
         solution, trace_info = _engine(_ScriptedLLM(_VALID_SCRIPT)).solve_problem(
-            _PROBLEM, {ContextKeys.REASONING_PUSH_PENDING: True}
+            _PROBLEM, {"reasoning_push_pending": True}
         )
 
         assert solution == _VALID_SCRIPT["final_solution"]
         assert trace_info["final_context"][ContextKeys.VALIDATION_RESULT] is True
 
-    def test_a_caller_cannot_push_a_strategy_before_the_analysis(self):
+    def test_a_caller_cannot_name_a_strategy_before_the_analysis(self):
         llm = _ScriptedLLM(_VALID_SCRIPT)
         _solution, trace_info = _engine(llm).solve_problem(
             _PROBLEM,
-            {
-                ContextKeys.REASONING_PUSH_PENDING: True,
-                ContextKeys.REASONING_TYPE_SELECTED: ReasoningType.CREATIVE.value,
-            },
+            {ContextKeys.REASONING_TYPE_SELECTED: ReasoningType.CREATIVE.value},
         )
         context = trace_info["final_context"]
 
         # Only the strategy the orchestrator chose ran.
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
-        assert "creative_reasoning_completed" not in context
-        assert context["deductive_reasoning_completed"] is True
+        assert _the_call(context)["target"] == "reasoning.deductive"
+        assert ContextKeys.BEST_CREATIVE_SOLUTION not in context
+        assert context[ContextKeys.DEDUCTIVE_CONCLUSION] == "Socrates is mortal"
+
+    def test_a_forged_final_call_record_does_not_skip_the_strategy(self):
+        """The retry clear runs on the first entry too, so a caller's public `call_result`
+        (an `ok` record with no stamp belongs to any call state) is gone before the executor
+        decides. Kills: a clear that is not on entry (the strategy would never run)."""
+        forged = {"status": "ok", "target": "reasoning.creative", "reason": None}
+        llm = _ScriptedLLM(_VALID_SCRIPT)
+        _solution, trace_info = _engine(llm).solve_problem(
+            _PROBLEM, {ContextKeys.CALL_RESULT: forged}
+        )
+        context = trace_info["final_context"]
+
+        assert _the_call(context)["target"] == "reasoning.deductive"
+        assert context[ContextKeys.DEDUCTIVE_CONCLUSION] == "Socrates is mortal"
 
 
 class TestMalformedClassifierValues:
@@ -938,7 +1009,7 @@ class TestMalformedClassifierValues:
         context = trace_info["final_context"]
 
         assert solution == _VALID_SCRIPT["final_solution"]
-        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == classified
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == f"reasoning.{classified}"
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == classified
         assert context[ContextKeys.ALTERNATIVE_APPROACHES] == alternatives
         for key in (
@@ -953,7 +1024,7 @@ class TestMalformedClassifierValues:
         )
         context = trace_info["final_context"]
 
-        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.deductive"
         assert context[ContextKeys.CLASSIFICATION_JUSTIFICATION] == "a syllogism"
         assert context[ContextKeys.PROBLEM_DOMAIN] == "logic"
         assert context[ContextKeys.ALTERNATIVE_APPROACHES] == ["analytical"]
@@ -994,7 +1065,7 @@ class TestEachCriticalRegistration:
         ("owner", "name", "initial_context"),
         [
             (ReasoningEngine, "_classify_problem", None),
-            (ReasoningEngine, "_prepare_reasoning_execution", None),
+            (ReasoningEngine, "_select_reasoning_type", None),
             (ReasoningHandlers, "validate_solution", None),
             (ReasoningEngine, "_check_retry_limit", None),
             (
@@ -1003,7 +1074,7 @@ class TestEachCriticalRegistration:
                 {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.HYBRID.value},
             ),
         ],
-        ids=["classifier", "executor", "validator", "retry-limiter", "hybrid-counter"],
+        ids=["classifier", "selector", "validator", "retry-limiter", "hybrid-counter"],
     )
     def test_a_crash_stops_the_solve(self, monkeypatch, owner, name, initial_context):
         calls = _crash_on_first_call(monkeypatch, owner, name)
@@ -1062,9 +1133,9 @@ class TestCallerCannotCarryAClassification:
         context = trace_info["final_context"]
 
         assert [r.call_type for r in llm.completions] == ["classification"]
-        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.deductive"
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
-        assert "creative_reasoning_completed" not in context
+        assert ContextKeys.BEST_CREATIVE_SOLUTION not in context
 
 
 _NON_STR_VALUES = [["logic"], 7, {"kind": "logic"}]

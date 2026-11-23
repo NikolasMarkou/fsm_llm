@@ -42,6 +42,16 @@ def _spellings() -> dict[str, str]:
     return table
 
 
+def lookup_reasoning_type(type_str: str) -> str | None:
+    """The strategy a spelling names (a value or an alias, case and padding ignored), or ``None``.
+
+    Contract: never raises for a ``str`` and never logs; ``map_reasoning_type`` is its warning
+    wrapper. The one place that tells a known spelling from an unknown one (an unknown spelling
+    maps to ``analytical`` there, which is not a signal a caller can read).
+    """
+    return _spellings().get(type_str.lower().strip())
+
+
 def map_reasoning_type(type_str: str) -> str:
     """
     Map a reasoning type string to a standardized value.
@@ -49,14 +59,12 @@ def map_reasoning_type(type_str: str) -> str:
     :param type_str: Input reasoning type string
     :return: Standardized reasoning type that matches ReasoningType enum values
     """
-    normalized = type_str.lower().strip()
-
-    spellings = _spellings()
-    if normalized not in spellings:
+    mapped = lookup_reasoning_type(type_str)
+    if mapped is None:
         logger.warning(f"Unknown reasoning type '{type_str}', defaulting to analytical")
         return ReasoningType.ANALYTICAL.value
 
-    return spellings[normalized]
+    return mapped
 
 
 def get_available_reasoning_types() -> dict[str, str]:

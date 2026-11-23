@@ -14,8 +14,8 @@ import json
 import pytest
 
 from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
-from fsm_llm.reasoning.handlers import ContextManager, OutputFormatter
-from fsm_llm.reasoning.strategy_files import FSM_NAMES, STRATEGY_ORDER
+from fsm_llm.reasoning.handlers import OutputFormatter
+from fsm_llm.reasoning.strategy_files import FSM_NAMES, STRATEGY_ORDER, strategy_facts
 from fsm_llm.reasoning.utilities import (
     get_available_reasoning_types,
     get_reasoning_fsm,
@@ -40,11 +40,10 @@ _ALIAS_PROBES = (
 )
 
 _GOLDEN_FSMS = {
-    # Re-baselined on purpose (D-052 of plan 51fde95b): the only change is
-    # `calculation_result` and `calculation_error_details` added to
-    # `handler_only_keys`; `test_orchestrator_hash_moved_only_by_the_calculator_keys`
-    # proves it by reproducing the previous hash without those two keys.
-    "orchestrator": "9fdeca073453c9408fe39f39cc1a497ef876de2a34a4f844c7d3d2bf4aa2de51",
+    # Re-baselined on purpose (D-031 of plan baa37f40, step 15): `execute_reasoning` is a `call`
+    # state with `choose`, `reasoning_push_pending` left `handler_only_keys`; the 51fde95b D-052
+    # re-baseline (calculator keys in `handler_only_keys`) is inside it.
+    "orchestrator": "82c88f57cb8bd0f8f442315a9f63825c3da47adf09c84639ea2d2f6e12136437",
     # Re-baselined on purpose (D-019 of plan baa37f40, step 5b): `recommend_strategy` classifies
     # through the nine closed intents; `test_classifier_intents` pins the file to its derivation.
     "classifier": "fe187a5446ca7564f7de07a9335169ff24c3de91b2f2ceee94818cff69bc29a5",
@@ -63,9 +62,10 @@ _GOLDEN_TABLES = {
     "fsm_registry_keys": "dfd445d472c78bb0f4fb0202001cf5029c4302154c3dd1c3b5fc7457c05c7829",
     "aliases": "553514a177ee4c9459754fae261202c64e49a4a0fc6c35a7398ff8da5ec1153a",
     "descriptions": "d96fb4b12d07b85ed0c9c1d24f597e07aef08f373d468a0c0c3e05351118099f",
-    "merge_ladder": "cfc304b3878488d08da2e6145631950facd2be075fc1f26bf7fcb676c1bb722a",
-    "merge_none_values": "48393bdd2d664c2d77301a09d8b4b67f218613c7ae02399199171dccba08f767",
-    "merge_calculator_cases": "12a0c4a62c50622ea1a6ac3e0c8053a7c1f201d777ac70b39e98ab1d39665853",
+    # The three merge tables went with `merge_reasoning_results` (D-031); the keys a strategy
+    # returns are its `results` map, which `settle` merges (`test_call_settle`), and this one
+    # table pins them.
+    "results_maps": "eb887e6e853ef3d13671574b49f5f6fd8e0f10e3fe0ce0ad4fda1f2e59ba2f78",
     "solution_order": "d036c8b670b52e7a851e527724decf1ddffbac72a3f894cdbffef1e6ebc1132f",
 }
 
@@ -83,29 +83,9 @@ def _every_key_filled() -> dict[str, str]:
     }
 
 
-def _merge_ladder() -> dict[str, dict]:
-    sub = _every_key_filled()
-    types = [t.value for t in ReasoningType] + ["bogus"]
-    return {t: ContextManager.merge_reasoning_results({}, sub, t) for t in types}
-
-
-def _merge_none_values() -> dict[str, dict]:
-    sub = {value: None for value in _every_key_filled()}
-    types = [t.value for t in ReasoningType]
-    return {t: ContextManager.merge_reasoning_results({}, sub, t) for t in types}
-
-
-def _merge_calculator_cases() -> list[dict]:
-    calc = ReasoningType.SIMPLE_CALCULATOR.value
-    cases = [
-        {},
-        {ContextKeys.CALCULATION_RESULT: 0},
-        {ContextKeys.CALCULATION_RESULT: None},
-        {ContextKeys.CALCULATION_ERROR: "boom"},
-        {ContextKeys.CALCULATION_ERROR: None},
-        {ContextKeys.CALCULATION_RESULT: 4, ContextKeys.CALCULATION_ERROR: "e"},
-    ]
-    return [ContextManager.merge_reasoning_results({}, c, calc) for c in cases]
+def _results_maps() -> dict[str, dict[str, str]]:
+    """Each strategy's parent key to child key map, the keys a call state merges on its pop."""
+    return {name: strategy_facts(name)["results"] for name in STRATEGY_ORDER}
 
 
 def _solution_order() -> list[str]:
@@ -132,9 +112,7 @@ def _tables() -> dict[str, object]:
         "fsm_registry_keys": list(FSM_NAMES),
         "aliases": {p: map_reasoning_type(p) for p in _ALIAS_PROBES},
         "descriptions": list(get_available_reasoning_types().items()),
-        "merge_ladder": _merge_ladder(),
-        "merge_none_values": _merge_none_values(),
-        "merge_calculator_cases": _merge_calculator_cases(),
+        "results_maps": _results_maps(),
         "solution_order": _solution_order(),
     }
 
@@ -183,17 +161,3 @@ class TestOneStrategyTable:
         assert get_reasoning_fsm("orchestrator")["states"]
         with pytest.raises(KeyError, match="FSM definition not found: nope"):
             get_reasoning_fsm("nope")
-
-
-_PREVIOUS_ORCHESTRATOR_HASH = (
-    "890af39efa2cde911c7c89644cf5f5951994cbaeccdd198b7082813be3dc9b55"
-)
-
-
-def test_orchestrator_hash_moved_only_by_the_calculator_keys():
-    definition = get_reasoning_fsm("orchestrator")
-    for key in (ContextKeys.CALCULATION_RESULT, ContextKeys.CALCULATION_ERROR_DETAILS):
-        assert key in definition["handler_only_keys"]
-        definition["handler_only_keys"].remove(key)
-
-    assert _hash(definition) == _PREVIOUS_ORCHESTRATOR_HASH

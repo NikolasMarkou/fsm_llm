@@ -23,7 +23,6 @@
         "solution_confidence",
         "reasoning_type_selected",
         "classified_problem_type",
-        "reasoning_push_pending",
         "hybrid_loop_count",
         "calculation_result",
         "calculation_error_details"
@@ -77,12 +76,59 @@
           "id": "execute_reasoning",
           "description": "Execute selected reasoning strategy",
           "purpose": "Apply the chosen reasoning approach through specialized FSM execution",
-          "extraction_instructions": "\n            The appropriate reasoning FSM will be executed here by handlers based on the selected strategy.\n            This state serves as a coordination point for specialized reasoning execution.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. The execution will be handled automatically.\n            ",
-          "response_instructions": "Acknowledge the current state of reasoning. Do not ask questions or request additional input from the user.",
+          "response_instructions": "",
+          "call": {
+            "choose": {
+              "key": "classified_problem_type",
+              "targets_from": {
+                "capability": "strategy"
+              },
+              "targets": [
+                "reasoning.simple_calculator",
+                "reasoning.analytical",
+                "reasoning.deductive",
+                "reasoning.inductive",
+                "reasoning.creative",
+                "reasoning.critical",
+                "reasoning.hybrid",
+                "reasoning.abductive",
+                "reasoning.analogical"
+              ],
+              "fallback": "reasoning.analytical"
+            },
+            "inputs": [
+              "problem_statement",
+              "problem_components",
+              "constraints",
+              "problem_type"
+            ],
+            "on_failure": "synthesize_solution",
+            "max_steps": 30
+          },
           "transitions": [
             {
               "target_state": "synthesize_solution",
-              "description": "Reasoning completed"
+              "description": "Reasoning completed",
+              "conditions": [
+                {
+                  "description": "The call has a result",
+                  "requires_context_keys": [
+                    "call_result"
+                  ],
+                  "logic": {
+                    "in": [
+                      {
+                        "var": "call_result.status"
+                      },
+                      [
+                        "ok",
+                        "failed",
+                        "aborted"
+                      ]
+                    ]
+                  }
+                }
+              ]
             }
           ]
         },

@@ -14,7 +14,7 @@ flowchart TD
     A -. problem_type extracted: classifier FSM runs .-> C[classified_problem_type]
     A --> S[strategy_selection]
     S --> E[execute_reasoning]
-    E -. on entry: pick a strategy FSM .-> X[push strategy FSM, drive it, pop results back]
+    E -. call state: push the chosen strategy FSM, it runs, pop its results back .-> X[strategy FSM]
     E --> Y[synthesize_solution]
     Y -. proposed_solution extracted: validator runs .-> V0[validation_result, retry_count]
     Y --> V[validate_refine]
@@ -24,7 +24,7 @@ flowchart TD
 
 - The engine starts an orchestrator conversation with the problem in its context and runs it with message-free steps (core `run_until_terminal`, no user message) until it reaches `final_answer`, for at most 170 steps in total (50 for the orchestrator plus 30 per strategy run, one run per attempt).
 - As soon as the orchestrator extracts `problem_type`, a handler (a Python function the FSM runs at a set point) runs a second FSM, the classifier, which looks at domain, structure and needs and recommends one of the strategies. The choice is one structured model call with the nine strategies as closed intents (core classification, one `complete` request): a pick below confidence 0.6, an unknown intent, a cut reply or a failed call ends on `analytical`, with a WARNING when no value was produced. The injected `llm_interface` therefore must implement `complete`. It gets at most 10 steps.
-- When the orchestrator enters `execute_reasoning`, a handler chooses the strategy FSM. The same run pushes it on top of the orchestrator (FSM stacking) by type, steps it for at most 30 steps, then pops it and copies its results back into the orchestrator. Each entry to `execute_reasoning` also clears `proposed_solution`, `key_insights` and `validation_result`, so a retry produces and validates a new answer.
+- `execute_reasoning` is a `call` state (a core state kind that runs another FSM by id). The classifier's recommendation (or `preferred_reasoning_type`, when it names a strategy) is written by a handler as the target id `reasoning.<strategy>`; the state chooses its target from that key among the nine strategies, with `reasoning.analytical` as the fallback. The engine pushes the strategy FSM on top of the orchestrator, steps it for at most 30 steps, then pops it and copies the keys the strategy declares back into the orchestrator (a strategy that spends its 30 steps ends `aborted/budget_spent`, its partial results are dropped and the solve goes on). Each entry to `execute_reasoning` also clears `proposed_solution`, `key_insights`, `validation_result` and `call_result`, so a retry runs the strategy again and validates a new answer.
 - When a `proposed_solution` appears, a validator runs these checks: there is an answer, there are key insights (not needed for arithmetic), the answer is longer than 20 characters (not needed for arithmetic), and it shares at least one non-trivial word with the question (not checked for arithmetic).
 
 The strategies and the result key each one fills:
@@ -46,9 +46,9 @@ In `simple_calculator` the model only writes the problem as a single arithmetic 
 ## Files
 
 - `calculator.py` - the bounded arithmetic evaluator behind `simple_calculator` (standard library only).
-- `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the hooks and handlers.
+- `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the handlers; the strategy is pushed by the `call` state of the orchestrator.
 - `strategies/*.json` - the FSM definitions as package data, one `fsm-llm/executable` file per FSM (orchestrator, classifier, and the nine strategies); `strategy_files.py` reads them and holds the two explicit name orders.
-- `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.
+- `handlers.py` - answer validation, trace recording, context pruning, picking the final answer.
 - `definitions.py` - Pydantic models for steps, traces, validation, classification, problems and solutions.
 - `constants.py` - reasoning types, state names, context key names, limits, and message text.
 - `executables.py` - the nine strategies as `strategy` executables (`reasoning.<name>`) and the whole engine as `reasoning.solve`, registered as the `reasoning` source of the `executable_sources` namespace when the package is imported. See `docs/executables.md`.
@@ -90,14 +90,14 @@ The command line also takes `--context '{"audience": "child"}'` (extra context a
 
 ## Things to know
 
-- The strategies and the engine can be run by id: `registry.get("reasoning.deductive")` is the strategy FSM the engine pushes, run on its own with the four context keys the engine hands it as inputs (`problem_statement`, `problem_components`, `constraints`, `problem_type`) and reporting both identities; `registry.get("reasoning.solve").run({"problem": "..."})` runs `solve_problem` on a worker thread (one engine per run, closed afterwards) and returns a `RunResult` with the solution in `outputs`. `reasoning.solve` takes no `max_steps` or `max_seconds` (the engine has its own 170-step budget), and a cancelled await leaves the worker running. See `docs/executables.md`.
+- The strategies and the engine can be run by id: `registry.get("reasoning.deductive")` is the strategy FSM the engine pushes, run on its own with one input, `problem_statement`, and reporting both identities (it returns every non-None key of its `results` map; the orchestrator hands a pushed strategy its own four problem keys); `registry.get("reasoning.solve").run({"problem": "..."})` runs `solve_problem` on a worker thread (one engine per run, closed afterwards) and returns a `RunResult` with the solution in `outputs`. `reasoning.solve` takes no `max_steps` or `max_seconds` (the engine has its own 170-step budget), and a cancelled await leaves the worker running. See `docs/executables.md`.
 - One engine solves one problem at a time. Calls to `solve_problem` on the same engine wait for each other.
 - An interrupt (`KeyboardInterrupt`, `SystemExit`) during a solve ends its conversations and reaches you unchanged. `engine.close()` ends whatever is still open (safe to call twice), and `with ReasoningEngine(...) as engine:` does it on exit.
-- Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps is popped and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`. Any failed solve raises that error, and its `details["partial_context"]` holds what the solve had collected (for example a validated `proposed_solution`).
+- Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps ends `aborted/budget_spent` and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`. Any failed solve raises that error, and its `details["partial_context"]` holds what the solve had collected (for example a validated `proposed_solution`).
 - The model cannot mark its own answer as valid or change the retry counters: those keys are written only by the engine's handlers. An attempt that produces no answer counts as a failed attempt.
 - `ReasoningEngine(llm_interface=my_interface)` sends every call to your interface (its `model` argument is then not used).
-- `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy.
-- If a strategy FSM cannot be loaded, the engine falls back to `analytical` only, never to another style.
+- `--type` (or `preferred_reasoning_type` in the starting context) overrides the automatic choice when it names a valid strategy; a value that names none is warned and ignored.
+- A strategy the registry cannot resolve fails the call (`failed/unknown_target`), the solve goes on without it and never runs another style in its place; the fallback `analytical` applies only to a choice outside the closed list of nine.
 - Unknown words passed to `map_reasoning_type` fall back to `analytical` with a warning.
 - `--list-types` prints its table and solutions print on stdout; an error is one line `python -m fsm_llm.reasoning: error: ...` on stderr. `--verbose` turns on the engine's own log records.
 - In `--output json` and in `.json` save files, `reasoning_types_used` is a sorted list of type names.

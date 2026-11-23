@@ -27,7 +27,7 @@ from .constants import (
     OrchestratorStates,
     ReasoningType,
 )
-from .strategy_files import STRATEGY_ORDER, solution_keys, strategy_facts
+from .strategy_files import solution_keys
 
 # Stop-words filtered out during solution-relevance checking in validate_solution.
 # Without this, common words (the, is, a) cause near-universal overlap, making the
@@ -133,8 +133,8 @@ def retries_exhausted(retry_count: int) -> bool:
 @cache
 def _solution_keys() -> tuple[str, ...]:
     """Orchestrator keys ``extract_final_solution`` reads, in order: the two the
-    SYNTHESIZE/FINAL states set, then one per strategy in ``STRATEGY_ORDER`` (the keys
-    ``merge_reasoning_results`` writes, not the raw sub-FSM keys)."""
+    SYNTHESIZE/FINAL states set, then one per strategy in ``STRATEGY_ORDER`` (the keys the
+    call state merges under their parent names, not the raw sub-FSM keys)."""
     return (
         ContextKeys.FINAL_SOLUTION,
         ContextKeys.PROPOSED_SOLUTION,
@@ -551,43 +551,6 @@ class ContextManager:
                     size -= removed_size
 
         return filtered
-
-    @staticmethod
-    def merge_reasoning_results(
-        orchestrator_context: dict[str, Any],
-        sub_fsm_context: dict[str, Any],
-        reasoning_type: str,
-    ) -> dict[str, Any]:
-        """
-        Merge sub-FSM results back to orchestrator with proper mapping.
-
-        :param orchestrator_context: Main orchestrator context
-        :param sub_fsm_context: Sub-FSM final context
-        :param reasoning_type: Type of reasoning executed
-        :return: Mapped results for orchestrator
-        """
-        sources = (
-            strategy_facts(reasoning_type)["results"]
-            if reasoning_type in STRATEGY_ORDER
-            else {}
-        )
-        results = {
-            key: sub_fsm_context[source]
-            for key, source in sources.items()
-            if sub_fsm_context.get(source) is not None
-        }
-
-        # Log overwrites for debugging
-        for key in results:
-            if key in orchestrator_context and orchestrator_context[key] is not None:
-                logger.debug(
-                    f"Overwriting existing key '{key}' during {reasoning_type} merge"
-                )
-
-        # Add completion flag
-        results[f"{reasoning_type}_reasoning_completed"] = True
-
-        return results
 
 
 class OutputFormatter:

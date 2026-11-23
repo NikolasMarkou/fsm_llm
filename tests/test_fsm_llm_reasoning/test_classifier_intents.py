@@ -135,8 +135,9 @@ class TestOneClassificationRequest:
         system = request.messages[0]["content"]
         assert _PROBLEM in system
         assert request.messages[-1]["content"] is None
+        # the classified strategy is the target id the call state reads (D-031)
         assert trace_info["final_context"][ContextKeys.CLASSIFIED_PROBLEM_TYPE] == (
-            "deductive"
+            "reasoning.deductive"
         )
 
     def test_the_intent_prompt_carries_every_description_and_no_second_list(
@@ -169,7 +170,7 @@ class TestOneClassificationRequest:
         )
 
         # the classifier still runs: the preferred type beats its answer in
-        # `_prepare_reasoning_execution`, the call count is the one of today
+        # `_strategy_for` (D-031), the call count is the one of today
         assert [r.call_type for r in llm.completions] == ["classification"]
 
 
@@ -201,7 +202,7 @@ class TestEveryUnusableChoiceEndsOnAnalytical:
         solution, trace_info = result[0]
         context = trace_info["final_context"]
         assert solution == _VALID_SCRIPT["final_solution"]
-        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "analytical"
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.analytical"
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "analytical"
         assert len(llm.completions) == 1
         assert len([m for m in messages if m.startswith(_NO_VALUE)]) == int(warns)
@@ -218,7 +219,7 @@ class TestEveryUnusableChoiceEndsOnAnalytical:
         solution, trace_info = result[0]
         assert solution == _VALID_SCRIPT["final_solution"]
         context = trace_info["final_context"]
-        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "analytical"
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.analytical"
         assert len(llm.completions) == 1
         assert len([m for m in messages if m.startswith(_NO_VALUE)]) == 1
 
@@ -240,7 +241,7 @@ class TestEveryUnusableChoiceEndsOnAnalytical:
         messages = _warnings(lambda: result.append(engine_.solve_problem(_PROBLEM)))
 
         context = result[0][1]["final_context"]
-        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "analytical"
+        assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.analytical"
         assert [m for m in messages if "Post-transition extraction failed" in m] == [
             "Post-transition extraction failed (non-fatal): 'host bug'"
         ]

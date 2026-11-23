@@ -91,11 +91,11 @@ class ContextKeys:
     REASONING_TRACE = "reasoning_trace"
 
     # Execution control
-    # Set (True) by the execute_reasoning entry handler; the engine's
-    # before_step hook clears it and pushes the strategy FSM of
-    # REASONING_TYPE_SELECTED. Only a flag: never an FSM dict in context.
-    REASONING_PUSH_PENDING = "reasoning_push_pending"
+    # The strategy NAME the execute_reasoning call runs (written by the entry
+    # handler); the call state chooses its target by CLASSIFIED_PROBLEM_TYPE,
+    # which holds the target id, and writes its record to CALL_RESULT.
     REASONING_TYPE_SELECTED = "reasoning_type_selected"
+    CALL_RESULT = "call_result"
     CLASSIFICATION_JUSTIFICATION = "classification_justification"
     RETRY_COUNT = "retry_count"
     MAX_RETRIES_REACHED = "max_retries_reached"
@@ -242,6 +242,10 @@ RETRY_CLEARED_KEYS: tuple[str, ...] = (
     # 51fde95b): a stale error or result, or a caller's claim, never survives.
     ContextKeys.CALCULATION_RESULT,
     ContextKeys.CALCULATION_ERROR_DETAILS,
+    # The call record of THIS attempt (plan baa37f40 D-031): the call executor skips a
+    # record that already belongs to its state, so a retry would never run the strategy
+    # again without the clear.
+    ContextKeys.CALL_RESULT,
 )
 
 
@@ -256,7 +260,6 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.SOLUTION_CONFIDENCE,
     ContextKeys.REASONING_TYPE_SELECTED,
     ContextKeys.CLASSIFIED_PROBLEM_TYPE,
-    ContextKeys.REASONING_PUSH_PENDING,
     ContextKeys.HYBRID_LOOP_COUNT,
     # Only the strategy merge writes the calculator's outcome (D-052): a bulk
     # reply must not claim a result that becomes the answer.
@@ -264,15 +267,14 @@ ORCHESTRATOR_HANDLER_ONLY_KEYS: tuple[str, ...] = (
     ContextKeys.CALCULATION_ERROR_DETAILS,
 )
 
-# Keys only the engine's own handlers write to choose and push the strategy
-# (``_classify_problem``, ``_StrategyStack``): ``solve_problem`` drops them
-# from a caller's ``initial_context``, so a caller cannot push a strategy
+# Keys only the engine's own handlers write to choose the strategy
+# (``_classify_problem``, ``_select_reasoning_type``): ``solve_problem`` drops
+# them from a caller's ``initial_context``, so a caller cannot name a strategy
 # before the orchestrator has chosen one, nor set a classification. This
 # does NOT make a ``final_context`` passed back in start fresh: a carried
 # ``problem_type`` keeps the classifier from running and a carried
 # ``reasoning_strategy`` then picks the strategy (Known open, D-061).
 SOLVE_DRIVER_KEYS: tuple[str, ...] = (
-    ContextKeys.REASONING_PUSH_PENDING,
     ContextKeys.REASONING_TYPE_SELECTED,
     ContextKeys.CLASSIFIED_PROBLEM_TYPE,
 )
@@ -312,7 +314,7 @@ class HandlerNames:
     """Handler names for registration."""
 
     ORCHESTRATOR_CLASSIFIER = "OrchestratorProblemClassifier"
-    ORCHESTRATOR_EXECUTOR = "OrchestratorStrategyExecutor"
+    ORCHESTRATOR_SELECTOR = "OrchestratorStrategySelector"
     ORCHESTRATOR_VALIDATOR = "OrchestratorSolutionValidator"
     REASONING_TRACER = "ReasoningTracer"
     CONTEXT_PRUNER = "ContextPruner"
@@ -336,14 +338,15 @@ class Defaults:
     MIN_SOLUTION_LENGTH = 20  # Minimum chars for a substantive solution
     PRUNE_LIST_MAX_LENGTH = 10  # Keep last N items when pruning lists
     PRUNE_STRING_MAX_LENGTH = 1000  # Truncate strings beyond this length
-    MAX_SUB_FSM_STEPS = 30  # Steps of a strategy FSM before a forced pop
     MAX_CLASSIFICATION_STEPS = 10  # Steps budget of the classifier FSM run
     MAX_TOTAL_STEPS = 50  # Orchestrator steps of one solve
     MAX_HYBRID_LOOPS = 2  # Times the hybrid critical_evaluation back edge runs
     # Steps budget of the one orchestrator run of a solve (D-013): the
     # orchestrator's own steps plus a full strategy run for the first attempt
-    # and each retry. A pop of an ended strategy FSM is not a step (D-052).
-    MAX_SOLVE_STEPS = MAX_TOTAL_STEPS + (MAX_RETRIES + 1) * MAX_SUB_FSM_STEPS
+    # and each retry. The 30 is ``call.max_steps`` of ``execute_reasoning`` in
+    # ``strategies/orchestrator.json`` (a test pins the equality; plan baa37f40
+    # step 16 computes it). A pop of an ended strategy FSM is not a step.
+    MAX_SOLVE_STEPS = 170  # MAX_TOTAL_STEPS + (MAX_RETRIES + 1) * 30
 
 
 class ErrorMessages:
@@ -353,7 +356,6 @@ class ErrorMessages:
     #: The answer of a calculator solve whose expression was refused on every
     #: attempt; ``{reason}`` is one of the calculator's fixed refusals.
     CALCULATION_REFUSED = "The calculation could not be completed: {reason}"
-    INVALID_REASONING_TYPE = "Invalid reasoning type: {type}"
     FSM_NOT_FOUND = "FSM definition not found: {name}"
 
 
@@ -364,8 +366,6 @@ class LogMessages:
     CLASSIFICATION_STARTED = "Starting classification with context: {context}"
     CLASSIFICATION_COMPLETE = "Classification complete. Recommended: {type}"
     STRATEGY_EXECUTING = "Executing {type} reasoning strategy"
-    FSM_PUSHED = "Pushed FSM: {name}, stack depth: {depth}"
-    FSM_POPPED = "Popped FSM: {name}, remaining depth: {depth}"
     VALIDATION_RESULT = "Validation: {valid} (confidence: {confidence})"
     RETRY_ATTEMPT = "Retry attempt {current}/{max} for validation"
     CONTEXT_PRUNED = "Context pruned ({original} chars exceeded threshold)"

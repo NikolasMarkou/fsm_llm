@@ -149,6 +149,8 @@ class TestKindOf:
                     if state.completion is not None
                     else "synthesize"
                     if state.synthesize is not None
+                    else "call"  # the corpus holds one call state: the orchestrator (D-031)
+                    if state.call is not None
                     else "conversation"
                 )
                 assert state.kind == parent_rule, (name, state_id)
@@ -351,7 +353,7 @@ class TestResultKeyReaders:
         for name, loaded in self._loaded():
             old = set()
             for state in loaded.states.values():
-                config = state.completion or state.synthesize
+                config = state.completion or state.synthesize or state.call
                 expected = config.result_key if config is not None else None
                 assert kind_of(state).result_key(state) == expected, (name, state.id)
                 if expected is not None:
@@ -508,7 +510,12 @@ class TestMintingHooks:
     def _old_minted(state: State) -> list[str]:
         """Frozen oracle: the rule `ConversationPass1._build_field_configs_from_state`
         spelled before the hook (ordered list of the config field names)."""
-        if state.completion is not None or state.synthesize is not None:
+        if (
+            state.completion is not None
+            or state.synthesize is not None
+            or state.call
+            is not None  # the call kind is newer than this oracle: it mints none
+        ):
             return []
         required: list[str] = list(state.required_context_keys or [])
         for transition in state.transitions or []:
@@ -531,7 +538,7 @@ class TestMintingHooks:
     def _old_produced(state: State, handler_only: frozenset[str]) -> set[str]:
         """Frozen oracle: `flow_analysis._produced` and `_minted_keys` before the hooks."""
         minted: set[str] = set()
-        if state.completion is None and state.synthesize is None:
+        if state.completion is None and state.synthesize is None and state.call is None:
             minted = set(state.required_context_keys or [])
             for transition in state.transitions or []:
                 for condition in transition.conditions or []:
@@ -542,7 +549,7 @@ class TestMintingHooks:
             }
         keys = minted | {c.field_name for c in state.classification_extractions or []}
         keys -= handler_only
-        config = state.completion or state.synthesize
+        config = state.completion or state.synthesize or state.call
         return keys | {config.result_key} if config is not None else keys
 
     def _states(self):
@@ -1430,7 +1437,11 @@ class TestVerifierHooks:
     def test_the_dryrun_verdicts_over_the_corpus_are_judged_by_the_hook(self):
         """`dryrun_judged` is False for exactly the kinds that were skipped."""
         for name, _loaded, state in self._states():
-            skipped = state.completion is not None or state.synthesize is not None
+            skipped = (
+                state.completion is not None
+                or state.synthesize is not None
+                or state.call is not None
+            )
             assert sk.kind_of(state).dryrun_judged is (not skipped), (name, state.id)
 
     def test_the_raw_lint_equals_the_old_validator_rule_over_the_corpus(self):
@@ -1910,7 +1921,7 @@ class TestToolAndProcedureHooks:
 
         refused = 0
         for name, definition in self._loaded():
-            old = any(s.completion for s in definition.states.values())
+            old = any(s.completion or s.call for s in definition.states.values())
             got = runnable_reason(
                 definition,
                 "verified",

@@ -147,7 +147,7 @@ API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_s
   → RunBudgetExceededError when a budget is spent; a conversation closed mid-run ends it normally
 ```
 
-This is how the agents, the reasoning engine and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. The reasoning engine runs one orchestrator run whose `before_step` hook pushes and pops the strategy FSMs. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
+This is how the agents, the reasoning engine and any program that drives an FSM by itself run a conversation: no synthetic user message is ever sent. The reasoning engine runs one orchestrator run whose `execute_reasoning` state is a `call` state: the engine pushes the chosen strategy FSM as a frame and pops it when it ends or spends its 30 steps. `advance_stream` and `run_until_terminal_stream` are the streaming forms (reply text only).
 
 ### Completion States (tool calling and structured output)
 
@@ -285,7 +285,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the ext
 
 ```
 fsm_llm (core, includes classification)
-├── fsm_llm.reasoning  -- Uses API run_until_terminal; its before_step hook pushes/pops strategy FSMs
+├── fsm_llm.reasoning  -- Uses API run_until_terminal; its execute_reasoning call state pushes/pops strategy FSMs
 ├── fsm_llm.workflows  -- Uses API (via ConversationStep); lifecycle hooks via add_hook
 ├── fsm_llm.agents     -- Uses API (auto-generates FSMs, drives them with run_until_terminal)
 │                          + handlers for tool execution; native_fc and the meta-builder use completion states
@@ -306,7 +306,7 @@ layers is in Package Layout above.
 | Package | Integration | Key Mechanism |
 |---------|------------|---------------|
 | Classification | Built into core | Structured `complete` call through the conversation's `llm_interface` |
-| Reasoning | One message-free run + FSM stacking | `run_until_terminal` on the orchestrator; the `before_step` hook pushes a strategy FSM by type and pops it when it ends (or after 30 steps); a spent 170-step budget raises `ReasoningExecutionError` |
+| Reasoning | One message-free run + a `call` state | `run_until_terminal` on the orchestrator; the `execute_reasoning` call state (`choose` on the handler-written `classified_problem_type`, fallback `reasoning.analytical`) pushes a strategy FSM as a frame and pops it when it ends; a strategy over its 30 steps ends `aborted/budget_spent` and the solve still answers; a spent 170-step budget raises `ReasoningExecutionError` |
 | Workflows | Async engine + ConversationStep | ConversationStep creates API instance for FSM conversations |
 | Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. `native_fc` runs on core completion states (native tool calls); the meta-builder is an FSM driven with `converse`/`advance`. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink + core graph data | Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from `build_fsm_graph` |

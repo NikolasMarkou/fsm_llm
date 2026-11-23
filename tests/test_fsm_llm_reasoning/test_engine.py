@@ -19,10 +19,9 @@ from fsm_llm.reasoning.definitions import (
     ReasoningStepType,
     ValidationResult,
 )
-from fsm_llm.reasoning.engine import ReasoningEngine
+from fsm_llm.reasoning.engine import ReasoningEngine, _strategy_for
 from fsm_llm.reasoning.exceptions import (
     ReasoningClassificationError,
-    ReasoningExecutionError,
 )
 from fsm_llm.reasoning.handlers import OutputFormatter, ReasoningHandlers
 from fsm_llm.reasoning.utilities import map_reasoning_type
@@ -153,71 +152,88 @@ class TestReasoningEngine:
         assert len(actual_enum_values) == len(expected_enum_values)
 
 
-class TestReasoningTypeFallback:
-    """F12 (D-009): the missing-FSM fallback is narrowed to ANALYTICAL-only.
-
-    Regression tests exercise ``_prepare_reasoning_execution`` directly on an
-    uninitialized ``ReasoningEngine`` (``object.__new__``, no LLM/API setup)
-    with a hand-built ``reasoning_fsms`` dict, so no real FSM loading or LLM
-    call is required.
-    """
+class TestTheStrategyIsChosenByTheClassifiedTypeThenThePreferredOne:
+    """D-031 (plan baa37f40, step 15): ``_strategy_for`` is the one rule that turns the
+    classifier's recommendation and ``preferred_reasoning_type`` into a strategy name. It
+    replaces the choice of ``_prepare_reasoning_execution`` (and the dead branch of D-009 that
+    forced ``analytical`` for an unknown preferred type)."""
 
     @staticmethod
-    def _make_engine(reasoning_fsms: dict) -> ReasoningEngine:
-        engine = object.__new__(ReasoningEngine)
-        engine.reasoning_fsms = reasoning_fsms
-        return engine
-
-    def test_missing_type_falls_back_to_analytical_with_warning(self):
-        """Requested type missing + ANALYTICAL present -> falls back, warns."""
-        engine = self._make_engine(
-            {ReasoningType.ANALYTICAL: {"name": "analytical_fsm"}}
-        )
-        context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
-
-        # `fsm_llm.logging.logger` is loguru, not stdlib logging, so `caplog`
-        # cannot intercept it; assert on stderr output instead (loguru's
-        # default sink) to confirm the fallback warning is actually emitted.
+    def _warnings(call, *args: Any) -> tuple[str, str]:
         from io import StringIO
 
-        from fsm_llm.logging import logger
-
+        # `fsm_llm.logging.logger` is loguru, not stdlib logging, so `caplog` cannot see it
         buf = StringIO()
         logger.enable("fsm_llm")  # library logging is off by default (D-004)
         sink_id = logger.add(buf, level="WARNING")
         try:
-            result = engine._prepare_reasoning_execution(context)
+            return call(*args), buf.getvalue()
         finally:
             logger.remove(sink_id)
             logger.disable("fsm_llm")
 
-        assert result[ContextKeys.REASONING_TYPE_SELECTED] == (
-            ReasoningType.ANALYTICAL.value
-        )
-        # Push by type: only the type and the pending flag go into context.
-        assert result[ContextKeys.REASONING_PUSH_PENDING] is True
-        assert {"name": "analytical_fsm"} not in result.values()
-        assert "Falling back to analytical reasoning" in buf.getvalue()
+    def test_the_classified_type_is_mapped_by_value_and_alias(self):
+        assert _strategy_for("deductive", None) == "deductive"
+        assert _strategy_for("  Math ", None) == "simple_calculator"
+        assert _strategy_for("brainstorm", "") == "creative"
 
-    def test_missing_type_and_missing_analytical_raises(self):
-        """Requested type missing + ANALYTICAL also missing -> raises."""
-        engine = self._make_engine({})
-        context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
+    def test_an_unknown_classified_type_is_analytical_with_the_warning(self):
+        chosen, warned = self._warnings(_strategy_for, "no such type", None)
+        assert chosen == "analytical"
+        assert "Unknown reasoning type" in warned
 
-        with pytest.raises(ReasoningExecutionError):
-            engine._prepare_reasoning_execution(context)
+    def test_a_known_preferred_type_wins_over_the_classified_one(self):
+        assert _strategy_for("deductive", "creative") == "creative"
+        assert _strategy_for("deductive", "direct computation") == "simple_calculator"
 
-    def test_missing_type_does_not_substitute_arbitrary_other_type(self):
-        """A non-ANALYTICAL type must never be silently substituted."""
-        engine = self._make_engine({ReasoningType.DEDUCTIVE: {"name": "deductive_fsm"}})
-        context = {ContextKeys.PREFERRED_REASONING_TYPE: ReasoningType.CREATIVE.value}
+    def test_an_unknown_preferred_type_is_ignored_with_one_warning(self):
+        """The old branch was dead: ``map_reasoning_type`` turned an unknown spelling into
+        ``analytical``, so an unknown ``--type`` forced ``analytical`` over the classified
+        strategy. It is ignored now, as the code's own comment said."""
+        chosen, warned = self._warnings(_strategy_for, "deductive", "no such type")
+        assert chosen == "deductive"
+        assert warned.count("names no known strategy") == 1
 
-        with pytest.raises(ReasoningExecutionError):
-            engine._prepare_reasoning_execution(context)
+    def test_a_preferred_value_that_is_not_text_never_raises(self):
+        assert _strategy_for("deductive", 3) == "deductive"
+        assert _strategy_for("deductive", ["creative"]) == "deductive"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+class TestTheEntryHandlerNamesTheStrategyTheCallRuns:
+    """``_select_reasoning_type`` reads the target by the call executor's own rule
+    (``chosen_target``) and never a model value (``reasoning_strategy``)."""
+
+    @staticmethod
+    def _delta(**context: Any) -> dict[str, Any]:
+        engine = ReasoningEngine(model="mock", llm_interface=_ScriptedLLM({}))
+        return engine._select_reasoning_type(context)
+
+    def test_the_name_is_the_one_of_the_target_id(self):
+        delta = self._delta(classified_problem_type="reasoning.deductive")
+        assert delta[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
+
+    def test_a_model_strategy_never_beats_the_classified_target(self):
+        """The old F-RE-06 row: no spelling of ``reasoning_strategy`` is read at all."""
+        chosen = {
+            self._delta(
+                reasoning_strategy=spelling,
+                classified_problem_type="reasoning.deductive",
+            )[ContextKeys.REASONING_TYPE_SELECTED]
+            for spelling in ("direct computation", "simple_calculator", "arithmetic")
+        }
+        assert chosen == {ReasoningType.DEDUCTIVE.value}
+
+    @pytest.mark.parametrize("value", [None, "", "deductive", "reasoning.nope", 3])
+    def test_a_value_outside_the_closed_list_is_the_fallback(self, value):
+        """The call falls back for a value that is not one of its targets, and the name
+        follows the same rule: never another loaded strategy (D-009 by construction)."""
+        delta = self._delta(classified_problem_type=value)
+        assert delta[ContextKeys.REASONING_TYPE_SELECTED] == "analytical"
+
+    def test_constraints_default_to_an_empty_list_and_a_callers_value_is_kept(self):
+        assert self._delta()[ContextKeys.CONSTRAINTS] == []
+        kept = self._delta(constraints=["no loops"])
+        assert ContextKeys.CONSTRAINTS not in kept
 
 
 class TestExecutionTime:
@@ -243,40 +259,8 @@ class TestDirectComputationIsNotASpecialCase:
     """F-RE-06: only the spelling the prompts ask for (simple_calculator) counts,
     and it picks the strategy the same way as any other spelling."""
 
-    @staticmethod
-    def _chosen(**context: Any) -> str:
-        engine = ReasoningEngine(model="mock", llm_interface=_ScriptedLLM({}))
-        return engine._prepare_reasoning_execution(context)[
-            ContextKeys.REASONING_TYPE_SELECTED
-        ]
-
-    def test_direct_computation_does_not_beat_the_classified_type(self):
-        chosen = self._chosen(
-            reasoning_strategy="direct computation",
-            classified_problem_type=ReasoningType.DEDUCTIVE.value,
-        )
-        assert chosen == ReasoningType.DEDUCTIVE.value
-
-    def test_every_spelling_agrees_with_a_classified_type(self):
-        chosen = {
-            self._chosen(
-                reasoning_strategy=spelling,
-                classified_problem_type=ReasoningType.DEDUCTIVE.value,
-            )
-            for spelling in (
-                "direct computation",
-                "Direct computation",
-                "simple_calculator",
-                "arithmetic",
-            )
-        }
-        assert chosen == {ReasoningType.DEDUCTIVE.value}
-
-    def test_the_strategy_alone_still_maps_to_the_calculator(self):
-        assert (
-            self._chosen(reasoning_strategy="direct computation")
-            == ReasoningType.SIMPLE_CALCULATOR.value
-        )
+    def test_the_classified_calculator_spelling_maps_to_the_calculator(self):
+        assert _strategy_for("direct computation", None) == "simple_calculator"
 
     def test_validator_reads_simple_calculator_not_direct_computation(self):
         base = {
@@ -364,7 +348,7 @@ class TestMalformedUserMessage:
 
 class TestExtractFinalSolutionKeys:
     """extract_final_solution must find results from every reasoning type
-    after merge_reasoning_results maps them to orchestrator-level keys."""
+    after the call state merged them under their orchestrator-level keys."""
 
     def test_deductive_conclusion_found(self):
         """Deductive merge writes DEDUCTIVE_CONCLUSION, not CONCLUSION."""
@@ -402,7 +386,7 @@ class TestExtractFinalSolutionKeys:
         assert OutputFormatter.extract_final_solution(ctx) == "final"
 
     def test_all_merge_keys_covered(self):
-        """Every key that merge_reasoning_results writes should be in the
+        """Every key a strategy returns (its ``results`` map) should be in the
         extract_final_solution priority list (excluding confidence/metadata keys)."""
         # Collect the primary result keys from each reasoning type's merge branch
         merge_primary_keys = {

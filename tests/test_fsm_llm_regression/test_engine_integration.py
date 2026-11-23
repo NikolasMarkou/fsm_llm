@@ -107,7 +107,8 @@ class TestReasoningEngineIntegration:
             ContextKeys.PROBLEM_TYPE: "logic puzzle",
         }
         result = engine._classify_problem(context_without_classification)
-        assert result[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
+        # the classified strategy as the target id the call state reads (D-031)
+        assert result[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "reasoning.deductive"
         assert [r.call_type for r in llm.completions] == ["classification"]
         assert not llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
 
@@ -122,6 +123,8 @@ class TestReasoningEngineIntegration:
             for state_id, state in fsm_def.states.items():
                 if (fsm_name, state_id) == ("simple_calculator", "perform_calculation"):
                     continue  # a handler writes its keys: nothing to extract
+                if state.call is not None:
+                    continue  # a call state declares no extraction (D-031)
                 assert state.extraction_instructions is not None, (
                     f"FSM '{fsm_name}' state '{state_id}' has no extraction_instructions"
                 )
@@ -772,64 +775,17 @@ class TestContextPruningLog:
                 assert len(result[key]) <= 10
 
 
-class TestContextKeysConstants:
-    """C3: merge_reasoning_results should only use ContextKeys constants."""
-
-    def test_no_raw_strings_in_merge(self):
-        """All keys in merge_reasoning_results should come from ContextKeys."""
-        from fsm_llm.reasoning.handlers import ContextManager
-
-        source = inspect.getsource(ContextManager.merge_reasoning_results)
-
-        # These raw strings should no longer appear as dict keys
-        forbidden_raw_keys = [
-            '"deductive_conclusion"',
-            '"best_explanation"',
-            '"adapted_solution_or_understanding"',
-            '"analogy_confidence"',
-            '"assessment_confidence"',
-            '"calculation_error_details"',
-            '"hybrid_synthesis_summary"',
-            '"explanation_confidence"',
-            '"analogical_solution"',
-            '"inductive_hypothesis"',
-        ]
-
-        for key in forbidden_raw_keys:
-            # Check it's not used as a dict key assignment (results[key] = ...)
-            pattern = f"results[{key}]"
-            assert pattern not in source, (
-                f"Raw string {key} found in merge_reasoning_results — use ContextKeys constant"
-            )
-
-    def test_all_reasoning_types_covered(self):
-        """merge_reasoning_results should handle all ReasoningType values."""
-        from fsm_llm.reasoning.constants import ReasoningType
-        from fsm_llm.reasoning.handlers import ContextManager
-
-        for rt in ReasoningType:
-            # Should not crash for any reasoning type
-            result = ContextManager.merge_reasoning_results(
-                orchestrator_context={}, sub_fsm_context={}, reasoning_type=rt.value
-            )
-            # Should always have a completion flag
-            assert f"{rt.value}_reasoning_completed" in result
-
-
 class TestNoMergeStrategyAlias:
-    """H4: reasoning engine should use ContextMergeStrategy directly."""
+    """H4: no alias of ``ContextMergeStrategy`` comes from the constants module (the engine
+    no longer merges anything itself: the ``call`` state of the orchestrator does, D-031)."""
 
-    def test_engine_imports_context_merge_strategy(self):
+    def test_engine_imports_no_merge_strategy_alias(self):
         from fsm_llm.reasoning import engine
 
         source = inspect.getsource(engine)
-        # Should import from public API (not internal fsm_llm.api)
-        assert "ContextMergeStrategy" in source
-        # Must come from fsm_llm, not fsm_llm.api
-        assert "from fsm_llm import" in source
-        # Should not import the alias from constants
         assert "from .constants import" in source
         import_line = next(
             line for line in source.split("\n") if "from .constants import" in line
         )
         assert "MergeStrategy" not in import_line
+        assert "ContextMergeStrategy" not in source

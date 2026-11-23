@@ -2,7 +2,9 @@
 
 ``builtin_executables()`` returns ten executables: the nine strategies, each the ``strategy`` document
 ``reasoning/strategies/<name>.json`` (ids ``reasoning.<name>``) run by the engine's ``FsmBodyExecutable``,
-and ``reasoning.solve``, the whole engine as one code-backed executable. ``fsm_llm.reasoning``
+and ``reasoning.solve``, the whole engine as one code-backed executable. ``strategy_registry()`` is a
+registry of the nine strategies alone: the ``TargetResolver`` the engine hands its orchestrator
+(plan baa37f40 D-031). ``fsm_llm.reasoning``
 registers this function as the ``reasoning`` source of the ``executable_sources`` namespace, so
 ``ExecutableRegistry().load_sources()`` serves them without the engine importing this package.
 
@@ -48,6 +50,7 @@ from fsm_llm.core.definitions.executable import (
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.engine.executables.adapters import FsmBodyExecutable
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
 
@@ -55,16 +58,17 @@ from .constants import ContextKeys, Defaults
 from .engine import ReasoningEngine
 from .exceptions import ReasoningExecutionError
 from .handlers import register_strategy_handlers
-from .strategy_files import STRATEGY_ORDER, load_document
+from .strategy_files import STRATEGY_ORDER, load_document, strategy_id
 
-__all__ = ["SOLVE_ID", "SolveExecutable", "builtin_executables", "strategy_id"]
+__all__ = [
+    "SOLVE_ID",
+    "SolveExecutable",
+    "builtin_executables",
+    "strategy_id",
+    "strategy_registry",
+]
 
 SOLVE_ID = "reasoning.solve"
-
-
-def strategy_id(name: str) -> str:
-    """The executable id of the strategy *name* (a ``ReasoningType`` value)."""
-    return f"reasoning.{name}"
 
 
 def _strategy_executable(name: str) -> FsmBodyExecutable:
@@ -188,3 +192,19 @@ def builtin_executables() -> list[FsmBodyExecutable | SolveExecutable]:
         *(_strategy_executable(name) for name in STRATEGY_ORDER),
         SolveExecutable(),
     ]
+
+
+def strategy_registry() -> ExecutableRegistry:
+    """A registry holding the nine built-in strategies: the ``TargetResolver`` of the orchestrator.
+
+    Contract: takes nothing and returns a NEW ``ExecutableRegistry`` on every call (the engine
+    owns its own), holding exactly the nine ``reasoning.<name>`` strategies of
+    ``STRATEGY_ORDER`` and not ``reasoning.solve`` (the engine is not its own target). The
+    objects are the ones ``builtin_executables()`` builds, so a strategy resolves with the
+    same identities in either place. Never raises for a packaged file.
+    """
+    registry = ExecutableRegistry()
+    for name in STRATEGY_ORDER:
+        # FsmBodyExecutable satisfies the Executable protocol (its attributes are read-only)
+        registry.register(_strategy_executable(name))  # type: ignore[arg-type]
+    return registry

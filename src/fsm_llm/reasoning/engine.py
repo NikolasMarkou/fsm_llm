@@ -13,13 +13,13 @@ from typing import Any
 
 from fsm_llm import (
     API,
-    AdvanceResult,
-    ContextMergeStrategy,
+    FSMDefinition,
     FSMError,
     RunBudgetExceededError,
     clear_keys_on_entry,
 )
 from fsm_llm.engine.api.helpers import llm_settings_for
+from fsm_llm.engine.kinds.call import chosen_target
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger
@@ -44,7 +44,8 @@ from .handlers import (
     register_strategy_handlers,
     retries_exhausted,
 )
-from .utilities import get_reasoning_fsm, map_reasoning_type
+from .strategy_files import strategy_id, strategy_name
+from .utilities import get_reasoning_fsm, lookup_reasoning_type, map_reasoning_type
 
 #: What ``ReasoningEngine.model`` shows when an injected interface states no model.
 _INJECTED_MODEL_LABEL = "injected-llm-interface"
@@ -101,19 +102,31 @@ class ReasoningEngine:
         """Load every FSM definition (all are in the package, so a miss raises)."""
         self.main_fsm = get_reasoning_fsm("orchestrator")
         self.classifier_fsm = get_reasoning_fsm("classifier")
-        self.reasoning_fsms = {
-            reasoning_type: get_reasoning_fsm(reasoning_type.value)
-            for reasoning_type in ReasoningType
-        }
+        call = (
+            FSMDefinition(**self.main_fsm)
+            .states[OrchestratorStates.EXECUTE_REASONING]
+            .call
+        )
+        if call is None:  # a packaging bug: the file of the orchestrator changed shape
+            raise ReasoningExecutionError(
+                f"state {OrchestratorStates.EXECUTE_REASONING!r} of the orchestrator "
+                "file is not a call state"
+            )
+        self._call_config = call
 
     def _initialize_apis(self):
         """Initialize APIs with all necessary handlers."""
         # An injected `llm_interface` owns its model: core refuses another
         # one beside it, so `model` goes only to an interface core builds.
         settings = llm_settings_for(self.api_kwargs, model=self.model)
+        # The call state of the orchestrator pushes a strategy FSM as a frame of this API
+        # (plan baa37f40 D-031): the nine built-in strategies are its targets. Imported
+        # here because ``executables`` imports this module.
+        from .executables import strategy_registry
+
         # Main orchestrator API
         self.orchestrator = API.from_definition(
-            self.main_fsm, **settings, **self.api_kwargs
+            self.main_fsm, **settings, targets=strategy_registry(), **self.api_kwargs
         )
 
         # Classification API
@@ -127,7 +140,7 @@ class ReasoningEngine:
     def _register_handlers(self):
         """Register all handlers with proper configuration."""
         # DECISION plan-2026-10-01T093600-944e2692/D-058: the classifier,
-        # strategy executor, validator, retry limiter and hybrid loop counter
+        # strategy selector, validator, retry limiter and hybrid loop counter
         # are critical: their failure stops the solve (core raises it through
         # the step, solve_problem wraps it as ReasoningExecutionError,
         # chained). Do NOT drop `.critical()`: core's default
@@ -159,12 +172,12 @@ class ReasoningEngine:
             )
         )
 
-        # Strategy executor
+        # Strategy selector (the call state itself pushes and pops the strategy FSM)
         self.orchestrator.register_handler(
-            self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_EXECUTOR)
+            self.orchestrator.create_handler(HandlerNames.ORCHESTRATOR_SELECTOR)
             .on_state_entry(OrchestratorStates.EXECUTE_REASONING)
             .critical()
-            .do(self._prepare_reasoning_execution)
+            .do(self._select_reasoning_type)
         )
 
         # Solution validator with retry logic
@@ -269,102 +282,49 @@ class ReasoningEngine:
             )
         )
 
+        # DECISION plan-2026-11-23T122249-baa37f40/D-031
+        # The strategy is chosen HERE and only here, as the target id the call state
+        # of `execute_reasoning` reads from the handler-only `classified_problem_type`
+        # (the classified strategy, then `preferred_reasoning_type` when it names a
+        # known one). Do NOT let a model reply choose it (`reasoning_strategy` is a
+        # model extraction and is never read), do NOT make the key public to match the
+        # roadmap's wording (a bulk reply could then pick the strategy, D-054), and do
+        # NOT write the bare name: the call's closed list holds target ids.
+        strategy = _strategy_for(
+            classification.recommended_type,
+            context.get(ContextKeys.PREFERRED_REASONING_TYPE),
+        )
         return {
-            ContextKeys.CLASSIFIED_PROBLEM_TYPE: classification.recommended_type,
+            ContextKeys.CLASSIFIED_PROBLEM_TYPE: strategy_id(strategy),
             ContextKeys.CLASSIFICATION_JUSTIFICATION: classification.justification,
             ContextKeys.PROBLEM_DOMAIN: classification.domain,
             ContextKeys.ALTERNATIVE_APPROACHES: classification.alternatives,
         }
 
-    def _prepare_reasoning_execution(self, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Prepare for reasoning execution with proper strategy selection.
+    # DECISION plan-2026-11-23T122249-baa37f40/D-031
+    # The `execute_reasoning` call state decides on ARRIVAL, after the state-entry
+    # handlers, so this handler runs first: it names the strategy for the trace and the
+    # validator (`reasoning_type_selected`, by the SAME rule the call executor uses,
+    # `chosen_target`, never a second one) and defaults `constraints` to `[]`, because
+    # the executor refuses a declared input that is absent and nothing in the
+    # orchestrator extracts `constraints`. Do NOT drop the default (every solve with no
+    # caller constraints would end `failed/inputs_missing` and skip its strategy), do
+    # NOT take the name from `reasoning_strategy` (a model value), and do NOT overwrite
+    # a caller's `constraints`.
+    def _select_reasoning_type(self, context: dict[str, Any]) -> dict[str, Any]:
+        """On entry to ``execute_reasoning``: name the strategy the call will run.
 
         :param context: Current context
-        :return: Execution preparation results
+        :return: ``reasoning_type_selected`` (the strategy name of the target
+            ``chosen_target`` picks), plus ``constraints = []`` when absent
         """
-        # Determine reasoning type
-        orchestrator_strategy = context.get(ContextKeys.REASONING_STRATEGY)
-        if not isinstance(orchestrator_strategy, str):
-            # A non-str model value is absent (analytical below), not a crash
-            # in map_reasoning_type (D-061).
-            orchestrator_strategy = None
-        classified_type = context.get(ContextKeys.CLASSIFIED_PROBLEM_TYPE)
-
-        # DECISION plan-2026-11-05T185903-5980fbb7/D-006: the classified type
-        # beats the orchestrator's strategy for every spelling. Do NOT re-add a
-        # `reasoning_strategy == "direct computation"` override (or move it to
-        # "simple_calculator"): no prompt asks for that literal, and forcing
-        # the calculator over the classifier is a model-behaviour change.
-        if classified_type:
-            reasoning_type_str = map_reasoning_type(classified_type)
-        elif orchestrator_strategy:
-            reasoning_type_str = map_reasoning_type(orchestrator_strategy)
-        else:
-            reasoning_type_str = "analytical"  # Default
-
-        # Allow CLI --type / initial_context override (R-ISSUE-003)
-        # DECISION plan_2026-05-29_d9092060/D-004 [STALE]
-        # NOTE: preferred_reasoning_type is checked AFTER the normal priority chain.
-        # Overriding earlier would bypass the FSM's own classified type which the
-        # orchestrator FSM has already validated; we only apply the preference when
-        # it maps to a known ReasoningType value.
-        preferred = context.get(ContextKeys.PREFERRED_REASONING_TYPE)
-        if preferred:
-            preferred_mapped = map_reasoning_type(str(preferred))
-            try:
-                ReasoningType(preferred_mapped)
-                reasoning_type_str = preferred_mapped
-                logger.debug(
-                    f"Using preferred_reasoning_type from context: {reasoning_type_str!r}"
-                )
-            except ValueError:
-                logger.warning(
-                    f"preferred_reasoning_type {preferred!r} maps to unknown type "
-                    f"{preferred_mapped!r}; ignoring"
-                )
-
-        # Get enum member
-        try:
-            reasoning_type = ReasoningType(reasoning_type_str)
-        except ValueError:
-            logger.warning(
-                ErrorMessages.INVALID_REASONING_TYPE.format(type=reasoning_type_str)
-            )
-            reasoning_type = ReasoningType.ANALYTICAL
-
-        # The strategy FSM is pushed by type from the before_step hook
-        # (``_StrategyStack``); only the type and a flag go into context.
-        fsm_def = self.reasoning_fsms.get(reasoning_type)
-
-        if not fsm_def:
-            logger.error(ErrorMessages.FSM_NOT_FOUND.format(name=reasoning_type.value))
-            # DECISION plan-2026-09-12T065608-089d0ec7/D-009
-            # Fallback ONLY to ANALYTICAL, never to an arbitrary other loaded
-            # type. Do NOT restore the old `[ReasoningType.ANALYTICAL,
-            # *self.reasoning_fsms]` loop: silently substituting, say,
-            # "deductive" for a missing "creative" FSM would solve the
-            # caller's problem with the wrong reasoning strategy while only
-            # logging a warning — the caller has no structured signal that a
-            # different strategy was used. See decisions.md D-009.
-            fsm_def = self.reasoning_fsms.get(ReasoningType.ANALYTICAL)
-            if fsm_def:
-                reasoning_type = ReasoningType.ANALYTICAL
-                logger.warning(
-                    f"Falling back to {ReasoningType.ANALYTICAL.value} reasoning"
-                )
-            else:
-                raise ReasoningExecutionError("No reasoning FSM definitions available")
-
-        logger.info(LogMessages.STRATEGY_EXECUTING.format(type=reasoning_type.value))
-
-        return {
-            ContextKeys.REASONING_PUSH_PENDING: True,
-            ContextKeys.REASONING_TYPE_SELECTED: reasoning_type.value,
-            ContextKeys.CLASSIFICATION_JUSTIFICATION: context.get(
-                ContextKeys.CLASSIFICATION_JUSTIFICATION, ""
-            ),
-        }
+        target = chosen_target(self._call_config, context)
+        selected = strategy_name(target) or str(target)
+        logger.info(LogMessages.STRATEGY_EXECUTING.format(type=selected))
+        delta: dict[str, Any] = {ContextKeys.REASONING_TYPE_SELECTED: selected}
+        if context.get(ContextKeys.CONSTRAINTS) is None:
+            delta[ContextKeys.CONSTRAINTS] = []
+        return delta
 
     def _check_retry_limit(self, context: dict[str, Any]) -> dict[str, Any]:
         """
@@ -447,12 +407,11 @@ class ReasoningEngine:
         log = _solve_log(conversation_id)
         log.info(f"Started reasoning process: {conversation_id}")
 
-        stack = _StrategyStack(self, conversation_id)
         try:
-            # One message-free run drives the orchestrator, every pushed
-            # strategy FSM and every retry; the hook pushes and pops.
+            # One message-free run drives the orchestrator, every strategy FSM its
+            # `execute_reasoning` call pushes (and pops) and every retry.
             results = self.orchestrator.run_until_terminal(
-                conversation_id, max_steps=Defaults.MAX_SOLVE_STEPS, before_step=stack
+                conversation_id, max_steps=Defaults.MAX_SOLVE_STEPS
             )
         except RunBudgetExceededError as e:
             # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
@@ -460,18 +419,20 @@ class ReasoningEngine:
             # solution.
             raise self._failed_solve(
                 conversation_id,
-                stack,
                 f"Reasoning did not finish within {e.limit} {e.budget}",
             ) from e
         except Exception as e:
             raise self._failed_solve(
-                conversation_id, stack, f"Reasoning execution failed: {e}"
+                conversation_id, f"Reasoning execution failed: {e}"
             ) from e
         except (KeyboardInterrupt, SystemExit):
             # The caller's signal reaches it unwrapped, but ends what it opened.
             _end_quietly(self.orchestrator, conversation_id)
             raise
-        responses = _ordered_responses(initial_response, stack.responses, results)
+        # a pushed child's greeting rides on the reply of the step that pushed it
+        responses = [initial_response] + [
+            result.response for result in results if result.response is not None
+        ]
 
         # Get final context BEFORE ending the conversation (end_conversation
         # removes the instance, making get_data fail).
@@ -506,7 +467,7 @@ class ReasoningEngine:
             _end_quietly(self.orchestrator, conversation_id)
 
     def _failed_solve(
-        self, conversation_id: str, stack: _StrategyStack, message: str
+        self, conversation_id: str, message: str
     ) -> ReasoningExecutionError:
         """End a solve whose run raised; return the error to raise.
 
@@ -515,6 +476,8 @@ class ReasoningEngine:
         with ``details={conversation_id, responses_so_far, partial_context}``
         for the caller to raise ``from`` the run's error; ``partial_context``
         is ``None`` when core cannot read it (``_read_partial_context``).
+        ``responses_so_far`` is the greeting plus the replies in the history of
+        the frame on top (best effort: the run's results are lost with the error).
         """
         # DECISION plan-2026-10-01T093600-944e2692/D-058: every failed solve
         # (spent budget or any error, e.g. a prompt over core's cap on the
@@ -523,15 +486,23 @@ class ReasoningEngine:
         # end_conversation core answers get_data only from its bounded
         # ended-conversation cache, which may already have evicted it.
         partial_context = self._read_partial_context(conversation_id)
+        replies = self._replies_so_far(conversation_id)
         _end_quietly(self.orchestrator, conversation_id)
         return ReasoningExecutionError(
             message,
             details={
                 "conversation_id": conversation_id,
-                "responses_so_far": 1 + len(stack.responses),
+                "responses_so_far": 1 + replies,
                 "partial_context": partial_context,
             },
         )
+
+    def _replies_so_far(self, conversation_id: str) -> int:
+        """The exchanges in the history of the frame on top, ``0`` when core cannot read it."""
+        try:
+            return len(self.orchestrator.get_conversation_history(conversation_id))
+        except (FSMError, ValueError):
+            return 0
 
     def _read_partial_context(self, conversation_id: str) -> dict[str, Any] | None:
         """The context of the frame on top of a solve that did not finish.
@@ -568,6 +539,28 @@ class ReasoningEngine:
                 types.add(snapshot[ContextKeys.REASONING_TYPE_SELECTED])
 
         return list(types) if types else ["unknown"]
+
+
+def _strategy_for(recommended: str, preferred: object) -> str:
+    """The strategy name a solve runs: the classified one, then the preferred one.
+
+    Contract: ``recommended`` is the classifier's (normalised) recommendation, mapped by
+    ``map_reasoning_type`` (an unknown spelling is ``analytical``, with a WARNING).
+    ``preferred`` is ``initial_context["preferred_reasoning_type"]``: when it names a known
+    strategy (a value or an alias) it WINS over the classified one; when it names none, ONE
+    WARNING and it is ignored. Never raises for any value.
+    """
+    chosen = map_reasoning_type(recommended)
+    if preferred:
+        named = lookup_reasoning_type(str(preferred))
+        if named is None:
+            logger.warning(
+                f"preferred_reasoning_type {preferred!r} names no known strategy; ignoring"
+            )
+        else:
+            logger.debug(f"Using preferred_reasoning_type from context: {named!r}")
+            chosen = named
+    return chosen
 
 
 def _classification_from(result: dict[str, Any]) -> ReasoningClassificationResult:
@@ -637,131 +630,3 @@ def _end_quietly(api: API, conversation_id: str) -> None:
         _solve_log(conversation_id).warning(
             f"Failed to clean up conversation {conversation_id}: {cleanup_err}"
         )
-
-
-class _StrategyStack:
-    """The ``before_step`` hook of one solve's orchestrator run.
-
-    Contract: called by core ``run_until_terminal`` with the number of the
-    next step (and once more, with the same number, when a pushed frame has
-    ended, D-052). Per call, on conversation ``conversation_id`` of
-    ``engine.orchestrator``:
-
-    - a pushed strategy FSM that has ended is popped, its results merged into
-      the orchestrator with ``ContextManager.merge_reasoning_results``;
-    - a pushed strategy FSM still running after ``MAX_SUB_FSM_STEPS``
-      steps is force-popped the same way;
-    - with only the orchestrator on the stack and ``reasoning_push_pending``
-      set, the flag is cleared and the strategy FSM of
-      ``reasoning_type_selected`` is pushed with the problem keys.
-
-    ``responses`` collects ``(step, reply)`` for each push and pop. What a
-    core call raises propagates unchanged (the run stops, no step runs).
-    """
-
-    def __init__(self, engine: ReasoningEngine, conversation_id: str) -> None:
-        self._engine = engine
-        self._api = engine.orchestrator
-        self._conversation_id = conversation_id
-        self._log = _solve_log(conversation_id)
-        self.responses: list[tuple[int, str]] = []
-        self._pushed_at = 0
-        self._reasoning_type = ""
-        self._orchestrator_context: dict[str, Any] = {}
-
-    def __call__(self, step: int) -> None:
-        conversation_id = self._conversation_id
-        if self._api.get_stack_depth(conversation_id) > 1:
-            if self._api.has_conversation_ended(conversation_id):
-                self._pop(step)
-            # DECISION plan-2026-10-01T093600-944e2692/D-053: the sub-FSM
-            # step count is arithmetic on core's step number (pushed before
-            # step `_pushed_at`, so `step - _pushed_at` sub steps have run).
-            # Do NOT count steps in a loop of the engine's own (D-013).
-            elif step - self._pushed_at >= Defaults.MAX_SUB_FSM_STEPS:
-                self._log.error(
-                    f"Sub-FSM exceeded {Defaults.MAX_SUB_FSM_STEPS} steps; "
-                    "forcing completion"
-                )
-                self._pop(step)
-            return
-        context = self._api.get_data(conversation_id)
-        if context.get(ContextKeys.REASONING_PUSH_PENDING):
-            self._push(step, context)
-
-    def _push(self, step: int, context: dict[str, Any]) -> None:
-        conversation_id = self._conversation_id
-        reasoning_type = ReasoningType(context[ContextKeys.REASONING_TYPE_SELECTED])
-        fsm_def = self._engine.reasoning_fsms[reasoning_type]
-        self._api.update_context(
-            conversation_id, {ContextKeys.REASONING_PUSH_PENDING: None}
-        )
-        sub_context = self._engine.context_manager.extract_relevant_context(
-            context,
-            [
-                ContextKeys.PROBLEM_STATEMENT,
-                ContextKeys.PROBLEM_COMPONENTS,
-                ContextKeys.CONSTRAINTS,
-                ContextKeys.PROBLEM_TYPE,
-            ],
-        )
-        self._log.info(
-            LogMessages.FSM_PUSHED.format(
-                name=fsm_def.get("name"),
-                depth=self._api.get_stack_depth(conversation_id) + 1,
-            )
-        )
-        response = self._api.push_fsm(
-            conversation_id, fsm_def, inherit_context=False, context_to_pass=sub_context
-        )
-        self.responses.append((step, response))
-        self._pushed_at = step
-        self._reasoning_type = reasoning_type.value
-        self._orchestrator_context = context
-
-    def _pop(self, step: int) -> None:
-        conversation_id = self._conversation_id
-        # Read the strategy FSM's context while it is still on top.
-        sub_context = self._api.get_data(conversation_id)
-        results = self._engine.context_manager.merge_reasoning_results(
-            self._orchestrator_context, sub_context, self._reasoning_type
-        )
-        response = self._api.pop_fsm(
-            conversation_id,
-            context_to_return=results,
-            merge_strategy=ContextMergeStrategy.UPDATE,
-        )
-        self.responses.append((step, response))
-        self._log.info(
-            LogMessages.FSM_POPPED.format(
-                name=self._reasoning_type,
-                depth=self._api.get_stack_depth(conversation_id),
-            )
-        )
-
-
-def _ordered_responses(
-    initial_response: str,
-    hook_responses: list[tuple[int, str]],
-    results: tuple[AdvanceResult, ...],
-) -> list[str]:
-    """Every reply of a solve, in the order it was produced.
-
-    Contract: ``hook_responses`` holds ``(step, reply)`` pairs in call order,
-    each produced before step ``step`` ran; ``results[i]`` is step ``i + 1``.
-    Returns ``initial_response``, then the replies interleaved by step; a
-    silent step (``response is None``) adds nothing. Never raises.
-    """
-    ordered = [initial_response]
-    pending = iter(hook_responses)
-    upcoming = next(pending, None)
-    for step, result in enumerate(results, start=1):
-        while upcoming is not None and upcoming[0] <= step:
-            ordered.append(upcoming[1])
-            upcoming = next(pending, None)
-        if result.response is not None:
-            ordered.append(result.response)
-    while upcoming is not None:
-        ordered.append(upcoming[1])
-        upcoming = next(pending, None)
-    return ordered
