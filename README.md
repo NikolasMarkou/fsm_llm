@@ -36,7 +36,7 @@ It is one package, `fsm_llm`, with a small core and subpackages on top: reasonin
 | Business logic around a chat: audit, analytics, lookups, side effects | Handlers at eight lifecycle points, with `continue` or `raise` error modes | [handler_hooks](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/advanced/handler_hooks) |
 | A tool-using agent where a person approves risky calls | ReAct, ReWOO, Reflexion and more; human approval as a driver-only grant bound to one exact call | [hitl_approval](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/agents/hitl_approval), [react_search](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/agents/react_search) |
 | A tree of agents with a manager and workers | `orchestrator`, `AgentGraph`, agents as tools of other agents | [hierarchical_orchestrator](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/agents/hierarchical_orchestrator) |
-| A tutor that reasons in the middle of a chat | A reasoning engine that picks a strategy, runs it as stacked FSMs and validates the answer | [math_tutor](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/reasoning/math_tutor) |
+| A tutor that reasons in the middle of a chat | A reasoning engine that picks a strategy, runs it as a child FSM through a call state and validates the answer | [math_tutor](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/reasoning/math_tutor) |
 | Long-running processes with events, timers and branches | An async workflow engine with typed steps, a Python DSL, waits and parallel steps, no model needed | [order_processing](https://github.com/NikolasMarkou/fsm_llm/tree/main/examples/workflows/order_processing) |
 | A bot you can crash, replay and fork | An opt-in write-ahead event log, `API.fork` and `API.resume` (on main, for the next release) | [Durable runs](#durable-runs-log-fork-resume) |
 | A bot you can unit test with no network | `fsm_llm.testing`: scripted models, a scripted user and state, path and context assertions | [Quick Start](#quick-start) |
@@ -89,7 +89,7 @@ Pass 1 of each turn extracts the fields the state declares: from `required_conte
 
 ### Conversations inside conversations
 
-`push_fsm` starts a sub-conversation, `pop_fsm` ends it and merges back only the keys you declared. Stacks nest, each frame has its own history and turn budget, and an ended pushed FSM can be popped inside a message-free run so the parent continues on its own.
+`push_fsm` (and its async twin `apush_fsm`) starts a sub-conversation, `pop_fsm` ends it and merges back only the keys you declared; a `call` state does the push and the pop for you. Stacks nest, each frame has its own history and turn budget, and an ended pushed FSM can be popped inside a message-free run so the parent continues on its own.
 
 ```python
 api.register_handler(audit)                       # a handler from create_handler, see Quick Start
@@ -181,7 +181,7 @@ A gated tool runs only with a grant bound to that exact call. The model cannot s
 ### Reasoning, workflows and synthesis
 
 - **`fsm_llm.reasoning`**: a solver that picks one of the reasoning strategies, runs it as a call state of the orchestrator inside one message-free core run, validates the answer and retries up to 3 times. `ReasoningEngine.solve_problem(problem)` returns the solution and a trace.
-  The nine strategies are `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical` and `hybrid`. A classifier FSM recommends one (one structured model call with the nine strategies as closed intents; a low-confidence pick falls to `analytical`, and an injected `llm_interface` must implement `complete`); `preferred_reasoning_type` or `--type` overrides it.
+  The nine strategies are `simple_calculator`, `analytical`, `deductive`, `inductive`, `abductive`, `analogical`, `creative`, `critical` and `hybrid`. A classifier FSM recommends one (one structured model call with the strategies as closed intents, the nine built-ins plus the eligible ones of a `registry=` you pass, at most 15; a low-confidence pick falls to `analytical`, and an injected `llm_interface` must implement `complete`); `preferred_reasoning_type` or `--type` overrides it.
 - **`fsm_llm.workflows`**: an async in-memory engine with typed steps (`auto_step`, `api_step`, `condition_step`, `switch_step`, `llm_step`, `parallel_step`, `wait_event_step`, `timer_step`, `retry_step`, `conversation_step`, `agent_step`) and a Python DSL. Waits match events by a correlation key and can time out into another step; a parallel step gives each child its own copy of the context. It runs without an LLM unless you add LLM steps.
 - **`fsm_llm.synthesis`** (experimental): a host FSM names a goal in a `synthesize` state, a model writes a child FSM for it, and the child runs only after gates: it loads, passes the validator, a data-flow check, a liveness check, a policy allow-list, a dead-edge check through the real evaluator, an optional bounded simulation and an optional approval. A file-backed library stores it and the engine runs it as a child of the host conversation through a `SynthesizeExecutor` (a bare `API` refuses a `synthesize` state). `verified` means those gates passed over a model-written spec, not that the procedure is correct. Bench blocks `s0`, `s1` and `s2` were run on one model and all three verdicts are INCONCLUSIVE. See the [synthesis guide](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/synthesis.md).
 
@@ -507,6 +507,7 @@ Every user message goes through two LLM passes:
 | `conversation` | Extracts fields and classifications from the user message, then Pass 2 writes the reply | Forms, intake, support flows (the default) |
 | `completion` | One `complete` call with tools or a JSON schema over a transcript you own; the result `{kind, text, calls}` lands in the context | Tool calling and structured turns; your handlers run the tools |
 | `synthesize` | Core only loads and validates the field; a `fsm_llm.synthesis.SynthesizeExecutor` registered with `API(executors=...)` has a model write a child FSM for the goal and runs it behind the gates | A sub-conversation that cannot be written ahead of time |
+| `call` | Makes no model call: names an executable by id (or picks one from a closed list), and the engine pushes it as a child that receives only the declared inputs and pops it with only the declared returns; needs `API(targets=...)`, such as an `ExecutableRegistry` | Running a stored FSM or a reasoning strategy from a state, with a result you route on |
 
 ### The layers
 
