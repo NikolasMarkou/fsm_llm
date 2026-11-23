@@ -5453,6 +5453,7 @@ class TestStep08_1:
         walkers raise ``ContextFilterError`` instead of returning a
         truncated value, and they do it fast."""
         from fsm_llm.context.filtering import ContextFilterError
+        from fsm_llm.logging import logger
 
         cur: dict[str, Any] = {"leaf": 1}
         for _ in range(14):
@@ -5461,6 +5462,13 @@ class TestStep08_1:
         data = {"root": cur}
         walkers = _d3_walkers()
         walkers.pop("prompt")
+        # The compactor logs one warning per dropped cyclic node. Earlier tests
+        # of a long single-process run leave the library logger enabled
+        # (logger.enable above), and writing those lines used 10.9 s of CPU
+        # against the 10 s budget in the push gate: the budget is for the
+        # walk, so the library logger is off for the measurement (its
+        # default state).
+        logger.disable("fsm_llm")
         for name, walker in walkers.items():
             run = _d3_run_in_thread(walker, data)
             assert run.finished, f"{name}: did not finish (hung)"
