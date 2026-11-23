@@ -23,11 +23,13 @@ from fsm_llm.core.definitions import FSMError
 from fsm_llm.core.definitions import RunBudgetExceededError as Spent
 from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.testing import ScriptedLLM
+from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.support import _state
 from tests.test_fsm_llm.test_async_cancel import _gate_is_free, _seen
 from tests.test_fsm_llm.test_async_engine import _CHAT, _CHILD
 
-_BOUND = 10  # seconds: a wait that would hang fails instead
+# seconds: a wait that would hang fails instead (scaled under a tracer)
+_BOUND = 10 * current_timing_factor()
 _SILENT: dict[str, Any] = {
     "name": "Silent",
     "description": "A child with no response instructions: its greeting makes no model call",

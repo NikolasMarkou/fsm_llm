@@ -35,6 +35,7 @@ from fsm_llm.engine.kinds.targets import ResolvedTarget
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.testing import ScriptedLLM
+from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import kind_corpus as kc
 from tests.test_fsm_llm.test_async_cancel import _gate_is_free
 from tests.test_fsm_llm.test_call_state import (
@@ -46,7 +47,8 @@ from tests.test_fsm_llm.test_call_state import (
     _parent,
 )
 
-_BOUND = 10  # seconds: a wait that would hang fails instead
+# seconds: a wait that would hang fails instead (scaled under a tracer)
+_BOUND = 10 * current_timing_factor()
 _TARGET = "reasoning.analytical"
 _OTHER = "reasoning.deductive"
 

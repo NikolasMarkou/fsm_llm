@@ -39,6 +39,7 @@ from fsm_llm.synthesis import (
 from fsm_llm.synthesis import executor as executor_module
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.testing import ScriptedLLM
+from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.test_fsm_lock_order import (
     _RecLock,
     _Recording,
@@ -56,7 +57,8 @@ from tests.test_fsm_llm_synthesis.rig import (
     make_rig,
 )
 
-_BOUND = 10  # seconds: a wait that would hang fails instead
+# seconds: a wait that would hang fails instead (scaled under a tracer)
+_BOUND = 10 * current_timing_factor()
 _ROOT = Path(fsm_llm.__file__).resolve().parent
 
 
