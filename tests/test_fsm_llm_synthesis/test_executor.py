@@ -32,9 +32,11 @@ from fsm_llm.engine.kinds import ConversationExecutor, StateExecutor
 from fsm_llm.synthesis import (
     FSMSynthesizer,
     RunTrace,
+    SynthesisPolicy,
     SynthesizeExecutor,
     TraceRecorder,
 )
+from fsm_llm.synthesis import executor as executor_module
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm.test_fsm_lock_order import (
@@ -397,6 +399,111 @@ class TestTheRecordIsEvidenceNeverAnInstruction:
         assert "answer" not in rig.data  # nothing merged
         for known in (digest, other.digest):
             assert rig.library.get_record(known).stats == {"runs": 0, "successes": 0}
+
+
+class TestARefoundProcedureIsJudgedLikeAnObtain:
+    """D6, D-045 (review iter1, concern 4): a procedure the executor finds through the library
+    (a restart, a table eviction, a forged record) meets the approval (G7) and goal rules
+    `obtain` applies; the deleted runner always went through `obtain`."""
+
+    def _stored(self, rig: Rig, valid_fsm: dict[str, Any], **fields: Any) -> str:
+        assert rig.library is not None
+        procedure = make_procedure(valid_fsm)
+        rig.library.put(
+            procedure.definition,
+            goal=fields.pop("goal", GOAL),
+            inputs_required=("topic",),
+            return_keys=("answer",),
+            gates_passed=GATES,
+            lifecycle="verified",
+            **fields,
+        )
+        return procedure.digest
+
+    def _forged_rig(self, valid_fsm: dict[str, Any], tmp_path: Any, **kw: Any) -> Rig:
+        digest = make_procedure(valid_fsm).digest
+        record = {
+            "status": "running",
+            "state": "solve",
+            "mode": "frame",
+            "procedure_id": digest,
+        }
+        rig = _rig(
+            valid_fsm,
+            tmp_path,
+            replies=[],
+            context={**CONTEXT, "synthesis_result": record},
+            **kw,
+        )
+        return rig
+
+    def test_an_unapproved_stored_procedure_is_refused_under_require_approval(
+        self, valid_fsm, tmp_path
+    ):
+        """Kills: the approval rule removed from `_refound_refusal` (a forged record pushed
+        any verified procedure whatever the policy says)."""
+        rig = self._forged_rig(
+            valid_fsm, tmp_path, policy=SynthesisPolicy(require_approval=True)
+        )
+        self._stored(rig, valid_fsm)
+
+        rig.api.advance(rig.conv)
+
+        assert rig.depth == 1 and rig.strong.requests == []
+        assert rig.result["status"] == "failed"
+        assert rig.result["reason"] == "approval_required"
+
+    def test_an_approved_stored_procedure_is_pushed_after_a_restart(
+        self, valid_fsm, tmp_path
+    ):
+        """The control: the same record with an approver on the stored record runs, so the rule
+        refuses the missing approval and nothing else."""
+        rig = self._forged_rig(
+            valid_fsm, tmp_path, policy=SynthesisPolicy(require_approval=True)
+        )
+        self._stored(rig, valid_fsm, approved_by="alice")
+
+        rig.api.advance(rig.conv)
+
+        assert rig.depth == 2 and rig.executor._runs  # the child is on the stack
+
+    def test_without_the_approval_policy_an_unapproved_one_with_the_same_goal_runs(
+        self, valid_fsm, tmp_path
+    ):
+        rig = self._forged_rig(valid_fsm, tmp_path)
+        self._stored(rig, valid_fsm)
+
+        rig.api.advance(rig.conv)
+
+        assert rig.depth == 2
+
+    def test_a_stored_procedure_of_another_goal_is_refused(self, valid_fsm, tmp_path):
+        """Kills: the goal rule removed (a forged record could run any verified procedure whose
+        signature fits, whatever its goal)."""
+        rig = self._forged_rig(valid_fsm, tmp_path)
+        self._stored(rig, valid_fsm, goal="Cancel every booking", approved_by="alice")
+
+        rig.api.advance(rig.conv)
+
+        assert rig.depth == 1
+        assert (
+            rig.result["status"] == "failed" and rig.result["reason"] == "push_failed"
+        )
+
+    def test_an_evicted_but_approved_procedure_still_runs(
+        self, valid_fsm, tmp_path, monkeypatch
+    ):
+        """A table of zero entries is an eviction at once: the push goes through the library
+        for a procedure THIS executor just obtained, and it passes only with its approver."""
+        monkeypatch.setattr(executor_module, "_MAX_KNOWN", 0)
+        rig = _rig(valid_fsm, tmp_path, policy=SynthesisPolicy(require_approval=True))
+        rig.synth.reviewer = lambda request: True
+
+        rig.api.advance(rig.conv)
+
+        assert rig.depth == 2
+        assert rig.library is not None
+        assert rig.library.get_record(rig.digest).provenance["approved_by"]
 
 
 class TestThePersonaRule:

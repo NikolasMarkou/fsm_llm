@@ -66,6 +66,15 @@ _DIGEST_RE = re.compile(r"[0-9a-f]{64}")
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)")
 _GOAL_CHARS = 500  # stored goal text; longer goals are cut
 _LABEL_CHARS = 120  # stored model name, run id and approver
+
+
+def stored_goal(goal: str) -> str:
+    """The goal as a record stores it (one capped line): what a goal compared with a stored one
+    must be made into first. Contract: never raises for a ``str``; the rule of ``put`` and of the
+    executor's goal match (plan baa37f40 D-045), so the two cannot drift."""
+    return capped_line(goal, _GOAL_CHARS)
+
+
 _TRACE_ROW_BYTES = 8192  # a longer trace line is not one of ours
 _TRACE_READ_BYTES = 4 * 2**20  # a reader looks at the tail of a trace file only
 _PROVENANCE_KEYS = frozenset(
@@ -403,7 +412,7 @@ class FSMLibrary:
                         "synthesizing_model": capped_line(
                             synthesizing_model, _LABEL_CHARS
                         ),
-                        "goal": capped_line(goal, _GOAL_CHARS),
+                        "goal": stored_goal(goal),
                         "parent_run": parent_run
                         and capped_line(parent_run, _LABEL_CHARS),
                         "gates_passed": list(gates_passed),

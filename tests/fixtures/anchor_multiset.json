@@ -859,6 +859,11 @@
       "delta": 1,
       "reason": "plan baa37f40 step 27.2 D-044: new anchor on _mapped_returns (the target's output map follows the loader's handler-only rule)",
       "token": "plan-2026-11-23T122249-baa37f40/D-044"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 step 27.3 D-045: new anchor on SynthesizeExecutor.aplan_push (a re-found procedure meets the approval and goal rules of obtain)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-045"
     }
   ]
 }

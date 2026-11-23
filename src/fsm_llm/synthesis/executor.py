@@ -93,6 +93,7 @@ from fsm_llm.logging import logger
 from .constants import (
     ABORT_STATE_ID,
     LIFECYCLE_VERIFIED,
+    REASON_APPROVAL_REQUIRED,
     REASON_BUDGET_SPENT,
     REASON_DEPTH_REFUSED,
     REASON_INPUTS_MISSING,
@@ -108,6 +109,8 @@ from .constants import (
     TRACE_KINDS,
 )
 from .exceptions import LibraryError, SynthesisError
+from .library import stored_goal
+from .policy import needs_approval
 from .procedures import (
     _result,
     _round_codes,
@@ -419,14 +422,19 @@ class SynthesizeExecutor(StateExecutor):
 
     def _procedure_of(self, digest: object) -> Procedure | None:
         """The procedure named by ``digest``: this executor's table, else the library (a restart)."""
+        return self._remembered(digest) or self._refound(digest)
+
+    def _remembered(self, digest: object) -> Procedure | None:
+        """The procedure this executor's table holds for ``digest`` (one ``obtain`` returned it)."""
         if not isinstance(digest, str):
             return None
         with self._lock:
-            known = self._known.get(digest)
-        if known is not None:
-            return known
+            return self._known.get(digest)
+
+    def _refound(self, digest: object) -> Procedure | None:
+        """The procedure the library holds for ``digest``, or ``None`` (absent or unreadable)."""
         library = self.synthesizer.library
-        if library is None:
+        if library is None or not isinstance(digest, str):
             return None
         try:
             return Procedure(
@@ -438,6 +446,28 @@ class SynthesizeExecutor(StateExecutor):
         except LibraryError:
             return None
 
+    def _refound_refusal(
+        self, procedure: Procedure, config: SynthesizeConfig
+    ) -> str | None:
+        """The reason a procedure found through the library may not be pushed for ``config``.
+
+        Contract: only for a procedure ``_remembered`` did not hold (a restart, an eviction, a
+        forged record), because ``obtain`` judged the others. Applies what ``obtain`` applies on
+        its own library path: the stored goal is the state's goal (a reuse by similarity is not
+        re-judged here, so such a procedure is refused after a restart) and the record carries
+        an approver unless nothing needs one (``needs_approval``). Returns a reason code or
+        ``None``; never raises.
+        """
+        record = procedure.record
+        if record is None or record.provenance.get("goal") != stored_goal(config.goal):
+            return REASON_PUSH_FAILED
+        if not record.provenance.get("approved_by") and needs_approval(
+            procedure.definition.model_dump(exclude_defaults=True),
+            self.synthesizer.policy,
+        ):
+            return REASON_APPROVAL_REQUIRED
+        return None
+
     def _depth_of(self, conversation_id: str) -> int:
         with self._lock:
             return self._depths.get(conversation_id, 0)
@@ -448,14 +478,26 @@ class SynthesizeExecutor(StateExecutor):
         config = ctx.state.synthesize
         if config is None:
             return None
-        procedure = self._procedure_of(ctx.record.get("procedure_id"))
+        # DECISION plan-2026-11-23T122249-baa37f40/D-045
+        # The record is evidence: a procedure this executor did not return from `obtain` (a
+        # restart, an eviction, a forged record) is judged again with the approval and goal
+        # rules `obtain` applies on its library path. Do NOT push it on `runnable_reason` alone
+        # (any verified procedure whose signature fits would run, whatever its goal, under
+        # `require_approval`) and do NOT re-run the library search here (the threshold rule has
+        # one home, `obtain`).
+        procedure = self._remembered(ctx.record.get("procedure_id"))
+        refound = procedure is None
+        if procedure is None:
+            procedure = self._refound(ctx.record.get("procedure_id"))
         reason: str | None = (
             REASON_PUSH_FAILED  # a record that names nothing this can push
         )
         error: BaseException | None = None
         try:
             if procedure is not None:
-                reason = self._unrunnable(procedure, config)
+                reason = (
+                    self._refound_refusal(procedure, config) if refound else None
+                ) or self._unrunnable(procedure, config)
             if reason is None and procedure is not None:
                 missing = any(is_missing(ctx.data, key) for key in config.inputs)
                 if missing:
