@@ -16,7 +16,7 @@ ABORT_STATE_ID = "abort"
 ABORT_CONTEXT_KEY = "procedure_abort"
 RESULT_CONTEXT_KEY = DEFAULT_SYNTHESIS_RESULT_KEY  # "synthesis_result"
 
-# --- Run status: the ``status`` field of the result a runner writes ---
+# --- Run status: the ``status`` field of the result the executor writes ---
 STATUS_OK = "ok"
 STATUS_FAILED = "failed"
 STATUS_ABORTED = "aborted"

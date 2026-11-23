@@ -345,7 +345,7 @@ class ScriptedLLM(_Metered, _AsyncMirror):
           ``classify``, ``complete``). Every call counts; a call that raises,
           a scripted exception or an unscripted call, also counts an error.
           Answered calls count as ``usage_missing`` (no token usage). A
-          ``Simulator`` and the synthesis runner read these.
+          ``Simulator`` and the synthesis executor read these.
         - Failure modes: an unscripted call raises ``UnscriptedCallError``;
           a scripted exception propagates as itself. The double never sleeps,
           reads a clock or touches a network.

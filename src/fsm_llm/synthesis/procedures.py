@@ -2,8 +2,8 @@
 The pure helpers of a synthesize run: the result record, the reason codes, the round
 strings and the refusal a stored procedure meets before it may run.
 
-Moved without change from ``runner.py`` (plan baa37f40, step 2) so the agent tools
-and the executor of the synthesize kind use them without the runner. Interface
+Moved without change from the old ``runner.py`` (plan baa37f40, step 2; the runner is
+gone since step 22) so the agent tools and the executor of the synthesize kind share them. Interface
 contract: ``_result(status, reason, procedure)`` returns the wire dict
 ``{status, procedure_id, version, reason}``; ``reason_of(error)`` and
 ``runnable_reason(...)`` return a code of ``constants.REASONS`` (``runnable_reason``
@@ -98,7 +98,7 @@ def runnable_reason(
     ``trusted``), a record that never passed G6b when ``policy.require_simulation``
     (``gates_passed`` is the record's list; ``None`` means no record, which a
     compile with that policy already simulated) or a failed ``verify_stored``,
-    checked in that order. Shared by the runner and the agent tools; never
+    checked in that order. Shared by the executor and the agent tools; never
     raises."""
     if any(not kind_of(s).supported_in_procedure for s in definition.states.values()):
         return REASON_COMPLETION_UNSUPPORTED

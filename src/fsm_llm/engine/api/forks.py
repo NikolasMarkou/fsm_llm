@@ -150,7 +150,7 @@ class ForkMixin(_ApiSurface):
     def event_log(self) -> EventLog | None:
         """The event log this ``API`` writes (``None`` when it was built without one).
 
-        Read-only. It is how a consumer above the engine (the synthesis runner) reads the log of
+        Read-only. It is how a consumer above the engine (the synthesis executor) reads the log of
         a conversation through ``fsm_llm.runtime.usage`` without building a second one.
         """
         return self._event_log

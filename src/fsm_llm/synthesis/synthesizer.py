@@ -262,7 +262,7 @@ def _checked(
 class FSMSynthesizer:
     """Compiles goals into gated procedures with a strong model.
 
-    Interface contract (callers: the runner, the tools, tests):
+    Interface contract (callers: the executor, the tools, tests):
         Exactly one of ``llm`` (an ``LLMInterface`` that implements
         ``complete``) or ``model`` (a name; a ``LiteLLMInterface`` is built)
         or ``ValueError``: the strong model is never an accidental default.

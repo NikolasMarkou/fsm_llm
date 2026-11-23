@@ -30,10 +30,12 @@ _CONVERSATION_KIND = "conversation"
 
 # Kind name -> executor: the ``state_kinds`` namespace of the name registry (plan ace7a8c8,
 # D-045; it names no entry-point group yet, that wiring is roadmap E2.3 and 5.5).
-# ``synthesize`` is passive and has no entry: it runs as
-# conversation through ``executor_for``'s fallback (a bare ``converse`` on it
-# stays BLOCKED, D-002 of plan 2cefeb61), which also honours a per-instance
-# override of ``conversation``.
+# ``synthesize`` has no entry on purpose: its executor lives in the subpackage
+# ``fsm_llm.synthesis`` (an engine layer may not import it) and a host passes it through
+# ``executors=``; the kind sets ``requires_executor``, so a bare engine refuses it with
+# ``MissingExecutorError`` (plan baa37f40 D-041). A kind with no executor and no flag still runs
+# as conversation through ``executor_for``'s fallback, which honours a per-instance override of
+# ``conversation``.
 _EXECUTORS: NameRegistry[StateExecutor] = NameRegistry("state_kinds")
 _EXECUTORS.register(_CONVERSATION_KIND, _CONVERSATION)
 _EXECUTORS.register("completion", CompletionExecutor())
@@ -128,14 +130,15 @@ def executor_for(
         - Resolution order: the pipeline's own ``executors`` map for the
           kind's name, then the module table for it, then the ``conversation``
           entry of the same two tables in the same order (a kind with no
-          executor of its own, ``synthesize`` or a runtime kind nobody
-          registered, runs as conversation, so an override of ``conversation``
+          executor of its own, a runtime kind nobody registered, runs
+          as conversation, so an override of ``conversation``
           in the per-instance map applies to it too), then the built-in
           conversation executor.
         - A kind whose spec says ``requires_executor`` has no such fallback: with no entry of
           its own name in either table, ``MissingExecutorError`` (naming the state id, the kind
           and the remedy). This is the one rule; ``_require_state_executors`` of ``engine/api``
-          asks it for every such state of a definition. No built-in kind sets the flag yet.
+          asks it for every such state of a definition. ``synthesize`` sets the flag (plan baa37f40
+          D-041).
         - Raises nothing else; ``kind_of`` raises nothing for a state.
     """
     # DECISION plan-2026-11-12T073150-d454fd62/D-026
@@ -145,6 +148,15 @@ def executor_for(
     # ``API(executors={"conversation": X})`` override for a synthesize state
     # (review gate 1, concern 11). A real synthesize executor registers under
     # its own name and then wins.
+    # DECISION plan-2026-11-23T122249-baa37f40/D-041
+    # [Supersedes plan 2cefeb61 D-002: "a bare converse on a synthesize state stays BLOCKED".]
+    # A kind whose spec says ``requires_executor`` (``synthesize``) takes NO conversation
+    # fallback: with no executor of its own name it raises ``MissingExecutorError``. Do NOT
+    # restore the fallback (a bare engine then BLOCKED forever and wrote nothing, with no word
+    # to the host), do NOT put ``SynthesizeExecutor`` in the module table (a subpackage, and one
+    # table entry would bind every ``API`` of the process to one synthesizer: a host passes it
+    # through ``executors=``) and do NOT make the loader or ``FSMValidator`` refuse the state
+    # (core only loads the field; the validator is never stricter than the loader).
     spec = kind_of(state)
     name = spec.name
     for kind in (name,) if spec.requires_executor else (name, _CONVERSATION_KIND):

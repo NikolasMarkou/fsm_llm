@@ -2,9 +2,10 @@
 
 A state is one of four kinds today: ``conversation`` (the default: field,
 bulk and classification extraction, then a reply), ``completion`` (Pass 1 is
-one model completion over a consumer-owned transcript), ``synthesize`` (a
-runner outside core pushes a compiled procedure) and ``call`` (the engine runs one
-target and merges its outputs). Until this module the rules
+one model completion over a consumer-owned transcript), ``synthesize`` (an executor
+outside core, ``fsm_llm.synthesis.SynthesizeExecutor``, obtains a compiled procedure and the
+engine runs it as a child; an engine with no such executor refuses the state, ``requires_executor``)
+and ``call`` (the engine runs one target and merges its outputs). Until this module the rules
 of the first two non-default kinds were spelled out in the State validator, the
 definition loader, the data-flow and liveness analyses, the dry-run gate, the
 pipeline and ``API.push_fsm``. Row 0.14 of the roadmap gathered them here, one
@@ -71,13 +72,13 @@ Interface contract:
   - ``read_keys(state)``: the key names the state READS on arrival, in order: a
     kind that takes host keys (``call``: its ``inputs`` then its ``choose`` key).
     Empty by default, so it is empty for ``synthesize`` too: its ``inputs`` are
-    not judged by G3 until that kind moves onto the call executor (plan baa37f40,
-    D-016, carried to K5b). Gate G3 finds each declared on every path to the state
+    not judged by G3 (five baseline records would gain a finding, plan baa37f40
+    D-016; the executor re-checks them at run time). Gate G3 finds each declared on every path to the state
     (``undeclared-input``); a read key is not a write, so it never enters
     ``produced_keys``.
   - ``sample_results(state)``: the sample results the loader runs the state's
     edges on, a tuple of ``(label, result)`` (``None`` is "no result yet");
-    empty for a kind that has none. Shaped as the kind's runner writes its
+    empty for a kind that has none. Shaped as the kind's executor writes its
     result key.
   - ``check_definition(definition, state, evaluator, logic_keys)``: the kind's
     cross-state rule, which needs the whole definition: a message (without the
@@ -124,12 +125,13 @@ Interface contract:
     raises on a malformed ``tools`` value. Called only for a state whose raw
     ``config_field`` value is a dict.
   - ``supported_in_procedure``: ``False`` when a stored procedure may not hold a
-    state of the kind (the runner refuses it with ``completion_unsupported``).
+    state of the kind (``runnable_reason`` refuses it with ``completion_unsupported``).
     Data, not a hook.
   - ``requires_executor``: ``True`` when a state of the kind may not run as
     ``conversation``: the engine then refuses a definition holding such a state, for
     an ``API`` with no executor of the kind, with ``MissingExecutorError``
-    (``executor_for`` is the one rule). Data, not a hook; no built-in kind sets it yet.
+    (``executor_for`` is the one rule). Data, not a hook; ``synthesize`` sets it (plan baa37f40
+    D-041, which supersedes the "a bare converse stays BLOCKED" rule of plan 2cefeb61 D-002).
   - ``requires_targets``: ``True`` when a state of the kind names its target by id and the
     engine resolves it through a ``TargetResolver`` (``API(targets=)``): an ``API`` with no
     resolver then refuses a definition holding such a state, with ``MissingExecutorError``
@@ -409,7 +411,7 @@ def _no_definition_problem(
 
 
 # Sample results the loader runs a synthesize state's edges on (D-035). Shaped as
-# the runner writes the result key (`status`, `procedure_id`, `version`, `reason`;
+# the executor writes the result key (`status`, `procedure_id`, `version`, `reason`;
 # producer: `fsm_llm.synthesis.procedures._result`, which core may not import). `None`
 # is "no result yet". The strings are the wire values of `codes.Status` and
 # `codes.Reason`: this leaf cannot import `codes`, so `test_codes` pins them
@@ -453,6 +455,8 @@ def _synthesize_check_definition(
         evaluator,
         logic_keys,
         kind="synthesize",
+        # the loader's refusal text, recorded in the kind-equality baseline: "the runner" now
+        # names the kind's driver, the executor (plan baa37f40 D-041); do not reword it
         producer="the runner",
         outcome="the procedure",
         result_key=config.result_key,
@@ -558,8 +562,8 @@ COMPLETION = KindSpec(
     raw_result_key=_completion_raw_result_key,
     declared_tools=_completion_declared_tools,
     raw_declared_tools=_completion_raw_declared_tools,
-    # A stored procedure may not hold a completion state (the runner's reason
-    # code `completion_unsupported`, kept unchanged).
+    # A stored procedure may not hold a completion state (the reason code
+    # `completion_unsupported`, kept unchanged).
     supported_in_procedure=False,
 )
 
@@ -570,7 +574,7 @@ SYNTHESIZE = KindSpec(
     # DECISION plan-2026-11-12T073150-d454fd62/D-022: a child pushed with
     # `inherit_context=True` routed on the parent's stale `synthesis_result`
     # (its edges must read that key) before any run wrote one, so the key is
-    # dropped on push like the completion one. The runner is not the reason: it
+    # dropped on push like the completion one. The executor is not the reason: it
     # pushes its own children with `inherit_context=False` and never serves a
     # user-pushed child. The rule is anchored in `API._build_push_context`.
     inherits_result_on_push=False,
@@ -580,6 +584,11 @@ SYNTHESIZE = KindSpec(
     sample_results=_synthesize_samples,
     check_definition=_synthesize_check_definition,
     raw_result_key=_synthesize_raw_result_key,
+    # Plan baa37f40 D-041 (supersedes D-002 of plan 2cefeb61; anchored at `executor_for`): the
+    # kind has no passive meaning. Do NOT clear this flag to let a bare engine run the state as
+    # conversation (it BLOCKED forever and wrote nothing): the engine refuses it with
+    # `MissingExecutorError`. The loader and `FSMValidator` stay pure and never stricter.
+    requires_executor=True,
 )
 
 # Plan baa37f40 D-015 (roadmap E3.1): the `call` kind. The engine writes its result key

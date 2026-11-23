@@ -24,7 +24,10 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.engine.api.stack import ContextMergeStrategy
-from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
+from fsm_llm.engine.kinds.conversation.executor import (
+    ConversationExecutor,
+    ConversationPass1,
+)
 from fsm_llm.testing import MockLLM2Interface
 from tests.conftest import compact_param_id
 
@@ -547,10 +550,17 @@ class TestPipelineMintsNothing:
         llm = MockLLM2Interface(
             extraction_data={result_key: {"status": "ok"}, "answer": "forged"}
         )
-        api = API.from_definition(definition=definition, llm_interface=llm)
+        # A passive executor (the conversation body under the kind's name) is what a bare API
+        # ran the state with before D-041: the closed result key is a rule of the pipeline's
+        # extraction channels, not of any executor, so it holds with this one too.
+        api = API.from_definition(
+            definition=definition,
+            llm_interface=llm,
+            executors={"synthesize": ConversationExecutor()},
+        )
         conv_id, _ = api.start_conversation()
         api.converse("book it", conv_id)
-        # The bare converse reached `solve` and stays there (BLOCKED, by design).
+        # The converse reached `solve` and stays there (BLOCKED: no executor wrote a result).
         assert api.get_current_state(conv_id) == "solve"
         api.converse("book it now", conv_id)
         assert api.get_current_state(conv_id) == "solve"
@@ -654,7 +664,12 @@ class _SpikeHook:
 class TestHookPushSpike:
     def test_push_run_pop_from_before_step(self):
         llm = MockLLM2Interface(extraction_data={"answer": "42"})
-        api = API.from_definition(definition=_parent(), llm_interface=llm)
+        # a passive executor stands in for the host's own driver: the spike pushes by hand
+        api = API.from_definition(
+            definition=_parent(),
+            llm_interface=llm,
+            executors={"synthesize": ConversationExecutor()},
+        )
         conv_id, _ = api.start_conversation(
             {"noise": "parent only", "db_password": "hunter2"}
         )

@@ -17,10 +17,12 @@ extraction, owned by the executor since step 80: ``conversation/``), ``completio
 (one ``LLMInterface.complete`` call over a consumer-owned transcript, ``completion.py``),
 ``call`` (no model call: Pass 1 resolves a target and writes a request or a refusal record
 that ``engine/api/calls.py`` applies after the turn, ``call.py``, plan baa37f40) and
-``synthesize`` (passive with no registration: it runs as conversation, a bare ``converse`` on such
-a state stays BLOCKED, D-002 of plan 2cefeb61; ``fsm_llm.synthesis.SynthesizeExecutor``, plan
-baa37f40 step 20, registers under its own name through ``API(executors=...)`` and replaces the
-fallback; the module table stays without it until step 22 flips ``requires_executor``).
+``synthesize``, which has NO registration here and needs one: its spec sets ``requires_executor``,
+so an engine with no executor of that kind refuses a definition holding such a state with
+``MissingExecutorError`` (plan baa37f40 D-041, which supersedes the "a bare converse stays
+BLOCKED" rule of plan 2cefeb61 D-002). ``fsm_llm.synthesis.SynthesizeExecutor`` registers under its
+own name through ``API(executors=...)``; it is not in the module table because synthesis is a
+subpackage an engine layer may not import.
 
 Layer ``engine`` (plan d454fd62, steps 53 to 56 and 80): the old flat ``fsm_llm.executors`` is
 this package; the old dotted path is gone. Modules:
@@ -65,10 +67,10 @@ Interface contract:
   ``kind_of(state).name``: the per-instance ``executors`` map first, then the
   module table; a kind with neither runs as ``conversation`` (a passive kind),
   resolved through the per-instance ``conversation`` entry first, then the
-  module's, so an override of ``conversation`` covers ``synthesize`` and a
-  runtime kind nobody registered. A kind whose ``KindSpec.requires_executor`` is
+  module's, so an override of ``conversation`` covers a runtime kind nobody
+  registered. A kind whose ``KindSpec.requires_executor`` is
   set has no such fallback: with no entry of its own it raises
-  ``MissingExecutorError`` (no built-in kind sets the flag yet).
+  ``MissingExecutorError`` (``synthesize`` sets the flag, plan baa37f40 D-041).
 - ``register_executor(kind_name, executor)``: add or replace the executor of a
   kind in the MODULE table, which every pipeline in the process reads (a test
   kind registers its own beside its ``KindSpec``; the caller removes it again).

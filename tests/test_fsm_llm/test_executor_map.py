@@ -30,6 +30,7 @@ from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FSMDefinition,
     FSMInstance,
+    MissingExecutorError,
     State,
 )
 from fsm_llm.engine.fsm.manager import FSMManager
@@ -359,15 +360,20 @@ def _synthesize_state() -> State:
 
 
 class TestPassiveKindsRunAsTheInstancesConversation:
-    """Review gate 1, concern 11: a kind with no executor of its own (``synthesize``,
-    a runtime kind nobody registered) runs as ``conversation``, so an
-    ``executors={"conversation": X}`` override reaches it too. Resolution order:
-    the per-instance map for the kind, the module table for the kind, the
-    per-instance ``conversation`` entry, the module ``conversation`` entry."""
+    """Review gate 1, concern 11: a kind with no executor of its own and no
+    ``requires_executor`` flag (a runtime kind nobody registered) runs as
+    ``conversation``, so an ``executors={"conversation": X}`` override reaches it too.
+    ``synthesize`` is no passive kind since plan baa37f40 D-041: it needs an executor of its
+    own name and the conversation entry never stands in for it. Resolution order: the
+    per-instance map for the kind, the module table for the kind, the per-instance
+    ``conversation`` entry, the module ``conversation`` entry (a flagged kind stops after
+    the first two)."""
 
-    def test_a_synthesize_state_follows_the_per_api_conversation_entry(self):
-        mine = ex.ConversationExecutor()
-        assert ex.executor_for(_synthesize_state(), {"conversation": mine}) is mine
+    def test_a_synthesize_state_is_not_covered_by_the_conversation_entry(self):
+        with pytest.raises(MissingExecutorError):
+            ex.executor_for(
+                _synthesize_state(), {"conversation": ex.ConversationExecutor()}
+            )
 
     def test_an_unregistered_runtime_kind_follows_it_too(self, marker_kind):
         marker = _definition().states["marker"]
@@ -375,18 +381,21 @@ class TestPassiveKindsRunAsTheInstancesConversation:
         mine = ex.ConversationExecutor()
         assert ex.executor_for(marker, {"conversation": mine}) is mine
 
-    def test_without_a_map_both_fall_back_to_the_module_conversation_entry(
+    def test_without_a_map_an_unregistered_kind_falls_back_to_the_module_conversation_entry(
         self, marker_kind
     ):
         module_conversation = ex._EXECUTORS.resolve("conversation")
-        assert ex.executor_for(_synthesize_state()) is module_conversation
         assert ex.executor_for(_definition().states["marker"]) is module_conversation
+        with pytest.raises(MissingExecutorError):
+            ex.executor_for(_synthesize_state())
 
-    def test_a_map_without_conversation_does_not_hide_the_module_entry(self):
+    def test_a_map_without_conversation_does_not_hide_the_module_entry(
+        self, marker_kind
+    ):
         other = ex.CompletionExecutor()
-        assert ex.executor_for(_synthesize_state(), {"completion": other}) is (
-            ex._EXECUTORS.resolve("conversation")
-        )
+        assert ex.executor_for(
+            _definition().states["marker"], {"completion": other}
+        ) is (ex._EXECUTORS.resolve("conversation"))
 
     def test_the_per_api_entry_of_the_kind_itself_still_wins(self):
         own, conversation = ex.ConversationExecutor(), ex.ConversationExecutor()
@@ -404,18 +413,17 @@ class TestPassiveKindsRunAsTheInstancesConversation:
             ex.executor_for(_synthesize_state(), {"conversation": mine}) is registered
         )
 
-    def test_a_per_api_conversation_override_reaches_a_synthesize_state_in_a_turn(self):
+    def test_a_conversation_override_alone_does_not_build_an_api_for_a_synthesize_host(
+        self,
+    ):
         from tests.test_fsm_llm.kind_corpus import _synth_fsm
 
-        recorder = _RecordingConversation()
-        api = API.from_definition(
-            _synth_fsm(), llm_interface=_llm(), executors={"conversation": recorder}
-        )
-        conversation_id, _ = api.start_conversation()
-        api.converse("hello", conversation_id)  # welcome -> solve
-        assert api.get_current_state(conversation_id) == "solve"
-        api.converse("anything", conversation_id)  # a bare converse on solve
-        assert recorder.states == ["welcome", "solve"]
+        with pytest.raises(MissingExecutorError):
+            API.from_definition(
+                _synth_fsm(),
+                llm_interface=_llm(),
+                executors={"conversation": _RecordingConversation()},
+            )
 
     def test_a_per_api_conversation_override_reaches_an_unregistered_kind_in_a_turn(
         self, marker_kind

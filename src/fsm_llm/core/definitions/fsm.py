@@ -33,8 +33,8 @@ from .transition import logic_referenced_keys
 def result_key_names(definition: FSMDefinition) -> frozenset[str]:
     """The ``result_key`` of every completion and synthesize state: the keys no
     extraction channel may write, classification included (only the state's own
-    completion call writes its key, D-021, and only the runner writes a
-    synthesize key, D-002 of plan 2cefeb61).
+    completion call writes its key, D-021, and only the synthesize executor writes a
+    synthesize key, D-002 of plan 2cefeb61, D-041 of plan baa37f40).
 
     Read from the kind registry (``KindSpec.result_key``), never from a branch on
     the kind configs. Takes a loaded definition, returns a new frozenset (empty

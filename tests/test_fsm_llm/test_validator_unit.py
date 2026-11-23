@@ -3599,7 +3599,9 @@ class TestValidatorWarnsOnCompletionStates:
     )
     def test_an_extraction_of_a_synthesize_result_key_is_a_warning(self, channel: str):
         """D-002 of plan 52ce5464: the synthesize kind owns its result key as the
-        completion kind does, and the warning names the runner as its writer."""
+        completion kind does, and the warning names the synthesize executor as its writer
+        (the "synthesis runner" of the old wording went with ``ProcedureRunner``, plan baa37f40
+        step 22)."""
         key = "synthesis_result"
         entries: dict[str, list[Any]] = {
             "field_extractions": [
@@ -3652,8 +3654,8 @@ class TestValidatorWarnsOnCompletionStates:
         }
         result = FSMValidator(fsm).validate()
         assert any(
-            f"'a' {channel} names '{key}', a key only handlers or the synthesis "
-            "runner write" in w
+            f"'a' {channel} names '{key}', a key only handlers or the synthesize "
+            "executor write" in w
             for w in result.warnings
         )
 

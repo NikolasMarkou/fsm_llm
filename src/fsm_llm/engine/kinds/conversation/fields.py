@@ -145,7 +145,7 @@ class ConversationFieldsMixin(_ConversationSurface):
         auto-generated ones. A completion state gets none: its Pass 1 is its
         completion call, and the keys its transitions read (its own
         ``result_key`` among them) are never minted into extractions. A
-        synthesize state gets none either: a runner writes its result key.
+        synthesize state gets none either: an executor writes its result key.
         """
         # The minting rule (which keys, in which order, minus classification-owned
         # keys, explicit field_extractions winning) lives in ONE place:

@@ -1014,18 +1014,32 @@ def _scenario_completion() -> dict[str, Any]:
 
 
 def _scenario_synthesize_host(*, silent: bool) -> dict[str, Any]:
+    """A synthesize host, two ways. A bare ``API`` refuses it (plan baa37f40 D-041, which
+    supersedes the BLOCKED shape of D-002 of plan 2cefeb61): the error class and message are
+    recorded. With a PASSIVE executor under the kind's name (the conversation body, which is what
+    a bare API ran the state with before D-041) the host's request bytes and states are the ones
+    the baseline recorded then: the engine around the kind did not move."""
     from fsm_llm import API
+    from fsm_llm.engine.kinds.conversation.executor import ConversationExecutor
     from fsm_llm.testing import ScriptedLLM
 
-    def host() -> tuple[Any, API]:
+    def host(*, bare: bool = False) -> tuple[Any, API]:
         llm = ScriptedLLM(
             [],
             default_response="ok",
             responses={"welcome": "Welcome!", "done": "All done.", "apology": "Sorry."},
         )
         host_fsm = _synth_fsm(silent=silent, also_reads=None if silent else "note")
-        return llm, API.from_definition(host_fsm, llm_interface=llm)
+        executors = None if bare else {"synthesize": ConversationExecutor()}
+        return llm, API.from_definition(
+            host_fsm, llm_interface=llm, executors=executors
+        )
 
+    refused = "built"
+    try:
+        host(bare=True)
+    except Exception as error:
+        refused = f"{type(error).__name__}: {error}"
     llm, api = host()
     conversation_id, opening = api.start_conversation()
     log: list[list[Any]] = [["start", opening, api.get_current_state(conversation_id)]]
@@ -1052,6 +1066,7 @@ def _scenario_synthesize_host(*, silent: bool) -> dict[str, Any]:
     failed.converse("finish", failed_id)
     llm.assert_exhausted()
     return {
+        "bare_api": refused,
         "log": log,
         "calls_while_blocked": calls_while_blocked,
         "requests": _requests(llm),

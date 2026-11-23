@@ -1,13 +1,12 @@
 """
-What a synthesis driver must do, on a real ``API`` (the runner rows of ``test_runner.py`` that do
-not pin the runner's own bookkeeping, re-expressed on the rig of ``rig.py``).
+What a host sees of a synthesis run, on a real ``API`` with ``SynthesizeExecutor`` (the rows that
+pinned ``ProcedureRunner`` before plan baa37f40 step 22, re-expressed on the rig of ``rig.py``).
 
-Every row runs on each entry of ``rig.DRIVERS`` (the ``_driver`` fixture below), through the call
-surface of a driver: ``run``, ``converse`` and the results a parent sees (``synthesis_result``, the
-state and depth, the trace events). Ported, not dropped: the ok path, abort at ``max_turns``, an
-outage is no fault of the procedure, return keys, a reason per failure, nesting, the trace events
-being value free. What stays on ``test_runner.py``: ``_runs``, ``_refused``, ``end_conversation``
-markers, ``hook``, the stream settle on close, the runner's own push, a signal during the compile.
+The rows go through the call surface of the rig's driver: ``run``, ``converse`` and the results a
+parent sees (``synthesis_result``, the state and depth, the trace events). The ok path, abort at
+``max_turns``, an outage is no fault of the procedure, return keys, a reason per failure, nesting
+and the trace events being value free. Until step 22 every row also ran on the runner, which made
+the parity of the two a row-by-row comparison; that oracle went with the runner.
 """
 
 import copy
@@ -44,12 +43,10 @@ from fsm_llm.synthesis import (
 )
 from fsm_llm.synthesis import procedures as procedures_module
 from fsm_llm.synthesis.gates import GATES
-from tests.test_fsm_llm_synthesis import rig as rig_module
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
 from tests.test_fsm_llm_synthesis.rig import (
     CANARIES,
     CONTEXT,
-    DRIVERS,
     GOAL,
     NOISE,
     PERSONA,
@@ -61,13 +58,6 @@ from tests.test_fsm_llm_synthesis.rig import (
     make_rig,
     serve_procedure,
 )
-
-
-@pytest.fixture(autouse=True, params=sorted(DRIVERS))
-def _driver(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
-    """Run every row of this file on each driver of the rig."""
-    monkeypatch.setattr(rig_module, "DEFAULT_DRIVER", request.param)
-    return request.param
 
 
 class _Ledgered(_RealMetered, ScriptedRunnerLLM):
@@ -258,7 +248,7 @@ class TestConverse:
 
 class TestAbort:
     def test_a_silent_child_is_aborted_after_max_turns_and_the_parent_apologises(
-        self, valid_fsm, tmp_path, _driver
+        self, valid_fsm, tmp_path
     ):
         rig = make_rig(
             valid_fsm,
@@ -285,17 +275,17 @@ class TestAbort:
         assert rig.cheap.count("generate_response", "ask") == 1 + 3
         assert rig.extractions() == 3 * 2
         assert rig.names == ["obtained", "pushed", "aborted", "popped"]
-        # the `step` of an event: core's next step number for the runner's hook, the engine's
-        # count of the child's turns (the three it took) for the executor (D-038 (7))
-        assert rig.events[2][1]["step"] == {"runner": 5, "executor": 3}[_driver]
+        # the `step` of an event: the engine's count of the child's turns (the three it took)
+        # (D-038 (7); the runner's hook reported core's next step number, 5, before step 22)
+        assert rig.events[2][1]["step"] == 3
         assert rig.library is not None
         assert rig.library.get_record(rig.digest).stats == {"runs": 1, "successes": 0}
 
     def test_a_resumed_run_still_aborts_the_child_after_max_turns_in_total(
         self, valid_fsm
     ):
-        """Core restarts its step number at 1 on every ``run`` call; the runner's
-        own count of child steps must not restart with it (review concern 5)."""
+        """Core restarts its step number at 1 on every ``run`` call; the count of the child's
+        steps is the engine's lifetime count and must not restart with it (review concern 5)."""
         rig = make_rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=5))
 
         for _ in range(10):
@@ -1103,7 +1093,7 @@ class TestTraceEvents:
         assert failed["reason"] == "inputs_missing"
         assert failed["error"] is None and failed["rounds"] is None
 
-    def test_two_conversations_on_one_runner_give_separable_streams(self, valid_fsm):
+    def test_two_conversations_on_one_executor_give_separable_streams(self, valid_fsm):
         rig = make_rig(valid_fsm, replies=[json.dumps(valid_fsm)] * 2)
         other, _ = rig.api.start_conversation(CONTEXT)
 

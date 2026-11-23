@@ -1,6 +1,6 @@
 """The ``synthesis_result`` dict as a ``RunResult`` (roadmap 0.16, D-047).
 
-``ProcedureRunner`` writes ``{status, procedure_id, version, reason}`` to the
+``SynthesizeExecutor`` writes ``{status, procedure_id, version, reason}`` to the
 result key of a ``synthesize`` state; that dict is the wire contract (edges read
 it) and is never replaced. ``synthesis_run_result`` reads it and returns the core
 envelope.

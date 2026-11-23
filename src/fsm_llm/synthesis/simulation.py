@@ -442,7 +442,7 @@ class Simulator:
             break
         if ran and all(t.error is not None for _, _, t in ran):
             # DECISION plan-2026-11-10T194139-2cefeb61/D-061
-            # An outage is chained from a fixed LLMResponseError so the runner
+            # An outage is chained from a fixed LLMResponseError so the executor
             # reads `provider_error`; the provider's text is never copied. Do NOT
             # chain any other trial error (a bug is a compile failure).
             outage = all(

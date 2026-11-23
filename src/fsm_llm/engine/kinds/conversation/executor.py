@@ -1,7 +1,7 @@
 """``ConversationExecutor`` and ``ConversationPass1``: the conversation kind's Pass 1.
 
 Layer ``engine`` (plan d454fd62, step 80, D-030). ``ConversationExecutor`` is what the registry
-holds for the ``conversation`` kind (and, as the passive fallback, for ``synthesize``). It owns the
+holds for the ``conversation`` kind (and, as the passive fallback, for a kind nobody registered). It owns the
 conversation Pass-1 machinery: the field, bulk and classification extraction and the
 post-transition extraction, which were methods of ``MessagePipeline`` until step 80.
 
@@ -46,7 +46,7 @@ class ConversationExecutor(StateExecutor):
     """The conversation kind: field, bulk and classification extraction.
 
     Owns the machinery (``ConversationPass1``, built per call over the pipeline's services,
-    plan d454fd62 step 80, D-030); also the passive executor of ``synthesize``.
+    plan d454fd62 step 80, D-030); also the passive executor of a kind nobody registered.
     """
 
     kind = "conversation"

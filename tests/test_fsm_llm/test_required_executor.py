@@ -1,17 +1,18 @@
-"""A state kind that requires an executor, and the list form of ``executors=`` (plan baa37f40, step 3).
+"""A state kind that requires an executor, and the list form of ``executors=`` (plan baa37f40, steps 3 and 22).
 
-``KindSpec.requires_executor`` is data (default ``False``); no built-in kind sets it in this plan
-step, so these rows flag the real ``synthesize`` spec for the length of one test (as the marker kind
-of ``test_executors.py`` does for its own). A flagged kind with no executor, in the per-instance map
-or the module table, is a named ``MissingExecutorError`` at the three sites a definition enters an
-``API`` (construction, ``push_fsm``, the frame of ``fork``) and at the first Pass 1 of a bare
-``FSMManager``. ``executors=`` also takes a list of executors, each carrying its ``kind``.
+``KindSpec.requires_executor`` is data (default ``False``); since step 22 (D-041, which supersedes
+2cefeb61/D-002) the ``synthesize`` spec sets it and no other built-in kind does. A flagged kind with
+no executor, in the per-instance map or the module table, is a named ``MissingExecutorError`` at the
+three sites a definition enters an ``API`` (construction, ``push_fsm``, the frame of ``fork``) and at
+the first Pass 1 of a bare ``FSMManager``. ``executors=`` also takes a list of executors, each
+carrying its ``kind``. The rows run on the real ``synthesize`` spec; the stand-in executor below is a
+conversation body that names the kind.
 """
 
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -52,16 +53,6 @@ class _Synth(ex.ConversationExecutor):
         return super().extract(*args, **kwargs)
 
 
-@pytest.fixture
-def flagged(monkeypatch):
-    """The synthesize kind flagged ``requires_executor`` for one test."""
-    spec = replace(sk.SYNTHESIZE, requires_executor=True)
-    monkeypatch.setattr(
-        sk, "KINDS", tuple(spec if k.name == _SYNTHESIZE else k for k in sk.KINDS)
-    )
-    return spec
-
-
 def _definition() -> FSMDefinition:
     return FSMDefinition(**_parent())
 
@@ -90,8 +81,8 @@ def _plain_api() -> API:
 
 
 class TestTheFlag:
-    def test_no_built_in_kind_requires_an_executor(self):
-        assert [s.name for s in sk.KINDS if s.requires_executor] == []
+    def test_only_the_synthesize_kind_requires_an_executor(self):
+        assert [s.name for s in sk.KINDS if s.requires_executor] == [_SYNTHESIZE]
 
     def test_the_default_is_false_and_the_field_is_a_bool(self):
         assert sk.KindSpec(name="x").requires_executor is False
@@ -103,12 +94,14 @@ class TestTheFlag:
         with pytest.raises(FrozenInstanceError):
             sk.CONVERSATION.requires_executor = True  # type: ignore[misc]
 
-    def test_an_unflagged_synthesize_state_still_runs_as_conversation(self):
-        """Nothing else moves: a bare API on a synthesize state builds and stays (D-002 of 2cefeb61)."""
-        api = _bare_api()
-        conversation_id, _ = api.start_conversation()
-        api.converse("go", conversation_id)
-        assert api.get_current_state(conversation_id) == "solve"
+    def test_a_synthesize_definition_still_loads_and_validates_with_no_executor(self):
+        """D-002 half that stands (D-041): core only loads the field, the validator is never
+        stricter than the loader; only an engine that would RUN the state refuses."""
+        from fsm_llm.core.verify import FSMValidator
+
+        raw = _parent()
+        assert FSMDefinition(**raw).states["solve"].synthesize is not None
+        assert FSMValidator(raw).validate().is_valid
 
 
 class TestTheNamedError:
@@ -129,7 +122,7 @@ class TestTheNamedError:
         bare = MissingExecutorError("m")
         assert (bare.state_id, bare.kind, bare.details) == (None, None, {})
 
-    def test_the_message_names_the_state_the_kind_and_the_remedy(self, flagged):
+    def test_the_message_names_the_state_the_kind_and_the_remedy(self):
         with pytest.raises(MissingExecutorError) as raised:
             _bare_api()
         text = str(raised.value)
@@ -140,7 +133,7 @@ class TestTheNamedError:
 
 class TestExecutorFor:
     def test_a_flagged_kind_with_no_executor_raises_instead_of_falling_back(
-        self, flagged
+        self,
     ):
         state = _definition().states["solve"]
         with pytest.raises(MissingExecutorError):
@@ -149,32 +142,62 @@ class TestExecutorFor:
         with pytest.raises(MissingExecutorError):
             ex.executor_for(state, {"conversation": ex.ConversationExecutor()})
 
-    def test_the_per_instance_map_satisfies_it(self, flagged):
+    def test_the_per_instance_map_satisfies_it(self):
         mine = _Synth()
         state = _definition().states["solve"]
         assert ex.executor_for(state, {_SYNTHESIZE: mine}) is mine
 
-    def test_the_module_table_satisfies_it(self, flagged, monkeypatch):
+    def test_the_module_table_satisfies_it(self, monkeypatch):
         monkeypatch.setattr(ex, "_EXECUTORS", copy_of_table())
         mine = _Synth()
         ex.register_executor(_SYNTHESIZE, mine)
         assert ex.executor_for(_definition().states["solve"]) is mine
 
-    def test_an_unflagged_kind_keeps_the_conversation_fallback(self):
-        state = _definition().states["solve"]
-        assert ex.executor_for(state) is ex.executor_for(_definition().states["start"])
+    def test_an_unflagged_kind_keeps_the_conversation_fallback(self, monkeypatch):
+        marker = sk.KindSpec(name="marker", config_field="marker")
+        monkeypatch.setattr(sk, "KINDS", (*sk.KINDS, marker))
+        state = SimpleNamespace(completion=None, synthesize=None, marker={"x": 1})
+        assert type(ex.executor_for(state)) is ex.ConversationExecutor
+
+
+class TestTheModuleTableHoldsNoSynthesizeExecutor:
+    """D-041 (2): the synthesize executor lives in a subpackage an engine layer may not import,
+    and a table entry would bind every ``API`` of the process to one synthesizer: a host passes
+    it through ``executors=``."""
+
+    def test_the_table_names_no_synthesize_entry(self):
+        assert "synthesize" not in dict(ex._EXECUTORS.items())
+
+    def test_importing_the_synthesis_package_registers_nothing(self):
+        import importlib
+
+        before = dict(ex._EXECUTORS.items())
+        importlib.import_module("fsm_llm.synthesis")
+        assert dict(ex._EXECUTORS.items()) == before
+        with pytest.raises(MissingExecutorError):
+            ex.executor_for(_definition().states["solve"])
+
+    def test_the_real_executor_satisfies_the_check_through_the_map_or_the_list(self):
+        from fsm_llm.synthesis import FSMSynthesizer, SynthesizeExecutor
+        from fsm_llm.testing import ScriptedLLM
+
+        executor = SynthesizeExecutor(FSMSynthesizer(ScriptedLLM([])))
+        for given in ({_SYNTHESIZE: executor}, [executor]):
+            api = _bare_api(executors=given)
+            conversation_id, _ = api.start_conversation()
+            assert api.get_current_state(conversation_id) == "start"
 
 
 class TestTheSitesThatRefuse:
-    def test_a_bare_api_refuses_at_construction(self, flagged):
+    def test_a_bare_api_refuses_at_construction(self):
         with pytest.raises(MissingExecutorError):
             _bare_api()
 
-    def test_a_bare_api_refuses_with_an_unrelated_map(self, flagged):
+    def test_a_bare_api_refuses_with_an_unrelated_map(self):
         with pytest.raises(MissingExecutorError):
             _bare_api(executors={"conversation": ex.ConversationExecutor()})
 
-    def test_an_api_with_the_executor_builds_and_runs(self, flagged):
+    def test_an_api_with_the_executor_builds_and_runs(self):
         mine = _Synth()
         api = _bare_api(executors={_SYNTHESIZE: mine})
         conversation_id, _ = api.start_conversation()
@@ -183,7 +206,7 @@ class TestTheSitesThatRefuse:
         assert api.get_current_state(conversation_id) == "solve"
         assert mine.extract_calls >= 1
 
-    def test_push_fsm_refuses_and_leaves_nothing_behind(self, flagged):
+    def test_push_fsm_refuses_and_leaves_nothing_behind(self):
         api = _plain_api()
         conversation_id, _ = api.start_conversation()
         with pytest.raises(MissingExecutorError):
@@ -193,7 +216,7 @@ class TestTheSitesThatRefuse:
         assert api._pending_push_ids == set()
         assert api.get_current_state(conversation_id) == "a"
 
-    def test_push_fsm_accepts_it_when_the_api_holds_the_executor(self, flagged):
+    def test_push_fsm_accepts_it_when_the_api_holds_the_executor(self):
         api = API.from_definition(
             FSMDefinition(**_parent()),
             llm_interface=_llm(),
@@ -203,9 +226,7 @@ class TestTheSitesThatRefuse:
         api.push_fsm(conversation_id, _parent())
         assert len(api.conversation_stacks[conversation_id]) == 2
 
-    def test_fork_refuses_a_frame_whose_kind_this_api_lacks(
-        self, flagged, log: EventLog
-    ):
+    def test_fork_refuses_a_frame_whose_kind_this_api_lacks(self, log: EventLog):
         source = _log_api(log, executors=[_Synth()])
         conversation_id, _ = source.start_conversation()
         source.converse("one", conversation_id)
@@ -222,7 +243,7 @@ class TestTheSitesThatRefuse:
         new_id, state = armed.fork(conversation_id, at_turn=2)
         assert state.stack_depth == 2 and new_id != conversation_id
 
-    def test_a_bare_manager_fails_at_the_first_pass_one(self, flagged):
+    def test_a_bare_manager_fails_at_the_first_pass_one(self):
         definition = _parent()
         manager = FSMManager(
             fsm_loader=lambda fsm_id: FSMDefinition(**definition),
@@ -233,7 +254,7 @@ class TestTheSitesThatRefuse:
         with pytest.raises(MissingExecutorError):
             manager.process_message(conversation_id, "go")
 
-    def test_a_manager_with_the_executor_runs_the_turn(self, flagged):
+    def test_a_manager_with_the_executor_runs_the_turn(self):
         definition = _parent()
         mine = _Synth()
         manager = FSMManager(
@@ -266,7 +287,7 @@ class TestTheListForm:
         assert ex.CompletionExecutor.kind == "completion"
         assert ex.StateExecutor.kind is None
 
-    def test_a_list_run_equals_a_mapping_run(self, flagged):
+    def test_a_list_run_equals_a_mapping_run(self):
         results = []
         for form in (lambda e: {_SYNTHESIZE: e}, lambda e: [e]):
             mine = _Synth()

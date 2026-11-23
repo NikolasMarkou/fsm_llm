@@ -155,18 +155,23 @@ class State(BaseModel):
     )
 
     # DECISION plan-2026-11-10T194139-2cefeb61/D-002: one optional, additive
-    # field (v4.1 unchanged, no existing `fsm_id` moves). Core only LOADS it; a
-    # runner outside core pushes the procedure. Do NOT add a push seam to the
-    # pipeline or `FSMManager` (a bare `converse` stays BLOCKED, by design), and
-    # do NOT make `FSMValidator.validate()` stricter than this loader (the
-    # never-stricter tests pin it; the flow gates live in `core/verify/flow.py`).
+    # field (v4.1 unchanged, no existing `fsm_id` moves). Core only LOADS it;
+    # an executor outside core gives it meaning. Do NOT make
+    # `FSMValidator.validate()` stricter than this loader (the never-stricter
+    # tests pin it; the flow gates live in `core/verify/flow.py`).
+    # [SUPERSEDED BY plan baa37f40 D-041 for the engine half: the old rule "do NOT
+    # add a push seam to the pipeline or `FSMManager` (a bare `converse` stays
+    # BLOCKED, by design)" is gone. A bare engine now refuses a definition that
+    # holds a synthesize state with `MissingExecutorError`, because the kind sets
+    # `requires_executor`; the executor is `fsm_llm.synthesis.SynthesizeExecutor`,
+    # given through `executors=`.]
     # Plan 9013b0e3 D-004 (appended): "no existing `fsm_id` moves" holds for
     # definitions that omit `version`; the default is now 4.2, so an explicit
     # "version": "4.1" definition has a new `fsm_id`.
     synthesize: SynthesizeConfig | None = Field(
         default=None,
         description=(
-            "Synthesize state: a runner pushes a procedure for the goal and "
+            "Synthesize state: an executor pushes a procedure for the goal and "
             "writes the outcome to result_key. Excludes completion and every "
             "extraction field."
         ),

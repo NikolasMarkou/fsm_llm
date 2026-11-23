@@ -41,7 +41,10 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.classification import Classifier, HierarchicalClassifier
-from fsm_llm.engine.kinds.conversation.executor import ConversationPass1
+from fsm_llm.engine.kinds.conversation.executor import (
+    ConversationExecutor,
+    ConversationPass1,
+)
 from fsm_llm.engine.turn.message_pipeline import MessagePipeline
 from fsm_llm.handlers import HandlerSystem
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
@@ -1733,7 +1736,9 @@ class TestResultKeyClosedToClassification:
                 result_key, after_transition=after_transition, required=required
             )
         )
-        api, conv_id, _ = _api(fsm)
+        # a passive executor under the synthesize kind (a bare API refuses the state, D-041 of
+        # plan baa37f40): the closed key is a rule of the classification channels, not of an executor
+        api, conv_id, _ = _api(fsm, executors={"synthesize": ConversationExecutor()})
         with _ClassifierCapture("buy", 0.9) as cap:
             api.converse("I want to buy", conv_id)
 

@@ -48,7 +48,7 @@ _RESULT_KINDS: tuple[str, ...] = get_args(
 _COMPLETION_WRITER = "a completion call"
 _RESULT_WRITERS = {
     "completion": _COMPLETION_WRITER,
-    "synthesize": "the synthesis runner",
+    "synthesize": "the synthesize executor",
     "call": "the call executor",
 }
 

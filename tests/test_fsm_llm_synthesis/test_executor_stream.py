@@ -20,7 +20,7 @@ from .rig import make_rig
 
 
 def _rig(valid_fsm: dict[str, Any], tmp_path: Any = None, **kw: Any) -> Any:
-    return make_rig(valid_fsm, tmp_path, driver="executor", **kw)
+    return make_rig(valid_fsm, tmp_path, **kw)
 
 
 def _stream(rig: Any, **kw: Any) -> Any:

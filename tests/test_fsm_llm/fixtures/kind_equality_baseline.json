@@ -572,6 +572,7 @@
  },
  "synthesize-host": {
   "aborted_state": "apology",
+  "bare_api": "MissingExecutorError: State 'solve' is of kind 'synthesize', which needs an executor and none is registered for it: pass executors={'synthesize': <executor>} (or a list of executors naming their kind) to API, FSMManager or MessagePipeline, or call register_executor('synthesize', <executor>)",
   "calls_while_blocked": 1,
   "log": [
    [
@@ -623,6 +624,7 @@
  },
  "synthesize-host-speaking": {
   "aborted_state": "apology",
+  "bare_api": "MissingExecutorError: State 'solve' is of kind 'synthesize', which needs an executor and none is registered for it: pass executors={'synthesize': <executor>} (or a list of executors naming their kind) to API, FSMManager or MessagePipeline, or call register_executor('synthesize', <executor>)",
   "calls_while_blocked": 4,
   "log": [
    [

@@ -12,10 +12,10 @@ G6a dead-edge gate and the G6b ``Simulator``), the compile and repair loop,
 ``RunTrace`` and ``TraceRecorder``, ``diagnose`` over run traces,
 ``apply_patch`` (an RFC 6902 subset), ``propose_patch`` and
 ``repair_procedure``, ``obtain`` with the approval gate, the
-``ProcedureRunner`` that pushes, runs and pops a procedure under a
-``synthesize`` state, the ``SynthesizeExecutor`` that gives the same field its meaning
-inside the engine (``API(executors=...)``, plan baa37f40), and the agent tools ``obtain_procedure`` and
-``run_procedure``.
+``SynthesizeExecutor`` that gives the ``synthesize`` field its meaning inside the engine
+(``API(executors=...)``: a bare ``API`` refuses a ``synthesize`` state, plan baa37f40 step 22;
+``ProcedureRunner``, the driver outside the engine this executor replaced, is gone), and the agent
+tools ``obtain_procedure`` and ``run_procedure``.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
 ``import fsm_llm`` never loads it.
@@ -50,7 +50,6 @@ from .policy import (
 )
 from .repair import PromotionResult, propose_patch, repair_procedure
 from .results import synthesis_run_result
-from .runner import ProcedureRunner
 from .simulation import SimulationReport, Simulator
 from .synthesizer import (
     CompileResult,
@@ -76,7 +75,6 @@ __all__ = [
     "PolicyFinding",
     "Procedure",
     "ProcedureApprovalRequest",
-    "ProcedureRunner",
     "PromotionResult",
     "RunTrace",
     "SimulationReport",

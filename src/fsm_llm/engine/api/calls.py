@@ -283,6 +283,13 @@ async def _try_pop(
         return False
     top_state = top.fsm_definition.states.get(top_state_id)
     ended = top_state is not None and not top_state.transitions
+    # DECISION plan-2026-11-18T071726-5a6a1f80/D-012
+    # The ENGINE bounds a child: the push gave its frame `max_steps` and the manager's record for
+    # THAT frame says when it is spent (`turn_budget_spent`, a fact of the frame, never the text
+    # of a `RunBudgetExceededError`, so a spent HOST budget still raises). Do NOT keep a count of
+    # the child's steps in settle or in an executor (it missed every turn run outside the loop and
+    # restarted with each resumed run), do NOT write an abort key or wait for an abort edge (only
+    # a compiled FSM had one) and do NOT merge anything of an aborted child.
     spent = api.fsm_manager.turn_budget_spent(top.conversation_id)
     view: PopContext | None = None
     if not is_call and not retry:
@@ -611,8 +618,13 @@ async def _push_plan(
         if resolved is not None:
             api._call_marks.pushed[child_id] = resolved
     if executor.watches_outage:
-        # the provider-error POSITION is taken where the push is (5a6a1f80/D-015), never at the
-        # pop: the child has already run by then
+        # DECISION plan-2026-11-18T071726-5a6a1f80/D-015
+        # The outage is a POSITION taken at the push (the log, then the ledger, then the meter,
+        # then 0: `runtime.usage.watch_provider_errors`), not a before and after of
+        # `usage().errors`. Do NOT go back to comparing that count alone (a `reset_usage()`
+        # mid-run and an interface with no meter lost the outage), do NOT add the ledger to the
+        # log (one source answers) and do NOT take the position at the pop (the child has
+        # already run by then). See decisions.md D-015 of plan 5a6a1f80.
         try:
             reader = watch_provider_errors(
                 api.llm_interface, api._event_log, root_id, depth - 1

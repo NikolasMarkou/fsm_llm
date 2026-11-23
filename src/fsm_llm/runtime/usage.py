@@ -6,7 +6,7 @@ a count means the same thing in both. A reader picks ONE source: the ledger and 
 never added (one outcome event exists per call, so a sum would count twice). Cost is not here
 (row 2.1 owns a price source); tokens, calls and errors are.
 
-Interface contract (callers: ``synthesis.runner`` for the outage reader, tests for the rest):
+Interface contract (callers: ``engine.api.calls`` (settle) for the outage reader, tests for the rest):
     - ``usage_from_events(events) -> LLMUsage``: folds the ``llm/response`` and ``provider/error``
       events of any iterable (``log.read(id)``, ``log.query(...)``); other events are skipped
       and a ``llm/request`` is never counted. An event is one call: a response is an answered
@@ -24,7 +24,7 @@ Interface contract (callers: ``synthesis.runner`` for the outage reader, tests f
       order, each tried at read time and the next used when one raises: the event log (when
       *log* is given: the errors of *frame* after the position), the ledger of *interface*
       (a position that survives ``reset_usage()``), the ``usage().errors`` count of an
-      interface that has its own ``usage()`` (read before and after, as the runner always did),
+      interface that has its own ``usage()`` (read before and after, as the synthesis runner, since deleted, always did),
       and 0. An interface with no meter and no log reads 0 (documented limit).
 
 Imports ``llm`` and ``runtime`` modules only.

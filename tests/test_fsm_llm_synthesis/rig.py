@@ -1,38 +1,32 @@
-"""The rig of the synthesis driver rows: a real ``API`` on a host with one ``synthesize`` state,
-a driver with the call surface of ``ProcedureRunner``, and what a row reads back.
+"""The rig of the synthesis driver rows: a real ``API`` on a host with one ``synthesize`` state
+and the ``SynthesizeExecutor`` of plan baa37f40, a driver that is the ``API`` plus the host's two
+steps, and what a row reads back.
 
-The runner rows (``test_driver_rows.py``) say what a driver must do, whoever the driver is: the
-results of a run, the ``synthesis_result`` the parent sees and the trace events. They run on every
-entry of ``DRIVERS``: the runner and the executor of plan baa37f40 (step 20), so the parity of the
-two is a row-by-row comparison, not a second suite. Rows that pin the runner's own bookkeeping
-(``_runs``, ``_refused``, ``hook``, the stream settle on close, a signal during the compile) stay
-on ``test_runner.py`` and use ``Rig.runner``.
+The driver rows (``test_driver_rows.py``) say what a host sees whoever drives it: the results of a
+run, the ``synthesis_result`` the parent sees and the trace events. Since step 22 of plan baa37f40
+the executor is the only driver (``ProcedureRunner``, the second driver that served as the parity
+oracle through steps 20 and 21, is gone with its rows).
 
-Interface of a driver (``Driver``): ``run(conversation_id, *, max_steps)`` returns the list of
+Interface of ``ExecutorDriver``: ``run(conversation_id, *, max_steps)`` returns the list of
 ``AdvanceResult`` of a bounded run (``RunBudgetExceededError`` on a spent budget);
 ``converse(conversation_id, message)`` returns the reply of one user turn;
-``end_conversation(conversation_id)`` drops what the driver holds for a conversation. A
-``DriverSpec`` names how a driver is wired: ``executors(synthesizer, trace_sink)`` the
-``executors=`` of the ``API`` (empty for the runner, which drives a bare ``API``) and
-``build(api, host_definition, synthesizer, trace_sink)`` the driver; ``trace_sink`` is ``None`` or
-a callable ``(event, fields)``. The executor's driver is a thin wrapper over the ``API``: the
-engine runs no parent turn after a pop and starts no Pass 1 for a child whose initial state is a
-synthesize state, so after each ``converse`` it advances the parent once the result is final (and
-a child whose result is not yet written), as the runner's ``_settle`` did (D-038 (9)).
+``end_conversation(conversation_id)`` ends the conversation. It is a thin wrapper over the
+``API``: the engine runs no parent turn after a pop and starts no Pass 1 for a child whose initial
+state is a synthesize state, so after each ``converse`` it advances the parent once the result is
+final (and a child whose result is not yet written) (D-038 (9)).
 
 Interface of ``make_rig(valid_fsm, tmp_path=None, **options)``: ``valid_fsm`` is the compile the
 strong model returns (unless ``replies`` is given); ``tmp_path`` makes a library when given;
 ``extraction``, ``policy``, ``config`` (keys of the host's ``synthesize`` state), ``context``,
-``sink``, ``cheap`` (a replacement cheap model), ``event_log``, ``host_edit`` (a callable that
-edits the host definition dict before the API is built) and ``driver`` (a key of ``DRIVERS``,
-default ``DEFAULT_DRIVER``) shape the run. It returns a ``Rig``.
+``sink``, ``cheap`` (a replacement cheap model), ``event_log`` and ``host_edit`` (a callable that
+edits the host definition dict before the API is built) shape the run. It returns a ``Rig``.
 """
 
 import copy
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 import pytest
 
@@ -44,7 +38,6 @@ from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
     Procedure,
-    ProcedureRunner,
     SynthesisPolicy,
     SynthesizeExecutor,
     digest_of,
@@ -68,30 +61,6 @@ REPLIES = {
 CANARIES = ("CANARY-CONTEXT", "CANARY-USER", "CANARY-MODEL")
 
 TraceSink = Callable[[str, dict[str, Any]], None]
-
-
-class Driver(Protocol):
-    def run(self, conversation_id: str, *, max_steps: int) -> list[Any]: ...
-
-    def converse(self, conversation_id: str, message: str) -> str: ...
-
-    def end_conversation(self, conversation_id: str) -> None: ...
-
-
-DriverFactory = Callable[[API, Any, FSMSynthesizer, TraceSink | None], Driver]
-ExecutorsFactory = Callable[[FSMSynthesizer, TraceSink | None], list[StateExecutor]]
-
-
-@dataclass(frozen=True)
-class DriverSpec:
-    executors: ExecutorsFactory
-    build: DriverFactory
-
-
-def runner_driver(
-    api: API, host_definition: Any, synth: FSMSynthesizer, sink: TraceSink | None
-) -> Driver:
-    return ProcedureRunner(api, host_definition, synth, trace_sink=sink)
 
 
 class ExecutorDriver:
@@ -132,22 +101,6 @@ class ExecutorDriver:
         return replies
 
 
-def executor_driver(
-    api: API, host_definition: Any, synth: FSMSynthesizer, sink: TraceSink | None
-) -> Driver:
-    return ExecutorDriver(api)
-
-
-DRIVERS: dict[str, DriverSpec] = {
-    "runner": DriverSpec(lambda synth, sink: [], runner_driver),
-    "executor": DriverSpec(
-        lambda synth, sink: [SynthesizeExecutor(synth, trace_sink=sink)],
-        executor_driver,
-    ),
-}
-DEFAULT_DRIVER = "runner"
-
-
 def make_host(**synthesize: Any) -> dict[str, Any]:
     """greet -> solve (synthesize) -> booked on ok, apology on failed/aborted."""
     return host_fsm(
@@ -170,7 +123,7 @@ def make_host(**synthesize: Any) -> dict[str, Any]:
 @dataclass
 class Rig:
     api: API
-    driver: Driver
+    driver: ExecutorDriver
     conv: str
     cheap: ScriptedRunnerLLM
     strong: ScriptedLLM
@@ -185,12 +138,6 @@ class Rig:
         (executor,) = self.executors
         assert isinstance(executor, SynthesizeExecutor)
         return executor
-
-    @property
-    def runner(self) -> ProcedureRunner:
-        """The driver as the runner, for the rows that pin the runner's own bookkeeping."""
-        assert isinstance(self.driver, ProcedureRunner)
-        return self.driver
 
     def run(self, max_steps: int = 20) -> list[Any]:
         """A bounded run of the conversation by the driver."""
@@ -254,7 +201,6 @@ def make_rig(
     sink: Any = None,
     cheap: ScriptedRunnerLLM | None = None,
     event_log: EventLog | None = None,
-    driver: str | None = None,
     host_edit: Callable[[dict[str, Any]], None] | None = None,
 ) -> Rig:
     cheap = cheap or ScriptedRunnerLLM(
@@ -268,15 +214,14 @@ def make_rig(
         host_edit(definition)
     stream: list[tuple[str, dict[str, Any]]] = []
     trace = sink or (lambda e, f: stream.append((e, dict(f))))
-    spec = DRIVERS[driver or DEFAULT_DRIVER]
-    executors = spec.executors(synth, trace)
+    executors: list[StateExecutor] = [SynthesizeExecutor(synth, trace_sink=trace)]
     api = API.from_definition(
         definition=definition,
         llm_interface=cheap,
         event_log=event_log,
         executors=executors,
     )
-    drive = spec.build(api, definition, synth, trace)
+    drive = ExecutorDriver(api)
     conv, _ = api.start_conversation(CONTEXT if context is None else context)
     return Rig(api, drive, conv, cheap, strong, synth, library, stream, executors)
 

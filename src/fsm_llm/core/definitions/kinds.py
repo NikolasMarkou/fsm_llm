@@ -237,16 +237,17 @@ class CompletionStateConfig(BaseModel):
 class SynthesizeConfig(BaseModel):
     """The work of a synthesize state (``State.synthesize``).
 
-    A fixed ``goal`` (the author's text, not blank) a runner turns into a
+    A fixed ``goal`` (the author's text, not blank) an executor turns into a
     procedure (a child FSM), runs on the host conversation's model and merges
-    back. Core only loads it: a bare ``API.converse`` finds no extraction and
-    no passing transition, so it stays (BLOCKED). The runner writes
+    back. Core only loads it: an engine with no executor of the kind refuses a
+    definition holding such a state (``MissingExecutorError``, plan baa37f40
+    D-041), and ``fsm_llm.synthesis.SynthesizeExecutor`` writes
     ``context[result_key]`` (a dict with a ``status``), which the pipeline
     makes handler-only. ``inputs`` and ``return_keys`` (at least one) hold
     public names only, never ``result_key``; ``on_failure`` is a state id one
     transition reaches, and the whole FSM is checked with the real evaluator on
     sample results (``_check_synthesize_states``): no edge of the state may pass
-    before the runner wrote a result (no result, or ``status`` ``running``), and
+    before the executor wrote a result (no result, or ``status`` ``running``), and
     an edge to ``on_failure`` must pass for ``status`` ``failed`` and for
     ``aborted``, so write it as ``status in [failed, aborted]`` (a bare
     ``== "failed"`` is refused). ``min_lifecycle`` is the least trusted stored

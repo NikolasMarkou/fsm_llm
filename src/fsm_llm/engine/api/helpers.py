@@ -160,7 +160,8 @@ def _require_state_executors(
     state whose kind has ``KindSpec.requires_executor`` set, asks ``executor_for``, the one
     lookup rule, which raises ``MissingExecutorError`` naming the state id, the kind and the
     remedy when neither the map nor the module table holds an executor of the kind. Returns
-    ``None`` otherwise; no built-in kind sets the flag yet, so nothing is refused today.
+    ``None`` otherwise; ``synthesize`` is the one built-in kind that sets the flag (D-041 of plan
+    baa37f40), so a bare ``API`` refuses a definition holding a synthesize state.
     Checked once per definition (construction, push, the frames of fork and resume) beside
     ``_require_classifier_interface``, instead of failing at the first turn; a bare
     ``FSMManager`` has no such site and fails at its first Pass 1 through ``executor_for``.

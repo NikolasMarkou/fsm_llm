@@ -39,7 +39,7 @@ class ConversationExtractionMixin(_ConversationSurface):
         """Keys no extraction may write (D-033): the FSM author's
         ``handler_only_keys`` plus the ``result_key`` of every completion state
         (only that state's own completion call writes it, D-021) and of every
-        synthesize state (only the runner writes it, D-002 of plan 2cefeb61).
+        synthesize state (only its executor writes it, D-002 of plan 2cefeb61).
 
         The result keys come from the kind registry through ``handler_only_names``.
         Resolved per instance through ``fsm_resolver`` so a stacked child uses

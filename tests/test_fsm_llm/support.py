@@ -106,9 +106,9 @@ def _ambiguous_then_blocked_fsm(
     )
 
 
-def _api(fsm_def: FSMDefinition) -> tuple[API, str, MagicMock]:
+def _api(fsm_def: FSMDefinition, **kwargs: Any) -> tuple[API, str, MagicMock]:
     llm = _mock_llm()
-    api = API.from_definition(fsm_def, llm_interface=llm)
+    api = API.from_definition(fsm_def, llm_interface=llm, **kwargs)
     conv_id, _ = api.start_conversation()
     return api, conv_id, llm
 

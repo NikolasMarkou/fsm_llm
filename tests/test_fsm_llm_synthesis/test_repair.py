@@ -841,7 +841,6 @@ class TestTheLoopEndToEnd:
             cheap=cheap,
             policy=policy,
             replies=[json.dumps(defective)],
-            driver="executor",
             sink=lambda e, f: recorder(e, f),
         )
         library = rig.library

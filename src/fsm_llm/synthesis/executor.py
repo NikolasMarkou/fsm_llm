@@ -1,19 +1,20 @@
 """``SynthesizeExecutor``: the synthesize kind on the engine, no second driver.
 
-Layer ``synthesis`` (plan baa37f40, step 20.2, D-038, roadmap E3.5 and P7.1). ``ProcedureRunner``
-gave the ``synthesize`` field its meaning from outside the engine, with a hook of its own, its own
-bookkeeping and its own converse loop. This executor gives it the meaning inside the engine, the
-way ``CallExecutor`` does for the ``call`` kind: Pass 1 of a synthesize state obtains a procedure
-and writes a REQUEST, and ``engine/api/calls.py`` (``settle``) pushes the child after the turn
-committed and pops it when it ends. Register it with
+Layer ``synthesis`` (plan baa37f40, step 20.2, D-038, roadmap E3.5 and P7.1). The deleted
+``ProcedureRunner`` gave the ``synthesize`` field its meaning from outside the engine, with a hook
+of its own, its own bookkeeping and its own converse loop. This executor gives it the meaning inside
+the engine, the way ``CallExecutor`` does for the ``call`` kind (a bare ``API`` with no such
+executor refuses a ``synthesize`` state with ``MissingExecutorError``, plan baa37f40 D-041): Pass 1
+of a synthesize state obtains a procedure and writes a REQUEST, and ``engine/api/calls.py``
+(``settle``) pushes the child after the turn committed and pops it when it ends. Register it with
 ``API(executors={"synthesize": SynthesizeExecutor(synth)})`` (or the list form).
 
 Interface contract:
 
 - ``SynthesizeExecutor(synthesizer, *, trace_sink=None)``: ``synthesizer`` obtains the
   procedures; ``trace_sink(event, fields)`` an optional plain callable (``TypeError`` if not
-  callable). The events are the runner's six (``obtained``, ``pushed``, ``stepped``, ``aborted``,
-  ``popped``, ``failed``), scalars only, never a value, user text or reply (D-044), every one with
+  callable). The events are the six of the old runner, kept as the wire of ``TraceRecorder``
+  (``obtained``, ``pushed``, ``stepped``, ``aborted``, ``popped``, ``failed``), scalars only, never a value, user text or reply (D-044), every one with
   ``conv`` (the conversation id of the frame that holds the synthesize state, the root's for a
   run of the root); a sink that raises is swallowed with one WARNING naming the event.
   ``step`` is the engine's count of the child's turns (0 at the push and at a refusal) for a run
@@ -40,11 +41,12 @@ Interface contract:
   that is not ok, D-061) and emits ``popped``.
 - The host drives the parent: the engine runs no parent turn after a pop (D-026 (2)) and starts
   no Pass 1 for a child whose INITIAL state is a synthesize state, so a host that wants the run
-  to continue in the same ``converse`` calls ``advance`` after it, as ``ProcedureRunner._settle``
+  to continue in the same ``converse`` calls ``advance`` after it, as the old runner's ``_settle``
   did. ``run_until_terminal`` needs nothing.
 - Failure mode: no exception reaches the caller from a refusal (a final ``failed`` record); a
   ``CancelledError``, an interrupt or any other ``BaseException`` during ``obtain`` propagates and
-  the turn rolls back whole (no record, nothing pending, no run counted).
+  no record is written, nothing is pending and no run is counted (a cancel rolls the turn back
+  whole; after an interrupt the next turn in the state obtains again, D-039).
 """
 
 from __future__ import annotations
@@ -152,8 +154,8 @@ def _bounded(table: dict[Any, Any], key: Any, value: Any, cap: int) -> None:
 # differs from the library digest, which is why `procedure_id` is the library digest and
 # `instance_identity` the pushed one), do NOT write to the library before the run ends
 # (`record_run` only in `on_ended`, never for an outage on a run that is not ok), do NOT catch
-# `BaseException` in Pass 1 (a cancel or an interrupt during `obtain` rolls the turn back whole:
-# no record, no run counted) and do NOT import `engine.api`, `engine.turn` or the manager.
+# `BaseException` in Pass 1 (a cancel or an interrupt during `obtain` writes no record and counts
+# no run; a cancel also rolls the turn back whole) and do NOT import `engine.api`, `engine.turn` or the manager.
 # Everything the executor needs of the stack arrives as a plain value (`engine/kinds/requests`).
 class SynthesizeExecutor(StateExecutor):
     """The synthesize kind: Pass 1 obtains and requests, settle pushes and pops (see the module
@@ -530,9 +532,10 @@ class SynthesizeExecutor(StateExecutor):
             # a run this executor cannot prove after a restart: nothing merges and no run counts
             return {config.result_key: _result(STATUS_FAILED, REASON_PUSH_FAILED, None)}
         self._trace_steps(ctx.parent_id, run, child)
-        # Read the outcome BEFORE the child is popped and the result written (the rule of
-        # plan 2cefeb61 D-044, which travels here from the runner at step 22): afterwards the
-        # top frame is the parent, and its state says nothing of the child's edges.
+        # DECISION plan-2026-11-10T194139-2cefeb61/D-044
+        # Read the outcome BEFORE the child is popped and the result written: afterwards the
+        # top frame is the parent, and its state says nothing of the child's edges. (The rule
+        # travelled here from the deleted runner, plan baa37f40 step 22, D-041.)
         if not child.ended:
             self._emit(
                 "aborted",
@@ -545,10 +548,10 @@ class SynthesizeExecutor(StateExecutor):
         ok = not aborted and not any(
             is_missing(child.data, key) for key in config.return_keys
         )
+        # DECISION plan-2026-11-10T194139-2cefeb61/D-061
         # Core swallows an extraction error, so an outage looks like a stuck child; a run whose
-        # interface errored is `provider_error`, which `diagnose` never patches (the rule of plan
-        # 2cefeb61 D-061, travelling here at step 22). Do NOT call it `budget_spent`, and do NOT
-        # let an ok run (a retried call) become a fault.
+        # interface errored is `provider_error`, which `diagnose` never patches. Do NOT call it
+        # `budget_spent`, and do NOT let an ok run (a retried call) become a fault.
         outage = child.errors > 0
         status = STATUS_OK if ok else STATUS_ABORTED if aborted else STATUS_FAILED
         reason = (
@@ -562,9 +565,11 @@ class SynthesizeExecutor(StateExecutor):
         )
         run.ok, run.outage = ok, outage
         merged = {key: child.data[key] for key in config.return_keys} if ok else {}
+        # DECISION plan-2026-11-10T194139-2cefeb61/D-029
         # Return keys go back ONLY when every key is present and the child was not aborted, in
-        # the one merge of the pop (plan 2cefeb61 D-029: no `shared_context_keys` at the push, a
-        # failed or aborted child would merge partial data into the parent).
+        # the one merge of the pop. Do NOT pass `shared_context_keys` at the push (D-017 of that
+        # plan): a failed or aborted child would then merge partial data into the parent. Read
+        # the child's data BEFORE the pop (after it the top of the stack is the parent).
         return {**merged, config.result_key: _result(status, reason, run.procedure)}
 
     def _proved(self, ctx: PopContext, config: SynthesizeConfig) -> _Run | None:

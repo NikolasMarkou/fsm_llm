@@ -495,7 +495,6 @@ class TestOnARealRun:
             extraction={"answer": CANARIES[2]},
             context={"topic": CANARIES[0]},
             sink=lambda e, f: recorder(e, f),
-            driver="executor",
         )
         recorder = TraceRecorder(
             lambda t: (got.append(t), rig.library.add_trace(t, max_traces=10))  # type: ignore[union-attr]
@@ -525,7 +524,6 @@ class TestOnARealRun:
             extraction={},
             policy=SynthesisPolicy(max_turns=1),
             sink=lambda e, f: recorder(e, f),
-            driver="executor",
         )
         recorder = TraceRecorder(got.append)
         rig.converse("hello")

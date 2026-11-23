@@ -249,7 +249,7 @@ def run_gates(
     """Run G1 to G5 and G6a on a raw compile and, on a pass, inject the abort path.
 
     Interface contract (callers: the compiler's repair loop, the library path,
-    the runner via ``verify_stored``):
+    the executor via ``verify_stored``):
         data: the compile as parsed, any shape (never mutated). ``inputs`` are
         the key names the driver provides, ``return_keys`` the keys the
         procedure must hand back (G3 requires each guaranteed). Returns a
@@ -310,7 +310,7 @@ def verify_stored(
 ) -> GateReport:
     """Re-verify a stored, abort-injected procedure before it runs.
 
-    Interface contract (callers: the library path, the runner, the tools):
+    Interface contract (callers: the library path, the executor, the tools):
         definition: the stored form, a dict or the loaded ``FSMDefinition``
         (dumped with ``exclude_defaults``, the library's canonical form); any
         other value is not canonical.

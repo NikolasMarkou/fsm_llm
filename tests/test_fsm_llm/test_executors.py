@@ -22,7 +22,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm.core import state_kinds as sk
-from fsm_llm.core.definitions import DataExtractionResponse
+from fsm_llm.core.definitions import DataExtractionResponse, MissingExecutorError
 from fsm_llm.engine import kinds
 from fsm_llm.engine.kinds import registry as ex
 from fsm_llm.testing import final_reply
@@ -398,20 +398,18 @@ class TestExecutorTable:
             is ex.CompletionExecutor
         )
 
-    def test_synthesize_is_passive_the_conversation_executor(self):
-        """D-002 of plan 2cefeb61: a bare converse on a synthesize state stays
-        BLOCKED, so the kind shares the conversation executor."""
+    def test_synthesize_needs_an_executor_of_its_own(self):
+        """D-041 of plan baa37f40 (supersedes D-002 of plan 2cefeb61): a bare engine no longer
+        runs a synthesize state as conversation (it BLOCKED forever); it names what is missing."""
         state = _plain_state(synthesize=_SYNTHESIZE)
         assert sk.kind_of(state).name == "synthesize"
-        assert ex.executor_for(state) is ex.executor_for(_plain_state())
+        assert sk.kind_of(state).requires_executor is True
+        with pytest.raises(MissingExecutorError, match="synthesize"):
+            ex.executor_for(state)
 
     def test_cleans_extracted_is_false_only_for_completion(self):
         assert ex.ConversationExecutor().cleans_extracted is True
         assert ex.CompletionExecutor().cleans_extracted is False
-        assert (
-            ex.executor_for(_plain_state(synthesize=_SYNTHESIZE)).cleans_extracted
-            is True
-        )
 
     def test_a_kind_without_an_executor_runs_as_conversation(self, monkeypatch):
         marker = sk.KindSpec(name="marker", config_field="marker")

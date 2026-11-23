@@ -506,9 +506,10 @@ class TestBudgetsAreCheckedWhenTheStepIsBuilt:
         with pytest.raises(ValidationError, match="max_steps"):
             _step(registry, "debate", max_steps=3)
         _step(registry, "debate", max_seconds=3.0)
+        # since plan baa37f40 step 16 (D-032) `reasoning.solve` maps both budgets to the solve
+        # (it refused them before): no refusal at construction
         for budget in ({"max_steps": 3}, {"max_seconds": 3.0}):
-            with pytest.raises(ValidationError, match=r"reasoning\.solve"):
-                _step(registry, "reasoning.solve", **budget)
+            _step(registry, "reasoning.solve", **budget)
         _step(registry, "reasoning.solve")
 
     def test_an_executable_not_yet_in_the_registry_is_judged_at_run_time(self) -> None:

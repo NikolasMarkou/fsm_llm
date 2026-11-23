@@ -28,7 +28,7 @@ from fsm_llm.core.definitions import (
     fsm_id_of,
 )
 from fsm_llm.engine.api.conversation import API
-from fsm_llm.engine.kinds import StateExecutor
+from fsm_llm.engine.kinds import ConversationExecutor, StateExecutor
 from fsm_llm.synthesis import (
     FSMSynthesizer,
     RunTrace,
@@ -59,7 +59,7 @@ _ROOT = Path(fsm_llm.__file__).resolve().parent
 
 
 def _rig(valid_fsm: dict[str, Any], tmp_path: Any = None, **kw: Any) -> Rig:
-    return make_rig(valid_fsm, tmp_path, driver="executor", **kw)
+    return make_rig(valid_fsm, tmp_path, **kw)
 
 
 def _speaking(host: dict[str, Any]) -> None:
@@ -302,11 +302,14 @@ class TestTheRecordIsEvidenceNeverAnInstruction:
         assert rig.depth == 1 and rig.result["status"] == "failed"
         assert rig.result["reason"] == "push_failed"
 
-    def test_a_bare_api_ignores_a_running_record(self, valid_fsm):
-        """No executor, no request: the state stays BLOCKED as before (2cefeb61/D-002)."""
+    def test_an_api_with_a_passive_executor_ignores_a_running_record(self, valid_fsm):
+        """An executor that serves no request is never asked to push: a forged running record is
+        left alone and the state stays (a bare API refuses the state now, D-041, so the
+        conversation body stands in under the kind's name; the rule is settle's, D3)."""
         api = API.from_definition(
             definition=make_host(),
             llm_interface=ScriptedRunnerLLM({"answer": "42"}, dict(REPLIES)),
+            executors={"synthesize": ConversationExecutor()},
         )
         conv, _ = api.start_conversation(
             {**CONTEXT, "synthesis_result": self._forged(procedure_id="a" * 64)}

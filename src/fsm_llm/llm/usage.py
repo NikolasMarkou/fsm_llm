@@ -146,7 +146,7 @@ def _minus(
 
 # DECISION plan-2026-11-18T071726-5a6a1f80/D-014: the ledger only grows and ``reset_usage`` moves
 # a marker. This SUPERSEDES D-004 of plan 944e2692 on "a reset clears the counters": a reader
-# that holds a position (``mark`` and ``since``, the synthesis runner's outage check) must
+# that holds a position (``mark`` and ``since``, the synthesis executor's outage check) must
 # outlive a ``reset_usage()`` another reader made. Do NOT clear ``_counts`` on reset, do NOT
 # share a ledger or a marker between interface instances (a per-instance marker keeps two
 # readers apart) and NEVER add the ledger to a projection of the event log (one outcome event

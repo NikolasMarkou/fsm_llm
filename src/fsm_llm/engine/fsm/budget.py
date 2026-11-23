@@ -72,7 +72,7 @@ def check_turn_limits(max_steps: int | None, max_seconds: float | None) -> None:
 # `context.data`, `metadata`, a handler or `_TurnSnapshot`: a model-extractable key that a driver
 # trusts as a gate is forgeable, a handler counter misses a null-extraction turn, and a snapshot
 # is rolled back (a failed turn would be refunded). Do NOT count in `run.py` (its counters are
-# locals of one call and restart, the reason the synthesis runner kept its own). Do NOT share one
+# locals of one call and restart, the reason the deleted synthesis runner kept its own). Do NOT share one
 # record between a parent and a pushed frame (each frame is its own manager conversation and its
 # own budget), do NOT make a spent frame "ended" (`has_conversation_ended` stays as it is and the
 # engine pops no frame of its own accord, with ONE exception: `settle` pops the frame a call state

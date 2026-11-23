@@ -3,7 +3,7 @@ Run traces: what a procedure run left behind, with no value in it.
 
 A ``RunTrace`` holds names, type names, state ids, codes and counts and nothing
 else (D-038): never a context value, user text or reply. ``TraceRecorder`` is
-the runner's ``trace_sink``; the library stores them (``FSMLibrary.add_trace``).
+the executor's ``trace_sink``; the library stores them (``FSMLibrary.add_trace``).
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-046
 # ``RunTrace.__post_init__`` is the ONE place that keeps a trace value-free (the
@@ -70,11 +70,11 @@ def _strs(value: object) -> tuple[str, ...]:
 class RunTrace:
     """One run of one procedure, value-free.
 
-    ``mode``: ``run`` or ``converse`` (the runner's drivers); ``states``: the
+    ``mode``: ``run`` or ``converse`` (the two ways a host drives the executor); ``states``: the
     state after each counted step (the last 100); ``keys``: declared names
     present at the end; ``kinds``:
     ``(key, type name)`` for gate-read keys (``TRACE_KINDS`` names or
-    ``other``); ``status``, ``reason``: the runner's result; ``stuck``: the
+    ``other``); ``status``, ``reason``: the executor's result; ``stuck``: the
     state an unfinished run was in; ``outcome``: ``blocked``, ``ambiguous`` or
     ``deterministic`` there.
 
@@ -142,7 +142,7 @@ class RunTrace:
 
 
 class TraceRecorder:
-    """The runner's ``trace_sink``: groups events by ``(conv, digest)`` and
+    """The executor's ``trace_sink``: groups events by ``(conv, digest)`` and
     hands each finished run (``popped`` or ``failed``) to ``on_trace``. A key
     holds a stack of open runs: an ``obtained`` event after a ``pushed`` one
     opens a nested run (a procedure that synthesizes itself), and ``stepped``,
@@ -154,8 +154,8 @@ class TraceRecorder:
     is ``converse`` when the ``pushed`` or ``failed`` event has no ``step``. A
     ``failed`` event with no digest yields nothing; an event it does not
     understand is ignored. What ``on_trace`` raises, or an invalid run,
-    propagates (the runner swallows a sink's error) after the run is dropped.
-    Thread safe: one runner serves many conversations, so the open runs are
+    propagates (the executor swallows a sink's error) after the run is dropped.
+    Thread safe: one executor serves many conversations, so the open runs are
     guarded by a lock, which is NOT held while ``on_trace`` runs (D-064).
     """
 
