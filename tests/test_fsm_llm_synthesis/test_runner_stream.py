@@ -12,7 +12,7 @@ import pytest
 from fsm_llm.core.definitions import RunBudgetExceededError
 from fsm_llm.synthesis import SynthesisPolicy
 
-from .test_runner import _rig
+from .rig import make_rig
 
 
 def _end(rig: Any) -> tuple[Any, ...]:
@@ -21,9 +21,9 @@ def _end(rig: Any) -> tuple[Any, ...]:
 
 class TestRunStream:
     def test_the_text_and_the_end_state_are_those_of_run(self, valid_fsm, tmp_path):
-        plain = _rig(valid_fsm, tmp_path / "a")
+        plain = make_rig(valid_fsm, tmp_path / "a")
         results = plain.runner.run(plain.conv, max_steps=20)
-        streamed = _rig(valid_fsm, tmp_path / "b")
+        streamed = make_rig(valid_fsm, tmp_path / "b")
 
         chunks = list(streamed.runner.run_stream(streamed.conv, max_steps=20))
 
@@ -36,26 +36,26 @@ class TestRunStream:
         }
 
     def test_the_arguments_are_checked_at_call_time(self, valid_fsm):
-        rig = _rig(valid_fsm)
+        rig = make_rig(valid_fsm)
         with pytest.raises(ValueError):
             rig.runner.run_stream(rig.conv, max_steps=0)
         with pytest.raises(ValueError):
             rig.runner.run_stream("no-such-conversation", max_steps=3)
 
     def test_a_spent_budget_raises_while_iterating(self, valid_fsm):
-        rig = _rig(valid_fsm)
+        rig = make_rig(valid_fsm)
         with pytest.raises(RunBudgetExceededError):
             list(rig.runner.run_stream(rig.conv, max_steps=1))
 
     def test_nothing_runs_before_the_first_next(self, valid_fsm):
-        rig = _rig(valid_fsm)
+        rig = make_rig(valid_fsm)
         rig.runner.run_stream(rig.conv, max_steps=20)
         assert rig.strong.requests == [] and rig.events == []
 
 
 class TestClosingEarly:
     def test_a_finished_child_is_popped_and_counted_once(self, valid_fsm, tmp_path):
-        rig = _rig(valid_fsm, tmp_path)
+        rig = make_rig(valid_fsm, tmp_path)
         stream = rig.runner.run_stream(rig.conv, max_steps=20)
         assert next(stream) == "Thanks"  # the child's last turn: it has ended
 
@@ -72,7 +72,7 @@ class TestClosingEarly:
         assert rig.library.get_record(rig.digest).stats == {"runs": 1, "successes": 1}
 
     def test_the_same_close_on_the_core_stream_leaves_the_child_pushed(self, valid_fsm):
-        rig = _rig(valid_fsm)  # the control: why the close needs a settle
+        rig = make_rig(valid_fsm)  # the control: why the close needs a settle
         stream = rig.api.run_until_terminal_stream(
             rig.conv, max_steps=20, before_step=rig.runner.hook(rig.conv)
         )
@@ -81,7 +81,7 @@ class TestClosingEarly:
         assert rig.depth == 2 and "popped" not in rig.names
 
     def test_a_running_child_is_left_alone(self, valid_fsm):
-        rig = _rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=5))
+        rig = make_rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=5))
         stream = rig.runner.run_stream(rig.conv, max_steps=20)
         assert next(stream) == "What is the answer?"
 
@@ -91,7 +91,7 @@ class TestClosingEarly:
         assert rig.names == ["obtained", "pushed"]
 
     def test_the_settle_on_close_starts_nothing(self, valid_fsm, monkeypatch):
-        rig = _rig(valid_fsm)
+        rig = make_rig(valid_fsm)
         calls: list[dict[str, Any]] = []
         real = rig.runner._tick
 
@@ -107,7 +107,7 @@ class TestClosingEarly:
         assert calls == [{"start": False}]
 
     def test_a_tick_without_start_obtains_nothing(self, valid_fsm):
-        rig = _rig(valid_fsm)
+        rig = make_rig(valid_fsm)
         rig.to_solve()  # a pending synthesize state, no result yet
         assert rig.runner._tick(rig.conv, None, start=False) == []
         assert rig.strong.requests == [] and "synthesis_result" not in rig.data
@@ -117,8 +117,8 @@ class TestClosingEarly:
 
 class TestConverseStream:
     def test_each_turn_reads_as_converse_does(self, valid_fsm, tmp_path):
-        plain = _rig(valid_fsm, tmp_path / "a")
-        streamed = _rig(valid_fsm, tmp_path / "b")
+        plain = make_rig(valid_fsm, tmp_path / "a")
+        streamed = make_rig(valid_fsm, tmp_path / "b")
         for message in ("hello", "forty-two"):
             want = plain.runner.converse(plain.conv, message)
             got = list(streamed.runner.converse_stream(streamed.conv, message))
@@ -129,7 +129,7 @@ class TestConverseStream:
 
     def test_an_aborted_child_and_the_apology_are_streamed_too(self, valid_fsm):
         kw: dict[str, Any] = {"extraction": {}, "policy": SynthesisPolicy(max_turns=2)}
-        plain, streamed = _rig(valid_fsm, **kw), _rig(valid_fsm, **kw)
+        plain, streamed = make_rig(valid_fsm, **kw), make_rig(valid_fsm, **kw)
         for message in ("hello", "one", "two"):
             want = plain.runner.converse(plain.conv, message)
             got = "".join(streamed.runner.converse_stream(streamed.conv, message))
@@ -142,7 +142,7 @@ class TestConverseStream:
     def test_a_pending_synthesize_state_starts_before_the_message_is_sent(
         self, valid_fsm
     ):
-        plain, streamed = _rig(valid_fsm), _rig(valid_fsm)
+        plain, streamed = make_rig(valid_fsm), make_rig(valid_fsm)
         for rig in (plain, streamed):
             rig.to_solve()  # the parent waits on its synthesize state
         want = plain.runner.converse(plain.conv, "hello")
@@ -154,7 +154,7 @@ class TestConverseStream:
     def test_closing_early_leaves_the_child_for_the_next_call(
         self, valid_fsm, tmp_path
     ):
-        rig = _rig(valid_fsm, tmp_path)
+        rig = make_rig(valid_fsm, tmp_path)
         list(rig.runner.converse_stream(rig.conv, "hello"))
         stream = rig.runner.converse_stream(rig.conv, "forty-two")
         assert next(stream) == "Thanks"
@@ -167,6 +167,6 @@ class TestConverseStream:
         assert rig.library.get_record(rig.digest).stats == {"runs": 1, "successes": 1}
 
     def test_nothing_runs_before_the_first_next(self, valid_fsm):
-        rig = _rig(valid_fsm)
+        rig = make_rig(valid_fsm)
         rig.runner.converse_stream(rig.conv, "hello")
         assert rig.strong.requests == [] and rig.events == []

@@ -13,7 +13,7 @@ import pytest
 from fsm_llm.synthesis import RunTrace, TraceRecorder
 from fsm_llm.synthesis.constants import TRACE_KINDS
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
-from tests.test_fsm_llm_synthesis.test_runner import _rig
+from tests.test_fsm_llm_synthesis.rig import make_rig
 
 D1 = "a" * 64
 D2 = "b" * 64
@@ -489,7 +489,7 @@ class TestOnARealRunner:
 
     def test_no_value_reaches_the_trace_file(self, valid_fsm, tmp_path):
         got: list[RunTrace] = []
-        rig = _rig(
+        rig = make_rig(
             valid_fsm,
             tmp_path,
             extraction={"answer": CANARIES[2]},
@@ -519,7 +519,7 @@ class TestOnARealRunner:
         from fsm_llm.synthesis import SynthesisPolicy
 
         got: list[RunTrace] = []
-        rig = _rig(
+        rig = make_rig(
             valid_fsm,
             extraction={},
             policy=SynthesisPolicy(max_turns=1),

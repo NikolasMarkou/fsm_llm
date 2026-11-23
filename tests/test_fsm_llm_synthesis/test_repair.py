@@ -44,8 +44,8 @@ from fsm_llm.synthesis.prompts import (
 from fsm_llm.synthesis.repair import PATCH_MAX_TOKENS, decide, propose_patch
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, good_fsm
-from tests.test_fsm_llm_synthesis.test_runner import CONTEXT, _host, _rig
-from tests.test_fsm_llm_synthesis.test_runner import GOAL as HOST_GOAL
+from tests.test_fsm_llm_synthesis.rig import CONTEXT, make_host, make_rig
+from tests.test_fsm_llm_synthesis.rig import GOAL as HOST_GOAL
 
 POLICY = SynthesisPolicy()
 NPF = "not-procedure-fault"
@@ -836,7 +836,7 @@ class TestTheLoopEndToEnd:
             "extraction_instructions"
         ] = "The answer"  # the cheap model never extracts from this one
         cheap = Cheap()
-        rig = _rig(
+        rig = make_rig(
             valid_fsm,
             tmp_path,
             cheap=cheap,
@@ -846,7 +846,7 @@ class TestTheLoopEndToEnd:
         library = rig.library
         assert library is not None
         recorder = TraceRecorder(library.add_trace)  # the one wiring line
-        runner = ProcedureRunner(rig.api, _host(), rig.synth, trace_sink=recorder)
+        runner = ProcedureRunner(rig.api, make_host(), rig.synth, trace_sink=recorder)
 
         # 1. real runs, one conversation each (the first compiles, the rest reuse)
         for _ in range(3):

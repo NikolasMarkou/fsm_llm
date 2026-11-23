@@ -36,7 +36,9 @@ Layout: most files test one module, named `test_<module>.py`. Cross-module files
 | `test_happy_path.py` | the happy path built from the definition, an honest executor, value-typed edges |
 | `test_synthesizer.py` | compile and repair rounds, cut or malformed replies, outage, the goal fence read from the REAL request, approval, reuse |
 | `test_library.py` | digest, lifecycle `_EDGES`, atomic write, corruption never overwritten, search, traces, scenarios, lineage |
-| `test_runner.py` | `run` and `converse`, abort at `max_turns`, an outage is no procedure fault, return keys, every failure the parent sees as a fixed reason, nesting, trace events |
+| `rig.py` | The rig of the driver rows: a real `API` on a host with a `synthesize` state, a driver with the call surface of `ProcedureRunner` (`run`, `converse`, `end_conversation`; `DRIVERS` maps a name to a factory, the executor of plan baa37f40 adds its entry), `make_rig` and the helpers `make_host`, `make_procedure`, `serve_procedure`, `Metered` |
+| `test_driver_rows.py` | What a driver must do, run on every entry of `DRIVERS`: the ok path, abort at `max_turns`, an outage is no procedure fault, return keys, every failure the parent sees as a fixed reason, nesting, trace events that carry no value |
+| `test_runner.py` | What pins `ProcedureRunner` itself: `hook`, `_runs` and `_refused`, its own push, a signal during the compile, the bare `converse` on a synthesize state, `TestPushedChildOwnsItsSynthesisResult`; it goes with the runner (plan baa37f40 steps 21 and 22) |
 | `test_tools.py` | the tool pair through `ToolRegistry.execute`: labels, caps, codes, `max_obtains` |
 | `test_concierge.py` | end to end, both runner modes, plus the tool pair |
 | `reference_tasks.py`, `test_reference_tasks.py` | the 16 reference tasks of the retired synthesis bench, their `hand_fsm` and `host_definition`, the scripted `User`, the grader and `drive_fsm` (arms S and H on one host, runner and library); the hand arm runs every task offline with no strong call |

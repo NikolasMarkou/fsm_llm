@@ -24,7 +24,9 @@ The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of t
 - `test_happy_path.py` - the G6b happy path built from the definition, with an honest executor.
 - `test_synthesizer.py` - the compile and repair loop, the strong-model contract, the goal fence, approval.
 - `test_library.py` - the content-addressed store, the lifecycle edge table, atomic writes, corruption handling, signature-first search, lineage.
-- `test_runner.py` - `ProcedureRunner` on a host FSM with a `synthesize` state, both `run` and `converse`, and every failure the parent can see.
+- `rig.py` - the rig of the driver rows (an `API`, a driver with the call surface of `ProcedureRunner`, the doubles; `DRIVERS` names the drivers a row runs on).
+- `test_driver_rows.py` - what a driver must do on a host FSM with a `synthesize` state, both `run` and `converse`, and every failure the parent can see; every row runs on each driver of the rig.
+- `test_runner.py` - the rows that pin `ProcedureRunner` itself (its hook, its bookkeeping, its own push, a signal during the compile).
 - `test_tools.py` - the agent tools `obtain_procedure` and `run_procedure` through `ToolRegistry.execute`.
 - `test_concierge.py` - the whole pattern end to end, offline.
 - `test_traces.py` - the value-free `RunTrace` and `TraceRecorder`.
