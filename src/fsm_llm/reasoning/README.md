@@ -47,7 +47,7 @@ In `simple_calculator` the model only writes the problem as a single arithmetic 
 
 - `calculator.py` - the bounded arithmetic evaluator behind `simple_calculator` (standard library only).
 - `engine.py` - `ReasoningEngine`: builds the orchestrator and classifier, registers handlers, runs one solve through the hooks and handlers.
-- `reasoning_modes/` - the FSM definitions as Python dictionaries, one module per FSM (orchestrator, classifier, and the strategies), and the `ALL_REASONING_FSMS` registry (`registry.py`); the package re-exports them.
+- `strategies/*.json` - the FSM definitions as package data, one `fsm-llm/executable` file per FSM (orchestrator, classifier, and the nine strategies); `strategy_files.py` reads them and holds the two explicit name orders.
 - `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.
 - `definitions.py` - Pydantic models for steps, traces, validation, classification, problems and solutions.
 - `constants.py` - reasoning types, state names, context key names, limits, and message text.

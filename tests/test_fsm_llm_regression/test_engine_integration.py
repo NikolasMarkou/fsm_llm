@@ -112,9 +112,11 @@ class TestReasoningEngineIntegration:
 
     def test_fsm_definitions_have_extraction_instructions(self):
         """All reasoning FSM states must have extraction_instructions populated."""
-        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.reasoning.strategy_files import FSM_NAMES
+        from fsm_llm.reasoning.utilities import get_reasoning_fsm
 
-        for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
+        for fsm_name in FSM_NAMES:
+            fsm_dict = get_reasoning_fsm(fsm_name)
             fsm_def = FSMDefinition(**fsm_dict)
             for state_id, state in fsm_def.states.items():
                 if (fsm_name, state_id) == ("simple_calculator", "perform_calculation"):
@@ -128,9 +130,11 @@ class TestReasoningEngineIntegration:
 
     def test_fsm_definitions_have_response_instructions(self):
         """All reasoning FSM states must have response_instructions populated."""
-        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.reasoning.strategy_files import FSM_NAMES
+        from fsm_llm.reasoning.utilities import get_reasoning_fsm
 
-        for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
+        for fsm_name in FSM_NAMES:
+            fsm_dict = get_reasoning_fsm(fsm_name)
             fsm_def = FSMDefinition(**fsm_dict)
             for state_id, state in fsm_def.states.items():
                 assert state.response_instructions is not None, (
@@ -139,9 +143,11 @@ class TestReasoningEngineIntegration:
 
     def test_no_bare_instructions_field(self):
         """No reasoning FSM should use the bare 'instructions' field (silently ignored)."""
-        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.reasoning.strategy_files import FSM_NAMES
+        from fsm_llm.reasoning.utilities import get_reasoning_fsm
 
-        for fsm_name, fsm_dict in ALL_REASONING_FSMS.items():
+        for fsm_name in FSM_NAMES:
+            fsm_dict = get_reasoning_fsm(fsm_name)
             for state_id, state_dict in fsm_dict.get("states", {}).items():
                 assert "instructions" not in state_dict, (
                     f"FSM '{fsm_name}' state '{state_id}' uses bare 'instructions' field "

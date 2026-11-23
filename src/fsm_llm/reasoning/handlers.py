@@ -6,6 +6,7 @@ Enhanced with retry logic, context pruning, and standardized handling.
 from __future__ import annotations
 
 import json
+from functools import cache
 from typing import Any
 
 from fsm_llm import API, clear_keys_on_entry
@@ -18,7 +19,6 @@ from .constants import (
     HYBRID_CLEARED_KEYS,
     HYBRID_EVALUATION_STATE,
     HYBRID_FIRST_STATE,
-    STRATEGIES,
     ContextKeys,
     Defaults,
     ErrorMessages,
@@ -27,6 +27,7 @@ from .constants import (
     OrchestratorStates,
     ReasoningType,
 )
+from .strategy_files import STRATEGY_ORDER, solution_keys, strategy_facts
 
 # Stop-words filtered out during solution-relevance checking in validate_solution.
 # Without this, common words (the, is, a) cause near-universal overlap, making the
@@ -129,14 +130,16 @@ def retries_exhausted(retry_count: int) -> bool:
     return retry_count >= Defaults.MAX_RETRIES
 
 
-# Orchestrator keys ``extract_final_solution`` reads, in order: the two the
-# SYNTHESIZE/FINAL states set, then one per strategy (the keys
-# ``merge_reasoning_results`` writes, not the raw sub-FSM keys).
-_SOLUTION_KEYS: tuple[str, ...] = (
-    ContextKeys.FINAL_SOLUTION,
-    ContextKeys.PROPOSED_SOLUTION,
-    *(spec.solution_key for spec in STRATEGIES.values()),
-)
+@cache
+def _solution_keys() -> tuple[str, ...]:
+    """Orchestrator keys ``extract_final_solution`` reads, in order: the two the
+    SYNTHESIZE/FINAL states set, then one per strategy in ``STRATEGY_ORDER`` (the keys
+    ``merge_reasoning_results`` writes, not the raw sub-FSM keys)."""
+    return (
+        ContextKeys.FINAL_SOLUTION,
+        ContextKeys.PROPOSED_SOLUTION,
+        *solution_keys(),
+    )
 
 
 def _head_and_tail(trace: list[Any], limit: int) -> list[Any]:
@@ -563,8 +566,11 @@ class ContextManager:
         :param reasoning_type: Type of reasoning executed
         :return: Mapped results for orchestrator
         """
-        spec = STRATEGIES.get(reasoning_type)
-        sources = spec.results if spec else {}
+        sources = (
+            strategy_facts(reasoning_type)["results"]
+            if reasoning_type in STRATEGY_ORDER
+            else {}
+        )
         results = {
             key: sub_fsm_context[source]
             for key, source in sources.items()
@@ -595,7 +601,7 @@ class OutputFormatter:
         :param context: Final context
         :return: Formatted solution string
         """
-        for key in _SOLUTION_KEYS:
+        for key in _solution_keys():
             solution = context.get(key)
             if _is_solution(solution):
                 logger.debug(f"Extracted final solution from context key '{key}'")

@@ -1,7 +1,7 @@
 """The reasoning strategies and ``reasoning.solve`` as executables (roadmap E2.4; plan ace7a8c8 D-061).
 
-``builtin_executables()`` returns ten executables: the nine strategies of the one ``STRATEGIES``
-table as ``strategy`` documents (ids ``reasoning.<name>``) run by the engine's ``FsmBodyExecutable``,
+``builtin_executables()`` returns ten executables: the nine strategies, each the ``strategy`` document
+``reasoning/strategies/<name>.json`` (ids ``reasoning.<name>``) run by the engine's ``FsmBodyExecutable``,
 and ``reasoning.solve``, the whole engine as one code-backed executable. ``fsm_llm.reasoning``
 registers this function as the ``reasoning`` source of the ``executable_sources`` namespace, so
 ``ExecutableRegistry().load_sources()`` serves them without the engine importing this package.
@@ -9,8 +9,8 @@ registers this function as the ``reasoning`` source of the ``executable_sources`
 Interface contract:
 
 - ``reasoning.<name>`` (kind ``strategy``, capability ``strategy``, lifecycle ``builtin``): the body
-  is ``get_reasoning_fsm(name)``, the very FSM the engine pushes; the declaration is
-  ``STRATEGIES[name]`` (aliases, results, solution key). Contract inputs are the four keys the engine
+  is ``body.fsm`` of the file, the very FSM the engine pushes (``get_reasoning_fsm(name)``); the
+  declaration is its ``body.strategy`` (aliases, results, solution key). Contract inputs are the four keys the engine
   hands a strategy (``problem_statement``, ``problem_components``, ``constraints``,
   ``problem_type``; a caller with no components passes ``[]``): the problem arrives through context,
   never definition text, so the template AND the instance identity do not depend on it. The contract
@@ -50,32 +50,15 @@ from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables.adapters import FsmBodyExecutable
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
 
-from .constants import STRATEGIES, ContextKeys, Defaults, HandlerNames
+from .constants import ContextKeys, Defaults
 from .engine import ReasoningEngine
 from .exceptions import ReasoningExecutionError
 from .handlers import register_strategy_handlers
-from .utilities import get_reasoning_fsm
+from .strategy_files import STRATEGY_ORDER, load_document
 
 __all__ = ["SOLVE_ID", "SolveExecutable", "builtin_executables", "strategy_id"]
 
 SOLVE_ID = "reasoning.solve"
-
-#: The four keys the engine hands a strategy FSM (``_StrategyStack._push``).
-_STRATEGY_INPUTS = [
-    ContextKeys.PROBLEM_STATEMENT,
-    ContextKeys.PROBLEM_COMPONENTS,
-    ContextKeys.CONSTRAINTS,
-    ContextKeys.PROBLEM_TYPE,
-]
-
-#: The strategies whose FSM needs handlers that only an engine registers, and their names.
-_STRATEGY_HANDLERS: dict[str, list[str]] = {
-    "simple_calculator": [
-        HandlerNames.CALCULATOR_EXECUTOR,
-        HandlerNames.CALCULATOR_FINALIZER,
-    ],
-    "hybrid": [HandlerNames.HYBRID_KEY_CLEARER, HandlerNames.HYBRID_LOOP_COUNTER],
-}
 
 
 def strategy_id(name: str) -> str:
@@ -84,27 +67,7 @@ def strategy_id(name: str) -> str:
 
 
 def _strategy_executable(name: str) -> FsmBodyExecutable:
-    spec = STRATEGIES[name]
-    handlers = _STRATEGY_HANDLERS.get(name, [])
-    document = {
-        "schema": "fsm-llm/executable",
-        "kind": "strategy",
-        "id": strategy_id(name),
-        "name": name,
-        "description": spec.description,
-        "contract": {"inputs": list(_STRATEGY_INPUTS), "outputs": [spec.solution_key]},
-        "requires": {"handlers": list(handlers)},
-        "capabilities": ["strategy"],
-        "lifecycle": "builtin",
-        "body": {
-            "fsm": get_reasoning_fsm(name),
-            "strategy": {
-                "aliases": list(spec.aliases),
-                "results": dict(spec.results),
-                "solution_key": spec.solution_key,
-            },
-        },
-    }
+    document = load_document(name)
     envelope, report = load_executable(document)
     if envelope is None or not report.is_valid:
         raise ExecutableError(
@@ -112,7 +75,8 @@ def _strategy_executable(name: str) -> FsmBodyExecutable:
             + "; ".join(report.errors[:5])
         )
     return FsmBodyExecutable(
-        envelope, setup=register_strategy_handlers if handlers else None
+        envelope,
+        setup=register_strategy_handlers if envelope.requires.handlers else None,
     )
 
 
@@ -218,5 +182,8 @@ class SolveExecutable(CodeBackedExecutable):
 
 
 def builtin_executables() -> list[FsmBodyExecutable | SolveExecutable]:
-    """The nine strategies in ``STRATEGIES`` order, then ``reasoning.solve``."""
-    return [*(_strategy_executable(name) for name in STRATEGIES), SolveExecutable()]
+    """The nine strategies in ``STRATEGY_ORDER``, then ``reasoning.solve``."""
+    return [
+        *(_strategy_executable(name) for name in STRATEGY_ORDER),
+        SolveExecutable(),
+    ]

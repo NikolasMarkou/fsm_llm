@@ -1,0 +1,87 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "strategy",
+  "id": "reasoning.simple_calculator",
+  "name": "simple_calculator",
+  "description": "Direct arithmetic calculations",
+  "contract": {
+    "inputs": [
+      "problem_statement",
+      "problem_components",
+      "constraints",
+      "problem_type"
+    ],
+    "outputs": [
+      "calculation_result"
+    ]
+  },
+  "requires": {
+    "handlers": [
+      "CalculatorExecutor",
+      "CalculatorFinalizer"
+    ]
+  },
+  "capabilities": [
+    "strategy"
+  ],
+  "lifecycle": "builtin",
+  "body": {
+    "fsm": {
+      "name": "simple_calculator",
+      "description": "Performs simple arithmetic calculations with error handling",
+      "initial_state": "extract_elements",
+      "persona": "You are a precise calculator that performs arithmetic operations accurately.",
+      "handler_only_keys": [
+        "calculation_result",
+        "calculation_error"
+      ],
+      "states": {
+        "extract_elements": {
+          "id": "extract_elements",
+          "description": "Write the problem as one arithmetic expression",
+          "purpose": "Extract 'calculation_expression'",
+          "field_extractions": [
+            {
+              "field_name": "calculation_expression",
+              "field_type": "str",
+              "extraction_instructions": "\n            Write the problem as ONE Python arithmetic expression:\n\n            - Use only numbers, + - * / // % ** and parentheses\n            - Use / for division, // only for whole-number division\n            - \"15% of 240\" is \"0.15 * 240\"; \"2^3\" is \"2 ** 3\"; \"(3 + 4) x 5\" is \"(3 + 4) * 5\"\n            - Write numbers without thousands separators (\"1000\", not \"1,000\")\n            - Do NOT compute the answer yourself: a program evaluates the expression\n            - Use problem_components if available, otherwise problem_statement\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Write the expression from the available problem information.\n            "
+            }
+          ],
+          "extraction_instructions": "\n            Write the problem as ONE Python arithmetic expression:\n\n            - Use only numbers, + - * / // % ** and parentheses\n            - Use / for division, // only for whole-number division\n            - \"15% of 240\" is \"0.15 * 240\"; \"2^3\" is \"2 ** 3\"; \"(3 + 4) x 5\" is \"(3 + 4) * 5\"\n            - Write numbers without thousands separators (\"1000\", not \"1,000\")\n            - Do NOT compute the answer yourself: a program evaluates the expression\n            - Use problem_components if available, otherwise problem_statement\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Write the expression from the available problem information.\n            ",
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "perform_calculation",
+              "description": "Expression extracted"
+            }
+          ]
+        },
+        "perform_calculation": {
+          "id": "perform_calculation",
+          "description": "The handler evaluates the expression (no model call)",
+          "purpose": "Hold 'calculation_result' or 'calculation_error'",
+          "response_instructions": "",
+          "transitions": []
+        }
+      }
+    },
+    "strategy": {
+      "aliases": [
+        "direct computation",
+        "direct calculation",
+        "arithmetic",
+        "calculation",
+        "math",
+        "calculator",
+        "compute",
+        "numeric"
+      ],
+      "results": {
+        "calculation_result": "calculation_result",
+        "proposed_solution": "calculation_result",
+        "calculation_error_details": "calculation_error"
+      },
+      "solution_key": "calculation_result"
+    }
+  }
+}

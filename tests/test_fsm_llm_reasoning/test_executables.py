@@ -41,9 +41,10 @@ from fsm_llm.engine.executables import (
 from fsm_llm.llm import ModelNotConfiguredError
 from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
 from fsm_llm.reasoning import executables as module
-from fsm_llm.reasoning.constants import STRATEGIES, ContextKeys, Defaults
+from fsm_llm.reasoning.constants import ContextKeys, Defaults
 from fsm_llm.reasoning.executables import SOLVE_ID, builtin_executables, strategy_id
 from fsm_llm.reasoning.handlers import register_strategy_handlers
+from fsm_llm.reasoning.strategy_files import STRATEGY_ORDER, strategy_facts
 from fsm_llm.reasoning.utilities import get_reasoning_fsm
 from fsm_llm.testing import ScriptedLLM
 
@@ -105,13 +106,13 @@ class TestTheSource:
     def test_the_registry_lists_nine_strategies_and_solve(self) -> None:
         registry = _registry()
         strategies = {e.id for e in registry.list(kind="strategy")}
-        assert strategies == {strategy_id(name) for name in STRATEGIES}
+        assert strategies == {strategy_id(name) for name in STRATEGY_ORDER}
         assert registry.get(SOLVE_ID).kind == "pattern"
-        assert len(STRATEGIES) == 9
+        assert len(STRATEGY_ORDER) == 9
 
     def test_every_one_is_a_builtin_and_launchable(self) -> None:
         registry = _registry()
-        ids = [strategy_id(n) for n in STRATEGIES] + [SOLVE_ID]
+        ids = [strategy_id(n) for n in STRATEGY_ORDER] + [SOLVE_ID]
         launchable = {e.id for e in registry.list(launchable=True)}
         for ident in ids:
             exe = registry.get(ident)
@@ -119,26 +120,26 @@ class TestTheSource:
             assert ident in launchable
             assert isinstance(exe, Executable)
 
-    @pytest.mark.parametrize("name", sorted(STRATEGIES))
+    @pytest.mark.parametrize("name", sorted(STRATEGY_ORDER))
     def test_a_strategy_declares_its_table_row(self, name: str) -> None:
         exe = _registry().get(strategy_id(name))
-        spec = STRATEGIES[name]
+        spec = strategy_facts(name)
         assert isinstance(exe, FsmBodyExecutable)
         assert Capability.STRATEGY in exe.capabilities
         decl = exe.envelope.body.strategy  # type: ignore[union-attr]
         assert (list(decl.aliases), decl.results, decl.solution_key) == (
-            list(spec.aliases),
-            spec.results,
-            spec.solution_key,
+            list(spec["aliases"]),
+            spec["results"],
+            spec["solution_key"],
         )
-        assert exe.contract.outputs == [spec.solution_key]
+        assert exe.contract.outputs == [spec["solution_key"]]
         assert exe.contract.inputs == list(INPUTS)
         # the body is the engine's own FSM, not a copy that can drift
         assert exe.envelope.body.fsm == get_reasoning_fsm(name)
 
     def test_only_the_two_that_need_handlers_get_the_setup_seam(self) -> None:
         registry = _registry()
-        for name in STRATEGIES:
+        for name in STRATEGY_ORDER:
             exe = registry.get(strategy_id(name))
             assert isinstance(exe, FsmBodyExecutable)
             if name in NEEDS_HANDLERS:
@@ -184,24 +185,24 @@ class TestTheSource:
 
     def test_the_source_returns_built_executables_in_table_order(self) -> None:
         ids = [e.id for e in builtin_executables()]
-        assert ids == [strategy_id(n) for n in STRATEGIES] + [SOLVE_ID]
+        assert ids == [strategy_id(n) for n in STRATEGY_ORDER] + [SOLVE_ID]
 
 
 # ---- the nine strategies -----------------------------------------------------------------------
 
 
 class TestStrategiesRunStandalone:
-    @pytest.mark.parametrize("name", sorted(STRATEGIES))
+    @pytest.mark.parametrize("name", sorted(STRATEGY_ORDER))
     def test_each_strategy_ends_ok_with_its_solution_and_both_identities(
         self, name: str
     ) -> None:
         exe = _registry().get(strategy_id(name))
         llm = _llm(name)
         result = exe.run(INPUTS, context=RunContext(llm_interface=llm))
-        spec = STRATEGIES[name]
+        solution_key = strategy_facts(name)["solution_key"]
         assert result.status is Status.OK, (result.reason, result.detail)
-        assert list(result.outputs) == [spec.solution_key]
-        assert result.outputs[spec.solution_key] is not None
+        assert list(result.outputs) == [solution_key]
+        assert result.outputs[solution_key] is not None
         assert result.identity.template_identity == exe.template_identity
         assert result.identity.instance_identity  # a strategy body is static
         assert result.handle

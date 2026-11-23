@@ -98,12 +98,12 @@ class TestCorpusCoverage:
         assert (len(hand), len(host)) == (16, 16)
 
     def test_holds_every_reasoning_fsm(self):
-        from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+        from fsm_llm.reasoning.strategy_files import FSM_NAMES
 
         reasoning = {
             n.split("/", 1)[1] for n in _BASELINE["cases"] if n.startswith("reasoning/")
         }
-        assert reasoning == set(ALL_REASONING_FSMS)
+        assert reasoning == set(FSM_NAMES)
 
     def test_holds_both_non_default_kinds_and_their_refusals(self):
         kinds = {

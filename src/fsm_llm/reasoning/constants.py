@@ -5,7 +5,6 @@ All string literals and magic values are consolidated here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import Enum
 
 
@@ -26,8 +25,8 @@ class ReasoningType(str, Enum):
 class OrchestratorStates:
     """States in the main orchestrator FSM.
 
-    Note: These constants are also used as dict keys in the reasoning_modes
-    FSM definitions. Both locations must stay in sync when renaming states.
+    Note: These constants spell the state names of ``strategies/orchestrator.json``.
+    Both locations must stay in sync when renaming states.
     """
 
     PROBLEM_ANALYSIS = "problem_analysis"
@@ -230,123 +229,6 @@ class ContextKeys:
 
     # CLI --type flag: set in initial_context to override automatic type selection
     PREFERRED_REASONING_TYPE = "preferred_reasoning_type"
-
-
-@dataclass(frozen=True)
-class StrategySpec:
-    """Everything the package knows about one reasoning strategy.
-
-    Contract: ``description`` is the line ``--list-types`` shows; ``aliases``
-    are further lowercase spellings ``map_reasoning_type`` accepts;
-    ``results`` maps each orchestrator key the strategy writes back to the
-    sub-FSM key it is read from (``merge_reasoning_results`` copies a value
-    only when it is not ``None``); ``solution_key`` is the orchestrator key
-    ``extract_final_solution`` reads for this strategy.
-    """
-
-    description: str
-    aliases: tuple[str, ...]
-    results: dict[str, str]
-    solution_key: str
-
-
-def _same(*keys: str) -> dict[str, str]:
-    return {key: key for key in keys}
-
-
-# The one table of strategies, keyed by ``ReasoningType`` value. A new strategy
-# is an enum member, an FSM in ``reasoning_modes.ALL_REASONING_FSMS`` and one
-# entry here. The order is the order ``extract_final_solution`` reads the
-# solution keys after ``final_solution`` and ``proposed_solution``.
-STRATEGIES: dict[str, StrategySpec] = {
-    ReasoningType.SIMPLE_CALCULATOR.value: StrategySpec(
-        "Direct arithmetic calculations",
-        (
-            "direct computation",
-            "direct calculation",
-            "arithmetic",
-            "calculation",
-            "math",
-            "calculator",
-            "compute",
-            "numeric",
-        ),
-        {
-            ContextKeys.CALCULATION_RESULT: ContextKeys.CALCULATION_RESULT,
-            ContextKeys.PROPOSED_SOLUTION: ContextKeys.CALCULATION_RESULT,
-            ContextKeys.CALCULATION_ERROR_DETAILS: ContextKeys.CALCULATION_ERROR,
-        },
-        ContextKeys.CALCULATION_RESULT,
-    ),
-    ReasoningType.ANALYTICAL.value: StrategySpec(
-        "Breaking down complex problems into components",
-        ("analyze", "analysis"),
-        _same(ContextKeys.KEY_INSIGHTS, ContextKeys.INTEGRATED_ANALYSIS),
-        ContextKeys.INTEGRATED_ANALYSIS,
-    ),
-    ReasoningType.DEDUCTIVE.value: StrategySpec(
-        "Deriving specific conclusions from general principles",
-        ("deduce", "deduction", "logic", "logical", "syllogism"),
-        {
-            ContextKeys.DEDUCTIVE_CONCLUSION: ContextKeys.CONCLUSION,
-            ContextKeys.LOGICAL_VALIDITY: ContextKeys.LOGICAL_VALIDITY,
-        },
-        ContextKeys.DEDUCTIVE_CONCLUSION,
-    ),
-    ReasoningType.INDUCTIVE.value: StrategySpec(
-        "Finding patterns from specific observations",
-        ("induce", "induction", "pattern", "observation", "generalize"),
-        {
-            ContextKeys.INDUCTIVE_HYPOTHESIS: ContextKeys.HYPOTHESIS,
-            ContextKeys.GENERALIZATION_STRENGTH: ContextKeys.GENERALIZATION_STRENGTH,
-        },
-        ContextKeys.INDUCTIVE_HYPOTHESIS,
-    ),
-    ReasoningType.CREATIVE.value: StrategySpec(
-        "Generating novel solutions through divergent thinking",
-        ("create", "innovation", "innovative", "brainstorm", "divergent"),
-        _same(ContextKeys.BEST_CREATIVE_SOLUTION, ContextKeys.INNOVATION_RATING),
-        ContextKeys.BEST_CREATIVE_SOLUTION,
-    ),
-    ReasoningType.CRITICAL.value: StrategySpec(
-        "Evaluating arguments and evidence",
-        ("critique", "evaluation", "evaluate", "assessment", "judge"),
-        {
-            ContextKeys.CRITICAL_ASSESSMENT: ContextKeys.CRITICAL_ASSESSMENT,
-            ContextKeys.ASSESSMENT_CONFIDENCE: ContextKeys.CONFIDENCE_RATING,
-        },
-        ContextKeys.CRITICAL_ASSESSMENT,
-    ),
-    ReasoningType.HYBRID.value: StrategySpec(
-        "Combining multiple reasoning approaches",
-        ("mixed", "combined", "multi"),
-        {
-            ContextKeys.FINAL_HYBRID_SOLUTION: ContextKeys.FINAL_HYBRID_SOLUTION,
-            ContextKeys.HYBRID_SYNTHESIS_SUMMARY: ContextKeys.REASONING_SYNTHESIS,
-        },
-        ContextKeys.FINAL_HYBRID_SOLUTION,
-    ),
-    ReasoningType.ABDUCTIVE.value: StrategySpec(
-        "Finding the best explanation for observations",
-        ("explain", "explanation", "hypothesis", "abduction", "diagnose"),
-        {
-            ContextKeys.BEST_EXPLANATION: ContextKeys.BEST_HYPOTHESIS,
-            ContextKeys.EXPLANATION_CONFIDENCE: ContextKeys.CONFIDENCE_IN_EXPLANATION,
-        },
-        ContextKeys.BEST_EXPLANATION,
-    ),
-    ReasoningType.ANALOGICAL.value: StrategySpec(
-        "Transferring insights through analogies",
-        ("analogy", "comparison", "compare", "similar"),
-        {
-            ContextKeys.ANALOGICAL_SOLUTION: (
-                ContextKeys.ADAPTED_SOLUTION_OR_UNDERSTANDING
-            ),
-            ContextKeys.ANALOGY_CONFIDENCE: ContextKeys.ANALOGY_CONFIDENCE_RATING,
-        },
-        ContextKeys.ANALOGICAL_SOLUTION,
-    ),
-}
 
 
 # Keys cleared on every entry to execute_reasoning. Core extracts a key only

@@ -4,8 +4,6 @@ Unit tests for reasoning engine constants.
 
 from __future__ import annotations
 
-import copy
-
 import pytest
 
 from fsm_llm.core.verify import FSMValidator
@@ -21,7 +19,7 @@ from fsm_llm.reasoning.constants import (
     ReasoningType,
 )
 from fsm_llm.reasoning.handlers import ReasoningHandlers
-from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+from fsm_llm.reasoning.utilities import get_reasoning_fsm
 
 
 class TestReasoningType:
@@ -176,22 +174,20 @@ class TestHandlerOnlyKeys:
         }
 
     def test_the_fsm_definitions_carry_them(self):
-        assert ALL_REASONING_FSMS["orchestrator"]["handler_only_keys"] == list(
+        assert get_reasoning_fsm("orchestrator")["handler_only_keys"] == list(
             ORCHESTRATOR_HANDLER_ONLY_KEYS
         )
-        assert ALL_REASONING_FSMS["hybrid"]["handler_only_keys"] == [
+        assert get_reasoning_fsm("hybrid")["handler_only_keys"] == [
             ContextKeys.HYBRID_LOOP_COUNT
         ]
-        assert ALL_REASONING_FSMS["simple_calculator"]["handler_only_keys"] == [
+        assert get_reasoning_fsm("simple_calculator")["handler_only_keys"] == [
             ContextKeys.CALCULATION_RESULT,
             ContextKeys.CALCULATION_ERROR,
         ]
 
     def test_the_calculator_fsm_validates_clean(self):
         """No D-054 warning: the handler-written keys are not ``required_context_keys``."""
-        result = FSMValidator(
-            copy.deepcopy(ALL_REASONING_FSMS["simple_calculator"])
-        ).validate()
+        result = FSMValidator(get_reasoning_fsm("simple_calculator")).validate()
         assert result.is_valid
         assert not result.warnings
 

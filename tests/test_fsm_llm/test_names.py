@@ -3,7 +3,7 @@
 Three parts: the primitive (``NameRegistry``: register, resolve, collisions, freeze, the leaf
 lock, lazy entry-point loading on the first miss), the list of every namespace with its sources,
 and the guard that no NEW private name table appears (a module-level dict that a ``register*``
-function mutates) beside the seven that remain and the row of the roadmap that retires each.
+function mutates) beside the five that remain and the row of the roadmap that retires each.
 """
 
 from __future__ import annotations
@@ -476,8 +476,6 @@ KNOWN_PRIVATE_TABLES: dict[str, tuple[str, str]] = {
     "SOPRegistry": ("agents/sop.py", "E4.5"),
     "_AGENT_CLASSES": ("monitor/instance_manager/agent.py", "E2.4"),
     "_WORKFLOW_PRESETS": ("monitor/instance_manager/workflow_presets.py", "E5.1"),
-    "STRATEGIES": ("reasoning/constants.py", "E3.3"),
-    "_TYPE_MAP": ("reasoning/utilities.py", "E3.3"),
     "_ARTIFACT_SCHEMAS": ("agents/meta_prompts.py", "E4.6"),
 }
 

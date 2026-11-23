@@ -444,9 +444,10 @@ def _builder_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
 
 
 def _reasoning_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-    from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+    from fsm_llm.reasoning.strategy_files import FSM_NAMES
+    from fsm_llm.reasoning.utilities import get_reasoning_fsm
 
-    return {f"reasoning/{name}": (fsm, {}) for name, fsm in ALL_REASONING_FSMS.items()}
+    return {f"reasoning/{name}": (get_reasoning_fsm(name), {}) for name in FSM_NAMES}
 
 
 @contextlib.contextmanager

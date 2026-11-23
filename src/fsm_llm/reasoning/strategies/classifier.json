@@ -1,0 +1,86 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "fsm",
+  "id": "reasoning.classifier",
+  "name": "problem_classifier",
+  "description": "Classifies problems to determine the most appropriate reasoning strategy",
+  "requires": {
+    "tools": []
+  },
+  "capabilities": [],
+  "lifecycle": "builtin",
+  "body": {
+    "fsm": {
+      "name": "problem_classifier",
+      "description": "Classifies problems to determine the most appropriate reasoning strategy",
+      "initial_state": "analyze_domain",
+      "persona": "You are an expert problem analyst who identifies the best reasoning approach for any given problem.",
+      "states": {
+        "analyze_domain": {
+          "id": "analyze_domain",
+          "description": "Identify problem domain and context",
+          "purpose": "Determine 'problem_domain' and 'domain_indicators'",
+          "required_context_keys": [
+            "problem_domain",
+            "domain_indicators"
+          ],
+          "extraction_instructions": "\n            Analyze the problem domain:\n\n            Identify the primary domain (mathematics, logic, creativity, analysis, evaluation, etc.) and specific indicators:\n            - Mathematical: Contains numbers, operations, calculations, formulas\n            - Logical: Involves premises, conclusions, if-then relationships\n            - Creative: Requires novel solutions, brainstorming, innovation\n            - Analytical: Needs breakdown, decomposition, systematic analysis\n            - Critical: Involves evaluation, judgment, argument assessment\n            - Empirical: Based on observations, patterns, data analysis\n            - Explanatory: Seeks to explain phenomena or observations\n            - Comparative: Involves analogies, similarities, pattern matching\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Analyze the domain based on the problem statement provided.\n            ",
+          "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+          "transitions": [
+            {
+              "target_state": "analyze_structure",
+              "description": "Domain identified"
+            }
+          ]
+        },
+        "analyze_structure": {
+          "id": "analyze_structure",
+          "description": "Analyze problem structure and complexity",
+          "purpose": "Identify 'problem_structure' and 'structural_elements'",
+          "required_context_keys": [
+            "problem_structure",
+            "structural_elements"
+          ],
+          "extraction_instructions": "\n            Analyze the structural characteristics:\n\n            Identify structure type and key elements:\n            - Simple: Single-step, direct solution path\n            - Sequential: Multi-step process with clear order\n            - Hierarchical: Nested components with dependencies\n            - Network: Multiple interconnected elements\n            - Complex: Multi-faceted with various approaches needed\n\n            Document structural elements like components, relationships, dependencies, constraints.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Analyze structure from the given problem.\n            ",
+          "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+          "transitions": [
+            {
+              "target_state": "identify_reasoning_needs",
+              "description": "Structure analyzed"
+            }
+          ]
+        },
+        "identify_reasoning_needs": {
+          "id": "identify_reasoning_needs",
+          "description": "Identify specific reasoning requirements",
+          "purpose": "Determine 'reasoning_requirements' and 'key_challenges'",
+          "required_context_keys": [
+            "reasoning_requirements",
+            "key_challenges"
+          ],
+          "extraction_instructions": "\n            Identify what type of reasoning is needed:\n\n            For simple calculations, set reasoning_requirements='direct computation'.\n            For other problems, identify specific needs:\n            - Decomposition and analysis\n            - Logical deduction from premises\n            - Pattern recognition and generalization\n            - Creative solution generation\n            - Critical evaluation of arguments\n            - Best explanation finding\n            - Analogical transfer of insights\n            - Multi-approach integration\n\n            Document key challenges that the reasoning approach must address.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Determine requirements based on your analysis.\n            ",
+          "response_instructions": "Present your findings clearly and concisely. Do not ask questions or request additional input from the user.",
+          "transitions": [
+            {
+              "target_state": "recommend_strategy",
+              "description": "Needs identified"
+            }
+          ]
+        },
+        "recommend_strategy": {
+          "id": "recommend_strategy",
+          "description": "Recommend optimal reasoning strategy",
+          "purpose": "Set 'recommended_reasoning_type', 'strategy_justification', and 'alternative_approaches'",
+          "required_context_keys": [
+            "recommended_reasoning_type",
+            "strategy_justification",
+            "alternative_approaches"
+          ],
+          "extraction_instructions": "\n            Recommend the best reasoning strategy:\n\n            Choose from available strategies:\n            - simple_calculator: For basic arithmetic operations\n            - analytical: For systematic breakdown and analysis\n            - deductive: For logical reasoning from premises\n            - inductive: For pattern recognition and generalization\n            - creative: For novel solution generation\n            - critical: For argument and evidence evaluation\n            - abductive: For finding best explanations\n            - analogical: For similarity-based problem solving\n            - hybrid: For complex problems needing multiple approaches\n\n            Provide clear justification and identify 1-2 alternative approaches that could also work.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Make recommendation based on your complete analysis.\n            ",
+          "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
+          "transitions": []
+        }
+      }
+    }
+  }
+}

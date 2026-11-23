@@ -933,6 +933,7 @@ _WHEEL_DATA_GLOBS = (
     "monitor/static/**/*",
     "monitor/templates/*",
     "core/definitions/schemas/*.json",
+    "reasoning/strategies/*.json",
 )
 
 #: Repo-root files setuptools reads while building (readme, license, manifest).

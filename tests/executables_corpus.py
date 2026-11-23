@@ -31,7 +31,7 @@ from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import ChainStep
 from fsm_llm.agents.fsm_definitions import _common, _loop, native_fc
 from fsm_llm.core.definitions import FSMDefinition, definition_digest, fsm_id_of
-from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+from fsm_llm.reasoning.strategy_files import FSM_NAMES, STRATEGY_ORDER, strategy_facts
 from fsm_llm.reasoning.utilities import get_reasoning_fsm
 from fsm_llm.tools import ToolRegistry
 
@@ -256,7 +256,7 @@ def fsm_cases() -> dict[str, dict[str, Any]]:
     of ``get_reasoning_fsm``), so the caller may mutate a result.
     """
     cases = {f"agents/{name}": build() for name, (build, full) in CASES.items() if full}
-    for name in ALL_REASONING_FSMS:
+    for name in FSM_NAMES:
         cases[f"reasoning/{name}"] = get_reasoning_fsm(name)
     return cases
 
@@ -305,20 +305,21 @@ def wrap(case: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
     builds all of them); omitted, it is built here.
 
     ``agents/*`` are ``fsm`` documents (the ``pattern`` kind arrives with E4.2); a
-    ``reasoning/*`` case with an entry in ``STRATEGIES`` is a ``strategy`` document
-    carrying its aliases, results and solution key. The header comes from the case:
+    ``reasoning/*`` case that is one of the nine strategies (``STRATEGY_ORDER``) is a
+    ``strategy`` document carrying its aliases, results and solution key, read from
+    ``reasoning/strategies/<name>.json``. The header comes from the case:
     ``id`` is the case name, ``name`` and ``description`` those of the FSM,
     ``requires.tools`` the tool names its completion states declare, ``capabilities``
     ``tools`` (some tool is declared), ``hitl`` (a state names an approval) and
     ``strategy``; ``lifecycle`` is ``builtin``; the contract is empty.
     """
     from fsm_llm.core.state_kinds import declared_tool_names
-    from fsm_llm.reasoning.constants import STRATEGIES
 
     raw = fsm_cases()[case] if raw is None else raw
     tools = sorted(declared_tool_names(FSMDefinition(**raw).states.values()))
     reasoning = case.startswith("reasoning/")
-    spec = STRATEGIES.get(case.removeprefix("reasoning/")) if reasoning else None
+    name = case.removeprefix("reasoning/")
+    spec = strategy_facts(name) if reasoning and name in STRATEGY_ORDER else None
     capabilities = (
         (["tools"] if tools else [])
         + (["hitl"] if any("approval" in sid for sid in raw["states"]) else [])
@@ -327,9 +328,9 @@ def wrap(case: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
     body: dict[str, Any] = {"fsm": raw}
     if spec:
         body["strategy"] = {
-            "aliases": list(spec.aliases),
-            "results": dict(spec.results),
-            "solution_key": spec.solution_key,
+            "aliases": list(spec["aliases"]),
+            "results": dict(spec["results"]),
+            "solution_key": spec["solution_key"],
         }
     return {
         "schema": "fsm-llm/executable",

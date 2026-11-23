@@ -8,15 +8,14 @@ order changed: update it only on purpose.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 
 import pytest
 
-from fsm_llm.reasoning.constants import STRATEGIES, ContextKeys, ReasoningType
+from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
 from fsm_llm.reasoning.handlers import ContextManager, OutputFormatter
-from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+from fsm_llm.reasoning.strategy_files import FSM_NAMES, STRATEGY_ORDER
 from fsm_llm.reasoning.utilities import (
     get_available_reasoning_types,
     get_reasoning_fsm,
@@ -128,7 +127,7 @@ def _solution_order() -> list[str]:
 def _tables() -> dict[str, object]:
     return {
         "enum": [(m.name, m.value) for m in ReasoningType],
-        "fsm_registry_keys": list(ALL_REASONING_FSMS),
+        "fsm_registry_keys": list(FSM_NAMES),
         "aliases": {p: map_reasoning_type(p) for p in _ALIAS_PROBES},
         "descriptions": list(get_available_reasoning_types().items()),
         "merge_ladder": _merge_ladder(),
@@ -140,7 +139,7 @@ def _tables() -> dict[str, object]:
 
 @pytest.mark.parametrize("name", sorted(_GOLDEN_FSMS))
 def test_fsm_definition_is_byte_identical(name):
-    assert _hash(ALL_REASONING_FSMS[name]) == _GOLDEN_FSMS[name]
+    assert _hash(get_reasoning_fsm(name)) == _GOLDEN_FSMS[name]
 
 
 @pytest.mark.parametrize("name", sorted(_GOLDEN_TABLES))
@@ -160,7 +159,7 @@ def test_solution_order_starts_final_proposed_calculation():
 
 def test_every_reasoning_type_has_an_fsm_a_description_and_an_alias():
     types = {t.value for t in ReasoningType}
-    assert types <= set(ALL_REASONING_FSMS)
+    assert types <= set(FSM_NAMES)
     assert types == set(get_available_reasoning_types())
     assert all(map_reasoning_type(t) == t for t in types)
 
@@ -169,16 +168,17 @@ class TestOneStrategyTable:
     """F-RE-02, F-RE-03, F-RE-07: tables derive from one registry."""
 
     def test_strategies_cover_exactly_the_enum(self):
-        assert set(STRATEGIES) == {t.value for t in ReasoningType}
+        assert set(STRATEGY_ORDER) == {t.value for t in ReasoningType}
 
     def test_every_state_id_is_its_key(self):
-        for fsm in ALL_REASONING_FSMS.values():
+        for name in FSM_NAMES:
+            fsm = get_reasoning_fsm(name)
             assert all(s["id"] == key for key, s in fsm["states"].items())
 
     def test_get_reasoning_fsm_returns_a_copy_and_names_the_missing(self):
         copy = get_reasoning_fsm("orchestrator")
         copy["states"].clear()
-        assert ALL_REASONING_FSMS["orchestrator"]["states"]
+        assert get_reasoning_fsm("orchestrator")["states"]
         with pytest.raises(KeyError, match="FSM definition not found: nope"):
             get_reasoning_fsm("nope")
 
@@ -189,7 +189,7 @@ _PREVIOUS_ORCHESTRATOR_HASH = (
 
 
 def test_orchestrator_hash_moved_only_by_the_calculator_keys():
-    definition = copy.deepcopy(ALL_REASONING_FSMS["orchestrator"])
+    definition = get_reasoning_fsm("orchestrator")
     for key in (ContextKeys.CALCULATION_RESULT, ContextKeys.CALCULATION_ERROR_DETAILS):
         assert key in definition["handler_only_keys"]
         definition["handler_only_keys"].remove(key)

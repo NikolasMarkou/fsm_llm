@@ -5,7 +5,7 @@ Purpose: Offline unit tests for the reasoning engine subpackage `fsm_llm.reasoni
 
 ## Scope
 
-Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilities.map_reasoning_type`, the `reasoning_modes` package (absence of removed functions), selected `engine.py` internals, and `__main__.py` (JSON output helpers and `--verbose`). No test calls a real LLM or needs network or env keys. `test_engine_scripted.py` runs whole `ReasoningEngine.solve_problem` solves through core with a scripted `LLMInterface` (`_ScriptedLLM`, injected as `llm_interface=`) and asserts every call: no user exchange and no "Continue reasoning" in history, push and pop of the strategy FSM, the retry loop reaching `max_retries_reached`, the hybrid back edge bounded, handler-only verdict keys, the budget error with `partial_context`, critical handlers, classifier value normalisation.
+Covers `constants.py`, `definitions.py`, `exceptions.py`, `handlers.py`, `utilities.map_reasoning_type`, `strategy_files` (the package-data loader; `test_strategy_files.py`), selected `engine.py` internals, and `__main__.py` (JSON output helpers and `--verbose`). No test calls a real LLM or needs network or env keys. `test_engine_scripted.py` runs whole `ReasoningEngine.solve_problem` solves through core with a scripted `LLMInterface` (`_ScriptedLLM`, injected as `llm_interface=`) and asserts every call: no user exchange and no "Continue reasoning" in history, push and pop of the strategy FSM, the retry loop reaching `max_retries_reached`, the hybrid back edge bounded, handler-only verdict keys, the budget error with `partial_context`, critical handlers, classifier value normalisation.
 
 ## Architecture
 
@@ -73,13 +73,13 @@ Model behaviour pinned in `test_definitions.py`:
 - `update_reasoning_trace` adds nothing without both state keys, snapshots only specific `ContextKeys` (never `_`-prefixed or arbitrary keys), and keeps length at most `MAX_TRACE_STEPS + 1`.
 - `prune_context` never returns `PROBLEM_STATEMENT` or `PROPOSED_SOLUTION` (preserved keys).
 - Source-level pins: the `engine` module contains no `converse(` and no `"Continue reasoning"` (the engine sends no user message); `_classify_problem` has `except ReasoningClassificationError:` before `except Exception as e:`, uses `ContextKeys.PROBLEM_DOMAIN` and `ContextKeys.ALTERNATIVE_APPROACHES`, and has no `problem_domain_classified`; `_solve_problem_locked` uses `default=redacting_json_default` and no `default=str`; the `engine` module has no `default=str` and at least 2 `default=redacting_json_default`; the `handlers` module contains the phrase `never emitted`.
-- the `reasoning_modes` package must not define `get_fsm_by_name`, `list_available_fsms`, `get_reasoning_fsms_only`.
+- `strategy_files` must not define `get_fsm_by_name`, `list_available_fsms`, `get_reasoning_fsms_only`; `fsm_llm.reasoning.reasoning_modes`, `STRATEGIES`, `StrategySpec` and `_TYPE_MAP` are gone (`test_strategy_files.py`).
 - CLI JSON output and saved results replace an object's `__str__` with `<redacted:ClassName>`.
 - Exceptions: `ReasoningError(msg, details=None)` has `details == {}` by default; `ReasoningExecutionError(msg, reasoning_type=None)`; both subclasses catchable as `ReasoningError`.
 
 ## Dependencies
 
-- `fsm_llm.reasoning` submodules: `constants`, `definitions`, `engine`, `exceptions`, `handlers`, `utilities`, `reasoning_modes`, `__main__`.
+- `fsm_llm.reasoning` submodules: `constants`, `definitions`, `engine`, `exceptions`, `handlers`, `utilities`, `strategy_files`, `__main__`.
 - `fsm_llm.logging.logger` (loguru) for the fallback-warning check.
 - `pytest` only; no fixtures from `tests/conftest.py` are used here except the built-ins `tmp_path` and `monkeypatch`.
 

@@ -443,19 +443,19 @@ class TestClassificationExceptionHandling:
 
 
 class TestDeadCodeRemoved:
-    """Unused utility functions in the reasoning_modes package should not exist."""
+    """Unused utility functions of the FSM store (``strategy_files``) should not exist."""
 
     def test_no_get_fsm_by_name(self):
-        from fsm_llm.reasoning import reasoning_modes
+        from fsm_llm.reasoning import strategy_files
 
-        assert not hasattr(reasoning_modes, "get_fsm_by_name")
+        assert not hasattr(strategy_files, "get_fsm_by_name")
 
     def test_no_list_available_fsms(self):
-        from fsm_llm.reasoning import reasoning_modes
+        from fsm_llm.reasoning import strategy_files
 
-        assert not hasattr(reasoning_modes, "list_available_fsms")
+        assert not hasattr(strategy_files, "list_available_fsms")
 
     def test_no_get_reasoning_fsms_only(self):
-        from fsm_llm.reasoning import reasoning_modes
+        from fsm_llm.reasoning import strategy_files
 
-        assert not hasattr(reasoning_modes, "get_reasoning_fsms_only")
+        assert not hasattr(strategy_files, "get_reasoning_fsms_only")

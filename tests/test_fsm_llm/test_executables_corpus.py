@@ -19,7 +19,7 @@ import pytest
 
 from fsm_llm.agents import fsm_definitions as fd
 from fsm_llm.core.definitions import FSMDefinition, definition_digest, fsm_id_of
-from fsm_llm.reasoning.reasoning_modes import ALL_REASONING_FSMS
+from fsm_llm.reasoning.strategy_files import FSM_NAMES
 from tests import executables_corpus as corpus
 
 _CASES = corpus.fsm_cases()
@@ -55,7 +55,7 @@ def test_every_fixture_is_ascii_and_the_escape_is_exercised():
 
 def test_no_orphan_fixture_and_no_case_without_a_file():
     on_disk = {f"{p.parent.name}/{p.stem}" for p in corpus.FIXTURES.glob("*/*.json")}
-    expected = {f"reasoning/{name}" for name in ALL_REASONING_FSMS} | {
+    expected = {f"reasoning/{name}" for name in FSM_NAMES} | {
         f"agents/{name}" for name, (_, full) in corpus.CASES.items() if full
     }
     assert on_disk == expected
