@@ -67,6 +67,13 @@ Interface contract:
     classification by ``handler_only`` too), plus its own ``result_key`` (only
     that state writes it). A ``frozenset``. The one arrival rule of G3 and G4
     (``core.verify.flow.declared_available``).
+  - ``read_keys(state)``: the key names the state READS on arrival, in order: a
+    kind that takes host keys (``call``: its ``inputs`` then its ``choose`` key).
+    Empty by default, so it is empty for ``synthesize`` too: its ``inputs`` are
+    not judged by G3 until that kind moves onto the call executor (plan baa37f40,
+    D-016, carried to K5b). Gate G3 finds each declared on every path to the state
+    (``undeclared-input``); a read key is not a write, so it never enters
+    ``produced_keys``.
   - ``sample_results(state)``: the sample results the loader runs the state's
     edges on, a tuple of ``(label, result)`` (``None`` is "no result yet");
     empty for a kind that has none. Shaped as the kind's runner writes its
@@ -166,6 +173,9 @@ from fsm_llm.core.kind_call import (
     CALL_SAMPLES,
     call_check_definition,
     call_check_state,
+    call_lint_raw,
+    call_raw_result_key,
+    call_read_keys,
     check_result_edges,
 )
 
@@ -317,6 +327,7 @@ class RawLintServices:
     default_result_key: str
     string_literals: Callable[[Any], set[str]]
     default_synthesis_result_key: str = "synthesis_result"
+    default_call_result_key: str = "call_result"
 
 
 def _no_lint(
@@ -400,6 +411,23 @@ def _completion_declared_tools(state: Any) -> tuple[str, ...]:
 
 def _completion_raw_declared_tools(state: dict[str, Any]) -> tuple[str | None, ...]:
     return _tool_names(state["completion"].get("tools"))
+
+
+def _no_read_keys(state: Any) -> tuple[str, ...]:
+    return ()
+
+
+def _call_produced_keys(
+    state: Any,
+    handler_only: frozenset[str],
+    result_names: frozenset[str] | None = None,
+) -> frozenset[str]:
+    """``produced_keys`` of a call state: the default (its result key) plus the parent
+    keys its ``returns`` can write (a coarse "can write": the guaranteed tier of G3 still
+    needs an edge that requires the key)."""
+    return _produced_keys(state, handler_only, result_names) | frozenset(
+        state.call.returns
+    )
 
 
 def _no_state_problem(state: Any) -> str | None:
@@ -550,6 +578,7 @@ class KindSpec:
     )
     supported_in_procedure: bool = True
     requires_executor: bool = False
+    read_keys: Callable[[Any], tuple[str, ...]] = _no_read_keys
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they
@@ -619,6 +648,10 @@ CALL = KindSpec(
     check_state=call_check_state,
     sample_results=_call_samples,
     check_definition=_call_check_definition,
+    produced_keys=_call_produced_keys,
+    lint_raw=call_lint_raw,
+    raw_result_key=call_raw_result_key,
+    read_keys=call_read_keys,
     supported_in_procedure=False,
 )
 

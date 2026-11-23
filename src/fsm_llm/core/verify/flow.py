@@ -213,13 +213,29 @@ def declared_available(
     Returns: state id -> frozenset of key names, in definition order; states
         unreachable from the initial state are absent. Never raises.
     """
+    return _with_own_production(definition, _arrival(definition, inputs))
+
+
+def _arrival(
+    definition: FSMDefinition, inputs: Iterable[str]
+) -> dict[str, frozenset[str]]:
+    """For each reachable state, the keys declared on EVERY path on ARRIVAL: the state's
+    own production is not in it (a kind that reads host keys, `read_keys`, is judged
+    against this set)."""
     handler_only = handler_only_names(definition)
     results = result_key_names(definition)
-    arrival = _forward_meet(
+    return _forward_meet(
         definition,
         frozenset(inputs),
         lambda state, _t, here: here | _produced(state, handler_only, results),
     )
+
+
+def _with_own_production(
+    definition: FSMDefinition, arrival: Mapping[str, frozenset[str]]
+) -> dict[str, frozenset[str]]:
+    handler_only = handler_only_names(definition)
+    results = result_key_names(definition)
     return {
         sid: keys | _produced(definition.states[sid], handler_only, results)
         for sid, keys in arrival.items()
@@ -237,7 +253,10 @@ def analyze_data_flow(
 
     Codes (analysis "data-flow"): `undeclared-read` (a gate reads a key that is
     not declared on every path to it, or is handler-only and unproduced; one
-    finding per state and key), `unresolvable-read` (a gate reads a key by a
+    finding per state and key), `undeclared-input` (a key a state of a kind that
+    takes host keys reads, its `read_keys`: a `call` state's inputs and choice key,
+    a `synthesize` state's inputs, is not declared on every path to ARRIVAL at it,
+    its own production not counted; one finding per state and key), `unresolvable-read` (a gate reads a key by a
     computed, empty or non-string name), `bulk-extraction` (extraction
     instructions with no declared extraction: the model could write any key),
     `return-key-undeclared` (a return key no reachable state produces and no
@@ -266,7 +285,8 @@ def analyze_data_flow(
     given = frozenset(inputs)
     handler_only = handler_only_names(definition)
     results = result_key_names(definition)
-    available = declared_available(definition, given)
+    arrival = _arrival(definition, given)
+    available = _with_own_production(definition, arrival)
     findings: list[FlowFinding] = []
 
     def add(code: str, sid: str, message: str) -> None:
@@ -287,6 +307,12 @@ def analyze_data_flow(
                 "bulk-extraction",
                 sid,
                 f"state '{sid}' has extraction_instructions but no declared extraction",
+            )
+        for key in sorted(set(kind_of(state).read_keys(state)) - arrival[sid]):
+            add(
+                "undeclared-input",
+                sid,
+                f"state '{sid}' reads '{key}', which is not declared on every path to it",
             )
         reads: set[str] = set()
         unresolvable = False

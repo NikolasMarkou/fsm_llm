@@ -30,6 +30,13 @@ Interface contract:
 - ``call_check_definition(definition, state, evaluator, logic_keys, owned)``: the call
   kind's ``check_definition``: ``check_result_edges`` in the call wording over the state's
   ``call`` config (read by ``getattr``; its ``choose`` key is a read, not a result key).
+- ``call_read_keys(state)``: the call kind's ``read_keys``: its ``inputs`` then its ``choose``
+  key (duplicates dropped), the keys G3 must find declared on arrival.
+- ``call_raw_result_key(state, services)`` and ``call_lint_raw(state_id, state, fsm_data,
+  services)``: the raw twins the validator reads (the result key a call state writes, a
+  WARNING when its ``choose`` key can be written by nothing). Never raise on a raw dict
+  (a malformed value is the loader's refusal to report, not the lint's); never stricter than
+  the loader.
 """
 
 from __future__ import annotations
@@ -41,6 +48,9 @@ __all__ = [
     "CALL_SAMPLES",
     "call_check_definition",
     "call_check_state",
+    "call_lint_raw",
+    "call_raw_result_key",
+    "call_read_keys",
     "check_result_edges",
 ]
 
@@ -230,3 +240,65 @@ def call_check_definition(
         samples=CALL_SAMPLES,
         owned=owned,
     )
+
+
+def call_read_keys(state: Any) -> tuple[str, ...]:
+    """The keys a call state reads on arrival: its inputs, then its choice key."""
+    config = state.call
+    keys = [*config.inputs]
+    if config.choose is not None:
+        keys.append(config.choose.key)
+    return tuple(dict.fromkeys(keys))
+
+
+def call_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
+    """The result key of a RAW call state (the default when absent or not a string)."""
+    key = state["call"].get("result_key")
+    return key if isinstance(key, str) and key else services.default_call_result_key
+
+
+def _declared_names(state: Any) -> set[str]:
+    """The key names a raw state declares for extraction (never raises)."""
+    if not isinstance(state, dict):
+        return set()
+    names: set[str] = set()
+    required = state.get("required_context_keys")
+    if isinstance(required, list):
+        names.update(k for k in required if isinstance(k, str))
+    for channel in ("field_extractions", "classification_extractions"):
+        entries = state.get(channel)
+        for entry in entries if isinstance(entries, list) else ():
+            name = entry.get("field_name") if isinstance(entry, dict) else None
+            if isinstance(name, str):
+                names.add(name)
+    return names
+
+
+def call_lint_raw(
+    state_id: str, state: dict[str, Any], fsm_data: dict[str, Any], services: Any
+) -> list[str]:
+    """A call state whose ``choose`` key nothing can write: a WARNING.
+
+    The key is written by a handler (then ``handler_only_keys`` should list it) or by an
+    extraction of an earlier state; a call state declares no extraction of its own. With no
+    value the call takes its ``fallback`` or ends ``failed`` (``unknown_target``). Quiet for
+    any raw shape the loader refuses.
+    """
+    choose = state["call"].get("choose")
+    key = choose.get("key") if isinstance(choose, dict) else None
+    if not isinstance(key, str) or not key:
+        return []
+    listed = fsm_data.get("handler_only_keys")
+    if isinstance(listed, list) and key in listed:
+        return []
+    states = fsm_data.get("states")
+    if isinstance(states, dict) and any(
+        key in _declared_names(other) for other in states.values()
+    ):
+        return []
+    return [
+        f"Call state '{state_id}' chooses its target by '{key}', which no state "
+        "extracts and handler_only_keys does not list: only a handler could write "
+        "it, and with no value the call takes its fallback or ends failed "
+        "(unknown_target)"
+    ]

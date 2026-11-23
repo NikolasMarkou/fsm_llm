@@ -15,6 +15,7 @@ from fsm_llm.constants import (
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
 )
 from fsm_llm.core.definitions import (
+    DEFAULT_CALL_RESULT_KEY,
     DEFAULT_SYNTHESIS_RESULT_KEY,
     ClassificationExtractionConfig,
     CompletionResponse,
@@ -48,6 +49,7 @@ _COMPLETION_WRITER = "a completion call"
 _RESULT_WRITERS = {
     "completion": _COMPLETION_WRITER,
     "synthesize": "the synthesis runner",
+    "call": "the call executor",
 }
 
 
@@ -333,6 +335,7 @@ class StructureMixin:
             default_result_key=DEFAULT_COMPLETION_RESULT_KEY,
             string_literals=_string_literals,
             default_synthesis_result_key=DEFAULT_SYNTHESIS_RESULT_KEY,
+            default_call_result_key=DEFAULT_CALL_RESULT_KEY,
         )
         result_keys: dict[str, str] = {}
         for state_id, state in self.states.items():
