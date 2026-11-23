@@ -45,8 +45,10 @@ from fsm_llm.engine.executables import (
 )
 from fsm_llm.engine.executables import registry as registry_module
 from fsm_llm.testing import ScriptedLLM
+from tests.conftest import symlink_or_skip
 from tests.test_fsm_llm import kind_corpus as kc
 from tests.test_fsm_llm.test_async_engine import _Gated
+from tests.test_fsm_llm_regression.workflow_support import passthrough_env
 
 _BOUND = 10.0
 
@@ -204,15 +206,17 @@ class TestPaths:
     ) -> None:
         _write(tmp_path / "a.json", _doc("a"))
         _write(tmp_path / "b.json", _doc("b"))
-        (tmp_path / "notes.txt").write_text("not a document")
-        (tmp_path / "bad_json.json").write_text("{not json")
-        (tmp_path / "list.json").write_text("[1, 2]")
+        (tmp_path / "notes.txt").write_text("not a document", encoding="utf-8")
+        (tmp_path / "bad_json.json").write_text("{not json", encoding="utf-8")
+        (tmp_path / "list.json").write_text("[1, 2]", encoding="utf-8")
         (tmp_path / "latin.json").write_bytes(b'{"x": "\xe9"}')
-        (tmp_path / "huge.json").write_text(" " * (MAX_DOCUMENT_BYTES + 1))
+        (tmp_path / "huge.json").write_text(
+            " " * (MAX_DOCUMENT_BYTES + 1), encoding="utf-8"
+        )
         _write(tmp_path / "invalid.json", {"kind": "fsm"})
         outside = tmp_path.parent / f"{tmp_path.name}-outside.json"
         _write(outside, _doc("outside"))
-        (tmp_path / "link.json").symlink_to(outside)
+        symlink_or_skip(tmp_path / "link.json", outside)
         registry = ExecutableRegistry.from_paths([tmp_path])
         assert [e.id for e in registry.list()] == ["a", "b"]
         report = registry.reload()
@@ -389,7 +393,7 @@ class TestAtomicReload:
     ) -> None:
         """Kills: a loader, a file read or a logger call moved under ``_lock``."""
         _write(tmp_path / "x.json", _doc("x"))
-        (tmp_path / "broken.json").write_text("{broken")
+        (tmp_path / "broken.json").write_text("{broken", encoding="utf-8")
         registry = ExecutableRegistry(paths=[tmp_path])
 
         class _SpyLock:
@@ -622,7 +626,11 @@ class TestSources:
             [sys.executable, "-I", "-c", code],
             capture_output=True,
             text=True,
-            env={"PYTHONPATH": str(root / "src"), "PATH": os.environ.get("PATH", "")},
+            env={
+                "PYTHONPATH": str(root / "src"),
+                "PATH": os.environ.get("PATH", ""),
+                **passthrough_env(),
+            },
             check=True,
         )
         assert out.stdout.strip() == "[]"
