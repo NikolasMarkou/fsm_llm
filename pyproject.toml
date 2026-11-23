@@ -89,6 +89,10 @@ dev = [
     # branch-coverage ratchet (scripts/coverage_ratchet.py) reads one measurement everywhere.
     "coverage>=7.10.6,<8",
     "pytest-mock>=3.14.0,<4",
+    # A hard per-test timeout (the thread method, which Windows needs): a hung test fails with a
+    # stack dump instead of running to the CI job limit. Set in [tool.pytest.ini_options]; plan
+    # ace7a8c8 D-060.
+    "pytest-timeout>=2.4.0,<3",
     "ruff>=0.4.0,<1",
     # The exact version is pinned in constraints.txt, not here — see the pin block there.
     "mypy>=2.0,<3",
@@ -184,6 +188,12 @@ addopts = "-v --tb=short"
 # Built in (no plugin): dump every thread's stack after 900 s inside one test, kill nothing. A hang on
 # a CI leg then names the test and the line instead of running to the job limit with no output.
 faulthandler_timeout = 900
+# A HARD limit (pytest-timeout, in the `dev` extra; plan ace7a8c8 D-060): a test that runs longer than 300 s
+# is stopped with a stack dump of every thread. The thread method works on Windows (the signal method
+# does not) and ends the whole pytest process, so a hang costs 5 minutes, not the CI job limit.
+# `--timeout=0` disables it; `@pytest.mark.timeout(N)` sets one test.
+timeout = 300
+timeout_method = "thread"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
