@@ -4,12 +4,16 @@ Utility functions for the reasoning engine.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fsm_llm.logging import logger
 
 from .constants import ErrorMessages, ReasoningType
-from .strategy_files import FSM_NAMES, STRATEGY_ORDER, load_fsm, strategy_facts
+from .selection import choices_for, find_choice
+from .strategy_files import FSM_NAMES, load_fsm
+
+if TYPE_CHECKING:
+    from fsm_llm.engine.executables import ExecutableRegistry
 
 
 def get_reasoning_fsm(fsm_name: str) -> dict[str, Any]:
@@ -32,34 +36,32 @@ def get_reasoning_fsm(fsm_name: str) -> dict[str, Any]:
     return fsm_dict
 
 
-def _spellings() -> dict[str, str]:
-    """Every spelling ``map_reasoning_type`` accepts: the nine values and the aliases
-    each strategy file declares. Built per call, never a module table."""
-    table = {value: value for value in STRATEGY_ORDER}
-    for value in STRATEGY_ORDER:
-        for alias in strategy_facts(value)["aliases"]:
-            table[alias] = value
-    return table
+def lookup_reasoning_type(
+    type_str: str, *, registry: ExecutableRegistry | None = None
+) -> str | None:
+    """The strategy a spelling names (a name or an alias, case and padding ignored), or ``None``.
 
-
-def lookup_reasoning_type(type_str: str) -> str | None:
-    """The strategy a spelling names (a value or an alias, case and padding ignored), or ``None``.
-
-    Contract: never raises for a ``str`` and never logs; ``map_reasoning_type`` is its warning
-    wrapper. The one place that tells a known spelling from an unknown one (an unknown spelling
-    maps to ``analytical`` there, which is not a signal a caller can read).
+    Contract: ``registry`` is the ``ExecutableRegistry`` whose eligible strategies
+    (``selection.strategy_choices``) are consulted; ``None`` means the nine built-ins. Never
+    raises for a ``str`` and never logs a spelling it does not know (``map_reasoning_type`` is
+    its warning wrapper); a registry with a skipped strategy logs that WARNING per call, so a
+    long-lived caller reads the choices once (``ReasoningEngine`` does).
     """
-    return _spellings().get(type_str.lower().strip())
+    choice = find_choice(choices_for(registry), type_str)
+    return None if choice is None else choice.name
 
 
-def map_reasoning_type(type_str: str) -> str:
+def map_reasoning_type(
+    type_str: str, *, registry: ExecutableRegistry | None = None
+) -> str:
     """
     Map a reasoning type string to a standardized value.
 
     :param type_str: Input reasoning type string
-    :return: Standardized reasoning type that matches ReasoningType enum values
+    :param registry: Registry whose strategies are known; ``None`` is the built-in nine
+    :return: The strategy name; an unknown spelling is ``analytical`` with a WARNING
     """
-    mapped = lookup_reasoning_type(type_str)
+    mapped = lookup_reasoning_type(type_str, registry=registry)
     if mapped is None:
         logger.warning(f"Unknown reasoning type '{type_str}', defaulting to analytical")
         return ReasoningType.ANALYTICAL.value
@@ -67,10 +69,14 @@ def map_reasoning_type(type_str: str) -> str:
     return mapped
 
 
-def get_available_reasoning_types() -> dict[str, str]:
+def get_available_reasoning_types(
+    *, registry: ExecutableRegistry | None = None
+) -> dict[str, str]:
     """
     Get all available reasoning types with descriptions.
 
-    :return: Dictionary of type -> description
+    :param registry: Registry whose eligible strategies are listed (the built-ins first, in
+        their documented order); ``None`` is the built-in nine
+    :return: Dictionary of type name -> one-line description (a new dict on every call)
     """
-    return {value: strategy_facts(value)["description"] for value in STRATEGY_ORDER}
+    return {choice.name: choice.description for choice in choices_for(registry)}

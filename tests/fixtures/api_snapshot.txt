@@ -1828,12 +1828,13 @@ fsm_llm.reasoning.ReasoningClassificationResult class(TimestampedModel)
   property has_alternatives
   classmethod def validate_alternatives_unique(cls, v: list[str]) -> list[str]
 fsm_llm.reasoning.ReasoningEngine class
-  def __init__(self, model: str | None = None, **kwargs)
+  def __init__(self, model: str | None = None, *, registry: ExecutableRegistry | None = None, **kwargs)
   def close(self) -> None
   def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, dict[str, Any]]
 fsm_llm.reasoning.ReasoningError class(FSMError)
 fsm_llm.reasoning.ReasoningExecutionError class(ReasoningError)
   def __init__(self, message: str, reasoning_type: str | None = None, **kwargs)
+fsm_llm.reasoning.ReasoningRegistryError class(ReasoningError, ValueError)
 fsm_llm.reasoning.ReasoningStep class(TimestampedModel)
   field timestamp: datetime = factory
   field step_type: ReasoningStepType required
@@ -1881,7 +1882,7 @@ fsm_llm.reasoning.ValidationResult class(TimestampedModel)
   property passed_checks
   property total_checks
   property validation_summary
-fsm_llm.reasoning.get_available_reasoning_types def() -> dict[str, str]
+fsm_llm.reasoning.get_available_reasoning_types def(*, registry: ExecutableRegistry | None = None) -> dict[str, str]
 # fsm_llm.synthesis
 fsm_llm.synthesis.CompileResult class
   def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = ()) -> None

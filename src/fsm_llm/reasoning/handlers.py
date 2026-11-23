@@ -6,6 +6,7 @@ Enhanced with retry logic, context pruning, and standardized handling.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from functools import cache
 from typing import Any
 
@@ -557,14 +558,20 @@ class OutputFormatter:
     """Formats and extracts final outputs."""
 
     @staticmethod
-    def extract_final_solution(context: dict[str, Any]) -> str:
+    def extract_final_solution(
+        context: dict[str, Any], solution_keys: Sequence[str] | None = None
+    ) -> str:
         """
         Extract the final solution from context with proper fallbacks.
 
         :param context: Final context
+        :param solution_keys: The keys to read, first non-empty wins; ``None`` is the cached
+            built-in order (``final_solution``, ``proposed_solution``, then the nine strategies'
+            solution keys). ``ReasoningEngine`` passes the keys of its own eligible strategies,
+            so a registered strategy keeps its answer (plan baa37f40 D-033)
         :return: Formatted solution string
         """
-        for key in _solution_keys():
+        for key in _solution_keys() if solution_keys is None else solution_keys:
             solution = context.get(key)
             if _is_solution(solution):
                 logger.debug(f"Extracted final solution from context key '{key}'")

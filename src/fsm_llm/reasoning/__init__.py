@@ -41,6 +41,7 @@ from .exceptions import (
     ReasoningClassificationError,
     ReasoningError,
     ReasoningExecutionError,
+    ReasoningRegistryError,
 )
 from .utilities import get_available_reasoning_types
 
@@ -74,6 +75,7 @@ __all__ = [
     "ReasoningError",
     "ReasoningExecutionError",
     "ReasoningClassificationError",
+    "ReasoningRegistryError",
     # Utilities
     "get_available_reasoning_types",
     # Version

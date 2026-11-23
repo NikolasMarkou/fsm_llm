@@ -341,6 +341,9 @@ class Defaults:
     MAX_CLASSIFICATION_STEPS = 10  # Steps budget of the classifier FSM run
     MAX_TOTAL_STEPS = 50  # Orchestrator steps of one solve
     MAX_HYBRID_LOOPS = 2  # Times the hybrid critical_evaluation back edge runs
+    # Characters of a strategy description kept as ONE line for a closed intent, a type listing
+    # and the CLI (``fsm_llm.text.capped_line``); the llm_description precedent of core.
+    STRATEGY_DESCRIPTION_CHARS = 300
 
 
 def solve_step_budget(strategy_steps: int) -> int:

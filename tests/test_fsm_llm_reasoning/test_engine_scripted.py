@@ -701,12 +701,25 @@ class TestHandlerFailuresStopTheSolve:
 class TestAMissingStrategy:
     """D-031 supersedes 089d0ec7/D-009: a strategy the registry cannot resolve fails the CALL
     (``failed/unknown_target``), the failure edge runs and the solve goes on without it. No
-    other strategy is substituted: the fallback applies to a value outside the closed list only."""
+    other strategy is substituted: the fallback applies to a value outside the closed list only.
+    The closed list is the eligible strategies of the registry the engine read (plan baa37f40
+    D-033), so a strategy the registry never held is not a target at all (second row)."""
 
-    def test_the_call_fails_and_no_other_strategy_runs(self, monkeypatch):
-        _registry_with(monkeypatch, deductive=None)
+    def test_a_listed_target_the_registry_cannot_resolve_fails_the_call(
+        self, monkeypatch
+    ):
         llm = _ScriptedLLM(_VALID_SCRIPT)
         engine = _engine(llm)
+        resolve = engine.registry.resolve_target
+
+        def vanished(target_id: str, **kwargs: Any) -> Any:
+            return (
+                None
+                if target_id == "reasoning.deductive"
+                else resolve(target_id, **kwargs)
+            )
+
+        monkeypatch.setattr(engine.registry, "resolve_target", vanished)
 
         solution, trace_info = engine.solve_problem(_PROBLEM)
         context = trace_info["final_context"]
@@ -718,6 +731,22 @@ class TestAMissingStrategy:
         # the analytical strategy (the fallback id) did not stand in
         assert ContextKeys.INTEGRATED_ANALYSIS not in context
         assert ContextKeys.DEDUCTIVE_CONCLUSION not in context
+        assert engine.orchestrator.list_active_conversations() == []
+
+    def test_a_strategy_the_registry_never_held_is_no_target_and_the_fallback_runs(
+        self, monkeypatch
+    ):
+        _registry_with(monkeypatch, deductive=None)
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        targets = engine.main_fsm["states"]["execute_reasoning"]["call"]["choose"][
+            "targets"
+        ]
+        assert "reasoning.deductive" not in targets
+
+        _solution, trace_info = engine.solve_problem(_PROBLEM)
+
+        record = _the_call(trace_info["final_context"])
+        assert (record["status"], record["target"]) == ("ok", "reasoning.analytical")
         assert engine.orchestrator.list_active_conversations() == []
 
 

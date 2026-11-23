@@ -19,6 +19,7 @@ from fsm_llm import (
     clear_keys_on_entry,
 )
 from fsm_llm.engine.api.helpers import llm_settings_for
+from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.engine.kinds.call import chosen_target
 from fsm_llm.handlers import HandlerTiming
@@ -38,7 +39,11 @@ from .constants import (
     solve_step_budget,
 )
 from .definitions import ReasoningClassificationResult, ReasoningTrace
-from .exceptions import ReasoningClassificationError, ReasoningExecutionError
+from .exceptions import (
+    ReasoningClassificationError,
+    ReasoningExecutionError,
+    ReasoningRegistryError,
+)
 from .handlers import (
     ContextManager,
     OutputFormatter,
@@ -46,8 +51,8 @@ from .handlers import (
     register_strategy_handlers,
     retries_exhausted,
 )
-from .strategy_files import strategy_id, strategy_name
-from .utilities import get_reasoning_fsm, lookup_reasoning_type, map_reasoning_type
+from .selection import ANALYTICAL, StrategyChoice, find_choice, strategy_choices
+from .utilities import get_reasoning_fsm
 
 #: What ``ReasoningEngine.model`` shows when an injected interface states no model.
 _INJECTED_MODEL_LABEL = "injected-llm-interface"
@@ -58,11 +63,22 @@ class ReasoningEngine:
     Main reasoning engine with enhanced error handling and flow control.
     """
 
-    def __init__(self, model: str | None = None, **kwargs):
+    def __init__(
+        self,
+        model: str | None = None,
+        *,
+        registry: ExecutableRegistry | None = None,
+        **kwargs,
+    ):
         """
         Initialize the reasoning engine.
 
         :param model: The LLM model to use; ``None`` reads env ``LLM_MODEL``
+        :param registry: The ``ExecutableRegistry`` the solve chooses its strategy from: every
+            eligible strategy in it (``selection.strategy_choices``) is a target of the
+            orchestrator's call and an intent of the classifier (plan baa37f40 D-033); it must
+            hold a strategy named ``analytical`` and at least one other. ``None`` is the nine
+            built-ins. Read once, here: a later change of the registry does not reach this engine
         :param kwargs: Additional arguments for the API
 
         Raises ``ModelNotConfiguredError`` when no model is named (argument or
@@ -72,7 +88,21 @@ class ReasoningEngine:
 
         Thread safety: ``solve_problem()`` is serialized via an internal lock
         so that only one solve runs at a time on a given engine instance.
+
+        Raises ``TypeError`` for a ``registry`` that is not an ``ExecutableRegistry`` and for a
+        ``targets=`` keyword (the targets of the orchestrator are the registry), and
+        ``ReasoningRegistryError`` for a registry that cannot serve a solve.
         """
+        # `targets=` would be swallowed by `**kwargs` into BOTH APIs below: refuse it by name
+        if "targets" in kwargs:
+            raise TypeError(
+                "ReasoningEngine takes registry=, not targets=: the targets of the "
+                "orchestrator are the strategies of its registry"
+            )
+        if registry is not None and not isinstance(registry, ExecutableRegistry):
+            raise TypeError(
+                f"registry must be an ExecutableRegistry, got {type(registry).__name__}"
+            )
         self._solve_lock = threading.Lock()
         self.api_kwargs = kwargs.copy()
         # DECISION plan-2026-11-12T073150-d454fd62/D-005
@@ -86,6 +116,21 @@ class ReasoningEngine:
         else:
             self.model = resolve_model(model)
         model = self.model
+
+        # The strategies this engine may choose, read once (plan baa37f40 D-033)
+        if registry is None:
+            # lazy: `executables` imports this module
+            from .executables import strategy_registry
+
+            registry = strategy_registry()
+        self.registry: ExecutableRegistry = registry
+        self._choices, self._analytical = _eligible_choices(registry)
+        self._names = {choice.target_id: choice.name for choice in self._choices}
+        self._solution_keys = (
+            ContextKeys.FINAL_SOLUTION,
+            ContextKeys.PROPOSED_SOLUTION,
+            *(choice.solution_key for choice in self._choices),
+        )
 
         # Load FSM definitions
         self._load_fsm_definitions()
@@ -104,6 +149,14 @@ class ReasoningEngine:
         """Load every FSM definition (all are in the package, so a miss raises)."""
         self.main_fsm = get_reasoning_fsm("orchestrator")
         self.classifier_fsm = get_reasoning_fsm("classifier")
+        # The closed list of the call is every eligible strategy of the registry, the fallback
+        # the one named `analytical` (plan baa37f40 D-033): with the built-in registry this
+        # writes the values the file holds, so no byte of the shipped definition moves.
+        choose = self.main_fsm["states"][OrchestratorStates.EXECUTE_REASONING]["call"][
+            "choose"
+        ]
+        choose["targets"] = [choice.target_id for choice in self._choices]
+        choose["fallback"] = self._analytical.target_id
         call = (
             FSMDefinition(**self.main_fsm)
             .states[OrchestratorStates.EXECUTE_REASONING]
@@ -128,14 +181,10 @@ class ReasoningEngine:
         # An injected `llm_interface` owns its model: core refuses another
         # one beside it, so `model` goes only to an interface core builds.
         settings = llm_settings_for(self.api_kwargs, model=self.model)
-        # The call state of the orchestrator pushes a strategy FSM as a frame of this API
-        # (plan baa37f40 D-031): the nine built-in strategies are its targets. Imported
-        # here because ``executables`` imports this module.
-        from .executables import strategy_registry
-
-        # Main orchestrator API
+        # Main orchestrator API: the call state of `execute_reasoning` pushes a strategy FSM as
+        # a frame of this API (plan baa37f40 D-031) and resolves its target in the registry
         self.orchestrator = API.from_definition(
-            self.main_fsm, **settings, targets=strategy_registry(), **self.api_kwargs
+            self.main_fsm, **settings, targets=self.registry, **self.api_kwargs
         )
 
         # Classification API
@@ -302,9 +351,11 @@ class ReasoningEngine:
         strategy = _strategy_for(
             classification.recommended_type,
             context.get(ContextKeys.PREFERRED_REASONING_TYPE),
+            self._choices,
+            self._analytical,
         )
         return {
-            ContextKeys.CLASSIFIED_PROBLEM_TYPE: strategy_id(strategy),
+            ContextKeys.CLASSIFIED_PROBLEM_TYPE: strategy.target_id,
             ContextKeys.CLASSIFICATION_JUSTIFICATION: classification.justification,
             ContextKeys.PROBLEM_DOMAIN: classification.domain,
             ContextKeys.ALTERNATIVE_APPROACHES: classification.alternatives,
@@ -328,7 +379,7 @@ class ReasoningEngine:
             ``chosen_target`` picks), plus ``constraints = []`` when absent
         """
         target = chosen_target(self._call_config, context)
-        selected = strategy_name(target) or str(target)
+        selected = self._names.get(str(target), str(target))
         logger.info(LogMessages.STRATEGY_EXECUTING.format(type=selected))
         delta: dict[str, Any] = {ContextKeys.REASONING_TYPE_SELECTED: selected}
         if context.get(ContextKeys.CONSTRAINTS) is None:
@@ -468,7 +519,9 @@ class ReasoningEngine:
         # removes the instance, making get_data fail).
         try:
             final_context = self.orchestrator.get_data(conversation_id)
-            solution = self.output_formatter.extract_final_solution(final_context)
+            solution = self.output_formatter.extract_final_solution(
+                final_context, self._solution_keys
+            )
 
             # Build trace info
             trace_steps = final_context.get(ContextKeys.REASONING_TRACE, [])
@@ -571,24 +624,59 @@ class ReasoningEngine:
         return list(types) if types else ["unknown"]
 
 
-def _strategy_for(recommended: str, preferred: object) -> str:
-    """The strategy name a solve runs: the classified one, then the preferred one.
+def _eligible_choices(
+    registry: ExecutableRegistry,
+) -> tuple[list[StrategyChoice], StrategyChoice]:
+    """The strategies of *registry* a solve may choose and the one it falls back to.
 
-    Contract: ``recommended`` is the classifier's (normalised) recommendation, mapped by
-    ``map_reasoning_type`` (an unknown spelling is ``analytical``, with a WARNING).
-    ``preferred`` is ``initial_context["preferred_reasoning_type"]``: when it names a known
-    strategy (a value or an alias) it WINS over the classified one; when it names none, ONE
-    WARNING and it is ignored. Never raises for any value.
+    Contract: ``selection.strategy_choices`` decides (skipped ones are warned there); raises
+    ``ReasoningRegistryError`` naming what is missing when no eligible strategy is named
+    ``analytical`` (the fallback) or fewer than two are eligible (a closed classification needs
+    two intents). Returns ``(choices, the analytical choice)``.
     """
-    chosen = map_reasoning_type(recommended)
+    choices = strategy_choices(registry)
+    analytical = find_choice(choices, ANALYTICAL)
+    if analytical is None or analytical.name != ANALYTICAL:
+        raise ReasoningRegistryError(
+            f"the registry has no eligible strategy named {ANALYTICAL!r} (the fallback of "
+            f"every solve); eligible: {[choice.name for choice in choices]}"
+        )
+    if len(choices) < 2:
+        raise ReasoningRegistryError(
+            "the registry has fewer than two eligible strategies: the choice is a closed "
+            f"classification of at least two; eligible: {[c.name for c in choices]}"
+        )
+    return choices, analytical
+
+
+def _strategy_for(
+    recommended: str,
+    preferred: object,
+    choices: list[StrategyChoice],
+    analytical: StrategyChoice,
+) -> StrategyChoice:
+    """The strategy a solve runs: the classified one, then the preferred one.
+
+    Contract: ``recommended`` is the classifier's recommendation, found among ``choices`` by name
+    or alias (an unknown spelling is ``analytical``, with a WARNING). ``preferred`` is
+    ``initial_context["preferred_reasoning_type"]``: when it names a strategy of ``choices`` (a
+    name or an alias, ANY eligible one, not only the intents the classifier saw) it WINS over the
+    classified one; when it names none, ONE WARNING and it is ignored. Never raises for any value.
+    """
+    chosen = find_choice(choices, recommended)
+    if chosen is None:
+        logger.warning(
+            f"Unknown reasoning type '{recommended}', defaulting to analytical"
+        )
+        chosen = analytical
     if preferred:
-        named = lookup_reasoning_type(str(preferred))
+        named = find_choice(choices, str(preferred))
         if named is None:
             logger.warning(
                 f"preferred_reasoning_type {preferred!r} names no known strategy; ignoring"
             )
         else:
-            logger.debug(f"Using preferred_reasoning_type from context: {named!r}")
+            logger.debug(f"Using preferred_reasoning_type from context: {named.name!r}")
             chosen = named
     return chosen
 

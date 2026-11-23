@@ -1144,6 +1144,7 @@
     "fsm_llm.reasoning.exceptions",
     "fsm_llm.reasoning.executables",
     "fsm_llm.reasoning.handlers",
+    "fsm_llm.reasoning.selection",
     "fsm_llm.reasoning.strategy_files",
     "fsm_llm.reasoning.utilities",
     "fsm_llm.runner",

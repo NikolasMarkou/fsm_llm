@@ -829,6 +829,11 @@
       "delta": -1,
       "reason": "step 15 of plan baa37f40 (D-031): the push machinery was deleted with its code (D-029 of plan ace7a8c8): the anchors of _prepare_reasoning_execution (5980fbb7/D-006, d9092060/D-004, 089d0ec7/D-009) and the second 944e2692/D-053 (_StrategyStack) are gone, the one at the retry clear stays; two D-031 anchors are new",
       "token": "plan_2026-05-29_d9092060/D-004"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 step 17 D-033: new anchor on strategy_choices (the one eligibility rule of a reasoning solve)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-033"
     }
   ]
 }

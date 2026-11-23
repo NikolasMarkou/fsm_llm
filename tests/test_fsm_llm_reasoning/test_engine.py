@@ -19,11 +19,13 @@ from fsm_llm.reasoning.definitions import (
     ReasoningStepType,
     ValidationResult,
 )
-from fsm_llm.reasoning.engine import ReasoningEngine, _strategy_for
+from fsm_llm.reasoning.engine import ReasoningEngine
+from fsm_llm.reasoning.engine import _strategy_for as _choose_strategy
 from fsm_llm.reasoning.exceptions import (
     ReasoningClassificationError,
 )
 from fsm_llm.reasoning.handlers import OutputFormatter, ReasoningHandlers
+from fsm_llm.reasoning.selection import builtin_choices
 from fsm_llm.reasoning.utilities import map_reasoning_type
 
 from .test_engine_scripted import _PROBLEM, _VALID_SCRIPT, _engine, _ScriptedLLM
@@ -150,6 +152,13 @@ class TestReasoningEngine:
         for val in expected_enum_values:
             assert val in actual_enum_values
         assert len(actual_enum_values) == len(expected_enum_values)
+
+
+def _strategy_for(recommended, preferred):
+    """The NAME of the strategy ``_choose_strategy`` picks among the nine built-ins."""
+    choices = builtin_choices()
+    analytical = next(choice for choice in choices if choice.name == "analytical")
+    return _choose_strategy(recommended, preferred, choices, analytical).name
 
 
 class TestTheStrategyIsChosenByTheClassifiedTypeThenThePreferredOne:

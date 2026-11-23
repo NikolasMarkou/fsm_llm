@@ -18,7 +18,7 @@ import pytest
 import fsm_llm
 from fsm_llm.core.definitions import FSMDefinition, definition_digest, fsm_id_of
 from fsm_llm.core.verify.executable import load_executable
-from fsm_llm.reasoning import constants, strategy_files, utilities
+from fsm_llm.reasoning import constants, selection, strategy_files, utilities
 from fsm_llm.reasoning.constants import ReasoningType
 from fsm_llm.reasoning.executables import strategy_id
 from fsm_llm.reasoning.strategy_files import (
@@ -193,10 +193,14 @@ class TestTheDeletedTables:
         assert not (REPO / "src" / "fsm_llm" / "reasoning" / "reasoning_modes").exists()
 
     def test_the_spelling_table_is_built_per_call_not_kept(self) -> None:
+        """No module table: the spellings come from the choices (``selection``), a fresh list
+        each call, so a planted entry never leaks into the next lookup (plan baa37f40 D-033)."""
         before = utilities.map_reasoning_type("math")
         assert before == "simple_calculator"
-        assert utilities._spellings() is not utilities._spellings()
-        utilities._spellings()["math"] = "planted"
+        assert not hasattr(utilities, "_spellings")
+        choices = selection.builtin_choices()
+        assert choices is not selection.builtin_choices()
+        choices.clear()
         assert utilities.map_reasoning_type("math") == "simple_calculator"
 
     def test_the_description_table_is_built_per_call_not_kept(self) -> None:
