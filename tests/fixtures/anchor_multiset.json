@@ -854,6 +854,11 @@
       "delta": 1,
       "reason": "plan baa37f40 step 22 D-041: the new anchor on executor_for: a kind with requires_executor (synthesize) takes no conversation fallback and raises MissingExecutorError (supersedes 2cefeb61/D-002, a bare converse stays BLOCKED); the five runner anchors (2cefeb61/D-029, D-044, D-061, 5a6a1f80/D-012, D-015) travelled to the executor and settle with equal counts",
       "token": "plan-2026-11-23T122249-baa37f40/D-041"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 step 27.2 D-044: new anchor on _mapped_returns (the target's output map follows the loader's handler-only rule)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-044"
     }
   ]
 }

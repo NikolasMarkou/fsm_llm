@@ -37,7 +37,8 @@ Interface contract:
   one is ``failed/return_keys_missing``); when it declares none, the output map the PUSHED target
   carries (``ResolvedTarget.returns``, a strategy's ``results``, D-030): every non-None child
   value under its parent key, a key the child never wrote simply absent, a key that is
-  internal-prefixed, secret-looking or the call's own result key dropped with a WARNING. A
+  internal-prefixed, secret-looking, a result key of the parent or a parent `handler_only_keys`
+  entry the child did not write by a handler (D-044) dropped with a WARNING. A
   target settle cannot prove after a restart (no mark, another definition now) merges nothing.
 - Errors: ``FSMError`` for a second driver and for a pop the manager refuses (the next settle
   retries); an ``LLMResponseError`` of the child's greeting is the FINAL record
@@ -62,10 +63,12 @@ from fsm_llm.constants import (
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import (
     CallStateConfig,
+    FSMDefinition,
     FSMError,
     LLMResponseError,
     State,
     fsm_id_of,
+    handler_only_names,
 )
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.kinds import executor_for
@@ -326,6 +329,7 @@ async def _try_pop(
             _pushed_target(api, top, parent, chosen_target(config, parent_data)),
             parent_data,
             ended=ended,
+            parent_definition=parent.fsm_definition,
         )
         final = context_to_return[config.result_key]
     try:
@@ -400,6 +404,7 @@ def _outcome(
     parent_data: dict[str, Any],
     *,
     ended: bool,
+    parent_definition: FSMDefinition,
 ) -> dict[str, Any]:
     """What the pop merges into the parent: the declared returns (only on ``ok``) and the final
     record under the result key. The target is re-derived from the parent's own state and the
@@ -427,7 +432,14 @@ def _outcome(
                 return settled(Status.FAILED, Reason.RETURN_KEYS_MISSING)
             merged[parent_key] = value
     elif pushed is not None and pushed.returns:
-        merged = _mapped_returns(state_id, config, pushed.returns, child_data)
+        merged = _mapped_returns(
+            state_id,
+            config,
+            pushed.returns,
+            child_data,
+            handler_only_names(parent_definition),
+            _handler_written(child.fsm_definition),
+        )
     elif pushed is None:
         logger.warning(
             f"Call state '{state_id}' ended a child whose target cannot be proven (no mark "
@@ -437,16 +449,39 @@ def _outcome(
     return {**merged, **settled(Status.OK, None)}
 
 
+def _handler_written(definition: FSMDefinition) -> frozenset[str]:
+    """The ``handler_only_keys`` of *definition* that no ``classification_extractions`` entry
+    names: the listed keys only a handler (never a model) can write. A listed key stays
+    classifiable (plan 52ce5464 D-002), so a classified one is a model's value like any other."""
+    classified = {
+        extraction.field_name
+        for state in definition.states.values()
+        for extraction in state.classification_extractions or ()
+    }
+    return frozenset(definition.handler_only_keys) - classified
+
+
+# DECISION plan-2026-11-23T122249-baa37f40/D-044
+# The output map of a target is a second road to the merge that the loader refuses for a declared
+# `returns` (`kind_call.check_result_edges` rule 3): a parent key the parent owns (its
+# `handler_only_keys` or any result key, `handler_only_names`) takes a child value only when the
+# CHILD wrote it by a handler. Do NOT drop the rule (a user strategy document could write
+# `hybrid_loop_count` or `validation_result` from its model's reply) and do NOT widen the
+# exception to every child key the child lists as handler-only (a listed key stays classifiable,
+# so a model can still write it: `_handler_written`).
 def _mapped_returns(
     state_id: str,
     config: CallStateConfig,
     mapping: Mapping[str, str],
     child_data: Mapping[str, Any],
+    parent_owned: frozenset[str],
+    child_handler_written: frozenset[str],
 ) -> dict[str, Any]:
     """The tolerant merge of the target's own output map (D-030): every non-None child value
-    under its parent key. A parent key that is internal-prefixed, a secret-looking entry or the
-    call's own result key is dropped with one WARNING per key (the map is registry text, never
-    an engine key); a key the child never wrote is simply absent."""
+    under its parent key. A parent key that is internal-prefixed, a secret-looking entry, the
+    call's own result key, or one the parent owns (``parent_owned``) with a child key no handler
+    wrote (``child_handler_written``) is dropped with one WARNING per key (the map is registry
+    text, never an engine key); a key the child never wrote is simply absent."""
     merged: dict[str, Any] = {}
     for parent_key, child_key in mapping.items():
         value = child_data.get(child_key)
@@ -456,6 +491,7 @@ def _mapped_returns(
             parent_key == config.result_key
             or has_internal_prefix(parent_key)
             or is_forbidden_context_entry(parent_key, value)
+            or (parent_key in parent_owned and child_key not in child_handler_written)
         ):
             logger.warning(
                 f"Call state '{state_id}': the output map of the target names "

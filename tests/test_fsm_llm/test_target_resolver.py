@@ -152,6 +152,19 @@ class TestTheRegistryResolves:
         registry.register(_Pattern(kind))
         assert registry.resolve_target("probe.pattern") is None
 
+    @pytest.mark.parametrize("kind", ["fsm", "strategy", "procedure"])
+    def test_a_deprecated_executable_resolves_to_nothing(self, kind):
+        """D-044 (2), review iter1 note 10: selection refuses a deprecated strategy, so a call
+        target is refused the same way (`failed/unknown_target`). Kills: a resolver that ignores
+        the lifecycle."""
+        registry = ExecutableRegistry()
+        registry.add_document(_doc(kind, lifecycle="deprecated"))
+        assert registry.get("demo") is not None
+        assert registry.resolve_target("demo") is None
+        live = ExecutableRegistry()
+        live.add_document(_doc(kind, lifecycle="verified"))
+        assert live.resolve_target("demo") is not None
+
     def test_an_unknown_id_resolves_to_nothing(self):
         assert ExecutableRegistry().resolve_target("no.such.id") is None
 

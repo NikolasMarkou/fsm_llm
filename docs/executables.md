@@ -393,7 +393,7 @@ A state of the `call` kind (see [FSM Design](fsm_design.md) and the Call state s
 - **What the record carries.** The final `call_result` holds the template identity of the executable and the instance identity of what was pushed (the identities `run` would report for the same inputs), read from what `settle` pushed and never from the forgeable public record; after a restart that cannot prove it they are `None`.
 - **Nested runs.** `FsmInstance.arun` gives its own `API` the context's registry (`RunContext.registry`), so a body with a `call` state runs under a run; a body with a call state and no registry is refused.
 - **Delegated mode is planned and not built.** A target that is code (a pattern, `reasoning.solve`, a workflow) cannot be a frame, so a call to one ends `failed/unknown_target`. Running one as a polled child run on a thread host is the second half of roadmap E3.2 and nothing in the tree does it.
-- **A `procedure` target is not gated.** The call kind trusts the ids its author or its closed `choose` list names; it checks no lifecycle and no provenance (the `synthesize` kind does, through its executor). Do not list a model-written procedure where an untrusted value can reach the list.
+- **A `procedure` target is not gated.** The call kind trusts the ids its author or its closed `choose` list names; it checks no provenance and no lifecycle but `deprecated`, which resolves to nothing and ends the call `failed/unknown_target` (the `synthesize` kind judges both, through its executor). Do not list a model-written procedure where an untrusted value can reach the list.
 
 ## Known limits
 

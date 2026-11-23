@@ -216,6 +216,27 @@ class TestStrategyChoices:
         assert [c.target_id for c in found] == [strategy_id(n) for n in STRATEGY_ORDER]
         assert any("already taken by 'reasoning.analytical'" in m for m in warned)
 
+    @pytest.mark.parametrize(
+        ("name", "owner"),
+        [("math", "simple_calculator"), ("logic", "deductive")],
+    )
+    def test_a_user_name_equal_to_a_builtin_alias_is_skipped_and_the_builtin_keeps_it(
+        self, name: str, owner: str
+    ) -> None:
+        """D-044 (3), review iter1 note 9: built-ins win, aliases included. Kills: the
+        built-in aliases not seeded before the user names are judged (the user strategy took
+        the alias and `preferred_reasoning_type=math` ran it)."""
+        registry = _registry(_document(name, ident=f"user.{name}"))
+        found: list[StrategyChoice] = []
+        warned = _warnings(lambda: found.extend(strategy_choices(registry)))
+        assert [c.target_id for c in found] == [strategy_id(n) for n in STRATEGY_ORDER]
+        assert any(
+            f"user.{name}" in m and f"already taken by 'reasoning.{owner}'" in m
+            for m in warned
+        )
+        chosen = find_choice(found, name)
+        assert chosen is not None and chosen.name == owner
+
     def test_an_alias_that_names_something_else_is_dropped_and_a_name_beats_an_alias(
         self,
     ) -> None:
@@ -494,6 +515,40 @@ class TestAUserStrategyIsChosenAndKeepsItsAnswer:
         )
         record = engine.orchestrator.get_data(conversation_id)[ContextKeys.CALL_RESULT]
         assert record["target"] == "reasoning.analytical"
+
+
+class TestAStrategyMapCannotWriteAnOrchestratorKey:
+    """D-044 (1), review iter1 concern 3: the output map of a user strategy is merged by the
+    pop, and the orchestrator's handler-only keys are never a merge target (the loader refuses
+    them for a declared `returns`)."""
+
+    @pytest.mark.parametrize(
+        "key", ["hybrid_loop_count", "validation_result", "max_retries_reached"]
+    )
+    def test_a_map_naming_a_handler_only_key_never_writes_it(self, key: str) -> None:
+        """Kills: `_mapped_returns` with no handler-only rule (the child's model value landed
+        on the orchestrator's handler-only key)."""
+        document = _document()
+        document["body"]["strategy"]["results"][key] = "key_insights"
+        engine = ReasoningEngine(
+            model="mock",
+            llm_interface=_ScriptedLLM(_script_for_user_strategy()),
+            registry=_registry(document),
+        )
+        result: list[Any] = []
+        warned = _warnings(
+            lambda: result.append(
+                engine.solve_problem(_PROBLEM, {"preferred_reasoning_type": "pirate"})
+            )
+        )
+        context = result[0][1]["final_context"]
+
+        assert context[ContextKeys.CALL_RESULT]["status"] == "ok"
+        assert (
+            context["pirate_answer"] == _PIRATE_ANSWER
+        )  # the rest of the map still merges
+        assert context.get(key) != _PIRATE_ANSWER
+        assert any(f"'{key}'" in m and "never merged" in m for m in warned)
 
 
 class TestNoTargetIsResolvedByAStringImport:

@@ -116,7 +116,15 @@ def strategy_choices(registry: ExecutableRegistry) -> list[StrategyChoice]:
         str, str
     ] = {}  # lowercase name or alias -> id of the strategy that owns it
     eligible: list[Any] = []
+    seeded = False
     for executable in listed:
+        if executable.id not in rank and not seeded:
+            # the built-ins are judged (they sort first): their aliases are taken before any
+            # other name is, so a user strategy named `math` cannot take the alias (D-044 (3))
+            seeded = True
+            for built_in in eligible:
+                for alias in built_in.envelope.body.strategy.aliases:
+                    owners.setdefault(alias.lower().strip(), built_in.id)
         reason = _skip_reason(executable, owners)
         if reason is None:
             eligible.append(executable)
@@ -131,7 +139,7 @@ def strategy_choices(registry: ExecutableRegistry) -> list[StrategyChoice]:
             key = alias.lower().strip()
             if not key or key == envelope.name.lower() or key in aliases:
                 continue
-            if key in owners:
+            if owners.get(key, executable.id) != executable.id:
                 logger.warning(
                     f"alias {alias!r} of strategy {executable.id!r} is dropped: "
                     f"it already names {owners[key]!r}"

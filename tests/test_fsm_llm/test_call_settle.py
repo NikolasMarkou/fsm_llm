@@ -349,6 +349,97 @@ class TestTheTargetsOwnOutputMap:
         assert flow.record() == _final("ok", None)
         assert "answer" not in flow.api.get_data(flow.cid)
 
+    async def test_a_mapped_key_the_parent_lists_as_handler_only_is_dropped(self):
+        """D-044 (1), review iter1 concern 3: the loader refuses a declared `returns` that names
+        a handler-only key (rule 3 of `kind_call`); the target's own map is the same merge, so
+        it follows the same rule. Kills (D3): `_mapped_returns` with no handler-only rule (the
+        child's model value would land on the key a handler owns)."""
+        flow = await _flow(
+            config=_call(returns={}),
+            maps={_TARGET: {"guarded": "solution", "answer": "solution"}},
+            handler_only=("guarded",),
+        )
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        raw = flow.api.fsm_manager.copy_raw_context_data(flow.frame)
+        assert raw["answer"] == "solved why"  # the rest of the map still merges
+        assert "guarded" not in raw
+        assert flow.record() == _final("ok", None)
+
+    async def test_a_mapped_key_naming_another_states_result_key_is_dropped(self):
+        """The result key of ANY call state of the parent is handler-owned (`handler_only_names`),
+        not only the one of the state that runs. Kills: a rule on `config.result_key` alone."""
+        status = {"var": "other_result.status"}
+        other = _call_state(
+            _call(result_key="other_result"),
+            id="other",
+            transitions=[
+                _edge("done", 1, {"==": [status, "ok"]}, ("other_result",)),
+                _edge(
+                    "apology",
+                    2,
+                    {"in": [status, ["failed", "aborted"]]},
+                    ("other_result",),
+                ),
+            ],
+        )
+        parent = _parent(_call(returns={}), extra_states={"other": other})
+        parent["states"]["start"]["transitions"][0]["priority"] = (
+            1  # no tie to classify
+        )
+        resolver = _Resolver(
+            {_TARGET: _child_definition()},
+            {_TARGET: {"other_result": "solution", "answer": "solution"}},
+        )
+        api = API.from_definition(
+            parent,
+            llm_interface=ScriptedLLM(default_response="r"),
+            targets=resolver,
+            handlers=[
+                create_handler("answer")
+                .on_state_entry("c2")
+                .do(lambda ctx: {"solution": "solved"})
+            ],
+        )
+        cid, _ = await api.astart_conversation({"topic": "why"})
+        await api.arun_until_terminal(cid, max_steps=10)
+        data = api.get_data(cid)
+        assert data["answer"] == "solved" and "other_result" not in data
+
+    async def test_a_handler_written_child_key_may_fill_a_handler_only_parent_key(self):
+        """The built-in calculator's map (`calculation_result`, written by a handler of the
+        strategy FSM on both sides) keeps working: the child lists the key handler-only too.
+        Kills: a rule with no exception (every calculator solve would lose its answer)."""
+        child = {**_child_definition(), "handler_only_keys": ["solution"]}
+        flow = await _flow(
+            config=_call(returns={}),
+            known={_TARGET: child},
+            maps={_TARGET: {"guarded": "solution"}},
+            handler_only=("guarded",),
+        )
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        assert flow.api.get_data(flow.cid)["guarded"] == "solved why"
+
+    def test_a_child_key_a_classification_can_write_is_not_handler_written(self):
+        """A handler-only key stays classifiable (plan 52ce5464 D-002), so a model can still
+        write it in the child: listing it is no provenance. Kills: an exception that trusts
+        `handler_only_keys` of the child alone."""
+        from fsm_llm.engine.api.calls import _handler_written
+
+        child = _child_definition(steps=2)
+        child["handler_only_keys"] = ["solution", "other"]
+        assert _handler_written(FSMDefinition(**child)) == {"solution", "other"}
+        child["states"]["c1"]["classification_extractions"] = [
+            {
+                "field_name": "solution",
+                "intents": [
+                    {"name": "a", "description": "one"},
+                    {"name": "b", "description": "two"},
+                ],
+                "fallback_intent": "a",
+            }
+        ]
+        assert _handler_written(FSMDefinition(**child)) == {"other"}
+
     async def test_a_mapped_key_that_is_internal_secret_or_the_record_is_dropped(self):
         """Kills (D2): a merge with no name filter (the child's text would become an engine key,
         a secret-looking entry or the result record itself)."""

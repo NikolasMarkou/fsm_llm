@@ -56,6 +56,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.definitions.executable import Capability, InstantiationError
 from fsm_llm.core.names import NameRegistry
@@ -492,6 +493,8 @@ class ExecutableRegistry:
             executable = self.get(target_id)
         except ExecutableNotFoundError:
             return None
+        if getattr(executable, "lifecycle", None) is Lifecycle.DEPRECATED:
+            return None  # selection refuses a deprecated strategy: so does a call (D-044 (2))
         try:
             instance = executable.instantiate()
         except InstantiationError as error:
