@@ -33,7 +33,7 @@ from fsm_llm.synthesis import (
     digest_of,
     run_gates,
 )
-from fsm_llm.synthesis.runner import reason_of
+from fsm_llm.synthesis.procedures import reason_of
 from fsm_llm.synthesis.simulation import happy_path
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import (

@@ -21,7 +21,7 @@ seam.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,11 +30,9 @@ from fsm_llm.core.definitions import (
     FSMContext,
     FSMDefinition,
     FSMError,
-    LLMResponseError,
     SynthesizeConfig,
 )
 from fsm_llm.core.expressions import is_missing
-from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.api.stack import ContextMergeStrategy
@@ -43,21 +41,14 @@ from fsm_llm.runtime.usage import watch_provider_errors
 
 from .constants import (
     ABORT_STATE_ID,
-    LIFECYCLE_TRUSTED,
     LIFECYCLE_VERIFIED,
     REASON_BUDGET_SPENT,
-    REASON_COMPILE_FAILED,
-    REASON_COMPLETION_UNSUPPORTED,
     REASON_DEPTH_REFUSED,
     REASON_INPUTS_MISSING,
-    REASON_LIBRARY_ERROR,
-    REASON_LIFECYCLE_TOO_LOW,
-    REASON_NOT_SIMULATED,
     REASON_PROVIDER_ERROR,
     REASON_PUSH_FAILED,
     REASON_RETURN_KEYS_MISSING,
     REASON_UNEXPECTED_ERROR,
-    REASONS,
     STATUS_ABORTED,
     STATUS_FAILED,
     STATUS_OK,
@@ -65,20 +56,17 @@ from .constants import (
     TRACE_KIND_OTHER,
     TRACE_KINDS,
 )
-from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
-from .gates import simulated, verify_stored
-from .policy import SynthesisPolicy
+from .exceptions import SynthesisError
+from .procedures import (
+    _no_errors,
+    _result,
+    _round_codes,
+    _round_string,
+    reason_of,
+    runnable_reason,
+)
 from .synthesizer import FSMSynthesizer, Procedure
 from .traces import gate_reads
-
-_ALLOWED_LIFECYCLES = {
-    LIFECYCLE_VERIFIED: (LIFECYCLE_VERIFIED, LIFECYCLE_TRUSTED),
-    LIFECYCLE_TRUSTED: (LIFECYCLE_TRUSTED,),
-}
-
-
-def _no_errors() -> int:
-    return 0
 
 
 @dataclass
@@ -93,75 +81,6 @@ class _Run:
     traced: int = 0
     # the provider errors made since the child was pushed (a position taken at the push)
     errors: Callable[[], int] = _no_errors
-
-
-def _result(
-    status: str, reason: str | None = None, procedure: Procedure | None = None
-) -> dict[str, Any]:
-    """The value of the result key: codes and ids only, never exception text."""
-    record = procedure.record if procedure else None
-    return {
-        "status": status,
-        "procedure_id": procedure.digest if procedure else None,
-        "version": record.version if record else None,
-        "reason": reason,
-    }
-
-
-def reason_of(error: Exception) -> str:
-    """The fixed reason for an ``obtain`` failure; the message is never read."""
-    if isinstance(error, SynthesisRefusedError) and error.code in REASONS:
-        return error.code
-    if isinstance(error, LibraryError):
-        return REASON_LIBRARY_ERROR
-    if isinstance(error, SynthesisError) and isinstance(
-        error.__cause__, LLMResponseError
-    ):
-        return REASON_PROVIDER_ERROR
-    return REASON_COMPILE_FAILED
-
-
-def _round_codes(error: BaseException | None) -> str | None:
-    """The failure codes of each compile round of a ``SynthesisError`` (codes
-    comma-joined, rounds semicolon-joined, cut at 200 characters), else ``None``."""
-    if not isinstance(error, SynthesisError):
-        return None
-    return _round_string(error.details.get("rounds") or ())
-
-
-def _round_string(rounds: Sequence[Sequence[Any]]) -> str:
-    return ";".join(",".join(map(str, codes)) for codes in rounds)[:200]
-
-
-def runnable_reason(
-    definition: FSMDefinition,
-    lifecycle: str,
-    *,
-    min_lifecycle: str,
-    policy: SynthesisPolicy,
-    inputs: Iterable[str],
-    return_keys: Iterable[str],
-    gates_passed: object = None,
-) -> str | None:
-    """The reason code a stored procedure may not run, else ``None``: a
-    ``completion`` state, a lifecycle below ``min_lifecycle`` (``verified`` or
-    ``trusted``), a record that never passed G6b when ``policy.require_simulation``
-    (``gates_passed`` is the record's list; ``None`` means no record, which a
-    compile with that policy already simulated) or a failed ``verify_stored``,
-    checked in that order. Shared by the runner and the agent tools; never
-    raises."""
-    if any(not kind_of(s).supported_in_procedure for s in definition.states.values()):
-        return REASON_COMPLETION_UNSUPPORTED
-    if lifecycle not in _ALLOWED_LIFECYCLES[min_lifecycle]:
-        return REASON_LIFECYCLE_TOO_LOW
-    # DECISION plan-2026-11-10T194139-2cefeb61/D-062
-    # `require_simulation` binds every path that runs a stored procedure, not
-    # only `obtain`. Do NOT copy the G6b test inline; use `gates.simulated`.
-    if policy.require_simulation and gates_passed is not None:
-        if not simulated(gates_passed):
-            return REASON_NOT_SIMULATED
-    report = verify_stored(definition, policy, inputs=inputs, return_keys=return_keys)
-    return None if report.passed else REASON_LIBRARY_ERROR
 
 
 class ProcedureRunner:

@@ -1842,7 +1842,7 @@ class TestToolAndProcedureHooks:
         assert "_completion_tool_names" not in defined
 
     def test_the_runner_refusal_reads_the_hook_not_the_config(self):
-        node = _function_node(self._ROOT / "runner.py", "runnable_reason")
+        node = _function_node(self._ROOT / "procedures.py", "runnable_reason")
         assert _config_attributes(node) == set()
 
     # ---- equal to the parent over the corpus -------------------------
@@ -1903,7 +1903,7 @@ class TestToolAndProcedureHooks:
 
     def test_the_runner_refusal_equals_the_parent_over_the_corpus(self):
         from fsm_llm.synthesis.policy import SynthesisPolicy
-        from fsm_llm.synthesis.runner import runnable_reason
+        from fsm_llm.synthesis.procedures import runnable_reason
 
         refused = 0
         for name, definition in self._loaded():
@@ -1924,7 +1924,7 @@ class TestToolAndProcedureHooks:
 
     def test_the_runner_refuses_the_kinds_the_hook_names(self, monkeypatch):
         from fsm_llm.synthesis.policy import SynthesisPolicy
-        from fsm_llm.synthesis.runner import runnable_reason
+        from fsm_llm.synthesis.procedures import runnable_reason
 
         definition = FSMDefinition(
             **_host_definition(

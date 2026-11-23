@@ -45,6 +45,7 @@ from fsm_llm.synthesis import (
     run_gates,
     strip_abort,
 )
+from fsm_llm.synthesis import procedures as procedures_module
 from fsm_llm.synthesis import runner as runner_module
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.testing import ScriptedLLM
@@ -841,7 +842,7 @@ class TestFailuresAreFixedReasons:
         def blow_up(*args: Any, **kwargs: Any) -> Any:
             raise RuntimeError(SECRET)
 
-        monkeypatch.setattr("fsm_llm.synthesis.runner.verify_stored", blow_up)
+        monkeypatch.setattr("fsm_llm.synthesis.procedures.verify_stored", blow_up)
         rig.runner.run(rig.conv, max_steps=10)
 
         assert (rig.state, rig.depth) == ("apology", 1)
@@ -1060,7 +1061,7 @@ class TestFailuresAreFixedReasons:
     def test_runnable_reason_reads_the_gates_list_under_require_simulation(
         self, valid_fsm, gates, reason
     ):
-        got = runner_module.runnable_reason(
+        got = procedures_module.runnable_reason(
             _procedure(valid_fsm).definition,
             "verified",
             min_lifecycle="verified",

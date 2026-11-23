@@ -24,7 +24,7 @@ from fsm_llm import API
 from fsm_llm.core.codes import CompletionKind, Reason, Status
 from fsm_llm.core.definitions import CompletionResponse
 from fsm_llm.handlers import BaseHandler, HandlerTiming
-from fsm_llm.synthesis.runner import _result as synthesis_result
+from fsm_llm.synthesis.procedures import _result as synthesis_result
 from fsm_llm.testing import (
     ConversationRun,
     PathRecorder,

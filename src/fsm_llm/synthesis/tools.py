@@ -48,7 +48,7 @@ from .constants import (
 )
 from .exceptions import LibraryError, SynthesisError
 from .gates import safe_text, verify_stored
-from .runner import _no_errors, reason_of, runnable_reason
+from .procedures import _no_errors, reason_of, runnable_reason
 from .synthesizer import FSMSynthesizer
 
 __all__ = ["TOOL_DESCRIPTIONS", "TOOL_PARAMETERS", "create_procedure_tools"]

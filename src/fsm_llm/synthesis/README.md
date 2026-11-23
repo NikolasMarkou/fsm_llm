@@ -51,7 +51,8 @@ A compile after a miss may carry one near miss in its request: the stored proced
 - `simulation.py` - `Simulator`, `SimulationReport`, `happy_path` (G6b).
 - `prompts.py` - the compile and patch prompts, the goal fence, a worked example FSM.
 - `library.py` - `FSMLibrary`, `LibraryRecord`, `LibraryMatch`, `digest_of`.
-- `runner.py` - `ProcedureRunner`, `runnable_reason`, `reason_of`.
+- `runner.py` - `ProcedureRunner`.
+- `procedures.py` - the pure helpers of a run: `runnable_reason`, `reason_of`, the result record and the round strings.
 - `tools.py` - `create_procedure_tools`: the agent tools `obtain_procedure` and `run_procedure`.
 - `traces.py` - `RunTrace`, `TraceRecorder`.
 - `diagnose.py` - `diagnose`, `Diagnosis`.

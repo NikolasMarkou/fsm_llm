@@ -420,7 +420,7 @@ def _no_definition_problem(
 
 # Sample results the loader runs a synthesize state's edges on (D-035). Shaped as
 # the runner writes the result key (`status`, `procedure_id`, `version`, `reason`;
-# producer: `fsm_llm.synthesis.runner._result`, which core may not import). `None`
+# producer: `fsm_llm.synthesis.procedures._result`, which core may not import). `None`
 # is "no result yet". The strings are the wire values of `codes.Status` and
 # `codes.Reason`: this leaf cannot import `codes`, so `test_codes` pins them
 # against the enums (and `_RUNNING` below). `definitions._SYNTHESIZE_SAMPLES` is

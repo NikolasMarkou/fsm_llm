@@ -1168,6 +1168,7 @@
     "fsm_llm.synthesis.library",
     "fsm_llm.synthesis.patch",
     "fsm_llm.synthesis.policy",
+    "fsm_llm.synthesis.procedures",
     "fsm_llm.synthesis.prompts",
     "fsm_llm.synthesis.repair",
     "fsm_llm.synthesis.reply",
