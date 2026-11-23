@@ -52,6 +52,7 @@ A compile after a miss may carry one near miss in its request: the stored proced
 - `prompts.py` - the compile and patch prompts, the goal fence, a worked example FSM.
 - `library.py` - `FSMLibrary`, `LibraryRecord`, `LibraryMatch`, `digest_of`.
 - `runner.py` - `ProcedureRunner`.
+- `executor.py` - `SynthesizeExecutor`: the same `synthesize` state run on the engine (`API(executors=...)`), no second driver (plan baa37f40, step 20; the runner coexists until step 22).
 - `procedures.py` - the pure helpers of a run: `runnable_reason`, `reason_of`, the result record and the round strings.
 - `tools.py` - `create_procedure_tools`: the agent tools `obtain_procedure` and `run_procedure`.
 - `traces.py` - `RunTrace`, `TraceRecorder`.

@@ -13,7 +13,8 @@ G6a dead-edge gate and the G6b ``Simulator``), the compile and repair loop,
 ``apply_patch`` (an RFC 6902 subset), ``propose_patch`` and
 ``repair_procedure``, ``obtain`` with the approval gate, the
 ``ProcedureRunner`` that pushes, runs and pops a procedure under a
-``synthesize`` state, and the agent tools ``obtain_procedure`` and
+``synthesize`` state, the ``SynthesizeExecutor`` that gives the same field its meaning
+inside the engine (``API(executors=...)``, plan baa37f40), and the agent tools ``obtain_procedure`` and
 ``run_procedure``.
 
 Import it by name, ``from fsm_llm.synthesis import SynthesisError``;
@@ -35,6 +36,7 @@ from .exceptions import (
     SynthesisError,
     SynthesisRefusedError,
 )
+from .executor import SynthesizeExecutor
 from .gates import GateFinding, GateReport, run_gates, verify_stored
 from .library import FSMLibrary, LibraryMatch, LibraryRecord, digest_of
 from .patch import apply_patch
@@ -82,6 +84,7 @@ __all__ = [
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",
+    "SynthesizeExecutor",
     "TraceRecorder",
     "analyze_dryrun",
     "apply_patch",

@@ -25,12 +25,16 @@ Interface contract:
   non-None value at the result key (any status) returns no data and asks no resolver. A
   pipeline with no resolver raises ``MissingExecutorError``; a state with no ``call`` config
   raises ``FSMError``.
-- ``write_call_request(result_key, *, target, resolved, inputs, max_steps, max_seconds)`` and
-  ``refuse(result_key, reason, *, target=None, resolved=None)``: the shared body (the
-  synthesize executor of step 20 reuses both). Each returns a ``DataExtractionResponse`` with
+- ``write_call_request(result_key, *, state_id, target, resolved, inputs, max_steps,
+  max_seconds)`` and ``refuse(result_key, reason, *, state_id, target=None, resolved=None)``: the
+  shared body (the synthesize executor, plan baa37f40 step 20.2, reuses both, with
+  ``record_response`` and ``commit_arrival``). Each returns a ``DataExtractionResponse`` with
   confidence 1.0 and exactly the result key. ``reason`` is a ``core.codes.Reason`` or its wire
   string (``ValueError`` for another). ``request.inputs`` holds the values it is given, each
   through ``runtime.to_jsonable`` and cut to a marker past ``_REQUEST_VALUE_MAX_CHARS``.
+  ``record_response(result_key, record)`` wraps any record the same way;
+  ``commit_arrival(pipeline, instance, committed, state_id)`` is the post-transition commit of
+  a decision made ON ARRIVAL.
 """
 
 from __future__ import annotations
@@ -104,6 +108,17 @@ def _identities(resolved: ResolvedTarget | None) -> dict[str, str | None]:
     }
 
 
+def record_response(
+    result_key: str, record: Mapping[str, Any]
+) -> DataExtractionResponse:
+    """A record as the one extracted key ``result_key`` (confidence 1.0).
+
+    Contract: the wrapper every call-shaped record and every synthesize record shares
+    (``write_call_request``, ``refuse``, ``SynthesizeExecutor``); it copies nothing and checks
+    nothing, so the caller hands it a record it built."""
+    return DataExtractionResponse(extracted_data={result_key: record}, confidence=1.0)
+
+
 def write_call_request(
     result_key: str,
     *,
@@ -130,7 +145,7 @@ def write_call_request(
             "max_seconds": max_seconds,
         },
     }
-    return DataExtractionResponse(extracted_data={result_key: record}, confidence=1.0)
+    return record_response(result_key, record)
 
 
 def refuse(
@@ -151,7 +166,36 @@ def refuse(
         "target": target,
         **_identities(resolved),
     }
-    return DataExtractionResponse(extracted_data={result_key: record}, confidence=1.0)
+    return record_response(result_key, record)
+
+
+def commit_arrival(
+    pipeline: _PipelineServices,
+    instance: FSMInstance,
+    committed: dict[str, Any],
+    state_id: str,
+) -> None:
+    """Commit the record an executor decided ON ARRIVAL at ``state_id`` (D-026 (1)).
+
+    Contract: the post-transition commit shape: ``committed`` (the extracted data of the
+    decision, the one result key) is written to the context, then the CONTEXT_UPDATE handlers
+    run for those keys; a handler that fails undoes only them (one WARNING naming the state).
+    Shared by ``CallExecutor`` and ``SynthesizeExecutor``; the source state's
+    ``extraction_response`` is not touched."""
+    commit_with_key_rollback(
+        instance.context,
+        committed,
+        lambda: pipeline.execute_handlers(
+            instance,
+            HandlerTiming.CONTEXT_UPDATE,
+            current_state=instance.current_state,
+            updated_keys=set(committed),
+        ),
+        lambda error: logger.warning(
+            f"CONTEXT_UPDATE handler failed ({type(error).__name__}: {error}), "
+            f"rolling back the call record of state '{state_id}'"
+        ),
+    )
 
 
 def chosen_target(config: CallStateConfig, data: Mapping[str, Any]) -> str | None:
@@ -265,22 +309,13 @@ class CallExecutor(StateExecutor):
         data = instance.context.data
         if record_belongs(data.get(config.result_key), new_state.id):
             return
-        committed = self._decide(
-            pipeline, data, conversation_id, new_state, config
-        ).extracted_data
-        commit_with_key_rollback(
-            instance.context,
-            committed,
-            lambda: pipeline.execute_handlers(
-                instance,
-                HandlerTiming.CONTEXT_UPDATE,
-                current_state=instance.current_state,
-                updated_keys=set(committed),
-            ),
-            lambda error: logger.warning(
-                f"CONTEXT_UPDATE handler failed ({type(error).__name__}: {error}), "
-                f"rolling back the call record of state '{new_state.id}'"
-            ),
+        commit_arrival(
+            pipeline,
+            instance,
+            self._decide(
+                pipeline, data, conversation_id, new_state, config
+            ).extracted_data,
+            new_state.id,
         )
 
     @staticmethod

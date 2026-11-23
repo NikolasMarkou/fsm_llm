@@ -12,8 +12,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from fsm_llm.aio import aoffload
+from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import DataExtractionResponse, FSMInstance, State
 
+from .requests import PopContext, PushContext, PushPlan
 from .services import _PipelineServices
 
 
@@ -29,6 +31,14 @@ class StateExecutor:
     # Whether the extracted data is passed through ``clean_context_keys`` before
     # it is committed (it drops None values and internal-prefixed keys).
     cleans_extracted: bool = True
+
+    # Whether ``engine/api/calls.py`` (``settle``) asks this executor to apply the request its
+    # Pass 1 wrote, through ``aplan_push``, ``arefusal``, ``aplan_pop`` and ``on_child_turn``
+    # (plan baa37f40, D-038). False for every kind settle judges itself (``call``) and for a
+    # kind with no request. ``watches_outage``: settle takes the provider-error position at the
+    # push and hands the count at the pop in ``ChildView.errors``.
+    serves_requests: bool = False
+    watches_outage: bool = False
 
     def extract(
         self,
@@ -128,4 +138,35 @@ class StateExecutor:
         FINAL record the pop wrote (``ok``, ``failed`` or ``aborted``). Informational, as
         ``on_pushed``.
         """
+        return None
+
+    async def aplan_push(self, ctx: PushContext) -> PushPlan | Mapping[str, Any] | None:
+        """What to push for the ``running`` record of ``ctx.state`` (``serves_requests`` only).
+
+        Returns a ``PushPlan`` (settle pushes it: ``inherit_context=False``, ONLY
+        ``plan.inputs``), a ``Mapping`` (the FINAL record of a refusal, which settle writes
+        under the result key), or ``None`` (not this executor's request: settle leaves it).
+        The record is evidence, never an instruction: an executor reads at most a lookup key
+        from it and judges everything else itself.
+        """
+        return None
+
+    async def arefusal(self, ctx: PushContext, reason: Reason) -> Mapping[str, Any]:
+        """The FINAL record of a refusal settle decided itself (the stack depth, a push the
+        engine refused, a greeting outage, a record of an unknown mode). The default is the
+        bare ``{status, reason}``; a kind with a wire shape of its own overrides it."""
+        return {"status": Status.FAILED.value, "reason": reason.value}
+
+    async def aplan_pop(self, ctx: PopContext) -> Mapping[str, Any] | None:
+        """What the pop of a child that ended (``ctx.child.ended``) or spent its budget merges
+        into the parent (``serves_requests`` only): the declared returns, only on success, and
+        the final record under the result key, as ONE mapping. ``None``: not this executor's
+        (settle leaves the frame). The child is read BEFORE the pop; afterwards the top of the
+        stack is the parent."""
+        return None
+
+    async def on_child_turn(self, ctx: PopContext) -> None:
+        """A child that is alive and inside its budget, seen at a settle round (``serves_requests``
+        only): nothing by default. Called at the start and the end of every turn entry of the
+        root, so an executor that traces keeps a cursor of the turns it has reported."""
         return None

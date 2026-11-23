@@ -24,6 +24,12 @@ Interface contract:
   ended (its state has no transition) or its own lifetime budget is spent, ``API.pop_fsm`` pops
   it with ONE merge of the declared ``returns`` and the final record. Rule (b), the push: T's
   state is a call state with such a record and nothing is above: the child is pushed.
+- A kind other than ``call`` (``synthesize``, plan baa37f40 step 20, D-038) is applied through its
+  executor: when ``StateExecutor.serves_requests`` is set settle asks it ``aplan_push`` (a ``PushPlan``,
+  the final record of a refusal, or ``None``), ``arefusal``, ``on_child_turn`` and ``aplan_pop`` (the
+  one merge), with plain values from ``engine/kinds/requests.py``; the stack, the marks, the push,
+  the pop and every cancel rule stay here. ``StateExecutor.watches_outage`` takes the provider-error
+  position at the push (``CallMarks.errors``). An executor that does not serve requests is left alone.
 - Never trusts the record (D-023): the target, the inputs and the budgets are read from the
   PARENT frame's own definition and context. A forged public ``call_result`` cannot name a
   target the state does not declare.
@@ -44,7 +50,7 @@ Interface contract:
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeGuard
 
@@ -64,15 +70,23 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.kinds import executor_for
 from fsm_llm.engine.kinds.call import chosen_target, record_belongs
+from fsm_llm.engine.kinds.requests import (
+    ChildView,
+    PopContext,
+    PushContext,
+    PushPlan,
+)
 from fsm_llm.engine.kinds.targets import TARGET_MODE_FRAME, ResolvedTarget
 from fsm_llm.logging import logger
+from fsm_llm.runtime.usage import watch_provider_errors
 
 if TYPE_CHECKING:
     from .stack import FSMStackFrame
     from .surface import _ApiSurface
 
-#: The state kinds whose records settle applies (step 20 adds ``synthesize``).
-_SETTLED_KINDS = frozenset({"call"})
+#: The state kinds whose records settle applies: ``call`` it judges itself, ``synthesize`` it
+#: asks its executor about (``StateExecutor.serves_requests``, plan baa37f40 D-038).
+_SETTLED_KINDS = frozenset({"call", "synthesize"})
 
 #: A settle step is one push or one pop; nesting is bounded by the stack depth, so a loop that
 #: does not end by then is a defect, not a long run.
@@ -97,17 +111,21 @@ class CallMarks:
     child frames whose returns are merged and whose end was refused, so the retry pops them
     with no second merge. ``pushed``: child frame id to the ``ResolvedTarget`` settle pushed,
     the source of the identities of the final record (D-027; never the public record).
+    ``errors``: child frame id to the reader of the provider errors made since its push, taken
+    only for an executor with ``watches_outage`` (D-038).
     """
 
     settling: set[str] = field(default_factory=set)
     ending: set[str] = field(default_factory=set)
     pushed: dict[str, ResolvedTarget] = field(default_factory=dict)
+    errors: dict[str, Callable[[], int]] = field(default_factory=dict)
 
     def forget(self, frame_ids: Iterable[str]) -> None:
         """Drop what is kept for these child frames (the caller holds ``_stack_lock``)."""
         for frame_id in frame_ids:
             self.ending.discard(frame_id)
             self.pushed.pop(frame_id, None)
+            self.errors.pop(frame_id, None)
 
 
 # DECISION plan-2026-11-23T122249-baa37f40/D-023
@@ -247,11 +265,18 @@ async def _try_pop(
     if parent_peek is None:
         return False
     state = _settled_state(parent, parent_peek[0])
-    config = None if state is None else state.call
-    if state is None or config is None:
+    if state is None:
+        return False
+    is_call = kind_of(state).name == "call"
+    config = state.call
+    result_key = kind_of(state).result_key(state)
+    if result_key is None or (is_call and config is None):
+        return False
+    executor = executor_for(state, api._executors)
+    if not is_call and not executor.serves_requests:
         return False
     parent_data = api.fsm_manager.copy_raw_context_data(parent.conversation_id) or {}
-    record = parent_data.get(config.result_key)
+    record = parent_data.get(result_key)
     with api._stack_lock:
         retry = top.conversation_id in api._call_marks.ending
     if not (retry or _is_request(record, state.id)):
@@ -259,12 +284,33 @@ async def _try_pop(
     top_state = top.fsm_definition.states.get(top_state_id)
     ended = top_state is not None and not top_state.transitions
     spent = api.fsm_manager.turn_budget_spent(top.conversation_id)
+    view: PopContext | None = None
+    if not is_call and not retry:
+        view = PopContext(
+            root_id,
+            parent.conversation_id,
+            state,
+            parent.fsm_definition,
+            record if isinstance(record, dict) else {},
+            _child_view(api, top, top_state_id, ended=ended, spent=spent),
+        )
+        if not (ended or spent is not None):
+            await executor.on_child_turn(view)  # alive and inside its budget: the trace
+            return False
     if not (retry or ended or spent is not None):
         return False  # the child is alive and inside its budget
     final: dict[str, Any] | None = None
+    context_to_return: dict[str, Any] | None
     if retry:
         context_to_return = None  # the merge landed before the end was refused
+    elif view is not None:
+        planned = await executor.aplan_pop(view)
+        if planned is None:
+            return False  # not this executor's request: the frame is left as it is
+        context_to_return = dict(planned)
+        final = context_to_return.get(result_key)
     else:
+        assert config is not None  # is_call
         context_to_return = _outcome(
             api,
             top,
@@ -280,7 +326,7 @@ async def _try_pop(
     except Exception:
         # the merge landed when the parent's record is final now: the retry must not merge again
         now = api.fsm_manager.copy_raw_context_data(parent.conversation_id) or {}
-        landed = now.get(config.result_key)
+        landed = now.get(result_key)
         with api._stack_lock:
             # only a frame that is still on the stack can be retried: an end that raised after
             # the teardown removed it leaves nothing for a mark to point at (D-028 (4))
@@ -300,11 +346,42 @@ async def _try_pop(
     with api._stack_lock:
         api._call_marks.forget([top.conversation_id])
     if final is None:
-        final = parent_data.get(config.result_key) or {}
-    await executor_for(state, api._executors).on_ended(
+        final = parent_data.get(result_key) or {}
+    await executor.on_ended(
         root_id, parent.conversation_id, top.conversation_id, state, final
     )
     return True
+
+
+def _child_view(
+    api: _ApiSurface,
+    child: FSMStackFrame,
+    state_id: str,
+    *,
+    ended: bool,
+    spent: str | None,
+) -> ChildView:
+    """The child frame as an executor may see it: copies and plain values only (D-038). The
+    provider-error count is read here, once, from the reader taken at the push (``0`` for an
+    executor that did not ask for one, or after a restart that lost it)."""
+    with api._stack_lock:
+        reader = api._call_marks.errors.get(child.conversation_id)
+    errors = 0
+    if reader is not None:
+        try:
+            errors = reader()
+        except Exception:  # the reader falls back by itself; a fault here is no outage
+            errors = 0
+    return ChildView(
+        conversation_id=child.conversation_id,
+        fsm_id=child.fsm_id,
+        state_id=state_id,
+        data=api.fsm_manager.copy_raw_context_data(child.conversation_id) or {},
+        ended=ended,
+        spent=spent,
+        steps=api.fsm_manager.turn_budget_steps(child.conversation_id),
+        errors=errors,
+    )
 
 
 def _outcome(
@@ -391,8 +468,12 @@ async def _try_push(
 ) -> bool:
     top = frames[-1]
     state = _settled_state(top, state_id)
-    config = None if state is None else state.call
-    if state is None or config is None:
+    if state is None:
+        return False
+    if kind_of(state).name != "call":
+        return await _try_push_requested(api, root_id, frames, state, greetings)
+    config = state.call
+    if config is None:
         return False
     data = api.fsm_manager.copy_raw_context_data(top.conversation_id) or {}
     record = data.get(config.result_key)
@@ -430,44 +511,118 @@ async def _try_push(
             )
             return True
         inputs[name] = copy.deepcopy(value)
+
+    async def refuse(reason: Reason) -> None:
+        await _refuse(api, root_id, state_id, config, reason, target, resolved)
+
+    plan = PushPlan(resolved.definition, inputs, config.max_steps, config.max_seconds)
+    return await _push_plan(
+        api, root_id, frames, state, record, plan, resolved, refuse, greetings
+    )
+
+
+async def _try_push_requested(
+    api: _ApiSurface,
+    root_id: str,
+    frames: list[FSMStackFrame],
+    state: State,
+    greetings: list[str],
+) -> bool:
+    """The push of a kind settle does not judge itself: its executor plans it (D-038)."""
+    top = frames[-1]
+    executor = executor_for(state, api._executors)
+    result_key = kind_of(state).result_key(state)
+    if not executor.serves_requests or result_key is None:
+        return False
+    data = api.fsm_manager.copy_raw_context_data(top.conversation_id) or {}
+    record = data.get(result_key)
+    unknown_mode = _is_unknown_mode(record, state.id)
+    if not (unknown_mode or _is_request(record, state.id)) or not isinstance(
+        record, dict
+    ):
+        return False
+    ctx = PushContext(
+        root_id, top.conversation_id, state, top.fsm_definition, data, record
+    )
+
+    async def refuse(reason: Reason) -> None:
+        final = await executor.arefusal(ctx, reason)
+        api.update_context(root_id, {result_key: dict(final)})
+
+    if unknown_mode:  # no host of another mode exists: fail, never wait forever
+        await refuse(Reason.UNKNOWN_TARGET)
+        return True
+    plan = await executor.aplan_push(ctx)
+    if plan is None:
+        return False  # not this executor's request: left as it is
+    if not isinstance(plan, PushPlan):  # the FINAL record of a refusal it decided
+        api.update_context(root_id, {result_key: dict(plan)})
+        return True
+    return await _push_plan(
+        api, root_id, frames, state, record, plan, None, refuse, greetings
+    )
+
+
+async def _push_plan(
+    api: _ApiSurface,
+    root_id: str,
+    frames: list[FSMStackFrame],
+    state: State,
+    record: Mapping[str, Any],
+    plan: PushPlan,
+    resolved: ResolvedTarget | None,
+    refuse: Callable[[Reason], Awaitable[None]],
+    greetings: list[str],
+) -> bool:
+    """The push both kinds share: the stack bound, ``apush_fsm`` with ONLY ``plan.inputs`` and
+    ``inherit_context=False``, the marks, ``on_pushed``. Always ``True`` (the stack or the
+    record changed); a refusal is written by ``refuse``."""
+    top = frames[-1]
     if len(frames) >= DEFAULT_MAX_STACK_DEPTH:
-        await _refuse(
-            api, root_id, state_id, config, Reason.DEPTH_REFUSED, target, resolved
-        )
+        await refuse(Reason.DEPTH_REFUSED)
         return True
     try:
         greeting = await api.apush_fsm(
             root_id,
-            resolved.definition,
-            context_to_pass=inputs,
+            plan.definition,
+            context_to_pass=dict(plan.inputs),
             inherit_context=False,
-            max_steps=config.max_steps,
-            max_seconds=config.max_seconds,
+            max_steps=plan.max_steps,
+            max_seconds=plan.max_seconds,
         )
     except LLMResponseError:
         # the push rolled itself back (D-020): an outage of the greeting is a final `failed`
         # record, so the failure edge fires on the next turn (D-026 (6)); it is not asked again
-        await _refuse(
-            api, root_id, state_id, config, Reason.PROVIDER_ERROR, target, resolved
-        )
+        await refuse(Reason.PROVIDER_ERROR)
         return True
     except (FSMError, ValueError) as error:
         logger.warning(
-            f"Call state '{state_id}' could not push its target: "
+            f"State '{state.id}' could not push its child: "
             f"{type(error).__name__}: {error}"
         )
-        await _refuse(
-            api, root_id, state_id, config, Reason.PUSH_FAILED, target, resolved
-        )
+        await refuse(Reason.PUSH_FAILED)
         return True
     if greeting:
         greetings.append(greeting)
+    executor = executor_for(state, api._executors)
     with api._stack_lock:
         child_id = api.conversation_stacks[root_id][-1].conversation_id
-        api._call_marks.pushed[child_id] = resolved
-    await executor_for(state, api._executors).on_pushed(
-        root_id, top.conversation_id, child_id, state, record
-    )
+        depth = len(api.conversation_stacks[root_id])
+        if resolved is not None:
+            api._call_marks.pushed[child_id] = resolved
+    if executor.watches_outage:
+        # the provider-error POSITION is taken where the push is (5a6a1f80/D-015), never at the
+        # pop: the child has already run by then
+        try:
+            reader = watch_provider_errors(
+                api.llm_interface, api._event_log, root_id, depth - 1
+            )
+        except Exception:  # a source that cannot start answers 0
+            reader = None
+        if reader is not None:
+            with api._stack_lock:
+                api._call_marks.errors[child_id] = reader
+    await executor.on_pushed(root_id, top.conversation_id, child_id, state, record)
     return True
 
 

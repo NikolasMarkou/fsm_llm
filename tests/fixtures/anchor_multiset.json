@@ -844,6 +844,11 @@
       "delta": 1,
       "reason": "plan baa37f40 D-036: a new anchor on ReasoningEngine._solve (the one solve body: the lock inside the generator, the conversation ended on every way out)",
       "token": "plan-2026-11-23T122249-baa37f40/D-036"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 D-038 (step 20.2): the new anchor on SynthesizeExecutor (the synthesize kind on the engine; the running record is evidence; persona rule; no run counted before on_ended)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-038"
     }
   ]
 }

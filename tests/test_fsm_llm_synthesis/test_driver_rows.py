@@ -258,7 +258,7 @@ class TestConverse:
 
 class TestAbort:
     def test_a_silent_child_is_aborted_after_max_turns_and_the_parent_apologises(
-        self, valid_fsm, tmp_path
+        self, valid_fsm, tmp_path, _driver
     ):
         rig = make_rig(
             valid_fsm,
@@ -285,7 +285,9 @@ class TestAbort:
         assert rig.cheap.count("generate_response", "ask") == 1 + 3
         assert rig.extractions() == 3 * 2
         assert rig.names == ["obtained", "pushed", "aborted", "popped"]
-        assert rig.events[2][1]["step"] == 5
+        # the `step` of an event: core's next step number for the runner's hook, the engine's
+        # count of the child's turns (the three it took) for the executor (D-038 (7))
+        assert rig.events[2][1]["step"] == {"runner": 5, "executor": 3}[_driver]
         assert rig.library is not None
         assert rig.library.get_record(rig.digest).stats == {"runs": 1, "successes": 0}
 
@@ -878,8 +880,10 @@ class TestTraceSink:
 
     def test_a_raising_sink_is_swallowed_with_one_warning_per_event(self, valid_fsm):
         seen: list[str] = []
+        sent: list[str] = []
 
         def sink(event: str, fields: dict[str, Any]) -> None:
+            sent.append(event)
             raise RuntimeError(SECRET)
 
         rig = make_rig(valid_fsm, sink=sink)
@@ -893,7 +897,12 @@ class TestTraceSink:
 
         assert rig.state == "booked"
         warnings = [m for m in seen if "trace_sink" in m]
-        assert len(warnings) == 3 and not any(SECRET in m for m in warnings)
+        # one warning per event sent: obtained, pushed and popped, plus a `stepped` per traced
+        # child turn (the executor traces the last turn of a run too, the runner's run mode did
+        # not: D-038 (7), so the count of events is not pinned, the rule is)
+        assert {"obtained", "pushed", "popped"} <= set(sent)
+        assert len(warnings) == len(sent) and not any(SECRET in m for m in warnings)
+        assert all(any(f"on {name!r}" in m for m in warnings) for name in set(sent))
 
 
 class TestObtainedEvent:

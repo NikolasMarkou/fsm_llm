@@ -17,10 +17,10 @@ extraction, owned by the executor since step 80: ``conversation/``), ``completio
 (one ``LLMInterface.complete`` call over a consumer-owned transcript, ``completion.py``),
 ``call`` (no model call: Pass 1 resolves a target and writes a request or a refusal record
 that ``engine/api/calls.py`` applies after the turn, ``call.py``, plan baa37f40) and
-``synthesize`` (passive, no registration: it runs as conversation, because a runner outside core
-pushes the compiled procedure and a bare ``converse`` on such a state stays BLOCKED, D-002 of
-plan 2cefeb61; a later synthesize executor registers under its own name and replaces the
-fallback).
+``synthesize`` (passive with no registration: it runs as conversation, a bare ``converse`` on such
+a state stays BLOCKED, D-002 of plan 2cefeb61; ``fsm_llm.synthesis.SynthesizeExecutor``, plan
+baa37f40 step 20, registers under its own name through ``API(executors=...)`` and replaces the
+fallback; the module table stays without it until step 22 flips ``requires_executor``).
 
 Layer ``engine`` (plan d454fd62, steps 53 to 56 and 80): the old flat ``fsm_llm.executors`` is
 this package; the old dotted path is gone. Modules:
@@ -32,6 +32,9 @@ this package; the old dotted path is gone. Modules:
 - ``call.py``: ``CallExecutor`` and the shared body ``write_call_request`` / ``refuse``.
 - ``conversation/``: ``ConversationExecutor`` and the conversation Pass-1 machinery.
 - ``records.py``: the records and digests both the executors and the turn pipeline use.
+- ``requests.py``: ``PushContext``, ``PushPlan``, ``ChildView``, ``PopContext``, the plain values ``settle``
+  and an executor that sets ``serves_requests`` exchange (``aplan_push``, ``arefusal``, ``aplan_pop``,
+  ``on_child_turn``, with ``on_pushed`` and ``on_ended``; plan baa37f40 D-038).
 - ``targets.py``: ``TargetResolver``, ``ResolvedTarget`` and ``check_targets``, the seam through which a
   ``call`` state reaches a registry it may not import (``API(targets=)``; plan baa37f40 D-021).
 
