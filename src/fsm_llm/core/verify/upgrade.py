@@ -1,7 +1,7 @@
 """``upgrade_fsm_file``: stamp the current definition version on an older FSM file in place.
 
 ``--upgrade`` is the one place a user's file is rewritten: it validates first and
-rewrites only a 4.0 or 4.1 file (any version from 4.0 up to below the
+rewrites only a 4.0, 4.1 or 4.2 file (any version from 4.0 up to below the
 default; see ``upgrade_fsm_file``).
 
 Layer ``core`` (plan d454fd62, step 75): split out of the old ``fsm_llm.validator``.

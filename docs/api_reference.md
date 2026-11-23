@@ -372,7 +372,7 @@ Usage counters count every provider call of that instance once, per kind (`gener
 
 ### Completion state
 
-A state may declare one optional `completion` field (`CompletionStateConfig`; additive, introduced in definition version 4.1, the default version is now 4.2):
+A state may declare one optional `completion` field (`CompletionStateConfig`; additive, introduced in definition version 4.1, the default version is now 4.3):
 
 ```json
 "call_model": {
@@ -406,7 +406,7 @@ A state with empty `response_instructions` is never sent to the interface: no `g
 
 ### Synthesize state
 
-A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen, extras refused; introduced in definition version 4.2, the default version). Core only loads and checks it; `fsm_llm.synthesis.ProcedureRunner` gives it meaning (see Synthesis below):
+A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen, extras refused; introduced in definition version 4.2). Core only loads and checks it; `fsm_llm.synthesis.ProcedureRunner` gives it meaning (see Synthesis below):
 
 ```json
 "gather": {
@@ -434,6 +434,36 @@ A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen,
 ```
 
 `goal` is the author's fixed text (1 to 2,000 characters, not blank). `inputs` and `return_keys` (at least one) hold public key names only, never `result_key` and never a handler-only key for a return key. `on_failure` is a state id one of the state's transitions reaches. `result_key` (default `synthesis_result`) is public and handler-only for extraction; the runner writes `{status, procedure_id, version, reason}` to it. `min_lifecycle` is `verified` or `trusted`. The state declares no `completion`, `field_extractions`, `classification_extractions`, `required_context_keys` or `extraction_instructions`, and the pipeline gives it no extraction. At load the whole FSM is checked with the real transition evaluator on sample results (none, `running`, `failed`, `aborted`): every edge must read the result key (or a handler-only key), no edge may pass for none or `running`, and the edge to `on_failure` must pass for `failed` and for `aborted`, so write it as `status in [failed, aborted]`; a bare `== "failed"` is refused. A bare `API.converse` on such a state stays in it. `fsm-llm-validate` adds no synthesize check beyond the loader; it only warns when a definition that declares `"4.0"` or `"4.1"` uses `synthesize` (see "Definition versions").
+
+### Call state
+
+A state may declare one optional `call` field (`CallStateConfig`, frozen, extras refused; introduced in definition version 4.3, the default). Core only loads and checks it: no executor runs a call state yet, so a bare `API.converse` on one stays (BLOCKED).
+
+```json
+"work": {
+  "id": "work",
+  "description": "Run one target",
+  "purpose": "Run the analytical strategy on the problem",
+  "call": {
+    "target": "reasoning.analytical",
+    "inputs": ["problem_statement"],
+    "returns": {"answer": "solution"},
+    "on_failure": "sorry",
+    "result_key": "call_result",
+    "max_steps": 30
+  },
+  "transitions": [
+    {"target_state": "done", "description": "The target returned", "priority": 1,
+     "conditions": [{"description": "ok", "requires_context_keys": ["call_result"],
+                     "logic": {"==": [{"var": "call_result.status"}, "ok"]}}]},
+    {"target_state": "sorry", "description": "It failed or was stopped", "priority": 2,
+     "conditions": [{"description": "not ok", "requires_context_keys": ["call_result"],
+                     "logic": {"in": [{"var": "call_result.status"}, ["failed", "aborted"]]}}]}
+  ]
+}
+```
+
+Exactly one of `target` (an executable id, the charset of an envelope id) and `choose` (`key`, the context key holding a target id, which may be a handler-only key; `targets`, the closed list of ids, at least one; `fallback`, one of `targets`, called when the value is not in the list; `targets_from {capability}`, a declaration kept beside the resolved list that core never resolves). `inputs` and both sides of `returns` (`{parent_key: child_output}`, empty allowed) hold public key names only, and `result_key` is none of the inputs, the parent return keys or the choose key. `max_steps` and `max_seconds` are positive. The state declares no `completion`, no `synthesize` and no extraction. The loader applies the synthesize edge rule in the call wording (`fsm_llm.core.kind_call.check_result_edges`): every edge reads the result key or a handler-only key, no edge passes before a result exists, and an edge to `on_failure` passes for `failed` and for `aborted`. `Reason.UNKNOWN_TARGET` (`"unknown_target"`) is the reason a call that names no resolvable target ends with.
 
 ## WorkingMemory (`fsm_llm`)
 
@@ -531,7 +561,7 @@ print(visualize_fsm_ascii(fsm_dict, style="compact"))
 ```python
 from fsm_llm.core.definitions.schema import FIELD_VERSIONS, SCHEMA_VERSION_DEFAULT, SCHEMA_VERSION_OLDEST, newer_fields, parse_version
 
-SCHEMA_VERSION_DEFAULT              # "4.2": the version a definition without `version` takes
+SCHEMA_VERSION_DEFAULT              # "4.3": the version a definition without `version` takes
 SCHEMA_VERSION_OLDEST               # "4.0": the oldest version whose shape the registry knows
 FIELD_VERSIONS["State.synthesize"]  # "4.2"; keys are "Model.field", values the version that added it
 parse_version("4.1")                # (4, 1); None for a text that is not N.M ("v4.1", "4", "4.1.1")
@@ -539,7 +569,7 @@ newer_fields(definition)            # tuple[SchemaFinding, ...]; each has .model
                                     # .declared, .state_id and .message
 ```
 
-The registry is a leaf core module (imports no other `fsm_llm` module, never logs). Its tiers are coarse: every field of the 4.0 schema is `"4.0"` (including `Transition.llm_description` and `TransitionCondition.evaluation_priority`), every field added since is `"4.1"`, and `State.synthesize` with every `SynthesizeConfig` field is `"4.2"`. A test walks the models reachable from `FSMDefinition`, so a field missing from `FIELD_VERSIONS` (or an entry for a field that is gone) fails the build. `newer_fields` lists the fields the author actually set (not `None`, not equal to the default) that the declared version predates; a declared version that does not parse, or is below 4.0, gives no finding.
+The registry is a leaf core module (imports no other `fsm_llm` module, never logs). Its tiers are coarse: every field of the 4.0 schema is `"4.0"` (including `Transition.llm_description` and `TransitionCondition.evaluation_priority`), every field added since is `"4.1"`, `State.synthesize` with every `SynthesizeConfig` field is `"4.2"`, and `State.call` with every `CallStateConfig`, `CallChoose` and `CallTargetsFrom` field is `"4.3"`. A test walks the models reachable from `FSMDefinition`, so a field missing from `FIELD_VERSIONS` (or an entry for a field that is gone) fails the build. `newer_fields` lists the fields the author actually set (not `None`, not equal to the default) that the declared version predates; a declared version that does not parse, or is below 4.0, gives no finding.
 
 The loader logs one warning per definition object for such a field (not again for each conversation or `push_fsm` that holds it) (library logging is off by default) and still loads the definition. `fsm-llm-validate` reports the same facts as warnings in its JSON report; `is_valid` is unchanged, so the validator is never stricter than the loader. A definition that omits `version` takes the current default and never warns. A definition that declares `"4.1"` explicitly now has a different `fsm_id` than before the default moved to `"4.2"` (the id hashes the declared version); a stored session of it restores with an `fsm_id` mismatch warning, and a stored synthesis procedure that declares `"4.1"` is stored again under a new digest.
 

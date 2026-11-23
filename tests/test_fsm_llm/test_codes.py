@@ -64,12 +64,20 @@ class TestMembers:
             "abstained",
         ]
 
-    def test_reason_values_are_the_pinned_tuple_then_two_more(self):
+    def test_reason_values_are_the_pinned_tuple_then_three_more(self):
         values = [m.value for m in Reason]
-        assert len(values) == 17
+        assert len(values) == 18
         assert values[:15] == list(synth_constants.REASONS)
         assert values[15] == "needs_user_input"
         assert values[16] == "cancelled"
+        assert values[17] == "unknown_target"
+
+    def test_unknown_target_is_outside_the_pinned_reasons(self):
+        # `unknown_target` is the call kind's vocabulary (roadmap E3.1): the 18th member, no
+        # synthesis string names it, so the pinned tuple stays 15 long.
+        assert Reason.UNKNOWN_TARGET.value == "unknown_target"
+        assert "unknown_target" not in synth_constants.REASONS
+        assert Reason.from_string("unknown_target") is Reason.UNKNOWN_TARGET
 
     def test_cancelled_is_outside_the_pinned_reasons(self):
         # `cancelled` is run-level vocabulary (roadmap 0.16, 4.8): no synthesis
@@ -205,6 +213,30 @@ class TestAgainstThePinnedVocabularies:
             if sample is not None and "reason" in sample
         }
         assert all(Reason.from_string(r) in Reason for r in reasons)
+
+    def test_call_samples_use_status_and_reason_values(self):
+        """The call samples live in the `kind_call` leaf, which cannot import `codes`: every
+        status and reason string in them is a member of the enums, and the shape is the C13
+        projection."""
+        from fsm_llm.core.kind_call import CALL_SAMPLES
+
+        assert [label for label, _ in CALL_SAMPLES] == [
+            "absent",
+            "running",
+            "failed",
+            "aborted",
+        ]
+        results = [sample for _, sample in CALL_SAMPLES if sample is not None]
+        assert {sample["status"] for sample in results} == {
+            "running",
+            "failed",
+            "aborted",
+        }
+        for sample in results:
+            assert Status.from_string(sample["status"]) in Status
+            assert set(sample) >= {"status", "target", "template_identity"}
+            if "reason" in sample:
+                assert Reason.from_string(sample["reason"]) in Reason
 
 
 class TestStatusOfStopReason:

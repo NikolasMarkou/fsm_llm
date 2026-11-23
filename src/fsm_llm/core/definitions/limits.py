@@ -40,6 +40,15 @@ DEFAULT_SYNTHESIS_RESULT_KEY = "synthesis_result"
 SYNTHESIZE_GOAL_MAX_LENGTH = 2000
 SYNTHESIZE_KEY_MAX_LENGTH = 100
 
+#: ``CallStateConfig`` default result key (the key a call state's record is written to);
+#: here, not in ``constants.py`` (pinned), like the synthesis one.
+DEFAULT_CALL_RESULT_KEY = "call_result"
+
+#: The id of an executable, as the envelope spells it and as a ``call`` target names one: the
+#: one spelling (the envelope model and the call models both read it).
+EXECUTABLE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:/-]*$"
+EXECUTABLE_ID_MAX_LENGTH = 128
+
 
 def nests_deeper_than(value: Any, limit: int) -> bool:
     """True when a container of `value` sits deeper than `limit` (the root is 1).

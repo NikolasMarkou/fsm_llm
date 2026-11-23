@@ -20,6 +20,9 @@ import pytest
 from pydantic import BaseModel
 
 from fsm_llm.core.definitions import (
+    CallChoose,
+    CallStateConfig,
+    CallTargetsFrom,
     ClassificationExtractionConfig,
     CompletionStateConfig,
     ContextScope,
@@ -51,6 +54,9 @@ REGISTERED_MODELS = {
     ContextScope,
     CompletionStateConfig,
     SynthesizeConfig,
+    CallStateConfig,
+    CallChoose,
+    CallTargetsFrom,
 }
 
 
@@ -143,13 +149,35 @@ def _synthesize_state(state_id: str = "solve") -> dict[str, Any]:
     )
 
 
+def _call_state(state_id: str = "work") -> dict[str, Any]:
+    return _state(
+        state_id,
+        call={"target": "reasoning.analytical", "on_failure": "end"},
+        transitions=[
+            {
+                "target_state": "end",
+                "description": "failed or aborted",
+                "conditions": [
+                    {
+                        "description": "status failed or aborted",
+                        "requires_context_keys": ["call_result"],
+                        "logic": {
+                            "in": [{"var": "call_result.status"}, ["failed", "aborted"]]
+                        },
+                    }
+                ],
+            }
+        ],
+    )
+
+
 def _found(definition: FSMDefinition) -> set[tuple[str, str, str | None]]:
     return {(f.model, f.field, f.state_id) for f in newer_fields(definition)}
 
 
 class TestRegistryCompleteness:
     def test_the_reachable_models_are_exactly_the_registered_ones(self):
-        # An 11th model reachable from FSMDefinition fails here until it is
+        # A model reachable from FSMDefinition fails here until it is
         # registered (and added to REGISTERED_MODELS above).
         assert _reachable(FSMDefinition) == REGISTERED_MODELS
 
@@ -188,6 +216,11 @@ class TestRegistryTiers:
     @pytest.mark.parametrize(
         ("key", "version"),
         [
+            ("State.call", "4.3"),
+            ("CallStateConfig.target", "4.3"),
+            ("CallStateConfig.max_seconds", "4.3"),
+            ("CallChoose.targets_from", "4.3"),
+            ("CallTargetsFrom.capability", "4.3"),
             ("State.synthesize", "4.2"),
             ("SynthesizeConfig.goal", "4.2"),
             ("SynthesizeConfig.min_lifecycle", "4.2"),
@@ -210,6 +243,15 @@ class TestRegistryTiers:
         names = [k for k in FIELD_VERSIONS if k.startswith("SynthesizeConfig.")]
         assert names
         assert {FIELD_VERSIONS[k] for k in names} == {"4.2"}
+
+    def test_every_call_field_is_4_3(self):
+        names = [
+            k
+            for k in FIELD_VERSIONS
+            if k.startswith(("CallStateConfig.", "CallChoose.", "CallTargetsFrom."))
+        ]
+        assert names
+        assert {FIELD_VERSIONS[k] for k in names} == {"4.3"}
 
 
 class TestParseVersion:
@@ -275,6 +317,14 @@ class TestNewerFields:
 
     def test_a_4_2_file_is_quiet(self):
         assert newer_fields(_definition("4.2", solve=_synthesize_state())) == ()
+
+    def test_a_4_2_file_using_call_warns_once_and_a_4_3_file_is_quiet(self):
+        definition = _definition("4.2", work=_call_state())
+        findings = newer_fields(definition)
+        assert [
+            (f.model, f.field, f.introduced, f.declared, f.state_id) for f in findings
+        ] == [("State", "call", "4.3", "4.2", "work")]
+        assert newer_fields(_definition("4.3", work=_call_state())) == ()
 
     @pytest.mark.parametrize("declared", ["3.0", "v4.1", "4", "4.1.1", "5.0", "3.9"])
     def test_an_unparseable_older_or_newer_declaration_is_quiet(self, declared):
@@ -438,7 +488,7 @@ class TestNewerFields:
 class TestDefaultVersion:
     def test_the_model_default_is_the_registry_constant(self):
         assert FSMDefinition.model_fields["version"].default == SCHEMA_VERSION_DEFAULT
-        assert SCHEMA_VERSION_DEFAULT == "4.2"
+        assert SCHEMA_VERSION_DEFAULT == "4.3"
 
     def test_an_omitted_version_loads_as_the_default(self):
         definition = FSMDefinition(
@@ -959,7 +1009,7 @@ class TestUpgradeFsmFile:
         path, text = self._definition_nested_to(tmp_path, _MAX_NESTING_DEPTH)
         result = upgrade_fsm_file(str(path))
         assert result.rewritten is True and result.refusal is None
-        assert json.loads(path.read_text(encoding="utf-8"))["version"] == "4.2"
+        assert json.loads(path.read_text(encoding="utf-8"))["version"] == "4.3"
 
         path, text = self._definition_nested_to(tmp_path, _MAX_NESTING_DEPTH + 1)
         result = upgrade_fsm_file(str(path))

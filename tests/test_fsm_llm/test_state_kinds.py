@@ -57,11 +57,12 @@ def _model_config_fields() -> set[str]:
 
 
 class TestRegistryShape:
-    def test_names_are_the_three_built_in_kinds_in_order(self):
+    def test_names_are_the_four_built_in_kinds_in_order(self):
         assert [spec.name for spec in sk.KINDS] == [
             "conversation",
             "completion",
             "synthesize",
+            "call",
         ]
 
     def test_the_default_kind_is_the_first_and_the_only_one_without_a_config_field(
@@ -1895,11 +1896,12 @@ class TestToolAndProcedureHooks:
 
     # ---- supported_in_procedure --------------------------------------
 
-    def test_only_the_completion_kind_is_unsupported_in_a_procedure(self):
+    def test_only_completion_and_call_are_unsupported_in_a_procedure(self):
         assert {spec.name: spec.supported_in_procedure for spec in sk.KINDS} == {
             "conversation": True,
             "completion": False,
             "synthesize": True,
+            "call": False,
         }
 
     def test_the_runner_refusal_equals_the_parent_over_the_corpus(self):

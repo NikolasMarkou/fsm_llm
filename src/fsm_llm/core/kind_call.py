@@ -22,6 +22,14 @@ Interface contract:
   *kind* (``synthesize``), *producer* (``the runner``), *outcome* (``the
   procedure``) and *return_entry* (``return_keys``, the label of the
   *return_names* list). Never raises on a loaded state.
+- ``CALL_SAMPLES``: the sample results the loader runs a call state's edges on (``None`` is
+  "no result yet"), shaped as the engine writes ``call_result`` (the C13 projection
+  ``{status, reason, target, template_identity, instance_identity}``; the strings are the
+  wire values of ``codes.Status`` and ``codes.Reason``, pinned by ``test_codes``).
+- ``call_check_state(state)``: the call kind's ``check_state`` (a message or ``None``).
+- ``call_check_definition(definition, state, evaluator, logic_keys, owned)``: the call
+  kind's ``check_definition``: ``check_result_edges`` in the call wording over the state's
+  ``call`` config (read by ``getattr``; its ``choose`` key is a read, not a result key).
 """
 
 from __future__ import annotations
@@ -29,7 +37,12 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-__all__ = ["check_result_edges"]
+__all__ = [
+    "CALL_SAMPLES",
+    "call_check_definition",
+    "call_check_state",
+    "check_result_edges",
+]
 
 _RUNNING = "running"
 
@@ -144,3 +157,76 @@ def check_result_edges(
                 continue
             return f"{kind} {entry} entry {name!r} collides with {reason}"
     return None
+
+
+# Sample results of a call state (the shape `call_result` takes: D-015). `None` is "no result yet".
+CALL_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
+    ("absent", None),
+    (
+        "running",
+        {
+            "status": "running",
+            "target": "t",
+            "template_identity": "x",
+            "instance_identity": "y",
+        },
+    ),
+    (
+        "failed",
+        {
+            "status": "failed",
+            "reason": "unknown_target",
+            "target": None,
+            "template_identity": None,
+            "instance_identity": None,
+        },
+    ),
+    (
+        "aborted",
+        {
+            "status": "aborted",
+            "reason": "budget_spent",
+            "target": "t",
+            "template_identity": "x",
+            "instance_identity": "y",
+        },
+    ),
+)
+
+
+def call_check_state(state: Any) -> str | None:
+    """The call kind's own rule: ``on_failure`` is one of the state's transition targets."""
+    on_failure = state.call.on_failure
+    if on_failure not in {t.target_state for t in state.transitions or []}:
+        return (
+            f"call on_failure {on_failure!r} must be one of the state's "
+            "transition targets (a terminal state has none)"
+        )
+    return None
+
+
+def call_check_definition(
+    definition: Any,
+    state: Any,
+    evaluator: Any,
+    logic_keys: Callable[[Any], set[str]],
+    owned: Callable[[], Mapping[str, str]],
+) -> str | None:
+    """Cross-state rules of a call state: ``check_result_edges`` in the call wording."""
+    config = state.call
+    return check_result_edges(
+        definition,
+        state,
+        evaluator,
+        logic_keys,
+        kind="call",
+        producer="the target",
+        outcome="the call",
+        result_key=config.result_key,
+        on_failure=config.on_failure,
+        inputs=config.inputs,
+        return_names=tuple(config.returns),
+        return_entry="returns",
+        samples=CALL_SAMPLES,
+        owned=owned,
+    )

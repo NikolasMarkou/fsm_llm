@@ -67,7 +67,11 @@ from fsm_llm.text import capped_line
 
 from .errors import FSMError
 from .fsm import FSMDefinition, definition_digest
-from .limits import nests_deeper_than
+from .limits import (
+    EXECUTABLE_ID_MAX_LENGTH,
+    EXECUTABLE_ID_PATTERN,
+    nests_deeper_than,
+)
 from .schema import SchemaFinding, parse_version
 
 __all__ = [
@@ -263,7 +267,7 @@ class ExecutableEnvelope(_Model):
         description="The envelope format version (not the FSM definition version)",
     )
     kind: str
-    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:/-]*$", max_length=128)
+    id: str = Field(pattern=EXECUTABLE_ID_PATTERN, max_length=EXECUTABLE_ID_MAX_LENGTH)
     version: str = Field("1", min_length=1, max_length=64, description="Author's label")
     name: str = Field("", max_length=200)
     description: str = Field("", max_length=2000)

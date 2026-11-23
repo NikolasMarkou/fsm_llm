@@ -12,7 +12,8 @@ beside the common name/state/transition fields. The fields first seen at the
 "4.1" default (commit 4fb5a8b6: `State.extraction_instructions` and
 `response_instructions`) and every field shipped since (each added as "v4.1
 unchanged", so one tier is all the history supports) are "4.1";
-`State.synthesize` and every `SynthesizeConfig` field are "4.2". A test walks the annotations
+`State.synthesize` and every `SynthesizeConfig` field are "4.2"; `State.call` and every
+`CallStateConfig`, `CallChoose` and `CallTargetsFrom` field are "4.3". A test walks the annotations
 reachable from `FSMDefinition`, so a field or nested model missing from
 `FIELD_VERSIONS` fails the build.
 """
@@ -41,7 +42,7 @@ __all__ = [
 EXECUTABLE_SCHEMA_ID = "fsm-llm/executable"
 
 # The version an omitted `FSMDefinition.version` takes.
-SCHEMA_VERSION_DEFAULT = "4.2"
+SCHEMA_VERSION_DEFAULT = "4.3"
 
 # The oldest version this registry knows the shape of. A declared version
 # below it (or not of the form N.M) is "unknown": no finding, and
@@ -62,6 +63,7 @@ _TABLE: dict[str, dict[str, str]] = {
             "field_extractions classification_extractions context_scope completion"
         ),
         "4.2": "synthesize",
+        "4.3": "call",
     },
     "Transition": {
         "4.0": "target_state description conditions priority llm_description",
@@ -91,6 +93,13 @@ _TABLE: dict[str, dict[str, str]] = {
     "SynthesizeConfig": {
         "4.2": "goal inputs return_keys on_failure result_key min_lifecycle",
     },
+    "CallStateConfig": {
+        "4.3": (
+            "target choose inputs returns on_failure result_key max_steps max_seconds"
+        ),
+    },
+    "CallChoose": {"4.3": "key targets targets_from fallback"},
+    "CallTargetsFrom": {"4.3": "capability"},
 }
 
 # "Model.field" -> the definition version that introduced it.

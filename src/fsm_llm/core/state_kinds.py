@@ -1,10 +1,11 @@
 """The state kinds: which kinds of state exist and the rules each kind owns.
 
-A state is one of three kinds today: ``conversation`` (the default: field,
+A state is one of four kinds today: ``conversation`` (the default: field,
 bulk and classification extraction, then a reply), ``completion`` (Pass 1 is
-one model completion over a consumer-owned transcript) and ``synthesize`` (a
-runner outside core pushes a compiled procedure). Until this module the rules
-of the two non-default kinds were spelled out in the State validator, the
+one model completion over a consumer-owned transcript), ``synthesize`` (a
+runner outside core pushes a compiled procedure) and ``call`` (the engine runs one
+target and merges its outputs). Until this module the rules
+of the first two non-default kinds were spelled out in the State validator, the
 definition loader, the data-flow and liveness analyses, the dry-run gate, the
 pipeline and ``API.push_fsm``. Row 0.14 of the roadmap gathered them here, one
 spec per kind: those places now read the spec instead of testing
@@ -161,9 +162,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypeVar
 
-from fsm_llm.core.kind_call import check_result_edges
+from fsm_llm.core.kind_call import (
+    CALL_SAMPLES,
+    call_check_definition,
+    call_check_state,
+    check_result_edges,
+)
 
 __all__ = [
+    "CALL",
     "COMPLETION",
     "CONVERSATION",
     "KINDS",
@@ -185,7 +192,7 @@ _E = TypeVar("_E", bound=Enum)
 
 
 class CompletionStateKind(str, Enum):
-    """The names of the three built-in state kinds (the values of ``State.kind``).
+    """The names of the four built-in state kinds (the values of ``State.kind``).
 
     Named for the state kinds, not ``codes.CompletionKind`` (the ``kind`` of a
     model reply: calls, final, malformed). Use ``.value`` in messages.
@@ -194,6 +201,7 @@ class CompletionStateKind(str, Enum):
     CONVERSATION = "conversation"
     COMPLETION = "completion"
     SYNTHESIZE = "synthesize"
+    CALL = "call"
 
     @classmethod
     def from_string(cls: type[_E], value: str) -> _E:
@@ -482,6 +490,23 @@ def _synthesize_check_definition(
     )
 
 
+def _call_samples(state: Any) -> tuple[tuple[str, dict[str, Any] | None], ...]:
+    return CALL_SAMPLES
+
+
+def _call_check_definition(
+    definition: Any, state: Any, evaluator: Any, logic_keys: Callable[[Any], set[str]]
+) -> str | None:
+    """Cross-state rules for a call state: ``kind_call.call_check_definition``."""
+    return call_check_definition(
+        definition,
+        state,
+        evaluator,
+        logic_keys,
+        lambda: owned_result_keys(getattr(definition, "states", {}).values()),
+    )
+
+
 def _result_key_of(config_field: str) -> Callable[[Any], str | None]:
     """The hook reading ``<config_field>.result_key`` (``None`` when unset)."""
 
@@ -580,7 +605,24 @@ SYNTHESIZE = KindSpec(
     raw_result_key=_synthesize_raw_result_key,
 )
 
-KINDS: tuple[KindSpec, ...] = (CONVERSATION, COMPLETION, SYNTHESIZE)
+# Plan baa37f40 D-015 (roadmap E3.1): the `call` kind. The engine writes its result key
+# (a record with a `status`); the edges are judged by the same rule as a synthesize
+# state's, in the call wording. `requires_executor` stays False until the call executor
+# registers (step 11).
+CALL = KindSpec(
+    name=CompletionStateKind.CALL.value,
+    config_field="call",
+    result_key=_result_key_of("call"),
+    inherits_result_on_push=False,
+    forbidden_declarations=("completion", "synthesize", *_EXTRACTION_DECLARATIONS),
+    dryrun_judged=False,
+    check_state=call_check_state,
+    sample_results=_call_samples,
+    check_definition=_call_check_definition,
+    supported_in_procedure=False,
+)
+
+KINDS: tuple[KindSpec, ...] = (CONVERSATION, COMPLETION, SYNTHESIZE, CALL)
 
 
 def get_kind(name: str) -> KindSpec:

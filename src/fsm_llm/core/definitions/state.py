@@ -14,7 +14,12 @@ from fsm_llm.core.state_kinds import kind_of, state_problem
 
 from .classification import ClassificationExtractionConfig
 from .extraction import FieldExtractionConfig
-from .kinds import CompletionStateConfig, ContextScope, SynthesizeConfig
+from .kinds import (
+    CallStateConfig,
+    CompletionStateConfig,
+    ContextScope,
+    SynthesizeConfig,
+)
 from .limits import ASCII_IDENTIFIER_PATTERN
 from .transition import Transition
 
@@ -167,6 +172,23 @@ class State(BaseModel):
         ),
     )
 
+    # Plan baa37f40 D-015 (roadmap E3.1): one optional, additive field, registered
+    # at definition version 4.3 (the default moved with it; no `fsm_id` moves for a
+    # definition that omits `version`). Core only LOADS it; the engine's call
+    # executor and settle step run the target. Do NOT make `call` a conversation
+    # or completion option (a call state declares no extraction and no model
+    # call), do NOT resolve `choose.targets_from` here (core has no registry; the
+    # closed `targets` is required), and do NOT make `FSMValidator.validate()`
+    # stricter than this loader.
+    call: CallStateConfig | None = Field(
+        default=None,
+        description=(
+            "Call state: the engine runs one target (an executable id, or one "
+            "chosen from a closed list by a context key) and writes the outcome to "
+            "result_key. Excludes completion, synthesize and every extraction field."
+        ),
+    )
+
     @field_validator("transition_classification")
     @classmethod
     def _validate_transition_classification(
@@ -278,7 +300,7 @@ class State(BaseModel):
     # `model_fields` and the JSON schema; a test pins all three).
     @property
     def kind(self) -> str:
-        """The state's kind name: ``conversation``, ``completion`` or
-        ``synthesize`` (see ``fsm_llm.core.state_kinds``). Derived from the config
+        """The state's kind name: ``conversation``, ``completion``,
+        ``synthesize`` or ``call`` or ``call`` (see ``fsm_llm.core.state_kinds``). Derived from the config
         fields; not part of the definition, its dump or its ``fsm_id``."""
         return kind_of(self).name

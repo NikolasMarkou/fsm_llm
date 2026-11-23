@@ -92,7 +92,9 @@ class Reason(str, Enum):
     it is not in the pinned ``REASONS`` tuple (a bench manifest pins that
     file), so a test asserts the difference rather than hiding it.
     ``CANCELLED`` is the 17th: a run ended from outside (``aborted`` with this
-    reason); no synthesis string names it.
+    reason); no synthesis string names it. ``UNKNOWN_TARGET`` is the 18th: a ``call``
+    state named a target that is not resolvable or not in its closed list (``failed``
+    with this reason); no synthesis string names it either.
     """
 
     INPUTS_MISSING = "inputs_missing"
@@ -112,6 +114,7 @@ class Reason(str, Enum):
     UNEXPECTED_ERROR = "unexpected_error"
     NEEDS_USER_INPUT = "needs_user_input"
     CANCELLED = "cancelled"
+    UNKNOWN_TARGET = "unknown_target"
 
     @classmethod
     def from_string(cls, value: Reason | str) -> Reason:

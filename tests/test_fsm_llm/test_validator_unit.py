@@ -1015,6 +1015,11 @@ def _maximal_fsm_data():
                         "description": "Fallback to the synthesize turn.",
                         "priority": 950,
                     },
+                    {
+                        "target_state": "call_turn",
+                        "description": "Fallback to the call turn.",
+                        "priority": 960,
+                    },
                 ],
                 "field_extractions": [
                     {
@@ -1104,6 +1109,46 @@ def _maximal_fsm_data():
                     }
                 ],
             },
+            # A call state (plan baa37f40 step 7): anchors CallStateConfig, CallChoose
+            # and CallTargetsFrom; reached from `start` on a fourth edge.
+            "call_turn": {
+                "id": "call_turn",
+                "description": "One call of a chosen target.",
+                "purpose": "Run a target chosen from a closed list.",
+                "response_instructions": "",
+                "call": {
+                    "choose": {
+                        "key": "picked",
+                        "targets": ["strategy.alpha", "strategy.beta"],
+                        "targets_from": {"capability": "strategy"},
+                        "fallback": "strategy.alpha",
+                    },
+                    "inputs": ["name"],
+                    "returns": {"answer": "solution"},
+                    "on_failure": "done",
+                    "result_key": "call_turn_result",
+                    "max_steps": 10,
+                    "max_seconds": 30.0,
+                },
+                "transitions": [
+                    {
+                        "target_state": "done",
+                        "description": "Finish once the call settled.",
+                        "conditions": [
+                            {
+                                "description": "A result exists.",
+                                "requires_context_keys": ["call_turn_result"],
+                                "logic": {
+                                    "in": [
+                                        {"var": "call_turn_result.status"},
+                                        ["ok", "failed", "aborted"],
+                                    ]
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
             "done": {
                 "id": "done",
                 "description": "The terminal state.",
@@ -1142,6 +1187,9 @@ _MODEL_ANCHORS = {
     ),
     "CompletionStateConfig": ("states", "tool_turn", "completion"),
     "SynthesizeConfig": ("states", "synth_turn", "synthesize"),
+    "CallStateConfig": ("states", "call_turn", "call"),
+    "CallChoose": ("states", "call_turn", "call", "choose"),
+    "CallTargetsFrom": ("states", "call_turn", "call", "choose", "targets_from"),
 }
 
 # One violating mutation per `model_validator`/`field_validator`. These cannot be
@@ -1201,6 +1249,37 @@ _VALIDATOR_VIOLATIONS = {
     ("SynthesizeConfig", "_validate_config"): (
         ("states", "synth_turn", "synthesize", "goal"),
         "   ",
+    ),
+    # Plan baa37f40 step 7 (D-015): the call models refuse a non-public key name, a
+    # non-mapping `returns`, a non-number budget, a result key that is an input, a
+    # non-public choose key, a closed list that is not a list and a fallback outside it.
+    ("CallStateConfig", "_validate_inputs"): (
+        ("states", "call_turn", "call", "inputs"),
+        ["_internal_only"],
+    ),
+    ("CallStateConfig", "_validate_returns"): (
+        ("states", "call_turn", "call", "returns"),
+        {"_internal_only": "solution"},
+    ),
+    ("CallStateConfig", "_validate_budget"): (
+        ("states", "call_turn", "call", "max_seconds"),
+        "five",
+    ),
+    ("CallStateConfig", "_validate_config"): (
+        ("states", "call_turn", "call", "result_key"),
+        "name",
+    ),
+    ("CallChoose", "_validate_key"): (
+        ("states", "call_turn", "call", "choose", "key"),
+        "_internal_only",
+    ),
+    ("CallChoose", "_validate_targets"): (
+        ("states", "call_turn", "call", "choose", "targets"),
+        "not_a_list",
+    ),
+    ("CallChoose", "_validate_choose"): (
+        ("states", "call_turn", "call", "choose", "fallback"),
+        "strategy.elsewhere",
     ),
     ("TransitionCondition", "_validate_logic"): (
         ("states", "start", "transitions", 0, "conditions", 0, "logic"),

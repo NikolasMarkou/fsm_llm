@@ -183,7 +183,7 @@ fsm_llm.FSMDefinition class(BaseModel)
   field description: str required
   field states: dict[str, State] required
   field initial_state: str required
-  field version: str = '4.2'
+  field version: str = '4.3'
   field persona: str | None = None
   field handler_only_keys: list[str] = factory
   def validate_fsm_structure(self) -> FSMDefinition
@@ -491,6 +491,7 @@ fsm_llm.State class(BaseModel)
   field context_scope: ContextScope | None = None
   field completion: CompletionStateConfig | None = None
   field synthesize: SynthesizeConfig | None = None
+  field call: CallStateConfig | None = None
   property kind
 fsm_llm.StateNotFoundError class(FSMError)
   def __init__(self, message: str, state_id: str | None = None, **kwargs)
@@ -645,6 +646,7 @@ fsm_llm.core.codes.Reason class(str, Enum)
   Reason.UNEXPECTED_ERROR = 'unexpected_error'
   Reason.NEEDS_USER_INPUT = 'needs_user_input'
   Reason.CANCELLED = 'cancelled'
+  Reason.UNKNOWN_TARGET = 'unknown_target'
 fsm_llm.core.codes.Status class(str, Enum)
   Status.OK = 'ok'
   Status.FAILED = 'failed'
@@ -968,7 +970,7 @@ fsm_llm.core.definitions.executable.variable_problems def(envelope: ExecutableEn
 # fsm_llm.core.definitions.schema
 fsm_llm.core.definitions.schema.EXECUTABLE_SCHEMA_ID = 'fsm-llm/executable'
 fsm_llm.core.definitions.schema.FIELD_VERSIONS dict
-fsm_llm.core.definitions.schema.SCHEMA_VERSION_DEFAULT = '4.2'
+fsm_llm.core.definitions.schema.SCHEMA_VERSION_DEFAULT = '4.3'
 fsm_llm.core.definitions.schema.SCHEMA_VERSION_OLDEST = '4.0'
 fsm_llm.core.definitions.schema.SchemaFinding class
   def __init__(self, model: str, field: str, introduced: str, declared: str, state_id: str | None = None) -> None
