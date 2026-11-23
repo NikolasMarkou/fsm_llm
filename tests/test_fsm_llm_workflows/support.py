@@ -46,6 +46,25 @@ class _CoreLikeLLM:
         return _FakeLLMResponse(self.reply)
 
 
+def _with_async_twins(api: Any) -> Any:
+    """Give a MagicMock API the async twins a ``ConversationStep`` awaits (X5.1, pin A-6).
+
+    ``astart_conversation`` and ``aconverse`` delegate to the sync mocks, so ``start_conversation``
+    and ``converse`` keep every call count, argument record and ``side_effect`` the rows assert.
+    A bare ``MagicMock`` cannot be awaited; the real ``API`` has both twins.
+    """
+
+    async def astart_conversation(*args: Any, **kwargs: Any) -> Any:
+        return api.start_conversation(*args, **kwargs)
+
+    async def aconverse(*args: Any, **kwargs: Any) -> Any:
+        return api.converse(*args, **kwargs)
+
+    api.astart_conversation = astart_conversation
+    api.aconverse = aconverse
+    return api
+
+
 def _single(step) -> Any:
     wf = create_workflow("wf", "wf")
     wf.with_initial_step(step)

@@ -3,6 +3,11 @@
 ``API`` is read at call time (``API.from_definition``, ``API.from_file`` in ``_run_conversation``), so a test patches
 ``fsm_llm.workflows.steps.conversation.API``: the module that performs the lookup, never the package.
 
+The whole conversation is ONE awaited coroutine on the loop (plan ace7a8c8 step 26, X5.1): the greeting and every
+turn go through ``API.astart_conversation`` and ``aconverse``, with no executor thread. A step has no sync mode, so it
+calls the async names directly, never through ``acall``. The time limit cancels the turn in flight (the core rolls it
+back whole, f150ec28 D-002) and ``end_conversation`` runs in ``finally`` on every exit, a cancel included.
+
 Part of the package (plan d454fd62 step 92; the old ``workflows/steps.py`` at the same dotted path).
 """
 
@@ -19,7 +24,7 @@ from fsm_llm.logging import logger
 from ..constants import CONTEXT_KEY_USER_INPUT
 from ..models import WorkflowStepResult
 from .base import WorkflowStep
-from .helpers import _STEP_EXECUTOR, _error_text
+from .helpers import _error_text
 
 
 class ConversationStep(WorkflowStep):
@@ -96,40 +101,47 @@ class ConversationStep(WorkflowStep):
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Execute an FSM conversation and return collected data."""
         limit = self._effective_timeout()
-        try:
-            # Run the blocking conversation body in an executor so the event
-            # loop is not frozen and the time limit can actually fire.
-            loop = asyncio.get_running_loop()
-            fut = loop.run_in_executor(
-                _STEP_EXECUTOR.get(), self._run_conversation, dict(context)
-            )
-            if limit is None:
-                return await fut
-            # asyncio.wait (not wait_for) so a TimeoutError RAISED by the
-            # conversation itself is not mistaken for this step's time limit.
-            done, _ = await asyncio.wait({fut}, timeout=limit)
-            if fut not in done:
-                fut.cancel()
-                logger.error(
-                    f"ConversationStep [{self.step_id}] timed out after {limit}s"
-                )
-                return WorkflowStepResult.failure_result(
-                    error=f"Conversation timed out after {limit}s",
-                    next_step_id=self.error_step_id,
-                    message="Conversation timed out",
-                )
-            return fut.result()
-        except Exception as e:
-            logger.error(f"Error in conversation step {self.step_id}: {e!s}")
-            return WorkflowStepResult.failure_result(
-                error=_error_text(e),
-                next_step_id=self.error_step_id,
-                message=f"Conversation failed: {e!s}",
-            )
+        raised = False
 
-    def _run_conversation(self, context: dict[str, Any]) -> WorkflowStepResult:
-        """Run the FSM conversation loop (synchronous; offloaded to an executor
-        by ``execute`` so the event loop stays responsive)."""
+        async def conversation() -> WorkflowStepResult:
+            nonlocal raised
+            try:
+                return await self._run_conversation(dict(context))
+            except TimeoutError:
+                # raised by the conversation itself: a failure, not this step's time limit
+                raised = True
+                raise
+
+        try:
+            # `wait_for` cancels the awaited turn at the limit: a real cancel, rolled back by the
+            # core, and `_run_conversation` still ends the conversation in its `finally`.
+            return await asyncio.wait_for(conversation(), timeout=limit)
+        except TimeoutError as e:
+            if raised:
+                return self._failed(e)
+            logger.error(f"ConversationStep [{self.step_id}] timed out after {limit}s")
+            return WorkflowStepResult.failure_result(
+                error=f"Conversation timed out after {limit}s",
+                next_step_id=self.error_step_id,
+                message="Conversation timed out",
+            )
+        except Exception as e:
+            return self._failed(e)
+
+    def _failed(self, e: Exception) -> WorkflowStepResult:
+        logger.error(f"Error in conversation step {self.step_id}: {e!s}")
+        return WorkflowStepResult.failure_result(
+            error=_error_text(e),
+            next_step_id=self.error_step_id,
+            message=f"Conversation failed: {e!s}",
+        )
+
+    async def _run_conversation(self, context: dict[str, Any]) -> WorkflowStepResult:
+        """Run the FSM conversation loop as one coroutine on the loop (no executor thread).
+
+        Readers (``has_conversation_ended``, ``get_data``) and ``end_conversation`` are called
+        inline from the task that ran the turn, so the turn gate is free for them.
+        """
         # Build initial context from workflow context using mapping
         conv_context: dict[str, Any] = {}
         for conv_key, workflow_key in self.initial_context.items():
@@ -149,7 +161,7 @@ class ConversationStep(WorkflowStep):
             messages.append(user_input)
 
         # Start conversation
-        conv_id, response = fsm.start_conversation(initial_context=conv_context)
+        conv_id, response = await fsm.astart_conversation(initial_context=conv_context)
         logger.info(
             f"ConversationStep [{self.step_id}] started conversation: "
             f"{str(response or '')[:100]}"
@@ -167,7 +179,9 @@ class ConversationStep(WorkflowStep):
             for message in messages:
                 if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
                     break
-                response = fsm.converse(user_message=message, conversation_id=conv_id)
+                response = await fsm.aconverse(
+                    user_message=message, conversation_id=conv_id
+                )
                 if response:
                     last_spoken = response
                 logger.debug(

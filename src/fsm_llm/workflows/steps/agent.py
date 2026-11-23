@@ -14,7 +14,7 @@ from fsm_llm.logging import logger
 from ..exceptions import WorkflowStepError
 from ..models import WorkflowStepResult
 from .base import WorkflowStep
-from .helpers import _call_user_callable, _error_text
+from .helpers import _call_user_callable, _error_text, _is_async_callable
 
 
 class AgentStep(WorkflowStep):
@@ -24,6 +24,10 @@ class AgentStep(WorkflowStep):
     workflows alongside other step types. ``agent.run`` must return an
     ``AgentResult``-like object (``answer``, ``success``, optional
     ``final_context`` / ``structured_output``) or a plain string answer.
+
+    An agent whose class has its own ``async def arun`` is awaited on the loop (a real cancel at
+    the time limit, no executor thread, plan ace7a8c8 X5.1); any other agent runs its ``run``
+    through ``_call_user_callable`` (the engine ``executor=``), as before.
 
     Example::
 
@@ -83,9 +87,12 @@ class AgentStep(WorkflowStep):
                     if wf_key in context
                 }
 
-            result = await self._with_timeout(
-                _call_user_callable(self.agent.run, task, **kwargs)
-            )
+            arun: Any = getattr(self.agent, "arun", None)
+            if _is_async_callable(arun):
+                run = arun(task, **kwargs)
+            else:
+                run = _call_user_callable(self.agent.run, task, **kwargs)
+            result = await self._with_timeout(run)
 
             answer: Any
             success: bool

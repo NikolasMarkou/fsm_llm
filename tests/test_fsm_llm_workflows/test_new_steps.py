@@ -287,20 +287,21 @@ class TestStepsOverTheRealCore:
     """plan-2026-09-30T062855-07ad3f8c step 14: ``AgentStep`` runs a real
     ``ReactAgent`` (driven by core's bounded run, no user turn), and
     ``ConversationStep.auto_messages`` stays a scripted conversation on
-    ``converse``."""
+    ``aconverse``."""
 
     @pytest.fixture
     def converse_calls(self, monkeypatch):
         from fsm_llm import API
 
         calls: list[str] = []
-        real = API.converse
+        real = API.aconverse
 
-        def _converse(api, user_message, conversation_id):
+        # the step awaits the async name (X5.1): an `a` twin bypasses a patch of the sync one
+        async def _aconverse(api, user_message, conversation_id):
             calls.append(user_message)
-            return real(api, user_message, conversation_id)
+            return await real(api, user_message, conversation_id)
 
-        monkeypatch.setattr(API, "converse", _converse)
+        monkeypatch.setattr(API, "aconverse", _aconverse)
         return calls
 
     async def test_agent_step_runs_a_react_agent_to_success(self, converse_calls):

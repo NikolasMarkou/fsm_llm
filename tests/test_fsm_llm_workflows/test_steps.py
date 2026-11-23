@@ -33,7 +33,7 @@ from fsm_llm.workflows.steps import (
     WaitEventStep,
     WorkflowStep,
 )
-from tests.test_fsm_llm_workflows.support import _CoreLikeLLM
+from tests.test_fsm_llm_workflows.support import _CoreLikeLLM, _with_async_twins
 
 # ---------------------------------------------------------------------------
 # AutoStep
@@ -412,7 +412,7 @@ class TestConversationStep:
         mock.has_conversation_ended.return_value = False
         mock.get_data.return_value = collected_data or {"name": "Alice"}
         mock.end_conversation.return_value = None
-        return mock
+        return _with_async_twins(mock)
 
     @pytest.mark.asyncio
     async def test_requires_fsm_file_or_definition(self):
@@ -858,18 +858,23 @@ class TestConversationStepFixes:
         from unittest.mock import MagicMock
 
         api = MagicMock()
-
-        def start(initial_context=None):
-            if delay:
-                import time
-
-                time.sleep(delay)
-            return ("conv", "hello")
-
-        api.start_conversation.side_effect = start
+        api.start_conversation.side_effect = lambda initial_context=None: (
+            "conv",
+            "hello",
+        )
         api.converse.return_value = "reply"
         api.has_conversation_ended.return_value = ended
         api.get_data.return_value = {"k": "v"}
+        _with_async_twins(api)
+        if delay:
+            # a model call that suspends: the step's time limit can cancel it
+            async def astart(initial_context=None):
+                import asyncio
+
+                await asyncio.sleep(delay)
+                return ("conv", "hello")
+
+            api.astart_conversation = astart
         return api
 
     async def test_base_timeout_is_honoured(self, timing_factor):
@@ -1044,7 +1049,7 @@ class TestConversationStepResourceCleanup:
             auto_messages=["msg1"],
         )
 
-        mock_api = MagicMock()
+        mock_api = _with_async_twins(MagicMock())
         mock_api.start_conversation.return_value = ("conv-1", "Hello")
         mock_api.has_conversation_ended.return_value = False
         mock_api.converse.side_effect = RuntimeError("LLM failed")
@@ -1216,7 +1221,8 @@ class TestWorkflowStepsPackageLayout:
         from fsm_llm.workflows.steps import conversation, helpers
 
         assert driver._STEP_EXECUTOR is helpers._STEP_EXECUTOR
-        assert conversation._STEP_EXECUTOR is helpers._STEP_EXECUTOR
+        # the conversation is one awaited coroutine (X5.1): it reads no executor
+        assert not hasattr(conversation, "_STEP_EXECUTOR")
         assert helpers._STEP_EXECUTOR.name == "fsm_llm_workflows_step_executor"
         defined_in = []
         for path in sorted(Path(facade.__file__).parent.glob("*.py")):
@@ -1266,7 +1272,7 @@ class TestWorkflowStepsPackageLayout:
         assert not hasattr(facade, "API")
 
     async def test_a_patch_at_the_conversation_module_reaches_the_step(self):
-        mock_api = MagicMock()
+        mock_api = _with_async_twins(MagicMock())
         mock_api.start_conversation.return_value = ("c1", "hello")
         mock_api.has_conversation_ended.return_value = True
         mock_api.get_data.return_value = {"k": "v"}
@@ -1574,7 +1580,7 @@ def _conversation_api(ended: bool = True) -> MagicMock:
     api.has_conversation_ended.return_value = ended
     api.converse.return_value = "reply"
     api.get_data.return_value = {}
-    return api
+    return _with_async_twins(api)
 
 
 class TestStepKindEdgesWaitsAndConversation:
@@ -1680,7 +1686,10 @@ class TestStepKindEdgesWaitsAndConversation:
                 "model": "some-model"
             }
 
-    async def test_the_conversation_runs_in_the_executor_the_driver_set(self):
+    async def test_the_conversation_runs_on_the_loop_not_in_the_executor_the_driver_set(
+        self,
+    ):
+        """X5.1: a conversation is awaited on the loop thread; the engine executor is not used."""
         import threading
         from concurrent.futures import ThreadPoolExecutor
 
@@ -1688,9 +1697,12 @@ class TestStepKindEdgesWaitsAndConversation:
 
         names: list[str] = []
         api = _conversation_api()
-        api.start_conversation.side_effect = lambda **kw: (
-            names.append(threading.current_thread().name) or ("c1", "hello")
-        )
+
+        async def astart(**kw):
+            names.append(threading.current_thread().name)
+            return ("c1", "hello")
+
+        api.astart_conversation = astart
         step = ConversationStep(step_id="c", name="C", fsm_definition={"x": 1})
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="conv92")
         token = _STEP_EXECUTOR.set(executor)
@@ -1701,7 +1713,8 @@ class TestStepKindEdgesWaitsAndConversation:
         finally:
             _STEP_EXECUTOR.reset(token)
             executor.shutdown()
-        assert names == ["conv92_0"]
+        assert names == [threading.current_thread().name]
+        assert not any(n.startswith("conv92") for n in names)
 
     async def test_an_agent_result_without_a_success_flag_is_a_failure(self):
         class _Result:

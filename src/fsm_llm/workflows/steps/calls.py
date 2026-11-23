@@ -19,7 +19,7 @@ from fsm_llm.logging import logger
 from ..exceptions import WorkflowStepError
 from ..models import WorkflowStepResult
 from .base import WorkflowStep
-from .helpers import _call_user_callable, _error_text
+from .helpers import _call_user_callable, _error_text, _is_async_callable
 
 
 class APIStep(WorkflowStep):
@@ -100,8 +100,9 @@ class LLMStep(WorkflowStep):
     """A step that processes data using an LLM.
 
     ``llm_interface`` may be a core ``fsm_llm.LLMInterface`` (its
-    ``generate_response`` is called with ``system_prompt`` and the rendered
-    prompt as the user message) or any object with a ``generate(prompt)``
+    ``agenerate_response`` is awaited on the loop, with ``system_prompt`` and the rendered
+    prompt as the user message; an interface with no async twin, a duck-typed object, runs its
+    ``generate_response`` through the step executor) or any object with a ``generate(prompt)``
     method, sync or async, returning a string.
 
     ``context_mapping`` is the INPUT mapping ``{prompt_var: context_key}``
@@ -216,9 +217,13 @@ class LLMStep(WorkflowStep):
                 request = ResponseGenerationRequest.checked(
                     system_prompt=system_prompt, user_message=prompt
                 )
-            raw = await self._with_timeout(
-                _call_user_callable(llm.generate_response, request)
-            )
+            agenerate: Any = getattr(llm, "agenerate_response", None)
+            if _is_async_callable(agenerate):
+                # a real LLMInterface: awaited on the loop, cancelled at the time limit
+                call = agenerate(request)
+            else:
+                call = _call_user_callable(llm.generate_response, request)
+            raw = await self._with_timeout(call)
         if isinstance(raw, str):
             return raw
         message = getattr(raw, "message", None)

@@ -103,7 +103,7 @@ Installing the `workflows` extra (`pip install "llm-fsm[workflows]"`) adds no pa
 
 ## Things to know
 
-- Everything is `async`. Plain (sync) functions such as actions and conditions run in a thread pool; pass `WorkflowEngine(executor=...)` to choose it. A function that returns a coroutine is awaited. A timeout cannot stop a sync function that is already running in its thread.
+- Everything is `async`. Plain (sync) functions such as actions and conditions run in a thread pool; pass `WorkflowEngine(executor=...)` to choose it. `ConversationStep`, an `AgentStep` whose agent has its own `async def arun` and an `LLMStep` over a real `LLMInterface` are awaited on the loop and use no executor: their time limit really cancels the model call in flight (a conversation turn is rolled back and the conversation is still ended). A function that returns a coroutine is awaited. A timeout cannot stop a sync function that is already running in its thread.
 - A step returning `next_step_id=""` ends the workflow there.
 - A failed step goes to its `error_step_id` (for API steps, `failure_step_id`). With no error route the instance FAILS; it never continues down the success route.
 - Loops are allowed when they pass through a timer or event wait (polling, retry-until). A loop made only of steps that run back to back is rejected when the workflow is registered. One engine call runs at most `max_steps` steps (default 1000), then the instance FAILS.
