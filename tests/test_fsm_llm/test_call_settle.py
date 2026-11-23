@@ -468,6 +468,75 @@ class TestTheRecordIsNotTrusted:
         assert flow.depth() == 1 and flow.resolver.asked == []
 
 
+class TestTheIdentitiesAreTheOnesThatWerePushed:
+    """The final record labels the child with what settle PUSHED (D-027), never with the
+    identities of the public ``running`` record."""
+
+    @staticmethod
+    async def _pushed(flow: Flow) -> None:
+        await flow.api.aadvance(flow.cid)  # the request and the push
+        assert flow.depth() == 2
+
+    async def test_a_forged_identity_in_the_running_record_is_ignored(self):
+        """Kills (D3): ``_outcome`` reading ``template_identity`` and ``instance_identity``
+        from the record."""
+        flow = await _flow(steps=2)
+        await self._pushed(flow)
+        forged = {
+            **flow.record(),
+            "template_identity": "FORGED-T",
+            "instance_identity": "FORGED-I",
+        }
+        flow.api.fsm_manager.update_conversation_context(
+            flow.frame, {"call_result": forged}
+        )
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        assert flow.record() == _final(
+            "ok", None
+        )  # the real `template:` and `instance:`
+        assert "FORGED" not in repr(flow.record())
+
+    async def test_the_marks_are_empty_after_the_pop(self):
+        flow = await _flow(steps=1)
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        marks = flow.api._call_marks
+        assert marks.pushed == {} and marks.ending == set()
+
+    async def test_after_a_restart_the_identities_are_derived_again_and_checked(self):
+        """The mark is in memory: a restore or a resume has none. The pop resolves the target
+        from the parent's own state and keeps the identities only when the definition is the
+        one the child frame runs."""
+        flow = await _flow(steps=2)
+        await self._pushed(flow)
+        flow.api._call_marks.pushed.clear()
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        assert flow.record() == _final("ok", None)
+
+    async def test_a_registry_that_answers_another_definition_gives_no_identity(self):
+        """Kills: a fallback that trusts whatever the resolver answers now (no ``fsm_id``
+        comparison)."""
+        flow = await _flow(steps=2)
+        await self._pushed(flow)
+        flow.api._call_marks.pushed.clear()
+        changed = _child_definition(2)
+        changed["name"] = "AnotherChild"
+        flow.resolver.definitions[_TARGET] = FSMDefinition(**changed)
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        record = flow.record()
+        assert record["status"] == "ok"
+        assert (
+            record["template_identity"] is None and record["instance_identity"] is None
+        )
+
+    async def test_ending_the_root_drops_its_marks(self):
+        flow = await _flow(steps=2)
+        await self._pushed(flow)
+        assert flow.api._call_marks.pushed
+        flow.api.end_conversation(flow.cid)
+        marks = flow.api._call_marks
+        assert marks.pushed == {} and marks.ending == set()
+
+
 class TestCancel:
     async def _cancelled_in_the_greeting(self, flow: Flow, llm: _Gate) -> None:
         llm.arm()

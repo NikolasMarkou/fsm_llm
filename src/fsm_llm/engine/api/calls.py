@@ -38,12 +38,19 @@ Interface contract:
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.core.codes import Reason, Status
-from fsm_llm.core.definitions import CallStateConfig, FSMError, LLMResponseError, State
+from fsm_llm.core.definitions import (
+    CallStateConfig,
+    FSMError,
+    LLMResponseError,
+    State,
+    fsm_id_of,
+)
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.kinds import executor_for
 from fsm_llm.engine.kinds.call import chosen_target, record_belongs
@@ -78,11 +85,19 @@ class CallMarks:
 
     ``settling``: root ids with a settle in progress (the one-driver mark). ``ending``: ids of
     child frames whose returns are merged and whose end was refused, so the retry pops them
-    with no second merge.
+    with no second merge. ``pushed``: child frame id to the ``ResolvedTarget`` settle pushed,
+    the source of the identities of the final record (D-027; never the public record).
     """
 
     settling: set[str] = field(default_factory=set)
     ending: set[str] = field(default_factory=set)
+    pushed: dict[str, ResolvedTarget] = field(default_factory=dict)
+
+    def forget(self, frame_ids: Iterable[str]) -> None:
+        """Drop what is kept for these child frames (the caller holds ``_stack_lock``)."""
+        for frame_id in frame_ids:
+            self.ending.discard(frame_id)
+            self.pushed.pop(frame_id, None)
 
 
 # DECISION plan-2026-11-23T122249-baa37f40/D-023
@@ -151,10 +166,23 @@ def _is_request(record: Any, state_id: str) -> TypeGuard[dict[str, Any]]:
     )
 
 
-def _identity(record: Any, name: str) -> str | None:
-    """An identity of the running record, kept only when it is text (a label, never trusted)."""
-    value = record.get(name) if isinstance(record, dict) else None
-    return value if isinstance(value, str) else None
+def _pushed_target(
+    api: _ApiSurface,
+    child: FSMStackFrame,
+    parent: FSMStackFrame,
+    target: str | None,
+) -> ResolvedTarget | None:
+    """What settle pushed as ``child`` (D-027): the object kept at the push, else the target
+    derived AGAIN from the parent's own state and kept only when its definition is the one the
+    child frame runs (``fsm_id`` equal). Never read from the record."""
+    with api._stack_lock:
+        kept = api._call_marks.pushed.get(child.conversation_id)
+    if kept is not None or target is None or api._targets is None:
+        return kept
+    again = api._targets.resolve_target(target, conversation_id=parent.conversation_id)
+    if again is not None and fsm_id_of(again.definition) == child.fsm_id:
+        return again
+    return None
 
 
 def _final(
@@ -218,7 +246,13 @@ async def _try_pop(
         context_to_return = None  # the merge landed before the end was refused
     else:
         context_to_return = _outcome(
-            api, top, state.id, config, record, parent_data, ended=ended
+            api,
+            top,
+            state.id,
+            config,
+            _pushed_target(api, top, parent, chosen_target(config, parent_data)),
+            parent_data,
+            ended=ended,
         )
         final = context_to_return[config.result_key]
     try:
@@ -232,7 +266,7 @@ async def _try_pop(
                 api._call_marks.ending.add(top.conversation_id)
         raise
     with api._stack_lock:
-        api._call_marks.ending.discard(top.conversation_id)
+        api._call_marks.forget([top.conversation_id])
     if final is None:
         final = parent_data.get(config.result_key) or {}
     await executor_for(state, api._executors).on_ended(
@@ -246,16 +280,18 @@ def _outcome(
     child: FSMStackFrame,
     state_id: str,
     config: CallStateConfig,
-    record: Any,
+    pushed: ResolvedTarget | None,
     parent_data: dict[str, Any],
     *,
     ended: bool,
 ) -> dict[str, Any]:
     """What the pop merges into the parent: the declared returns (only on ``ok``) and the final
-    record under the result key. The target is re-derived from the parent's own state."""
+    record under the result key. The target is re-derived from the parent's own state and the
+    identities are those of what was pushed (``pushed``, ``None`` when unproven), never the
+    record's."""
     target = chosen_target(config, parent_data)
-    template = _identity(record, "template_identity")
-    instance = _identity(record, "instance_identity")
+    template = None if pushed is None else pushed.template_identity
+    instance = None if pushed is None else pushed.instance_identity
 
     def settled(status: Status, reason: Reason | None) -> dict[str, Any]:
         return {
@@ -351,6 +387,7 @@ async def _try_push(
         greetings.append(greeting)
     with api._stack_lock:
         child_id = api.conversation_stacks[root_id][-1].conversation_id
+        api._call_marks.pushed[child_id] = resolved
     await executor_for(state, api._executors).on_pushed(
         root_id, top.conversation_id, child_id, state, record
     )

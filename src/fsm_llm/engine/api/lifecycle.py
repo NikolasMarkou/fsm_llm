@@ -193,6 +193,7 @@ class LifecycleMixin(_ApiSurface):
         with self._stack_lock:
             self.conversation_stacks.pop(conversation_id, None)
             self._last_accessed.pop(conversation_id, None)
+            self._call_marks.forget(frame_ids)  # what settle kept for the child frames
             if ended_cache is not None:
                 self._ended_conversations[conversation_id] = ended_cache
                 if len(self._ended_conversations) > self._MAX_ENDED_CACHE:
