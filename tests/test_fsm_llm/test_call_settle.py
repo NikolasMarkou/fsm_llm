@@ -16,7 +16,7 @@ import asyncio
 import copy
 from contextlib import aclosing
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -70,8 +70,15 @@ def _child_definition(
 class _Resolver:
     """Answers a definition per id and records every question."""
 
-    def __init__(self, known: dict[str, dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        known: dict[str, dict[str, Any]],
+        maps: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         self.definitions = {k: FSMDefinition(**v) for k, v in known.items()}
+        self.maps = (
+            maps or {}
+        )  # id -> the target's own output map (a strategy's `results`)
         self.asked: list[str] = []
 
     def resolve_target(self, target_id: str, *, conversation_id: str | None = None):
@@ -80,7 +87,10 @@ class _Resolver:
         if definition is None:
             return None
         return ResolvedTarget(
-            definition, f"template:{target_id}", f"instance:{target_id}"
+            definition,
+            f"template:{target_id}",
+            f"instance:{target_id}",
+            returns=self.maps.get(target_id),
         )
 
 
@@ -147,6 +157,7 @@ async def _flow(
     context: dict[str, Any] | None = None,
     llm: ScriptedLLM | None = None,
     known: dict[str, dict[str, Any]] | None = None,
+    maps: dict[str, dict[str, str]] | None = None,
     handlers: bool = True,
     api_kwargs: dict[str, Any] | None = None,
     **state_overrides: Any,
@@ -158,7 +169,8 @@ async def _flow(
     resolver = _Resolver(
         known
         if known is not None
-        else {_TARGET: _child_definition(steps, greeting, speaks)}
+        else {_TARGET: _child_definition(steps, greeting, speaks)},
+        maps,
     )
     llm = ScriptedLLM(default_response="r") if llm is None else llm
     state_overrides.setdefault(
@@ -289,6 +301,84 @@ class TestTheSyncNames:
         assert [r.state_after for r in results] == ["work", "c2", "done"]
         assert api.get_data(cid)["answer"] == "solved why"
         assert api.get_stack_depth(cid) == 1
+
+
+class TestTheTargetsOwnOutputMap:
+    """D-030 (plan baa37f40, step 14): a call that declares no ``returns`` takes the output map
+    its target carries (``ResolvedTarget.returns``, a strategy's ``results``): every non-None
+    child value under its parent key, tolerant of a key the child never wrote. A declared
+    ``returns`` is the whole rule as before."""
+
+    _MAP: ClassVar[dict[str, str]] = {"answer": "solution", "extra": "never_written"}
+
+    async def test_every_non_none_mapped_key_is_merged_and_a_missing_one_is_absent(
+        self,
+    ):
+        """Kills: a rule that reads ``config.returns`` only (nothing would be merged) and one
+        that requires every mapped key (``extra`` would fail the call)."""
+        flow = await _flow(config=_call(returns={}), maps={_TARGET: self._MAP})
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        data = flow.api.get_data(flow.cid)
+        assert flow.record() == _final("ok", None)
+        assert data["answer"] == "solved why"
+        assert (
+            "extra" not in data and "solution" not in data
+        )  # only the mapped parent keys
+
+    async def test_a_declared_returns_wins_and_stays_required(self):
+        """The map of the target is used only when the call declares none."""
+        flow = await _flow(
+            config=_call(returns={"answer": "solution"}),
+            maps={_TARGET: {"other": "solution"}},
+        )
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        data = flow.api.get_data(flow.cid)
+        assert flow.record() == _final("ok", None)
+        assert data["answer"] == "solved why" and "other" not in data
+        missing = await _flow(
+            config=_call(returns={"answer": "never_written"}),
+            maps={_TARGET: {"other": "solution"}},
+        )
+        await missing.api.arun_until_terminal(missing.cid, max_steps=10)
+        assert missing.record() == _final("failed", "return_keys_missing")
+        assert "other" not in missing.api.get_data(missing.cid)
+
+    async def test_with_no_map_and_no_returns_nothing_is_merged(self):
+        flow = await _flow(config=_call(returns={}))
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        assert flow.record() == _final("ok", None)
+        assert "answer" not in flow.api.get_data(flow.cid)
+
+    async def test_a_mapped_key_that_is_internal_secret_or_the_record_is_dropped(self):
+        """Kills (D2): a merge with no name filter (the child's text would become an engine key,
+        a secret-looking entry or the result record itself)."""
+        hostile = {
+            "_approval_granted": "solution",
+            "api_key": "solution",
+            "call_result": "solution",
+            "answer": "solution",
+        }
+        flow = await _flow(config=_call(returns={}), maps={_TARGET: hostile})
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        raw = flow.api.fsm_manager.copy_raw_context_data(flow.frame)
+        assert raw["answer"] == "solved why"
+        assert "_approval_granted" not in raw and "api_key" not in raw
+        assert flow.record() == _final("ok", None)  # the record wins, in the one delta
+
+    async def test_a_target_that_cannot_be_proven_after_a_restart_merges_nothing(self):
+        """The map belongs to the object settle pushed: when the mark is gone and the registry
+        now answers another definition, the map is unknown and nothing is guessed."""
+        flow = await _flow(config=_call(returns={}), steps=2, maps={_TARGET: self._MAP})
+        await flow.api.aadvance(flow.cid)
+        assert flow.depth() == 2
+        flow.api._call_marks.pushed.clear()
+        changed = _child_definition(2)
+        changed["name"] = "AnotherChild"
+        flow.resolver.definitions[_TARGET] = FSMDefinition(**changed)
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        record = flow.record()
+        assert record["status"] == "ok" and record["instance_identity"] is None
+        assert "answer" not in flow.api.get_data(flow.cid)
 
 
 class TestEveryFailureHasItsReason:

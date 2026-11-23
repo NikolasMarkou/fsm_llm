@@ -6,14 +6,9 @@
   "description": "Direct arithmetic calculations",
   "contract": {
     "inputs": [
-      "problem_statement",
-      "problem_components",
-      "constraints",
-      "problem_type"
+      "problem_statement"
     ],
-    "outputs": [
-      "calculation_result"
-    ]
+    "outputs": []
   },
   "requires": {
     "handlers": [

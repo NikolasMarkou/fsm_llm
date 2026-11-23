@@ -28,8 +28,9 @@ Interface contract:
   ``TargetResolver`` of the ``call`` kind (``engine.kinds.targets``, plan baa37f40 D-021): the
   greatest version of *target_id* instantiated with no variables, answered as its
   ``FSMDefinition`` and both identities when the instance is an FSM body (kinds ``fsm``,
-  ``strategy``, ``procedure``); ``None`` for a miss, a body that does not instantiate and a
-  code-backed kind (``pattern``, ``workflow``). Never raises for a miss, never loads a module
+  ``strategy``, ``procedure``) and, for a ``strategy``, its declared ``results`` as the target's own
+  output map (``ResolvedTarget.returns``, D-030 of plan baa37f40); ``None`` for a miss, a body
+  that does not instantiate and a code-backed kind (``pattern``, ``workflow``). Never raises for a miss, never loads a module
   by the id and keeps no instance.
 - ``set_alias(name, routes, *, target=None)`` and ``resolve(name, *, experiment=None,
   conversation_id=None, pinned_template_identity=None) -> Resolution`` (see ``aliases``).
@@ -503,8 +504,13 @@ class ExecutableRegistry:
             definition, FSMDefinition
         ):  # a code-backed kind has no body to push
             return None
+        envelope = getattr(executable, "envelope", None)
+        decl = getattr(getattr(envelope, "body", None), "strategy", None)
         return ResolvedTarget(
-            definition, executable.template_identity, instance.instance_identity
+            definition,
+            executable.template_identity,
+            instance.instance_identity,
+            returns=None if decl is None else dict(decl.results),
         )
 
     # ---- aliases ------------------------------------------------------------------------

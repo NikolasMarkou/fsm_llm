@@ -10,12 +10,13 @@ Interface contract:
 
 - ``reasoning.<name>`` (kind ``strategy``, capability ``strategy``, lifecycle ``builtin``): the body
   is ``body.fsm`` of the file, the very FSM the engine pushes (``get_reasoning_fsm(name)``); the
-  declaration is its ``body.strategy`` (aliases, results, solution key). Contract inputs are the four keys the engine
-  hands a strategy (``problem_statement``, ``problem_components``, ``constraints``,
-  ``problem_type``; a caller with no components passes ``[]``): the problem arrives through context,
-  never definition text, so the template AND the instance identity do not depend on it. The contract
-  output is the solution key (a declared output is required at the terminal state, and only declared
-  outputs are returned; the other result keys wait for E3.3). ``simple_calculator`` and ``hybrid``
+  declaration is its ``body.strategy`` (aliases, results, solution key). The contract is ONE
+  input, ``problem_statement`` (the problem arrives through context, never definition text, so
+  the template AND the instance identity do not depend on it), and NO declared output (plan
+  baa37f40 D-030): a run returns every non-None key of ``results``, so a refused calculator
+  expression returns ``calculation_error_details`` instead of failing the run, and a caller with
+  no ``constraints`` runs. The orchestrator hands a pushed strategy its own ``call`` inputs (the
+  four problem keys); frame mode reads no contract. ``simple_calculator`` and ``hybrid``
   run with ``setup=register_strategy_handlers`` (their handlers are named in ``requires.handlers``);
   the other seven run standalone. The result carries both identities.
 - ``reasoning.solve`` (kind ``pattern``): inputs ``problem`` (a ``str``, required), ``context`` (a

@@ -6,14 +6,9 @@
   "description": "Deriving specific conclusions from general principles",
   "contract": {
     "inputs": [
-      "problem_statement",
-      "problem_components",
-      "constraints",
-      "problem_type"
+      "problem_statement"
     ],
-    "outputs": [
-      "deductive_conclusion"
-    ]
+    "outputs": []
   },
   "requires": {
     "handlers": []

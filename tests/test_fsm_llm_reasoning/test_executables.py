@@ -51,12 +51,9 @@ from fsm_llm.testing import ScriptedLLM
 from .test_engine_scripted import _PROBLEM, _VALID_SCRIPT, _ScriptedLLM
 
 REPO = Path(__file__).resolve().parents[2]
-INPUTS = {
-    "problem_statement": "Is Socrates mortal?",
-    "problem_components": ["a"],
-    "constraints": [],
-    "problem_type": "logic",
-}
+# The contract of a strategy is the problem alone (D-030 of plan baa37f40, step 14): the
+# orchestrator hands a pushed strategy its own `call` inputs, frame mode reads no contract.
+INPUTS = {"problem_statement": "Is Socrates mortal?"}
 NEEDS_HANDLERS = {"simple_calculator", "hybrid"}
 
 
@@ -132,7 +129,7 @@ class TestTheSource:
             spec["results"],
             spec["solution_key"],
         )
-        assert exe.contract.outputs == [spec["solution_key"]]
+        assert exe.contract.outputs == []
         assert exe.contract.inputs == list(INPUTS)
         # the body is the engine's own FSM, not a copy that can drift
         assert exe.envelope.body.fsm == get_reasoning_fsm(name)
@@ -201,7 +198,8 @@ class TestStrategiesRunStandalone:
         result = exe.run(INPUTS, context=RunContext(llm_interface=llm))
         solution_key = strategy_facts(name)["solution_key"]
         assert result.status is Status.OK, (result.reason, result.detail)
-        assert list(result.outputs) == [solution_key]
+        assert solution_key in result.outputs
+        assert set(result.outputs) <= set(strategy_facts(name)["results"])
         assert result.outputs[solution_key] is not None
         assert result.identity.template_identity == exe.template_identity
         assert result.identity.instance_identity  # a strategy body is static
@@ -214,7 +212,7 @@ class TestStrategiesRunStandalone:
             .get("reasoning.simple_calculator")
             .run(INPUTS, context=RunContext(llm_interface=_llm("simple_calculator")))
         )
-        assert result.outputs == {"calculation_result": 36}
+        assert result.outputs == {"calculation_result": 36, "proposed_solution": 36}
 
     def test_the_instance_identity_is_the_digest_of_the_engines_own_fsm(self) -> None:
         exe = _registry().get("reasoning.deductive")
@@ -234,7 +232,7 @@ class TestStrategiesRunStandalone:
         result = (
             _registry()
             .get("reasoning.deductive")
-            .run({"problem_statement": "p"}, context=RunContext(llm_interface=llm))
+            .run({}, context=RunContext(llm_interface=llm))
         )
         assert (result.status, result.reason) == (Status.FAILED, Reason.INPUTS_MISSING)
         assert llm.call_history == []

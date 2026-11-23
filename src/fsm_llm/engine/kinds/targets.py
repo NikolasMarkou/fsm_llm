@@ -16,11 +16,16 @@ Interface contract:
   miss, never loads a module by the id, and keeps no instance. ``conversation_id`` is the
   root conversation that asks, for a resolver that routes per conversation (the registry
   does not yet).
-- ``ResolvedTarget(definition, template_identity, instance_identity, mode="frame")``: frozen.
-  ``definition`` is the ``FSMDefinition`` the stack pushes, unchanged (so its ``fsm_id`` is the
-  recomputed digest a restore checks). ``template_identity`` is the digest of the executable
-  (``None`` when the resolver has none) and ``instance_identity`` the digest of this
+- ``ResolvedTarget(definition, template_identity, instance_identity, mode="frame", returns=None)``:
+  frozen. ``definition`` is the ``FSMDefinition`` the stack pushes, unchanged (so its ``fsm_id``
+  is the recomputed digest a restore checks). ``template_identity`` is the digest of the
+  executable (``None`` when the resolver has none) and ``instance_identity`` the digest of this
   instantiation. ``mode`` has ONE value, ``TARGET_MODE_FRAME``; any other raises ``ValueError``.
+  ``returns`` is the target's OWN output map (plan baa37f40 D-030): parent key to child key, the
+  shape of ``CallStateConfig.returns``; a strategy's ``results``. ``None`` when the target
+  declares none. A call that declares no ``returns`` merges every non-None child value of this
+  map; a declared ``returns`` is the whole rule. Stored as a read-only copy; a map that is not
+  ``str`` to ``str`` raises ``TypeError``.
 - ``check_targets(value)``: ``None`` or an object with a callable ``resolve_target``, returned
   as is; anything else raises ``TypeError``. The one check of ``API(targets=)``,
   ``FSMManager(targets=)``, ``MessagePipeline(targets=)`` and ``RunContext(registry=)``.
@@ -28,7 +33,9 @@ Interface contract:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
 from fsm_llm.core.definitions import FSMDefinition
@@ -47,12 +54,20 @@ class ResolvedTarget:
     template_identity: str | None
     instance_identity: str | None
     mode: str = TARGET_MODE_FRAME
+    returns: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         if self.mode != TARGET_MODE_FRAME:
             raise ValueError(
                 f"a resolved target has the one mode {TARGET_MODE_FRAME!r}, got {self.mode!r}"
             )
+        if self.returns is not None:
+            if not all(
+                isinstance(parent, str) and isinstance(child, str)
+                for parent, child in self.returns.items()
+            ):
+                raise TypeError("ResolvedTarget.returns must map str keys to str keys")
+            object.__setattr__(self, "returns", MappingProxyType(dict(self.returns)))
 
 
 @runtime_checkable

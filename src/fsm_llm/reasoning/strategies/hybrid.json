@@ -6,14 +6,9 @@
   "description": "Combining multiple reasoning approaches",
   "contract": {
     "inputs": [
-      "problem_statement",
-      "problem_components",
-      "constraints",
-      "problem_type"
+      "problem_statement"
     ],
-    "outputs": [
-      "final_hybrid_solution"
-    ]
+    "outputs": []
   },
   "requires": {
     "handlers": [

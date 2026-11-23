@@ -27,6 +27,12 @@ Interface contract:
 - Never trusts the record (D-023): the target, the inputs and the budgets are read from the
   PARENT frame's own definition and context. A forged public ``call_result`` cannot name a
   target the state does not declare.
+- The pop merges ``config.returns`` when the call declares it (every entry required: a missing
+  one is ``failed/return_keys_missing``); when it declares none, the output map the PUSHED target
+  carries (``ResolvedTarget.returns``, a strategy's ``results``, D-030): every non-None child
+  value under its parent key, a key the child never wrote simply absent, a key that is
+  internal-prefixed, secret-looking or the call's own result key dropped with a WARNING. A
+  target settle cannot prove after a restart (no mark, another definition now) merges nothing.
 - Errors: ``FSMError`` for a second driver and for a pop the manager refuses (the next settle
   retries); an ``LLMResponseError`` of the child's greeting is the FINAL record
   ``failed/provider_error`` (the push rolled itself back; D-026 (6)); a ``CancelledError`` and
@@ -38,11 +44,15 @@ Interface contract:
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeGuard
 
-from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
+from fsm_llm.constants import (
+    DEFAULT_MAX_STACK_DEPTH,
+    has_internal_prefix,
+    is_forbidden_context_entry,
+)
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import (
     CallStateConfig,
@@ -326,12 +336,50 @@ def _outcome(
         return settled(Status.ABORTED, Reason.BUDGET_SPENT)
     child_data = api.fsm_manager.copy_raw_context_data(child.conversation_id) or {}
     merged: dict[str, Any] = {}
-    for parent_key, child_key in config.returns.items():
+    if config.returns:
+        for parent_key, child_key in config.returns.items():
+            value = child_data.get(child_key)
+            if value is None:
+                return settled(Status.FAILED, Reason.RETURN_KEYS_MISSING)
+            merged[parent_key] = value
+    elif pushed is not None and pushed.returns:
+        merged = _mapped_returns(state_id, config, pushed.returns, child_data)
+    elif pushed is None:
+        logger.warning(
+            f"Call state '{state_id}' ended a child whose target cannot be proven (no mark "
+            "and the registry answers another definition): its own output map is unknown, "
+            "nothing is merged"
+        )
+    return {**merged, **settled(Status.OK, None)}
+
+
+def _mapped_returns(
+    state_id: str,
+    config: CallStateConfig,
+    mapping: Mapping[str, str],
+    child_data: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The tolerant merge of the target's own output map (D-030): every non-None child value
+    under its parent key. A parent key that is internal-prefixed, a secret-looking entry or the
+    call's own result key is dropped with one WARNING per key (the map is registry text, never
+    an engine key); a key the child never wrote is simply absent."""
+    merged: dict[str, Any] = {}
+    for parent_key, child_key in mapping.items():
         value = child_data.get(child_key)
         if value is None:
-            return settled(Status.FAILED, Reason.RETURN_KEYS_MISSING)
+            continue
+        if (
+            parent_key == config.result_key
+            or has_internal_prefix(parent_key)
+            or is_forbidden_context_entry(parent_key, value)
+        ):
+            logger.warning(
+                f"Call state '{state_id}': the output map of the target names "
+                f"'{parent_key}', which is never merged into a parent context"
+            )
+            continue
         merged[parent_key] = value
-    return {**merged, **settled(Status.OK, None)}
+    return merged
 
 
 async def _try_push(

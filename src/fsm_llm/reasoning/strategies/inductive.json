@@ -6,14 +6,9 @@
   "description": "Finding patterns from specific observations",
   "contract": {
     "inputs": [
-      "problem_statement",
-      "problem_components",
-      "constraints",
-      "problem_type"
+      "problem_statement"
     ],
-    "outputs": [
-      "inductive_hypothesis"
-    ]
+    "outputs": []
   },
   "requires": {
     "handlers": []

@@ -6,14 +6,9 @@
   "description": "Generating novel solutions through divergent thinking",
   "contract": {
     "inputs": [
-      "problem_statement",
-      "problem_components",
-      "constraints",
-      "problem_type"
+      "problem_statement"
     ],
-    "outputs": [
-      "best_creative_solution"
-    ]
+    "outputs": []
   },
   "requires": {
     "handlers": []
