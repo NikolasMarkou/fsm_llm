@@ -90,7 +90,9 @@ class TestTheHeader:
             {
                 "kind": "pattern",
                 "id": "probe",
+                "version": "1",
                 "impl": "tests.probe.Probe",
+                "contract": _Probe().contract.model_dump(mode="json"),
                 "fsm_llm": fsm_llm.__version__,
                 "requires": Requires(callables=["tools"]).model_dump(mode="json"),
             }
@@ -101,7 +103,9 @@ class TestTheHeader:
         "change",
         [
             {"id": "other"},
+            {"version": "2"},
             {"impl": "tests.probe.Other"},
+            {"contract": Contract(inputs=["more"])},
             {"requires": Requires(callables=["hitl"])},
         ],
     )

@@ -125,6 +125,13 @@ def _assemble(
             )
             continue
         known = versions.get(key[0], [])
+        numeric = _version_key(key[1])
+        if numeric is not None and any(_version_key(v) == numeric for v in known):
+            refused.append(
+                f"{key[0]!r} version {key[1]!r} from {source} equals a version already "
+                "served as an integer dotted tuple"
+            )
+            continue
         if known and any(_version_key(v) is None for v in [*known, key[1]]):
             refused.append(
                 f"{key[0]!r} version {key[1]!r} from {source}: a version label that is "
@@ -344,8 +351,13 @@ class ExecutableRegistry:
                 if label in loaded:
                     candidates.append((loaded[label], label))
                 elif label in keep:
+                    # a file label equals its entries' source; a directory that could not be
+                    # listed is its resolved root, and its entries sit under it
+                    under = label + os.sep
                     candidates += [
-                        (e.executable, e.source) for e in current if e.source == label
+                        (e.executable, e.source)
+                        for e in current
+                        if e.source == label or e.source.startswith(under)
                     ]
             entries, refused = _assemble(candidates)
             self._snapshot = _Snapshot(entries)
@@ -384,7 +396,7 @@ class ExecutableRegistry:
             if target.stat().st_size > MAX_DOCUMENT_BYTES:
                 return f"larger than {MAX_DOCUMENT_BYTES} bytes"
             with target.open("rb") as handle:
-                text = handle.read(MAX_DOCUMENT_BYTES + 1).decode("utf-8")
+                text = handle.read(MAX_DOCUMENT_BYTES + 1).decode("utf-8-sig")
             data = json.loads(text)
         except (OSError, UnicodeDecodeError, ValueError, RecursionError) as error:
             return f"unreadable: {type(error).__name__}"
@@ -514,9 +526,10 @@ def _members(path: Path) -> list[tuple[str, Path | None, str | None]]:
     root = path.resolve()
     members: list[tuple[str, Path | None, str | None]] = []
     try:
-        names = sorted(n for n in os.listdir(root) if n.endswith(".json"))
+        names = sorted(n for n in os.listdir(root) if n.lower().endswith(".json"))
     except OSError as error:
-        return [(str(path), None, f"unreadable directory: {type(error).__name__}")]
+        # reported under the resolved root: the label `reload` matches its entries against
+        return [(str(root), None, f"unreadable directory: {type(error).__name__}")]
     for name in names:
         label = str(root / name)
         if (root / name).is_symlink():

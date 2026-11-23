@@ -45,7 +45,7 @@ from fsm_llm.engine.executables import (
 )
 from fsm_llm.engine.executables import registry as registry_module
 from fsm_llm.testing import ScriptedLLM
-from tests.conftest import symlink_or_skip
+from tests.conftest import posix_only, skip_if_root, symlink_or_skip
 from tests.test_fsm_llm import kind_corpus as kc
 from tests.test_fsm_llm.test_async_engine import _Gated
 from tests.test_fsm_llm_regression.workflow_support import passthrough_env
@@ -288,6 +288,97 @@ class TestPaths:
         assert [Path(k).name for k in report.failed] == ["x.json"]
         assert registry.get("y")
 
+    @pytest.mark.parametrize("through_link", [False, True])
+    def test_a_directory_that_cannot_be_listed_keeps_every_entry_it_served(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        through_link: bool,
+    ) -> None:
+        real = tmp_path / "real"
+        folder = real / "docs"
+        folder.mkdir(parents=True)
+        _write(folder / "a.json", _doc("a"))
+        _write(folder / "b.json", _doc("b"))
+        source = folder
+        if through_link:
+            symlink_or_skip(tmp_path / "link", real, target_is_directory=True)
+            source = tmp_path / "link" / "docs"
+        registry = ExecutableRegistry.from_paths([source])
+        before = {e.id: e for e in registry.list()}
+        assert set(before) == {"a", "b"}
+        listdir = os.listdir
+
+        def failing(path: Any = ".") -> list[str]:
+            if Path(path).resolve() == folder.resolve():
+                raise PermissionError("the share went away")
+            return listdir(path)
+
+        monkeypatch.setattr(registry_module.os, "listdir", failing)
+        report = registry.reload()
+        # the source failed as a whole, so what it served stays served
+        assert {e.id: e for e in registry.list()} == before
+        assert list(report.failed.values()) == [
+            ("unreadable directory: PermissionError",)
+        ]
+        monkeypatch.undo()
+        assert registry.reload().failed == {}
+        assert [e.id for e in registry.list()] == ["a", "b"]
+
+    @posix_only("a directory mode bit stops the listing")
+    def test_a_directory_with_no_read_permission_keeps_its_entries(
+        self, tmp_path: Path
+    ) -> None:
+        skip_if_root()
+        folder = tmp_path / "docs"
+        folder.mkdir()
+        _write(folder / "a.json", _doc("a"))
+        registry = ExecutableRegistry.from_paths([folder])
+        before = registry.get("a")
+        folder.chmod(0o000)
+        try:
+            report = registry.reload()
+        finally:
+            folder.chmod(0o755)
+        assert registry.get("a") is before
+        assert len(report.failed) == 1
+
+    def test_a_utf8_bom_document_loads(self, tmp_path: Path) -> None:
+        (tmp_path / "bom.json").write_bytes(
+            b"\xef\xbb\xbf" + json.dumps(_doc("bom")).encode("utf-8")
+        )
+        registry = ExecutableRegistry.from_paths([tmp_path])
+        assert registry.get("bom")
+        assert registry.reload().failed == {}
+
+    def test_an_uppercase_json_suffix_is_a_document(self, tmp_path: Path) -> None:
+        _write(tmp_path / "Upper.JSON", _doc("upper"))
+        registry = ExecutableRegistry.from_paths([tmp_path])
+        assert registry.get("upper")
+
+    @pytest.mark.parametrize("order", [("01", "1"), ("1", "01"), ("1.0", "1.00")])
+    def test_a_numeric_version_label_equal_to_a_served_one_is_a_collision(
+        self, order: tuple[str, str]
+    ) -> None:
+        # "01" and "1" are the same integer tuple: which one get() served would depend on the
+        # order they were added in, so the second one is refused, in either order.
+        registry = ExecutableRegistry()
+        first = registry.add_document(_doc(version=order[0]))
+        with pytest.raises(ExecutableCollisionError, match="already served"):
+            registry.add_document(_doc(version=order[1], response="B."))
+        assert registry.get("demo") is first
+        assert [e.version for e in registry.list()] == [order[0]]
+
+    def test_equal_numeric_labels_from_two_files_are_reported_not_served(
+        self, tmp_path: Path
+    ) -> None:
+        _write(tmp_path / "a.json", _doc(version="01"))
+        _write(tmp_path / "b.json", _doc(version="1", response="B."))
+        registry = ExecutableRegistry.from_paths([tmp_path])
+        report = registry.reload()
+        assert len(report.collisions) == 1 and "b.json" in report.collisions[0]
+        assert registry.get("demo").version == "01"
+
     def test_memory_entries_survive_a_reload(self, tmp_path: Path) -> None:
         registry = ExecutableRegistry(paths=[tmp_path])
         mine = registry.add_document(_doc("mine"))
@@ -326,8 +417,13 @@ class TestAtomicReload:
         assert registry._pins == {}
 
     def test_a_reader_thread_sees_only_wholly_old_or_wholly_new_snapshots(
-        self, tmp_path: Path
+        self, tmp_path: Path, timing_factor: float
     ) -> None:
+        # A busy-loop reader against 30 reloads is the shape of the stress test that stalled
+        # inside coverage's data lock on CPython 3.12.16 in CI (test_core_hardening_seam skips
+        # under a tracer for the same reason); every untraced leg still runs it.
+        if timing_factor > 1:
+            pytest.skip("stalls inside coverage's tracer on CPython 3.12 (CI)")
         x = tmp_path / "x.json"
         y = tmp_path / "y.json"
         _write(x, _doc("x", "1"))

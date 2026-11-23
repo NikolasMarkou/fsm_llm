@@ -11,7 +11,7 @@ Interface contract:
 - ``CodeBackedExecutable(*, id, kind, impl, contract, requires=None, capabilities=(),
   optional_inputs=(), optional_callables=(), version="1")``: ``impl`` is the dotted name of the
   code (a claim of the code revision, never of behaviour); ``lifecycle`` is always ``builtin``.
-  ``template_identity`` is ``canonical_digest({kind, id, impl, fsm_llm version, requires})``: it
+  ``template_identity`` is ``canonical_digest({kind, id, version, impl, contract, fsm_llm version, requires})``: it
   never depends on a caller's task (Principle 14). ``requires.callables`` names the host objects a
   run REQUIRES, ``optional_callables`` those it reads when present, both looked up in
   ``RunContext.callables``; ``optional_inputs`` are input keys a caller may give beside the
@@ -85,7 +85,9 @@ class CodeBackedExecutable(ABC):
             {
                 "kind": kind,
                 "id": id,
+                "version": version,
                 "impl": impl,
+                "contract": contract.model_dump(mode="json"),
                 "fsm_llm": _FSM_LLM_VERSION,
                 "requires": self.requires.model_dump(mode="json"),
             }
