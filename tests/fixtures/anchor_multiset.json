@@ -764,6 +764,21 @@
       "delta": 2,
       "reason": "D-068 (plan ace7a8c8 step 29.2): the subclass-bypass warning anchor in synthesizer.py and the never-widen timeout anchor in agents/executables.py",
       "token": "plan-2026-11-20T055240-ace7a8c8/D-068"
+    },
+    {
+      "delta": 1,
+      "reason": "D-061, D-059, D-069 (plan ace7a8c8 step 29.3): anchors for the agent executables HITL rule, the FsmInstance cancel and cleanup rule and the workflow loader class-table rule (review warning 5)",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-059"
+    },
+    {
+      "delta": 1,
+      "reason": "D-061, D-059, D-069 (plan ace7a8c8 step 29.3): anchors for the agent executables HITL rule, the FsmInstance cancel and cleanup rule and the workflow loader class-table rule (review warning 5)",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-061"
+    },
+    {
+      "delta": 1,
+      "reason": "D-061, D-059, D-069 (plan ace7a8c8 step 29.3): anchors for the agent executables HITL rule, the FsmInstance cancel and cleanup rule and the workflow loader class-table rule (review warning 5)",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-069"
     }
   ]
 }

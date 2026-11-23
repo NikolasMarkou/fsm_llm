@@ -180,6 +180,12 @@ class FsmInstance:
         """The sync name of ``arun``, driven with no event loop."""
         return run_sync(self.arun(inputs, context=context))
 
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-059
+    # The run owns its API and its conversation: the conversation is ended and the API closed
+    # exactly once in the `finally` (`_release`), a cancel (`CancelledError`) is never swallowed
+    # and rolls back whole, and an error in cleanup never replaces the outcome. Do NOT end the
+    # conversation outside `finally`, do NOT catch `BaseException` or `CancelledError` here, and
+    # do NOT let `_release` raise.
     async def arun(
         self, inputs: Mapping[str, Any], *, context: RunContext | None = None
     ) -> RunResult:

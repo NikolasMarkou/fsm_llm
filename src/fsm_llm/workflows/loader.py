@@ -186,6 +186,13 @@ class _Builder:
         return True
 
 
+# DECISION plan-2026-11-20T055240-ace7a8c8/D-069
+# A step `type` resolves ONLY through the class table (`builtin_step_classes()` plus the caller's
+# `step_classes`, keyed by `__name__`), and a callable or object a document names resolves ONLY
+# through the caller's `NameRegistry`. A document never chooses what runs by a dynamic import.
+# Do NOT resolve a type or a name from a dotted path of the document (the loader's source row of
+# `test_workflow_loader` and `test_string_imports` ban the import machinery here), do NOT add a
+# global step registry, and do NOT let a custom class shadow a built-in name (one collected error).
 def load_workflow(
     document: Mapping[str, Any],
     *,

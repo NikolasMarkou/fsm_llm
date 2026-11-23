@@ -128,6 +128,14 @@ class PatternExecutable(CodeBackedExecutable):
             optional_callables=row.optional,
         )
 
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-061
+    # An executable NEVER supplies an approval grant: the host's `hitl` object passes through
+    # `objects` unchanged and the agent's own gate stays the only place the driver grant is
+    # written, bound to one exact call. Do NOT build a `HumanInTheLoop` here (not even a default
+    # or an auto-approving one), do NOT write the grant key or any run-output key into
+    # `initial_context`, and do NOT filter or forward the caller's seed in a new way: the agent
+    # strips grant and run-output keys itself (`strip_caller_context`). A tool with
+    # `requires_approval` and no `hitl` raises `AgentError` at construction, before any model call.
     async def execute(
         self,
         inputs: Mapping[str, Any],
