@@ -75,8 +75,10 @@ def check_turn_limits(max_steps: int | None, max_seconds: float | None) -> None:
 # locals of one call and restart, the reason the synthesis runner kept its own). Do NOT share one
 # record between a parent and a pushed frame (each frame is its own manager conversation and its
 # own budget), do NOT make a spent frame "ended" (`has_conversation_ended` stays as it is and the
-# engine never pops a frame) and do NOT put the record or its count in a session snapshot (a
-# restore, a fork and a resume start a FRESH budget from the API defaults).
+# engine pops no frame of its own accord, with ONE exception: `settle` pops the frame a call state
+# pushed when its child ended or its budget is spent, plan baa37f40 decision D-023) and do NOT
+# put the record or its count in a session snapshot (a restore, a fork and a resume start a
+# FRESH budget from the API defaults).
 @dataclass
 class TurnBudget:
     """The limits and the count of one conversation (see the module docstring)."""

@@ -132,6 +132,7 @@ from fsm_llm.llm import (
 from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog
 
+from .calls import CallMarks
 from .events import (
     close_event_log,
     open_event_log,
@@ -337,6 +338,8 @@ class API(
         # "Unknown FSM ID ..."). Cleanup treats
         # pending ids as referenced. See D-011.
         self._pending_push_ids: set[str] = set()
+        # What `settle` keeps in memory (the one-driver mark per root, refused child ends).
+        self._call_marks = CallMarks()
 
         # Create custom FSM loader
         def custom_fsm_loader(fsm_id: str) -> FSMDefinition:

@@ -75,7 +75,10 @@ class AdvanceResult(BaseModel):
         chose to stay; ``BLOCKED`` always stays.
       - ``response``: the Pass-2 reply of ``state_after``, or ``None`` when that
         state is silent (empty ``response_instructions``): no LLM call is made
-        and nothing is appended to the history for it.
+        and nothing is appended to the history for it. ``API.advance`` follows it
+        with the greeting of a child FSM a call state pushed at the end of the step,
+        joined by one newline (plan baa37f40, D-023): the reply of the step as a
+        whole, so a silent parent and a greeting child give the greeting alone.
       - ``ended``: ``True`` when ``state_after`` is terminal.
 
     Frozen: a result is a record of a finished step.

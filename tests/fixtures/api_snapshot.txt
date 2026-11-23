@@ -241,6 +241,7 @@ fsm_llm.FSMManager class
   def get_fsm_definition(self, fsm_id: str) -> FSMDefinition
   def has_conversation_ended(self, conversation_id: str, log: Any = None) -> bool
   def has_instance(self, conversation_id: str) -> bool
+  def peek_turn(self, conversation_id: str) -> tuple[str, bool] | None
   def process_message(self, conversation_id: str, message: str, log: Any = None) -> str
   def process_message_stream(self, conversation_id: str, message: str, log: Any = None) -> Iterator[str]
   def prune_orphaned_locks(self) -> list[str]

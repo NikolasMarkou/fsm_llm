@@ -417,3 +417,42 @@ class TestTheCheckerSeesViolations:
         assert order_problems(events) == [
             "event 1: _lock taken while a conv_lock is held"
         ]
+
+
+class _Recording(dict):
+    """The manager's per-conversation lock table, wrapping every lock it holds or gets in a
+    ``_RecLock`` (a pushed frame's lock is created at the push, so the table wraps on write)."""
+
+    def __init__(self, items, events) -> None:
+        self._events = events
+        super().__init__()
+        for key, lock in items.items():
+            self[key] = lock
+
+    def __setitem__(self, key, lock) -> None:
+        if not isinstance(lock, _RecLock):
+            lock = _RecLock("conv", lock, self._events)
+        super().__setitem__(key, lock)
+
+
+class TestSettleKeepsTheOrder:
+    """``settle`` (``engine/api/calls.py``, plan baa37f40 D-023) runs after the turn released its
+    conversation lock and reads through ``peek_turn``: a whole call flow (the request, the push,
+    the child's turns, the pop with its merge) takes no manager lock under a conversation lock
+    and awaits no conversation lock while ``_lock`` is held."""
+
+    async def test_a_whole_call_flow_keeps_the_lock_rules(self):
+        from tests.test_fsm_llm.test_call_settle import _flow
+
+        flow = await _flow(steps=2)
+        manager = flow.api.fsm_manager
+        events: list[tuple[str, str, int]] = []
+        manager._lock = _RecLock("lock", manager._lock, events)  # type: ignore[assignment]
+        manager._fsm_cache_lock = _RecLock("cache", manager._fsm_cache_lock, events)  # type: ignore[assignment]
+        manager._conversation_locks = _Recording(manager._conversation_locks, events)  # type: ignore[assignment]
+        await flow.api.arun_until_terminal(flow.cid, max_steps=10)
+        assert flow.record() is not None and flow.record()["status"] == "ok"
+        assert order_problems(events) == []
+        # not vacuous: both frames' conversation locks and `_lock` were taken
+        assert {name for name, _, _ in events} >= {"lock", "conv"}
+        assert sum(1 for n, w, _ in events if n == "conv" and w == "acquire-nb") >= 3

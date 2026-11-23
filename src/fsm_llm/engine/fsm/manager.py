@@ -624,6 +624,23 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         budget = self._turn_budgets.get(conversation_id)
         return None if budget is None else budget.steps_taken
 
+    def peek_turn(self, conversation_id: str) -> tuple[str, bool] | None:
+        """The current state and whether a turn is in flight for ``conversation_id``.
+
+        Contract: ``(current_state, turn_in_flight)``, or ``None`` for an unknown or ended id.
+        Taken under ``_lock`` only and NEVER under or toward a conversation lock, so it neither
+        waits for a turn (a thread) nor raises for one (a sibling task): this is the one read
+        ``settle`` makes of a frame it must not disturb. The pair is a point-in-time fact of
+        two attributes, not one consistent snapshot of a running turn: a caller that acts on
+        ``turn_in_flight == False`` accepts that a turn may start right after (the next settle
+        heals what that leaves).
+        """
+        with self._lock:
+            instance = self.instances.get(conversation_id)
+            if instance is None:
+                return None
+            return instance.current_state, conversation_id in self._active_turns
+
     @with_conversation_context
     def end_conversation(self, conversation_id: str, log: Any = None) -> None:
         """End conversation and clean up resources."""

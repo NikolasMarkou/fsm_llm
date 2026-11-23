@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from fsm_llm.llm import LLMInterface
     from fsm_llm.runtime import EventLog
 
+    from .calls import CallMarks
     from .stack import FSMStackFrame
 
 
@@ -43,6 +44,7 @@ class _ApiSurface:
         _targets: TargetResolver | None
         _temp_fsm_definitions: dict[str, FSMDefinition]
         _pending_push_ids: set[str]
+        _call_marks: CallMarks
         _stack_lock: threading.Lock
         conversation_stacks: dict[str, list[FSMStackFrame]]
         _last_accessed: dict[str, float]
@@ -97,6 +99,31 @@ class _ApiSurface:
             _suppress_start: bool = False,
             _conversation_id: str | None = None,
         ) -> tuple[str, str]: ...
+
+        async def apush_fsm(
+            self,
+            conversation_id: str,
+            new_fsm_definition: FSMDefinition | dict[str, Any] | str | os.PathLike[str],
+            context_to_pass: dict[str, Any] | None = None,
+            return_context: dict[str, Any] | None = None,
+            shared_context_keys: list[str] | None = None,
+            preserve_history: bool = False,
+            inherit_context: bool = True,
+            *,
+            max_steps: int | None = None,
+            max_seconds: float | None = None,
+        ) -> str: ...
+
+        def pop_fsm(
+            self,
+            conversation_id: str,
+            context_to_return: dict[str, Any] | None = None,
+            merge_strategy: Any = ...,
+        ) -> str: ...
+
+        def update_context(
+            self, conversation_id: str, context_update: dict[str, Any]
+        ) -> None: ...
 
         def advance(self, conversation_id: str) -> AdvanceResult: ...
 

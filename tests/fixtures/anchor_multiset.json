@@ -784,6 +784,11 @@
       "delta": 1,
       "reason": "D-020 (plan baa37f40 step 9): the new anchor on API.apush_fsm, the one push body (supersedes the cut of apush_fsm in plan f150ec28 D-015)",
       "token": "plan-2026-11-23T122249-baa37f40/D-020"
+    },
+    {
+      "delta": 1,
+      "reason": "D-023 (plan baa37f40 step 12): the new anchor on settle, which applies a call record after the turn and supersedes 5a6a1f80 D-010 for call frames only",
+      "token": "plan-2026-11-23T122249-baa37f40/D-023"
     }
   ]
 }

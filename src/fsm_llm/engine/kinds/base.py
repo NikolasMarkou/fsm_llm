@@ -8,6 +8,9 @@ package docstring of ``fsm_llm.engine.kinds``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from fsm_llm.aio import aoffload
 from fsm_llm.core.definitions import DataExtractionResponse, FSMInstance, State
 
@@ -93,3 +96,36 @@ class StateExecutor:
             previous_state,
             new_state,
         )
+
+    async def on_pushed(
+        self,
+        root_id: str,
+        parent_id: str,
+        child_id: str,
+        state: State,
+        record: Mapping[str, Any],
+    ) -> None:
+        """Settle pushed the child of ``state`` (plan baa37f40, D-023): nothing by default.
+
+        Called by ``engine/api/calls.py`` after a push succeeded, on the executor of the
+        parent state's kind. ``record`` is the running record the push applied. Informational:
+        what it returns and raises is not read, but a raise propagates out of the entry that
+        settled (the next entry finds the child already pushed and does not call it again).
+        """
+        return None
+
+    async def on_ended(
+        self,
+        root_id: str,
+        parent_id: str,
+        child_id: str,
+        state: State,
+        record: Mapping[str, Any],
+    ) -> None:
+        """Settle popped the child of ``state`` and merged its outcome: nothing by default.
+
+        Called after the pop, on the executor of the parent state's kind; ``record`` is the
+        FINAL record the pop wrote (``ok``, ``failed`` or ``aborted``). Informational, as
+        ``on_pushed``.
+        """
+        return None

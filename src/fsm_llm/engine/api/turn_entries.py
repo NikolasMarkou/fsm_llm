@@ -24,6 +24,7 @@ from fsm_llm.core.definitions import AdvanceResult, FSMError
 from fsm_llm.logging import logger
 
 from .budget import budget_kwargs
+from .calls import settle
 from .events import event_scope, event_stream, record_started
 from .helpers import _unexpected_error
 from .stack import FSMStackFrame
@@ -58,6 +59,17 @@ def _turn_errors(doing: str, do: str) -> Iterator[None]:
         raise _unexpected_error(
             e, f"Error {doing} message", f"Failed to {do} message"
         ) from e
+
+
+def _with_greetings(reply: str | None, greetings: list[str]) -> str | None:
+    """The reply of a step followed by the greetings of the children a call state pushed.
+
+    Contract: ``reply`` unchanged when ``greetings`` is empty; else the non-empty reply and
+    every greeting joined by one newline (D-023 of plan baa37f40, item 9). Never raises.
+    """
+    if not greetings:
+        return reply
+    return "\n".join([*([reply] if reply else []), *greetings])
 
 
 def _auto_save_session(api: _ApiSurface, conversation_id: str) -> None:
@@ -105,6 +117,7 @@ def _open_stream(
     async def _stream() -> AsyncGenerator[str, None]:
         with _turn_errors(doing, do):
             try:
+                sent = False
                 async with aclosing(
                     event_stream(
                         api,
@@ -115,7 +128,14 @@ def _open_stream(
                     )
                 ) as chunks:
                     async for chunk in chunks:
+                        sent = True
                         yield chunk
+                # Only at the NORMAL end (never in the `finally`: an abandoned or cancelled
+                # stream defers to the next entry's settle). A pushed child's greeting is one
+                # more chunk. See the D-023 anchor of `calls.py`.
+                for greeting in await settle(api, conversation_id):
+                    yield f"\n{greeting}" if sent else greeting
+                    sent = True
             finally:
                 # Auto-save session after stream completes or is abandoned
                 _auto_save_session(api, conversation_id)
@@ -246,15 +266,20 @@ class TurnEntriesMixin(_ApiSurface):
         """The async twin of ``converse``: the event loop runs other tasks while the model
         calls are awaited. A second turn on a busy conversation is refused, never waited for."""
         with _turn_errors("processing", "process"):
+            # A call state's request (a cancelled settle, a restore) is applied BEFORE the turn
+            # resolves its frame, so the message goes to the child it pushes.
+            greetings = await settle(self, conversation_id)
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with event_scope(self, conversation_id):
                 response: str = await acall(
                     self.fsm_manager, "process_message", current_fsm_id, user_message
                 )
+            greetings += await settle(self, conversation_id)
             # Auto-save session if store is configured
             _auto_save_session(self, conversation_id)
-            return response
+            joined = _with_greetings(response, greetings)
+            return response if joined is None else joined
 
     def advance(self, conversation_id: str) -> AdvanceResult:
         """Run one step of the current state with no user message.
@@ -291,12 +316,18 @@ class TurnEntriesMixin(_ApiSurface):
     async def aadvance(self, conversation_id: str) -> AdvanceResult:
         """The async twin of ``advance`` (see ``aconverse``)."""
         with _turn_errors("advancing without a", "advance without a"):
+            greetings = await settle(self, conversation_id)
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with event_scope(self, conversation_id):
                 result: AdvanceResult = await acall(
                     self.fsm_manager, "advance", current_fsm_id
                 )
+            greetings += await settle(self, conversation_id)
             _auto_save_session(self, conversation_id)
+            if greetings:
+                result = result.model_copy(
+                    update={"response": _with_greetings(result.response, greetings)}
+                )
             return result
 
     def converse_stream(self, user_message: str, conversation_id: str) -> Iterator[str]:

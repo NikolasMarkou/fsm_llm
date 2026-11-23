@@ -11,7 +11,6 @@ scripted model and a one-class resolver.
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 from unittest.mock import patch
 
@@ -38,12 +37,12 @@ _TARGET = "reasoning.analytical"
 
 
 def _child() -> dict[str, Any]:
-    """Two silent states: ``c1`` then the terminal ``c2``."""
+    """Two silent states (no greeting reaches the model): ``c1`` then the terminal ``c2``."""
     return kc._fsm(
         "Child",
         "c1",
-        kc._state("c1", transitions=[kc._go("c2")]),
-        kc._state("c2"),
+        kc._state("c1", response_instructions="", transitions=[kc._go("c2")]),
+        kc._state("c2", response_instructions=""),
     )
 
 
@@ -114,7 +113,8 @@ class TestTheRequestRecord:
                 "max_seconds": None,
             },
         }
-        assert resolver.asked == [(_TARGET, frame)]
+        # the executor asks first; settle (step 12) asks again when it pushes the child
+        assert resolver.asked[0] == (_TARGET, frame)
         # the call stays in its state: no edge passes while the status is `running`
         assert api.fsm_manager.get_conversation_state(frame) == "work"
 
@@ -169,21 +169,23 @@ class TestTheRequestRecord:
         await api.aadvance(cid)
         assert list(llm.call_history) == before
 
-    async def test_a_second_turn_while_the_request_stands_writes_nothing_new(self):
-        """Skip-if-set: a record of any status is final for the executor, and the resolver is
-        not asked again. Kills: an executor that re-resolves or re-writes every turn."""
+    async def test_a_record_that_stands_is_never_rewritten_or_resolved_again(self):
+        """Skip-if-set: a record of any status is final for the executor and the resolver is
+        not asked. Kills: an executor that re-resolves or re-writes every turn."""
         api, cid, frame, resolver, _ = await _at_the_call()
-        await api.aadvance(cid)
-        first = copy.deepcopy(_record(api, frame))
-        asked = list(resolver.asked)
-        api.fsm_manager.update_conversation_context(
-            frame, {"call_result": {**first, "template_identity": "marker"}}
-        )
-        # the stack may hold a child once settle exists; read the parent only
-        if api.get_stack_depth(cid) == 1:
-            await api.aadvance(cid)
-            assert _record(api, frame)["template_identity"] == "marker"
-            assert resolver.asked == asked
+        standing = {
+            "status": "ok",
+            "reason": None,
+            "target": _TARGET,
+            "template_identity": "marker",
+            "instance_identity": "marker",
+        }
+        api.fsm_manager.update_conversation_context(frame, {"call_result": standing})
+        step = await api.aadvance(cid)
+        assert resolver.asked == [] and _record(api, frame) == standing
+        assert (
+            step.state_after == "done"
+        )  # the success edge fired on the standing record
 
 
 class TestChoose:
@@ -210,7 +212,8 @@ class TestChoose:
         await api.aadvance(cid)
         record = _record(api, frame)
         assert record["status"] == "running" and record["target"] == want
-        assert resolver.asked == [(want, frame)]
+        assert resolver.asked[0] == (want, frame)
+        assert {t for t, _ in resolver.asked} == {want}  # never another id
 
     async def test_a_value_outside_the_list_with_no_fallback_fails_the_call(self):
         """Kills: an executor that calls whatever the key holds."""
