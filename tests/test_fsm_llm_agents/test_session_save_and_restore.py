@@ -43,6 +43,7 @@ class TestStreamAutoSave:
         api = Mock(spec=API)
         api._session_store = Mock()
         api._stack_lock = threading.RLock()
+        api.conversation_stacks = {}  # a stream settles at its START (D-026)
         api._last_accessed = {}
         api.save_session = Mock()
         api._get_current_fsm_conversation_id = Mock(return_value="fsm-1")
