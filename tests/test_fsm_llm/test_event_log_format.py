@@ -50,7 +50,9 @@ from fsm_llm.runtime.events import (
 
 RUNTIME_DIR = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "runtime"
 
-#: A literal copy of the 21 types of roadmap row 1.1 (docs/2026_roadmap.md), in its order.
+#: A literal copy of the types of roadmap row 1.1 (docs/2026_roadmap.md), in its order, then the
+#: three run types of row E2.1 (declared, no producer yet: plan ace7a8c8 D-059). The wire strings
+#: are the contract; no count is pinned, the enum is the source of every set below.
 ROADMAP_TYPES = [
     "turn/start",
     "llm/request",
@@ -73,7 +75,13 @@ ROADMAP_TYPES = [
     "context/record",
     "compaction/epoch",
     "turn/end",
+    "executable/resolve",
+    "run/start",
+    "run/end",
 ]
+
+#: The run vocabulary: declared and never produced until phase S.
+RUN_TYPES = {"executable/resolve", "run/start", "run/end"}
 
 
 def _envelope(**fields: Any) -> dict[str, Any]:
@@ -98,10 +106,9 @@ def _deep_list(depth: int) -> list[Any]:
 
 
 class TestVocabulary:
-    def test_the_21_strings_equal_the_roadmap_list(self) -> None:
+    def test_the_wire_strings_equal_the_roadmap_list(self) -> None:
         assert [member.value for member in EventType] == ROADMAP_TYPES
-        assert len(EventType) == 21
-        assert len(set(ROADMAP_TYPES)) == 21
+        assert len(set(ROADMAP_TYPES)) == len(EventType)
 
     def test_members_are_upper_snake_and_values_are_the_wire_strings(self) -> None:
         for member in EventType:
@@ -121,7 +128,6 @@ class TestVocabulary:
 
     def test_the_declared_set_is_the_whole_enum(self) -> None:
         assert DECLARED_TYPES == frozenset(EventType)
-        assert len(DECLARED_TYPES) == 21
 
     def test_the_produced_set_is_14_and_a_subset_of_the_declared_set(self) -> None:
         assert len(PRODUCED_TYPES) == 14
@@ -143,8 +149,8 @@ class TestVocabulary:
             "decision",
         }
 
-    def test_the_seven_declared_but_not_produced_types(self) -> None:
-        assert {t.value for t in DECLARED_TYPES - PRODUCED_TYPES} == {
+    def test_the_declared_but_not_produced_types(self) -> None:
+        assert {t.value for t in DECLARED_TYPES - PRODUCED_TYPES} == RUN_TYPES | {
             "extraction",
             "extraction/miss",
             "intent/out_of_scope",

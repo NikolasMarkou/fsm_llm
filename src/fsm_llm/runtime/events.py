@@ -59,6 +59,17 @@ class EventType(str, Enum):
     CONTEXT_RECORD = "context/record"
     COMPACTION_EPOCH = "compaction/epoch"
     TURN_END = "turn/end"
+    # The run vocabulary of E2.1 (plan ace7a8c8 D-059): declared, no producer yet (phase S writes
+    # them). Unknown types are refused on write and tolerated on read, so adding members changes
+    # no old log and needs no ``LOG_FORMAT_VERSION`` bump. A ``run/*`` event is written at the
+    # TOP frame of its owner: the FSM-body adapter owns its own API conversation tree, so its log
+    # is its own root. The intended ``run/start`` payload: the template and instance identity,
+    # the instantiation record and the inputs by reference, and the ``source`` of the request (a
+    # ``MessageSource`` value); ``run/end`` carries the ``RunResult`` (status, reason, identity,
+    # handle); ``executable/resolve`` the id, the version label and the template identity.
+    EXECUTABLE_RESOLVE = "executable/resolve"
+    RUN_START = "run/start"
+    RUN_END = "run/end"
 
     @classmethod
     def from_string(cls, value: EventType | str) -> EventType:
@@ -96,11 +107,11 @@ class TurnOutcome(str, Enum):
             ) from None
 
 
-#: Every type the format declares (21).
+#: Every type the format declares (the 21 of roadmap row 1.1 and the three run types).
 DECLARED_TYPES: frozenset[EventType] = frozenset(EventType)
 
 #: The types something writes today (14: ``decision`` joined at plan 5a6a1f80 step 7, the budget
-#: stop); the other 7 are declared for later rows.
+#: stop); the rest are declared for later rows.
 PRODUCED_TYPES: frozenset[EventType] = frozenset(
     {
         EventType.TURN_START,
