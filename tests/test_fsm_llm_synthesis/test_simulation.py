@@ -25,11 +25,11 @@ from fsm_llm.eval.config import EvalConfig
 from fsm_llm.synthesis import (
     FSMSynthesizer,
     Procedure,
-    ProcedureRunner,
     SimulationReport,
     Simulator,
     SynthesisError,
     SynthesisPolicy,
+    SynthesizeExecutor,
     digest_of,
     run_gates,
 )
@@ -42,6 +42,7 @@ from tests.test_fsm_llm_synthesis.conftest import (
     host_fsm,
     stuck_fsm,
 )
+from tests.test_fsm_llm_synthesis.rig import ExecutorDriver
 
 GOAL = "Collect one answer"
 KINDS = ("missing_info", "correction", "off_topic", "adversarial")
@@ -624,7 +625,7 @@ class TestReplay:
         assert self._replay(max_simulation_calls=1)[0] is None
 
 
-class TestParityWithTheRunner:
+class TestParityWithTheHostedChild:
     def test_the_same_model_and_turns_end_in_the_same_state_with_the_same_keys(self):
         data = _injected().model_dump(exclude_defaults=True)
         turns = ["the answer is 42"]
@@ -655,18 +656,21 @@ class TestParityWithTheRunner:
             fail_text="Apologise",
         )
         cheap = ScriptedRunnerLLM({"answer": "42"})
-        api = API.from_definition(definition=host, llm_interface=cheap)
         synth = FSMSynthesizer(ScriptedLLM([]))
         definition = _injected()
         procedure = Procedure(digest_of(definition), definition, None, "compiled")
         synth.obtain = lambda *a, **k: procedure  # type: ignore[method-assign]
         stream: list[tuple[str, dict[str, Any]]] = []
-        runner = ProcedureRunner(
-            api, host, synth, trace_sink=lambda e, f: stream.append((e, dict(f)))
+        executor = SynthesizeExecutor(
+            synth, trace_sink=lambda e, f: stream.append((e, dict(f)))
         )
+        api = API.from_definition(
+            definition=host, llm_interface=cheap, executors={"synthesize": executor}
+        )
+        driver = ExecutorDriver(api)
         conv, _ = api.start_conversation({"topic": "sample"})
-        runner.converse(conv, "hello")  # the parent's turn: pushes the child
-        runner.converse(conv, turns[0])
+        driver.converse(conv, "hello")  # the parent's turn: pushes the child
+        driver.converse(conv, turns[0])
 
         child_states = [f["state"] for name, f in stream if name == "stepped"]
         assert trial.ended and trial.error is None

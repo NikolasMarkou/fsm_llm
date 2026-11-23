@@ -10,12 +10,12 @@ stdlib helpers and its recorded blocks were deleted. What stays is what an offli
 - ``User``: the scripted user (a rule table, no model).
 - ``grade`` (with ``holds``, ``squash``, ``NEGATORS``): one grader for the values a run returned.
 - ``drive_fsm``: arms S (a compiled child) and H (a hand-written child) on one host, one
-  runner and one library, user turn by user turn.
+  bare ``API`` with a ``SynthesizeExecutor`` and one library, user turn by user turn.
 
 Interface of ``drive_fsm(arm, task, lib_dir, llms)``: ``arm`` is ``SYNTH`` or ``HAND``;
 ``llms`` maps ``compile``, ``sim`` (arm S only) and ``run`` to ``LLMInterface`` objects;
 ``lib_dir`` is the library directory. It returns the row fields (``correct``, ``per_key``,
-``checks``, ``values``, ``status``, ``runner_reason``, ``source``, ``rounds``,
+``checks``, ``values``, ``status``, ``reason``, ``source``, ``rounds``,
 ``compile_seconds``, ``turns``, ``confused_turns``, ``transcript``, ``child_states``). It raises
 ``AssertionError`` when the hand child fails the compiler's own gates; any other exception of
 the run propagates.
@@ -202,11 +202,13 @@ def grade(task: Task, values: dict[str, Any] | None, late: list[str], used: int)
 def drive_fsm(
     arm: str, task: Task, lib_dir: Path, llms: dict[str, Any]
 ) -> dict[str, Any]:
-    """Arms S and H on one host, one runner, one library path: user turns until the
-    conversation ends or ``MAX_USER_TURNS``. Returns the row's FSM fields."""
+    """Arms S and H on one host, one bare ``API`` with a ``SynthesizeExecutor``, one library
+    path: user turns until the conversation ends or ``MAX_USER_TURNS``. Returns the row's FSM
+    fields."""
     import fsm_llm.synthesis as syn
     from fsm_llm import API
     from fsm_llm.synthesis.gates import GATES
+    from tests.test_fsm_llm_synthesis.rig import ExecutorDriver
 
     hand = arm == HAND
     policy = syn.SynthesisPolicy(**POLICY, require_simulation=not hand)
@@ -224,13 +226,14 @@ def drive_fsm(
     synth = syn.FSMSynthesizer(llms["compile"], policy=policy, library=library, simulator=sim)  # fmt: skip
     events: list[tuple[str, dict[str, Any]]] = []
     host = host_definition(task)
-    api = API.from_definition(definition=host, llm_interface=llms["run"])
-    runner = syn.ProcedureRunner(api, host, synth, trace_sink=lambda e, f: events.append((e, f)))  # fmt: skip
+    executor = syn.SynthesizeExecutor(synth, trace_sink=lambda e, f: events.append((e, f)))  # fmt: skip
+    api = API.from_definition(definition=host, llm_interface=llms["run"], executors={"synthesize": executor})  # fmt: skip
+    driver = ExecutorDriver(api)
     conv, _ = api.start_conversation()
     user, said, turns = User(task.users), OPENER, []
     try:
         for _ in range(MAX_USER_TURNS):
-            reply = runner.converse(conv, said)
+            reply = driver.converse(conv, said)
             turns.append([said[:300], reply[:300]])
             if api.has_conversation_ended(conv):
                 break
@@ -238,12 +241,12 @@ def drive_fsm(
         data = api.get_data(conv)
     finally:
         with contextlib.suppress(Exception):
-            runner.end_conversation(conv)
+            api.end_conversation(conv)
     result = data.get("synthesis_result") or {}
     got = next((f for e, f in events if e in ("obtained", "failed")), {})
     grades = grade(task, {k: data.get(k) for k in keys}, user.late, user.used[0])
     # fmt: off
-    return {**grades, "status": result.get("status"), "runner_reason": result.get("reason"), "source": got.get("source"),
+    return {**grades, "status": result.get("status"), "reason": result.get("reason"), "source": got.get("source"),
             "rounds": [c.split(",") for c in (got.get("rounds") or "").split(";") if c], "compile_seconds": got.get("seconds", 0.0),
             "turns": len(turns), "confused_turns": user.confused, "transcript": turns,
             "child_states": sorted({f["state"] for e, f in events if e == "stepped" and f.get("state")})}

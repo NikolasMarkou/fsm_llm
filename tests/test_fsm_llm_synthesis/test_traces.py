@@ -1,6 +1,6 @@
 """
 Tests for ``fsm_llm.synthesis.traces``: the value-free ``RunTrace``, the
-``TraceRecorder`` that turns runner events into one, and the converter for a
+``TraceRecorder`` that turns run events into one, and the converter for a
 run. The library's trace store is tested in ``test_library.py``.
 """
 
@@ -435,7 +435,7 @@ class TestNestedRunsOfOneProcedure:
 
 
 class TestRecorderThreads:
-    """One runner serves many conversations, one thread each (D-064)."""
+    """One recorder serves many conversations, one thread each (D-064)."""
 
     RUN = (
         ("pushed", {"digest": D1, "step": 1}),
@@ -484,8 +484,8 @@ class TestRecorderThreads:
 CANARIES = ("CANARY-CONTEXT", "CANARY-USER", "CANARY-MODEL")
 
 
-class TestOnARealRunner:
-    """The recorder as the runner's ``trace_sink``, into a real library."""
+class TestOnARealRun:
+    """The recorder as the executor's ``trace_sink``, into a real library."""
 
     def test_no_value_reaches_the_trace_file(self, valid_fsm, tmp_path):
         got: list[RunTrace] = []
@@ -495,13 +495,14 @@ class TestOnARealRunner:
             extraction={"answer": CANARIES[2]},
             context={"topic": CANARIES[0]},
             sink=lambda e, f: recorder(e, f),
+            driver="executor",
         )
         recorder = TraceRecorder(
             lambda t: (got.append(t), rig.library.add_trace(t, max_traces=10))  # type: ignore[union-attr]
         )
 
-        assert rig.runner.converse(rig.conv, "hello") == "What is the answer?"
-        rig.runner.converse(rig.conv, CANARIES[1])
+        assert rig.converse("hello") == "What is the answer?"
+        rig.converse(CANARIES[1])
 
         assert rig.library is not None and len(got) == 1
         t = got[0]
@@ -524,10 +525,11 @@ class TestOnARealRunner:
             extraction={},
             policy=SynthesisPolicy(max_turns=1),
             sink=lambda e, f: recorder(e, f),
+            driver="executor",
         )
         recorder = TraceRecorder(got.append)
-        rig.runner.converse(rig.conv, "hello")
-        rig.runner.converse(rig.conv, "one")
+        rig.converse("hello")
+        rig.converse("one")
 
         (t,) = got
         assert (t.status, t.reason, t.stuck) == ("aborted", "budget_spent", "ask")

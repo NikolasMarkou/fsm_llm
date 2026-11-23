@@ -189,7 +189,7 @@ def create_procedure_tools(
           user: it stops there with ``needs_user_input`` and counts no run (the
           rest of the budget would be wasted calls). ``provider_error`` counts none (an outage the core
           swallowed, which only shows as a stalled child, is told from the
-          interface's meter as the runner tells it, D-061); ``push_failed`` is
+          interface's meter as the synthesize executor tells it, D-061); ``push_failed`` is
           a procedure the sub-``API`` cannot be built for on *runner_llm* (a
           classifying state and an interface without ``complete``).
         - Every reply starts with ``PROCEDURE_UNTRUSTED_LABEL`` and fits the
@@ -307,7 +307,7 @@ def create_procedure_tools(
             with api:
                 # close() ends the sub-conversation on every path
                 conv, _ = api.start_conversation({n: given[n] for n in needs})
-                # the outage is a position taken now, as the runner takes it at the push
+                # the outage is a position taken now, as the executor takes it at the push
                 outage = watch_provider_errors(
                     runner_llm, getattr(api, "event_log", None), conv, 0
                 )

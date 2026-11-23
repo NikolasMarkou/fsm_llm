@@ -20,7 +20,6 @@ from fsm_llm.synthesis import (
     Diagnosis,
     FSMLibrary,
     FSMSynthesizer,
-    ProcedureRunner,
     PromotionResult,
     RunTrace,
     Simulator,
@@ -44,7 +43,7 @@ from fsm_llm.synthesis.prompts import (
 from fsm_llm.synthesis.repair import PATCH_MAX_TOKENS, decide, propose_patch
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, good_fsm
-from tests.test_fsm_llm_synthesis.rig import CONTEXT, make_host, make_rig
+from tests.test_fsm_llm_synthesis.rig import CONTEXT, make_rig
 from tests.test_fsm_llm_synthesis.rig import GOAL as HOST_GOAL
 
 POLICY = SynthesisPolicy()
@@ -842,16 +841,17 @@ class TestTheLoopEndToEnd:
             cheap=cheap,
             policy=policy,
             replies=[json.dumps(defective)],
+            driver="executor",
+            sink=lambda e, f: recorder(e, f),
         )
         library = rig.library
         assert library is not None
         recorder = TraceRecorder(library.add_trace)  # the one wiring line
-        runner = ProcedureRunner(rig.api, make_host(), rig.synth, trace_sink=recorder)
 
         # 1. real runs, one conversation each (the first compiles, the rest reuse)
         for _ in range(3):
             conv, _ = rig.api.start_conversation(CONTEXT)
-            runner.run(conv, max_steps=30)
+            rig.driver.run(conv, max_steps=30)
             assert (
                 rig.api.get_data(conv)["synthesis_result"]["reason"] == "budget_spent"
             )
@@ -899,6 +899,6 @@ class TestTheLoopEndToEnd:
         )
         assert [h.record.digest for h in hits] == [done.child]
         conv, _ = rig.api.start_conversation(CONTEXT)
-        runner.run(conv, max_steps=30)
+        rig.driver.run(conv, max_steps=30)
         result = rig.api.get_data(conv)["synthesis_result"]
         assert (result["status"], result["procedure_id"]) == ("ok", done.child)

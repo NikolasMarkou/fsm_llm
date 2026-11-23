@@ -66,8 +66,8 @@ from fsm_llm.monitor.definitions import StubToolConfig
 from fsm_llm.reasoning import ReasoningEngine
 from fsm_llm.synthesis import (
     FSMSynthesizer,
-    ProcedureRunner,
     Simulator,
+    SynthesizeExecutor,
     create_procedure_tools,
 )
 from fsm_llm.testing import ScriptedLLM
@@ -317,10 +317,12 @@ def _synthesis_synthesizer_injected(tmp_path: Path) -> None:
     FSMSynthesizer(_double())
 
 
-def _synthesis_runner_and_tools(tmp_path: Path) -> None:
+def _synthesis_executor_and_tools(tmp_path: Path) -> None:
     synthesizer = FSMSynthesizer(_double())
-    ProcedureRunner(
-        API.from_definition(_FSM, llm_interface=_double()), _FSM, synthesizer
+    API.from_definition(
+        _FSM,
+        llm_interface=_double(),
+        executors={"synthesize": SynthesizeExecutor(synthesizer)},
     )
     create_procedure_tools(synthesizer, runner_llm=_double())
     Simulator(_double())
@@ -385,8 +387,8 @@ _NO_MODEL_NEEDED: dict[str, Any] = {
     "workflows: AgentStep around an injected agent": _workflows_agent_step,
     "monitor: InstanceManager, attach_api, launch_workflow": _monitor_construction,
     "synthesis: FSMSynthesizer(injected llm)": _synthesis_synthesizer_injected,
-    "synthesis: ProcedureRunner, create_procedure_tools, Simulator": (
-        _synthesis_runner_and_tools
+    "synthesis: SynthesizeExecutor, create_procedure_tools, Simulator": (
+        _synthesis_executor_and_tools
     ),
     "agents: run() of react and debate on a double": _agents_run_with_a_double,
     "agents: AgentGraphBuilder with an injected-interface node": _agents_graph,

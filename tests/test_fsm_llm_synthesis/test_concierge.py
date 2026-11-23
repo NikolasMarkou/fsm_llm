@@ -4,9 +4,10 @@ End to end, offline: a concierge host FSM whose ``gather`` state is a
 
 The strong model is ``ScriptedLLM`` and the cheap model (the host's own
 interface, under the pushed child too) is ``ScriptedRunnerLLM``, both from
-conftest; the network is blocked. Every scenario runs both ways the runner
-drives a conversation: ``converse`` (user turns drive the child) and ``run``
-(``run_until_terminal`` with the runner's hook). One more test drives the agent
+conftest; the network is blocked. The host is a bare ``API`` with a
+``SynthesizeExecutor`` (no runner, plan baa37f40 step 21). Every scenario runs
+both ways a host drives a conversation: ``converse`` (user turns drive the
+child) and ``run`` (``run_until_terminal``). One more test drives the agent
 tools pair.
 """
 
@@ -20,14 +21,15 @@ from fsm_llm.engine.api.conversation import API
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
-    ProcedureRunner,
     SynthesisPolicy,
+    SynthesizeExecutor,
     create_procedure_tools,
 )
 from fsm_llm.synthesis.constants import PROCEDURE_UNTRUSTED_LABEL as LABEL
 from fsm_llm.testing import ScriptedLLM
 from fsm_llm.tools import ToolCall
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, host_fsm
+from tests.test_fsm_llm_synthesis.rig import ExecutorDriver
 
 GOAL = "collect visa application data"
 KEYS = ["passport_no", "travel_dates", "purpose"]
@@ -105,7 +107,7 @@ def _host() -> dict[str, Any]:
 @dataclass
 class _Rig:
     api: API
-    runner: ProcedureRunner
+    driver: ExecutorDriver
     cheap: ScriptedRunnerLLM
     strong: ScriptedLLM
     library: FSMLibrary | None
@@ -117,12 +119,12 @@ class _Rig:
     def drive(self, conv: str, mode: str) -> None:
         """Run ``conv`` to its end: user turns, or one message-free run."""
         if mode == "run":
-            assert self.runner.run(conv, max_steps=80)[-1].ended
+            assert self.driver.run(conv, max_steps=80)[-1].ended
             return
         for turn in range(12):
             if self.api.has_conversation_ended(conv):
                 return
-            self.runner.converse(conv, f"message {turn}")
+            self.driver.converse(conv, f"message {turn}")
         raise AssertionError("the conversation did not end in 12 turns")
 
     def finished(self, conv: str) -> tuple[str, int, dict[str, Any]]:
@@ -149,8 +151,12 @@ def _rig(
     lib = FSMLibrary(tmp_path / "lib") if library else None
     synth = FSMSynthesizer(strong, policy=policy, library=lib)
     host = _host()
-    api = API.from_definition(definition=host, llm_interface=cheap)
-    return _Rig(api, ProcedureRunner(api, host, synth), cheap, strong, lib)
+    api = API.from_definition(
+        definition=host,
+        llm_interface=cheap,
+        executors={"synthesize": SynthesizeExecutor(synth)},
+    )
+    return _Rig(api, ExecutorDriver(api), cheap, strong, lib)
 
 
 def _good_after_bad() -> list[str]:
