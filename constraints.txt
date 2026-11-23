@@ -111,7 +111,7 @@ cyclonedx-bom==8.0.1
 # `mcp>=1.0.0` floats: mcp 2.x already renamed Tool.inputSchema and moved FastMCP,
 # so an unpinned CI would silently test a new major. Same rule as the dev tools
 # above: bump deliberately, with the stdio MCP tests on every matrix leg.
-mcp==2.2.0
+mcp==2.3.0
 
 # ---------------------------------------------------------------------------
 # Docs site tools (`[dependency-groups] docs` in pyproject.toml, `make docs`, row 0.7 of the
