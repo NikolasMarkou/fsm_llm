@@ -12,7 +12,7 @@ The pages in the table below are current guides for version 0.13.0, and each sta
 | `quickstart.md` | Install, the model setting, a first bot, a handler, streaming, sessions, the builders, an agent, a workflow, the reasoning engine |
 | `concepts.md` | Why and where it fits, how a turn works, what each subpackage adds, status, references |
 | `fsm_design.md` | How to design states, transitions, priorities, context, classification, `completion` and `synthesize` states |
-| `executables.md` | The executable envelope: header and body, the two identities, the caller-input rule, the load sequence V1 to V5 and V7, `fsm-llm-validate` on a document |
+| `executables.md` | Executables: the envelope (header and body, the two identities, the caller-input rule, the load sequence V1 to V5 and V7, `fsm-llm-validate`), running one (`RunContext`, the protocol, the FSM-body adapter), the registry (retention, aliases, namespaces), the built-in patterns and strategies, the workflow step and the known limits |
 | `results_and_names.md` | The status and reason codes, `RunResult` and `Identity`, `NameRegistry`, the JSON patch applier, how the model is chosen |
 | `handlers.md` | The handler timings, `HandlerBuilder`, error modes, patterns |
 | `synthesis.md` | Runtime FSM synthesis: a model writes a procedure, gates judge it, a runner executes it |
@@ -76,6 +76,8 @@ After editing a page, run the docs tests:
 ```bash
 .venv/bin/python -m pytest tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm/test_docs_site.py tests/test_fsm_llm/test_docs_content.py tests/test_fsm_llm/test_docs_links.py tests/test_fsm_llm_testing/test_guide.py
 ```
+
+The same files run through the repository's step gate with `scripts/gate.sh step --tests tests/test_fsm_llm/test_docs_snippets.py tests/test_fsm_llm/test_docs_site.py tests/test_fsm_llm/test_docs_content.py tests/test_fsm_llm/test_docs_links.py tests/test_fsm_llm_testing/test_guide.py` (the gate also checks the touched files for lint, the em dash and the import contracts, in one pytest process). Every test has a hard limit of 300 seconds (`pytest-timeout`, set in `pyproject.toml`): a hung test fails with a stack dump instead of running on, and `pytest --timeout=0` turns it off for a debugger session. The pre-push hook runs `scripts/gate.sh push`.
 
 ## Things to know
 

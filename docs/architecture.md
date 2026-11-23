@@ -96,6 +96,17 @@ These core modules are imported by name. `import fsm_llm` loads only `core/names
 
 See [Runs, results and names](results_and_names.md) for the rules of each.
 
+### Executables run (`engine/`)
+
+`engine/context.py` and `engine/executables/` sit above the `API` and are imported by name. The engine packages below them (`engine.api`, `engine.fsm`, `engine.turn`, `engine.kinds` and the others) import neither, an import contract in `.importlinter`, so `import fsm_llm` never loads them and a turn never depends on a registry.
+
+- `engine/context.py` is `RunContext` and `CancelToken`: the frozen value a runner takes for one run (interface or factory, event log, limits, cancel token, the host objects a code-backed executable needs, the asking run).
+- `engine/executables/` holds the `Executable` protocol, `FsmBodyExecutable` (one adapter for the kinds `fsm`, `strategy` and `procedure`: it owns a fresh `API` per run and drives the body with the message-free step loop), `CodeBackedExecutable` (the base of an executable whose body is code), `ExecutableRegistry` (serve by id, reload atomically, retain templates only, weighted aliases) and the two namespaces `executable_kinds` and `executable_sources`.
+- The engine imports no extension package. A package declares its built-ins by registering a lazy source in `executable_sources` (`fsm_llm.agents` and `fsm_llm.reasoning` each register one when they are imported), and the registry calls the sources it is asked to load.
+- `fsm_llm.workflows` reads the executable side through `engine.executables` and `engine.context`: `ExecutableStep` runs an executable by id inside a workflow.
+
+See [Executables](executables.md) for the behaviour and its limits.
+
 ## Data Flow
 
 ### Message Processing
@@ -258,7 +269,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the ext
 | Layer (top to bottom) | Packages | What it holds |
 |---|---|---|
 | Subpackages | `monitor`, `eval`; `agents`, `synthesis`, `workflows`, `reasoning`; `testing` | One extra each, imported by name, never by `import fsm_llm` |
-| `engine` | `fsm_llm.engine` | `API` (`engine.api`), `FSMManager` (`engine.fsm`), the 2-pass `MessagePipeline` (`engine.turn`), the state-kind executors (`engine.kinds`), `Classifier`, the builders, the session store, the plain-FSM OKF handler (`engine.okf_bridge`) |
+| `engine` | `fsm_llm.engine` | `API` (`engine.api`), `FSMManager` (`engine.fsm`), the 2-pass `MessagePipeline` (`engine.turn`), the state-kind executors (`engine.kinds`), `Classifier`, the builders, the session store, the plain-FSM OKF handler (`engine.okf_bridge`), and, above the API, the run context (`engine.context`) and the executables (`engine.executables`), both loaded by name only |
 | `handlers` | `fsm_llm.handlers` | The handler system, `HandlerBuilder`, `create_handler` |
 | `policy` | `fsm_llm.policy` | Approval types and the human-in-the-loop manager; imports `tools` and none of `context`, `okf`, `skills` (the contract `policy-imports-no-sibling-layer`: the row sits above the siblings, so only the contract keeps it off them) |
 | Independent siblings | `context`, `okf`, `skills`, `tools` | Context compaction and prompt builders (`context.layout`); Open Knowledge Format; Agent Skills; the tool registry and tool models |

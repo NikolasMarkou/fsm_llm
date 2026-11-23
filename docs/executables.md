@@ -2,9 +2,9 @@
 
 > Covers FSM-LLM v0.13.0
 
-An executable is one JSON document that wraps an FSM body with a header: who it is, what it reads and writes, which names it needs, and which `{{variables}}` an operator fills in. This page covers the format, the two identities of a document, the rule that keeps a caller's input out of instruction text, the load sequence that checks a document, and how `fsm-llm-validate` reports it.
+An executable is one thing that can be run by id and reports one result. Most are a JSON document that wraps an FSM body with a header: who it is, what it reads and writes, which names it needs, and which `{{variables}}` an operator fills in. This page covers the format, the two identities of a document, the rule that keeps a caller's input out of instruction text, the load sequence that checks a document, how an executable runs (the run context, the protocol and the FSM-body adapter), the registry that serves executables by id, the built-in agent patterns and reasoning strategies, the workflow step that runs one, and the limits that are known.
 
-What exists today is the format and its loader. A document is parsed and checked, and `instantiate_envelope` turns it into an `FSMDefinition` that you hand to `API.from_definition`. The engine does not read an executable file by itself and nothing here executes anything from a document. The built-in agent patterns, the reasoning strategies and `reasoning.solve` are served by id as executables (see [Built-in executables](#built-in-executables)).
+What runs today: a document is parsed and checked, wrapped by `FsmBodyExecutable` (the kinds `fsm`, `strategy` and `procedure`) or implemented in Python (the built-ins), served by an `ExecutableRegistry`, and run with `run` or `arun` under a `RunContext`. The result is a [`RunResult`](results_and_names.md) that carries both identities. Nothing in a document executes code or imports a module: a document names its tools, handlers and callables, and the host supplies them.
 
 ## The document
 
@@ -16,42 +16,33 @@ What exists today is the format and its loader. A document is parsed and checked
   "id": "support/greeter",
   "version": "1",
   "name": "Greeter",
-  "description": "Ask a name, say goodbye",
-  "contract": {"inputs": [], "outputs": ["name"]},
-  "capabilities": ["conversational"],
+  "description": "Greet a named person, then say goodbye",
+  "contract": {"inputs": ["name"], "outputs": ["name"]},
   "variables": ["company"],
   "body": {
     "fsm": {
       "name": "Greeter",
-      "description": "Ask a name, say goodbye",
-      "initial_state": "ask_name",
+      "description": "Greet a named person, then say goodbye",
+      "initial_state": "greet",
       "persona": "A receptionist at {{company}}",
       "states": {
-        "ask_name": {
-          "id": "ask_name",
-          "description": "Find out the name",
-          "purpose": "Learn the user's name",
-          "extraction_instructions": "Extract the user's name",
-          "response_instructions": "Ask for the user's name",
-          "required_context_keys": ["name"],
+        "greet": {
+          "id": "greet",
+          "description": "Greet the person by name",
+          "purpose": "Welcome the person",
+          "response_instructions": "Greet the person by the name in the context",
           "transitions": [
             {
               "target_state": "goodbye",
-              "description": "The name is known",
-              "conditions": [
-                {
-                  "description": "A name was collected",
-                  "requires_context_keys": ["name"],
-                  "logic": {"has_context": "name"}
-                }
-              ]
+              "description": "Always, after the greeting",
+              "priority": 100
             }
           ]
         },
         "goodbye": {
           "id": "goodbye",
           "description": "Say goodbye",
-          "purpose": "Wrap up the conversation",
+          "purpose": "Wrap up",
           "response_instructions": "Say goodbye by name"
         }
       }
@@ -66,7 +57,7 @@ The header fields:
 |---|---|
 | `schema` | The constant `fsm-llm/executable`. It is how a tool tells an executable from a plain FSM file. |
 | `schema_version` | The version of this envelope format, `N.M`, default `1.0`. It is not the FSM definition version and not the author's `version`. This release reads `1.0` up to any `1.x`; another major or a lower number is refused. |
-| `kind` | `fsm`, `strategy` or `procedure`. It decides the shape of `body`. The kinds `pattern` and `workflow` are refused by name until their adapters exist. |
+| `kind` | `fsm`, `strategy` or `procedure`. It decides the shape of `body`. A document of kind `pattern` or `workflow` is refused by name: the built-in patterns are code, not documents (see [Built-in executables](#built-in-executables)). |
 | `id` | A name of letters, digits and `_ . : / -`, at most 128 characters, starting with a letter or digit. |
 | `version`, `name`, `description` | The author's own label and texts, all optional. |
 | `contract` | `inputs` (keys the caller supplies), `outputs` (keys the run returns), `handler_only_keys`, and `input_templates` (see below). |
@@ -104,28 +95,6 @@ identity = identity_of(envelope, definition)           # template_identity, inst
 `instantiate_envelope(envelope, *, options=None, variables=None)` replaces `{{name}}` in the string values of `body.fsm` for the declared variables. It never touches a key, never rescans a replacement, and leaves an unknown `{{name}}` as text. It raises `InstantiationError` for a declared variable with no value, a value for a name that is not declared, a value that is not text, a non-empty `options` (no kind has an option schema yet), or a body that is not a valid FSM definition. The returned `record` is what you log. `rebuild_instance(envelope, record, expected_instance_identity)` re-instantiates from a record and raises `InstanceIdentityMismatchError` unless the digest equals the one that was logged, so a replay can prove it ran the same body.
 
 `identity_of(template, instance=None)` returns an `Identity` with `instance_identity` left `None` when no instance is given. The instance may be an `FSMDefinition` or a dict: a dict that loads as an FSM definition gives the same instance identity as the definition (one instance, one identity), and only a dict that is not an FSM is hashed as written. Parse and instantiation functions raise `ExecutableDocumentError` and `InstantiationError`, both `ValueError`s and `FSMError`s.
-
-## Built-in executables
-
-`fsm_llm.agents` and `fsm_llm.reasoning` declare their built-ins through the `executable_sources` namespace: each registers one lazy factory, named `agents` and `reasoning`, when the package is imported, and `ExecutableRegistry().load_sources()` calls the factories of the packages your process has imported (there is no entry-point wiring yet, so import the package first). The built-ins have lifecycle `builtin`: the 18 agent patterns under their `create_agent` names (`react`, `debate`, and so on), nine strategies (`reasoning.deductive`, and so on) and `reasoning.solve`.
-
-```python
-import fsm_llm.agents
-from fsm_llm.engine.context import RunContext
-from fsm_llm.engine.executables import ExecutableRegistry
-
-registry = ExecutableRegistry()
-registry.load_sources()
-result = registry.get("debate").run(
-    {"task": "Is tea better than coffee?"}, context=RunContext(llm_interface=llm)
-)  # a RunResult
-```
-
-- A pattern's input is `task` (and an optional `initial_context`). A pattern that needs Python objects (its tools, a chain, an evaluation function, maker and checker instructions, the members of a swarm) names them in `requires.callables` and is not `launchable`: the host supplies them in `RunContext(callables=...)`, a `NameRegistry` of that name, and an unresolved name raises `ExecutableError` before any model call. Optional objects, such as `hitl` and `config`, are read from the same registry when present.
-- An executable never supplies an approval. The `hitl` object you give passes through unchanged, and a tool that needs approval without one is refused when the agent is built.
-- `max_seconds` of the context becomes the agent's `timeout_seconds`; `max_steps` is refused for a pattern (set `max_iterations` on the config) and both are refused by `reasoning.solve`, which has its own step budget.
-- A strategy takes the four keys the reasoning engine hands it (`problem_statement`, `problem_components`, `constraints`, `problem_type`) as inputs and reports both identities. A pattern and `reasoning.solve` report the template identity only: their instance identity is `None`, because the body is code and the task sits in the FSM description until patterns become files.
-- Known limits: a pattern or `reasoning.solve` runs its synchronous body on a worker thread, checks the cancel token only before it starts, and leaves the worker running if its await is cancelled.
 
 ## A caller's input is data, never instruction text
 
@@ -169,7 +138,7 @@ It returns `(envelope or None, FSMValidationResult)`. The envelope is returned o
 
 The numbering follows the roadmap: V6 (a strict mode) and the V4 variants for the pattern kind are not built.
 
-The `resolver` is a function called with `(category, name)`, the category being `tools`, `handlers`, `callables` or `executables`. The loader reads no registry itself; build the function from your [name registries](results_and_names.md#name-registries): `lambda category, name: name in namespaces[category]`. No namespace exists yet for executable sources, so the `fsm-llm-validate` command passes no resolver.
+The `resolver` is a function called with `(category, name)`, the category being `tools`, `handlers`, `callables` or `executables`. The loader reads no registry itself; build the function from your [name registries](results_and_names.md#name-registries): `lambda category, name: name in namespaces[category]`. The `fsm-llm-validate` command passes no resolver, so it checks that the names are declared and not that they resolve; `ExecutableRegistry.add_document` takes a `resolver` of its own.
 
 ### Text written by a model (`origin="model"`)
 
@@ -183,7 +152,7 @@ The `resolver` is a function called with `(category, name)`, the category being 
 
 A body key that would bind code (`handlers`, `variants`, `generator`) is refused by V1 for every origin. Names, keys and state ids that came from a document reach a message only after they are capped and stripped of control characters, because a repair loop may show the message to a model. V7 has no consumer in the library yet. It is not the synthesis gate G5: V7 covers the lines above (the `requires` names, the declared tools, those four body settings, handlers and lifecycle) and nothing else of G5, so text length, key names, unknown keys, priorities and the abort edge are still checked only by G5, and a synthesis or meta-builder output needs both.
 
-### Known limits
+### Limits of the load sequence
 
 - `newer_envelope_fields(envelope)` lists fields newer than the declared `schema_version`, but `load_executable` does not call it. Only version `1.0` exists, so there is nothing newer to report yet.
 - The contract check (V5) warns and never refuses.
@@ -199,9 +168,239 @@ The command reads the file and routes on its header: a file whose `schema` is `f
 
 `--upgrade` rewrites an older FSM definition file. An executable is never rewritten: with `--upgrade` the command prints the report, logs one warning and exits 1, and no file changes.
 
+## Running an executable
+
+### The run context
+
+`RunContext` (`fsm_llm.engine.context`) is the frozen value a runner takes for one run. It is imported by name; `import fsm_llm` does not load it, and no `API` constructor reads it.
+
+| Field | Meaning |
+|---|---|
+| `llm_interface` | The model interface of the run. |
+| `llm_factory` | A function with no arguments that returns an interface, called once per run. It is refused together with `llm_interface`. With neither, the run resolves a model the way `API` does, from `LLM_MODEL`. |
+| `event_log` | What `API(event_log=)` takes: an `EventLog` or a directory path. |
+| `max_steps`, `max_seconds` | The limits of one run, checked by the same rule as `API`: `max_steps` is an `int` of at least 1, `max_seconds` a number above 0, and neither is a `bool`. `None` means no limit from the context. |
+| `cancel` | A `CancelToken`; a fresh one by default. |
+| `callables` | A `NameRegistry` of the host objects a code-backed executable needs (see [Built-in executables](#built-in-executables)). |
+| `parent` | The reference (a conversation or instance id) of the run that asked, or `None`. |
+
+A bad value raises `ValueError` (`TypeError` for a `cancel` or `callables` of the wrong type) when the context is built. `resolve_llm()` returns the interface, one fresh `llm_factory()` result, or `None`.
+
+`context.derive(parent=..., max_steps=None, max_seconds=None)` returns a child context that shares everything else, names `parent`, and narrows the limits it is given: a value above the parent's own raises `ValueError`, and `None` keeps the parent's limit, it never removes one. The limits are per run, not a shared ledger: a child's steps are not subtracted from the parent's.
+
+`CancelToken` is one thread-safe, set-once request: `cancel()`, `cancelled`, and `raise_if_cancelled()`, which raises `RunCancelledError` (an `FSMError`). A run checks it between steps. It never interrupts a model call that is already in flight, and it is not an `asyncio` cancel: a cancelled task still raises `CancelledError`, and the engine rolls its turn back whole.
+
+### The protocol
+
+An `Executable` has `id`, `kind`, `version`, `contract`, `requires`, `capabilities`, `lifecycle` and `template_identity`, and three methods:
+
+- `instantiate(options=None, variables=None)` returns an `Instance`: the body with its variables filled, with `record` (the instantiation record) and `instance_identity` (`None` when the body is code and has no static instance).
+- `run(inputs, *, context=None)` and `arun(inputs, *, context=None)` run the executable and return a `RunResult`. `run` is the thin sync name over `arun` (`run_sync`), so a sync caller needs no event loop. On an executable, `run` is the run of the default instance, with no variables: a document that declares variables must be instantiated with values first, or `run` raises `InstantiationError`.
+
+An instance is built per run and no registry keeps it. Both `run` and `arun` raise `ValueError` for an input key the contract does not declare, or one with an internal prefix, before any model call.
+
+### An FSM-body executable
+
+`FsmBodyExecutable(envelope, *, setup=None, pins=None)` runs a parsed envelope of kind `fsm`, `strategy` or `procedure`. `setup(api)` is an optional function called once per run on the fresh `API`, before the conversation starts: the strategies that need handlers register them there.
+
+```python
+from fsm_llm.core.definitions.executable import parse_executable
+from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.executables import FsmBodyExecutable
+
+executable = FsmBodyExecutable(parse_executable(document))
+instance = executable.instantiate(variables={"company": "Acme"})
+result = instance.run(
+    {"name": "Ada"},
+    context=RunContext(llm_interface=llm, max_steps=20, max_seconds=60),
+)
+result.status, result.outputs, result.answer
+result.identity        # both digests of this run
+result.handle          # the conversation id the run used
+```
+
+A run does this, in order:
+
+1. Checks the input keys (above). A declared input that is missing is not an error but a result: `failed` with the reason `inputs_missing`.
+2. Builds a fresh `API` for the instance with the interface and the event log of the context, calls `setup(api)` if there is one, and starts a conversation with the inputs as its initial context.
+3. Drives the body with the message-free step loop (`arun_until_terminal`): no user message is sent. The step budget is `max_steps` of the context, or 100 (`DEFAULT_EXECUTABLE_MAX_STEPS`) when it sets none, and `max_seconds` bounds the time. The cancel token is checked before every step.
+4. Ends the conversation and closes the `API` in a `finally`, once, whatever the outcome.
+
+The outcome maps to a result:
+
+| What happened | `status` | `reason` |
+|---|---|---|
+| The body reached a terminal state and every declared output is there | `ok` | none |
+| The body reached a terminal state and a declared output is missing | `failed` | `return_keys_missing` |
+| A declared input was not given | `failed` | `inputs_missing` |
+| The step or time budget was spent | `aborted` | `budget_spent` |
+| The cancel token was set | `aborted` | `cancelled` |
+| The provider failed (`LLMResponseError`) | `failed` | `provider_error` |
+
+Any other exception propagates, and an `asyncio.CancelledError` is never caught. `outputs` holds the declared output keys (a strategy with none declared returns its mapped result keys), `answer` the last reply the run spoke (the opening reply when no step spoke), and `detail` the kind, the number of steps and the final state. A strategy's `answer` is its solution when there is one.
+
+## The registry
+
+`ExecutableRegistry` (`fsm_llm.engine.executables`) serves executables by id.
+
+```python
+from fsm_llm.engine.executables import ExecutableRegistry
+
+registry = ExecutableRegistry.from_paths(["executables/"])   # files, or folders of *.json
+registry.add_document(document)                              # one more, checked by load_executable
+executable = registry.get("support/greeter")                 # the greatest version
+registry.get("support/greeter", version="1")
+registry.list(kind="fsm", launchable=True)         # also capability="hitl" and the like
+```
+
+- **Adding.** `add_document(data, *, variables=None, resolver=None)` runs the [load sequence](#the-load-sequence), raises `ExecutableError` with every error of an invalid document, and builds the executable through the adapter of its kind. `register(executable)` adds one that is already built, such as a code-backed executable. Two executables with the same `(id, version)` are refused with `ExecutableCollisionError`.
+- **Path sources.** `from_paths(paths)` and `reload()` read files, and the `*.json` files of folders in sorted order. Each file is read as UTF-8, at most `MAX_DOCUMENT_BYTES` (2 MiB), and a folder member is confined to its folder (`security.resolve_within`); a symbolic link is reported and skipped. `reload()` validates every source first and then swaps one immutable snapshot, so a reader sees a wholly old or a wholly new view, never half of each. A file that fails keeps the entries it had and is reported, a file that is gone drops out, and for a duplicate `(id, version)` the first source wins. `ReloadReport` names the ids served, the failures per source and the refusals.
+- **Reading.** `get(id, version=None)` returns the greatest version, ordered as dotted integers (`"2"` above `"1.5"`); a version label that is not dotted integers is allowed only as the sole version of its id. `get_by_template(identity)` finds an executable by its template identity. A miss raises `ExecutableNotFoundError`, or `ExecutableEvictedError` for an identity that is neither current nor retained. `list(kind=None, capability=None, launchable=None)` is sorted by id and version; an executable is `launchable` when its `requires.callables` is empty, which is what a server or a launcher may start without a host that supplies objects.
+
+### Retention
+
+The registry keeps templates and never keeps an instance.
+
+- The current snapshot holds the executables of the sources. Every `get`, `get_by_template`, `register` and reload also touches a bounded least-recently-used set of templates (`MAX_RETAINED_TEMPLATES`, 256, or `max_retained_templates=` on the constructor), so a template that a reload replaced stays reachable by its identity while it is recent.
+- An executable built through the registry pins its template for the length of every run (`pin` and `unpin` are counted and public). A pinned template is never evicted, so a run that started before a reload finishes on the template it started with, while new `get` calls see the new one.
+- `rebuild(template_identity, record, expected_instance_identity)` returns the instance of a logged run, rebuilt from its retained template and its instantiation record. It raises `InstanceIdentityMismatchError` unless the rebuilt digest equals the logged one, and `ExecutableEvictedError`, naming the identity, when the template is gone: the registry never guesses.
+- A server that runs a million distinct tasks therefore holds one template and no instances. A caller's task is an input, not part of the template.
+
+Pins and the retained set are in memory. A restart forgets them, and nothing on disk keeps a template.
+
+### Aliases
+
+An alias is one name served by several versions, with weights:
+
+```python
+registry.set_alias("greeter", {"1": 90, "2": 10}, target="support/greeter")
+served = registry.resolve("greeter", experiment="tone-test", conversation_id=conversation_id)
+served.executable, served.template_identity, served.route
+```
+
+A route key is a version label of `target` (the alias name when `target` is omitted) or a 64-hex template identity. Weights are finite numbers of at least 0 that sum above 0. With several live routes both `experiment` and `conversation_id` are required, and the route is a pure function of them: the first 64 bits of `sha256(f"{experiment}:{conversation_id}")` placed on the cumulative weights of the routes sorted by key. The same pair always gets the same route, and a route of weight 0 is never picked. `resolve(..., pinned_template_identity=...)` returns that template as it is and never rolls again, which is how a resumed conversation keeps what it was served. A name that is not an alias resolves to the plain id. Aliases are held in memory and set by code; no file defines one, and `resolve` writes no event.
+
+### The two namespaces
+
+Two [name registries](results_and_names.md#name-registries) hold the extension points, both with an entry-point group:
+
+- `EXECUTABLE_KINDS` (`executable_kinds`, group `fsm_llm.executable_kinds`) maps a document `kind` to the adapter factory that turns a parsed envelope into an executable. `fsm`, `strategy` and `procedure` are registered, each to `FsmBodyExecutable`. `adapter_for(kind)` raises `ExecutableKindError` for a kind with no adapter.
+- `EXECUTABLE_SOURCES` (`executable_sources`, group `fsm_llm.executable_sources`) maps a source name to a function with no arguments that returns executables or envelope documents. `registry.load_sources()` calls each source that this registry has not called yet, once, and adds what it returns; a source or an item that fails is reported in the `ReloadReport` and warned, never raised. This is how `fsm_llm.agents` and `fsm_llm.reasoning` declare their built-ins without the engine importing them.
+
+The package `pyproject.toml` declares no entry point for either group yet, so a source is registered by an explicit `EXECUTABLE_SOURCES.register(name, factory)` call, and `load_sources()` finds only the packages the process has imported. An entry point installed after the process started is not seen until it restarts. `ExecutableRegistry(kinds=..., sources=...)` takes registries of its own.
+
+The event vocabulary of the event log declares `run/start`, `run/end` and `executable/resolve` (`fsm_llm.runtime.EventType`). Nothing writes them yet: a run through an executable adds no event of its own, and the registry logs nothing. A pin that a restart could rebuild from the log waits for those events.
+
+## Built-in executables
+
+`fsm_llm.agents` and `fsm_llm.reasoning` declare their built-ins through the `executable_sources` namespace: each registers one lazy factory, named `agents` and `reasoning`, when the package is imported, and `ExecutableRegistry().load_sources()` calls the factories of the packages your process has imported (there is no entry-point wiring yet, so import the package first). The built-ins have lifecycle `builtin`: the agent patterns under their `create_agent` names (`react`, `debate`, and so on), the nine reasoning strategies (`reasoning.deductive`, and so on) and `reasoning.solve`.
+
+```python
+import fsm_llm.agents
+from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.executables import ExecutableRegistry
+
+registry = ExecutableRegistry()
+registry.load_sources()
+result = registry.get("debate").run(
+    {"task": "Is tea better than coffee?"}, context=RunContext(llm_interface=llm)
+)  # a RunResult
+```
+
+A pattern and `reasoning.solve` are not documents. Each is a code-backed executable: a subclass of `CodeBackedExecutable` (`fsm_llm.engine.executables`) that builds its agent or engine per run and runs it. The strategies are `strategy` documents on `FsmBodyExecutable`.
+
+- A pattern's input is `task` (and an optional `initial_context`). A pattern that needs Python objects (its tools, a chain, an evaluation function, maker and checker instructions, the members of a swarm) names them in `requires.callables` and is not `launchable`: the host supplies them in `RunContext(callables=...)`, a `NameRegistry`, and an unresolved name raises `ExecutableError` before any model call. Optional objects, such as `hitl` and `config`, are read from the same registry when present. Patterns that need none (`debate`, `self_consistency`, `adapt`, `plan_execute`, `orchestrator` and `meta_builder`, with `reasoning.solve`) are launchable.
+- An executable never supplies an approval. The `hitl` object you give passes through unchanged, and a tool that needs approval without one is refused when the agent is built.
+- `max_seconds` of the context becomes the agent's `timeout_seconds`; `max_steps` is refused for a pattern (set `max_iterations` on the config) and both are refused by `reasoning.solve`, which has its own step budget.
+- `meta_builder` is single-shot: `run(task)` returns the artifact in `outputs`, and a build that does not validate is `failed`, with the errors in `detail`.
+- A strategy takes the four keys the reasoning engine hands it (`problem_statement`, `problem_components`, `constraints`, `problem_type`) as inputs and reports both identities. `simple_calculator` and `hybrid` run with the handler registration of the reasoning package as their `setup`. A pattern and `reasoning.solve` report the template identity only: their instance identity is `None`, because the body is code and the task sits in the FSM description until patterns become files.
+- Budget and provider errors map as for an FSM body: a spent agent budget or timeout, or a spent reasoning budget, is `aborted` with `budget_spent`; a provider failure of `reasoning.solve` is `failed` with `provider_error`; any other error propagates.
+
+To add your own, subclass `CodeBackedExecutable` and implement `execute`:
+
+```python
+from fsm_llm.core.codes import Status
+from fsm_llm.core.definitions.executable import Contract
+from fsm_llm.core.results import RunResult
+from fsm_llm.engine.executables import CodeBackedExecutable
+
+
+class Shout(CodeBackedExecutable):
+    def __init__(self) -> None:
+        super().__init__(
+            id="demo/shout", kind="pattern", impl="myapp.Shout",
+            contract=Contract(inputs=["text"], outputs=["shouted"]),
+        )
+
+    async def execute(self, inputs, objects, context, identity):
+        return RunResult(
+            status=Status.OK, outputs={"shouted": inputs["text"].upper()}, identity=identity
+        )
+
+
+registry.register(Shout())
+```
+
+The base checks the inputs, resolves `requires.callables` from the context into `objects` and the cancel token, then awaits `execute`. Its `template_identity` is the digest of `{kind, id, impl, the fsm_llm version, requires}`: `impl` names the code (a claim about the code revision, never about behaviour), and a caller's task is never part of it. A code-backed executable takes no variable or option, and its lifecycle is `builtin`.
+
+## Executables in a workflow
+
+`fsm_llm.workflows` runs an executable as a step and reads a workflow back from a document.
+
+```python
+from fsm_llm.workflows import auto_step, create_workflow, executable_step
+
+workflow = create_workflow("greet", "Greet a customer")
+workflow.with_initial_step(
+    executable_step(
+        "run_greeter", "Run the greeter",
+        target="support/greeter", registry=registry,
+        inputs={"name": "customer"},          # {executable input: workflow key}
+        returns={"greeted": "name"},          # {workflow key: executable output}
+        success_step_id="done", error_step_id="failed",
+    )
+)
+workflow.with_step(auto_step("done", "Done", next_step_id=""))
+workflow.with_step(auto_step("failed", "Failed", next_step_id=""))
+```
+
+`ExecutableStep` awaits `registry.get(target).arun(inputs, context=RunContext(...))`. A workflow key the context lacks is left out of the inputs, and the executable judges its own contract. `returns` copies only outputs that are not `None`, and a `returns` entry naming a workflow key with an internal prefix is refused. A result whose status is not `ok` (`failed`, `aborted`) is a failure that routes to `error_step_id` and never to the success route; with no `error_step_id` the instance fails. `max_steps` and `max_seconds` are the budgets of the one run, and the step's own `timeout_seconds` cancels the run in flight. The step writes `executable_status`, `executable_identity` (both digests), `executable_answer` and the `executable_<step_id>_...` forms. It owns no conversation: the executable ends its own.
+
+An executable that needs host objects (`requires.callables` is not empty) is refused unless the step names a `callables` registry (`callables=`, a `NameRegistry` of namespace `callables`), which becomes `RunContext.callables`. The step has no interface field: an FSM body takes its model from `LLM_MODEL`.
+
+`workflow.serialize(callables=objects)` writes the registry and any function, interface or agent as its registered name, and `load_workflow(document, objects=objects)` reads it back, so a workflow with an executable step round-trips:
+
+```python
+from fsm_llm.core.names import NameRegistry
+from fsm_llm.workflows import load_workflow
+
+objects = NameRegistry("callables")
+objects.register("executables", registry)
+document = workflow.serialize(callables=objects)
+assert load_workflow(document, objects=objects) == workflow
+```
+
+The loader resolves a step `type` only through the built-in step classes and the classes you pass, matches names only through `objects`, and reports every failure of a document in one `WorkflowValidationError`. See the [API Reference](api_reference.md#workflowengine-fsm_llmworkflows).
+
+The model-calling steps are awaited on the loop: a `ConversationStep`, an `AgentStep` whose agent has its own `async def arun` and an `LLMStep` over a real interface run with no worker thread, and their time limit cancels the call in flight. `BaseAgent.arun` has a default that runs the sync `run` on a worker through `aoffload`; `AgentStep` does not count that default as native.
+
+## Known limits
+
+Each limit has the condition under which it applies.
+
+- **No stall detection.** A body that needs a user message to leave a state (a transition gated on a value only a user supplies) runs message-free steps until the step budget is spent, and ends `aborted` with `budget_spent`. The run is bounded, never stuck. Give such a body its inputs as contract inputs, or do not run it as an executable.
+- **Templates are bounded and pins are in memory.** The registry retains at most `MAX_RETAINED_TEMPLATES` templates beside the current ones. A template that was replaced, evicted and is not pinned cannot be found by its identity (`ExecutableEvictedError`), and a restart forgets every pin. A run that started and never ended is not pinned from the log yet: that needs the `run/start` and `run/end` events, which nothing writes.
+- **Cancel hazard of the code-backed built-ins.** A pattern and `reasoning.solve` run their synchronous body on a worker thread (`aoffload`). A cancelled `await` returns at once, but the worker keeps running to its end: its tools and handlers are not stopped, and its late result is dropped. The cancel token is checked only before the run starts. The same holds for an `AgentStep` whose agent has no `arun` of its own, and for the default `BaseAgent.arun`: it is one worker hop, not an async body.
+- **A code-backed pattern has no instance identity.** Its `RunResult.identity` carries the template identity and `instance_identity=None`, because the task sits in the FSM description and the per-run tools shape the instructions. A caller's task never enters either identity.
+- **Budgets are per run.** `RunContext.derive` narrows a limit but does not share a ledger: the steps a child spends are not taken from its parent's budget.
+- **No entry-point wiring.** `pyproject.toml` declares no entry point for `executable_kinds` or `executable_sources`, so a source is found only when its package was imported and registered it.
+- **No launch by id from the monitor.** The monitor still starts agents from its own table of classes and workflows from its own presets; it does not list or launch executables, and a code-backed pattern with `requires.callables` could not be launched there.
+- **No `resume`, no `target` on `AgentStep` or `ConversationStep`.** An `ExecutableStep` is the only workflow step that runs an executable by id.
+- **Claims are not authorization.** `lifecycle`, `capabilities`, `contract` and `requires` describe a document; the registry serves a `trusted` or `builtin` one exactly as it serves a `draft`.
+
 ## Next steps
 
-- [Runs, results and names](results_and_names.md) for the `RunResult` that carries both identities.
+- [Runs, results and names](results_and_names.md) for the `RunResult` that carries both identities and for `NameRegistry`.
 - [FSM Design Guide](fsm_design.md) for the FSM inside `body.fsm`.
 - [Runtime FSM synthesis](synthesis.md) for the library that stores model-written FSMs by digest.
 - [Command line](cli.md) and the [API Reference](api_reference.md).
