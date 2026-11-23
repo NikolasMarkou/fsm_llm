@@ -98,12 +98,12 @@ collect_touched() {  # TOUCHED := files changed against $1 (deleted ones left ou
 
 dash_count() { LC_ALL=C grep -o $'\xe2\x80\x94' 2>/dev/null | wc -l; }
 
-# A touched path may not gain an em dash (U+2014). Exempt, as in the ratchet: the plan record, the
-# recorded bench data and the append-only logs. Compared with the base, so inherited ones do not count.
+# A touched path may not gain an em dash (U+2014). Exempt, as in the ratchet: the plan record and
+# the append-only logs. Compared with the base, so inherited ones do not count.
 em_dash_gain() {
   local base=$1 f new old bad=0
   for f in "${TOUCHED[@]}"; do
-    case $f in plans/*|scripts/bench_data/*|docs/2026_roadmap.md|EVALUATE.md) continue ;; esac
+    case $f in plans/*|docs/2026_roadmap.md|EVALUATE.md) continue ;; esac
     [ -f "$f" ] || continue
     new=$(dash_count < "$f")
     [ "$new" -gt 0 ] || continue
@@ -126,7 +126,7 @@ py_ruff() {  # ruff check and format --check on the touched python files
 no_wrong_install_hint() {
   local hits
   hits=$(git grep -nIE "pip install[ \"'-]*(--[a-z-]+ )*[\"']?fsm-llm([^-[:alnum:]_]|$)" -- . \
-    ':!plans' ':!CHANGELOG.md' ':!scripts/bench_data' ':!scripts/gate.sh' \
+    ':!plans' ':!CHANGELOG.md' ':!scripts/gate.sh' \
     ':!tests/test_fsm_llm_regression/test_distribution_name.py')
   [ -z "$hits" ] || { echo "$hits"; echo "say pip install llm-fsm (the PyPI project fsm-llm is another one)"; return 1; }
 }

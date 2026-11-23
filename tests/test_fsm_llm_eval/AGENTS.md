@@ -10,7 +10,7 @@ Covers `fsm_llm.eval`: `config`, `records`, `stats`, `scoring`, `examples`, `cas
 - `examples` mode: run each `examples/<category>/<name>/run.py` (and `run_manual.py`) as a subprocess, score 0 (CRASH) to 4 (PASS) with `classify_result`, write `results.json`, `scorecard.md`, and per-example logs.
 - `run` mode (cases): replay JSON/JSONL conversation cases N trials each against an FSM, check expectations, write `rows.jsonl`, `results.json`, `summary.md` with Wilson intervals.
 
-No test calls a real LLM or network. Not covered here: the rest of `fsm_llm` core, `scripts/bench_common.py`.
+No test calls a real LLM or network. Not covered here: the rest of `fsm_llm` core.
 
 ## Architecture
 
@@ -39,7 +39,6 @@ Test doubles and fixtures:
 | `test_records.py` | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, exceptions |
 | `test_scoring.py` | `classify_result` golden parity, `SCORE_LABELS`, `MAX_SCORE`, `TestReportedFailure` (a line-anchored `Error:` or `Success: False` caps at 2, an extraction rate of at most 50% is partial) |
 | `test_stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` |
-| `test_bench_parity.py` | the `scripts/bench_common.py` copies of `wilson_ci` and `fisher_exact_two_sided` equal the `stats` functions |
 | `test_timeout_table.py` | the harness timeout table against the agent budgets found by an `ast` scan of `examples/`: no harness timeout ties or is below an `AgentConfig` budget; the examples on the default 300 s budget are at 360 s |
 | `__init__.py` | Empty package marker |
 
@@ -90,7 +89,7 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 - `fsm_llm.eval` and its submodules (`__main__`, `cases`, `examples`, `stats`, `records`, `constants`).
 - `fsm_llm.constants` (`ENV_LLM_MODEL`), `fsm_llm.core.definitions.FSMError` (root of `EvalError`), `fsm_llm.logging`.
 - `fsm_llm.testing.MockLLM2Interface`.
-- Repository files: `evaluation/datasets/simple_greeting_cases.json` (config `{"trials": 3}`, includes case `name_is_extracted`, passes fully with extraction `{"user_name": "Alex"}`), the historical `results.json` above, `scripts/bench_common.py`, `examples/` (listing must include `basic/simple_greeting` and `classification/classified_transitions_manual`), and a git checkout.
+- Repository files: `evaluation/datasets/simple_greeting_cases.json` (config `{"trials": 3}`, includes case `name_is_extracted`, passes fully with extraction `{"user_name": "Alex"}`), the historical `results.json` above, `examples/` (listing must include `basic/simple_greeting` and `classification/classified_transitions_manual`), and a git checkout.
 - pytest only; no network.
 
 ## Failure modes

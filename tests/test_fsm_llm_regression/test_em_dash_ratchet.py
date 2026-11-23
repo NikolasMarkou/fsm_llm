@@ -13,7 +13,7 @@ em dash to its exact count, and the test fails when
 
 Read: every file `git ls-files` lists (the index only: a foreign untracked file, a scratch
 file or a build product never turns the ratchet red, so the live working tree can be gated;
-a new file is judged from `git add` on), decodable as UTF-8 with no NUL byte. Never read: `plans/` (the plan record), `scripts/bench_data/`,
+a new file is judged from `git add` on), decodable as UTF-8 with no NUL byte. Never read: `plans/` (the plan record),
 `docs/2026_roadmap.md` (never edited) and `EVALUATE.md` (an
 append-only run log). Not run when `git` is missing or the checkout is not a git repository.
 
@@ -44,7 +44,6 @@ REGENERATE = "python -m tests.test_fsm_llm_regression.test_em_dash_ratchet --wri
 #: Path prefixes (or exact paths) that are never read.
 EXEMPT = (
     "plans/",
-    "scripts/bench_data/",
     "docs/2026_roadmap.md",
     "EVALUATE.md",
 )

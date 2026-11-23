@@ -7,7 +7,7 @@ Purpose: Offline pytest suite for `fsm_llm.synthesis` (gates G1 to G7, library, 
 
 Covers `fsm_llm.synthesis` (`policy`, `gates`, `dryrun`, `simulation`, `synthesizer`, `prompts`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`, `constants`, `exceptions`). Core pieces it relies on are tested elsewhere: `State.synthesize` and `SynthesizeConfig` in `tests/test_fsm_llm/test_synthesize_field.py`, `fsm_llm.core.verify.flow` in `tests/test_fsm_llm/test_flow_analysis.py`, the `stop` hook of `eval.cases.run_case_trial` in `tests/test_fsm_llm_eval/test_cases.py`.
 
-No test calls a real LLM, a model server or the network. Not covered here: the bench `scripts/synthesis_bench.py` (frozen history with no test; blocks s0 to s2 were run by hand, all INCONCLUSIVE), the rest of `fsm_llm`.
+No test calls a real LLM, a model server or the network. Not covered here: the retired synthesis bench (blocks s0 to s2 were run by hand, all INCONCLUSIVE, and deleted with their rows), the rest of `fsm_llm`.
 
 ## Architecture
 
@@ -39,6 +39,7 @@ Layout: most files test one module, named `test_<module>.py`. Cross-module files
 | `test_runner.py` | `run` and `converse`, abort at `max_turns`, an outage is no procedure fault, return keys, every failure the parent sees as a fixed reason, nesting, trace events |
 | `test_tools.py` | the tool pair through `ToolRegistry.execute`: labels, caps, codes, `max_obtains` |
 | `test_concierge.py` | end to end, both runner modes, plus the tool pair |
+| `reference_tasks.py`, `test_reference_tasks.py` | the 16 reference tasks of the retired synthesis bench, their `hand_fsm` and `host_definition`, the scripted `User`, the grader and `drive_fsm` (arms S and H on one host, runner and library); the hand arm runs every task offline with no strong call |
 | `test_traces.py` | `RunTrace.__post_init__` (value-free), `TraceRecorder` folding |
 | `test_diagnose.py` | the rule table in order, outages never a procedure fault |
 | `test_patch.py` | RFC 6902 Appendix A examples under `/states/s`, scope, bounds before the walk, atomicity |
@@ -52,7 +53,6 @@ The package exports (`fsm_llm.synthesis.__all__`), the reason codes (`constants.
 
 - A `SimulationReport` is a frozen dataclass; the tests build procedures that are stuck, forged or half-finished and read its finding codes.
 - A library root holds `definitions/`, `records/`, `traces/`, `scenarios/`, `patches/`; tests use `tmp_path` and never share a directory between tests.
-- Bench rows carry a derived `phase`; the tests feed rows to `metrics`, `decide` and `report` and read the verdict.
 
 ## Invariants and constraints
 
@@ -64,12 +64,12 @@ The package exports (`fsm_llm.synthesis.__all__`), the reason codes (`constants.
 ## Dependencies
 
 - `fsm_llm.synthesis` and its submodules, core (`core.definitions`, `engine.api`, `core.verify` (the validator and `flow`), `core.transition_evaluator`), `fsm_llm.agents` (`ToolRegistry`, `ToolCall`), `fsm_llm.eval`.
-- `tests.conftest` (`block_network`), `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, `state_in_prompt`), `scripts/synthesis_bench.py`, `scripts/bench_common.py`.
+- `tests.conftest` (`block_network`), `fsm_llm.testing` (`MockLLM2Interface`, `ScriptedLLM`, `state_in_prompt`).
 - pytest only; no network.
 
 ## Failure modes
 
-- Run outside the repository root: `from tests...` imports and the `scripts/` path fail.
+- Run outside the repository root: `from tests...` imports fail.
 - A test that builds a real `LiteLLMInterface` fails through `foreign_calls`; give it a double.
 
 ## Working here

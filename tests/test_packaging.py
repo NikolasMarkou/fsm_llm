@@ -1438,9 +1438,6 @@ class TestExplicitEncodings:
         for root in roots:
             for path in sorted(root.rglob("*.py")):
                 rel = path.relative_to(_REPO_ROOT)
-                # scripts/bench_data is recorded history, not source.
-                if rel.parts[:2] == ("scripts", "bench_data"):
-                    continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(rel))
                 offenders += [f"{rel}:{n}" for n in _unencoded_text_calls(tree)]
         assert not offenders, "text file call without encoding=: " + ", ".join(

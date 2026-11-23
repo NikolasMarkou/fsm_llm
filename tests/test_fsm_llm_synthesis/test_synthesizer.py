@@ -11,19 +11,12 @@ import dataclasses
 import itertools
 import json
 import re
-import sys
 import threading
 import types
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-import synthesis_bench as sb  # read only: the 16 reference hand-written children
 
 from fsm_llm import API
 from fsm_llm.agents import HumanInTheLoop
@@ -71,6 +64,7 @@ from fsm_llm.synthesis.synthesizer import (
 from fsm_llm.testing import ScriptedLLM, UnscriptedCallError, final_reply
 from tests.conftest import cpu_timer
 from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM, stuck_fsm
+from tests.test_fsm_llm_synthesis.reference_tasks import POLICY, TASKS, hand_fsm
 
 RET = ("answer",)
 
@@ -1720,12 +1714,12 @@ class TestNormaliseExtraction:
         report = _happy(fixed, (KEY,))
         assert report.passed, report.repair_text()
 
-    @pytest.mark.parametrize("task", sb.TASKS, ids=lambda t: t.id)
+    @pytest.mark.parametrize("task", TASKS, ids=lambda t: t.id)
     def test_the_reference_children_pass_every_gate_normalised(self, task):
         """Guards: a gate result that moves on a previously passing definition
         (the 16 reference hand-written children of the bench, read only)."""
-        policy = SynthesisPolicy(**sb.POLICY)
-        child = sb.hand_fsm(task)
+        policy = SynthesisPolicy(**POLICY)
+        child = hand_fsm(task)
         assert run_gates(child, policy, return_keys=tuple(task.gold)).passed
         fixed = _normal(child)
         assert run_gates(fixed, policy, return_keys=tuple(task.gold)).passed

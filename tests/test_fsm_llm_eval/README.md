@@ -24,7 +24,6 @@ The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repos
 - `test_scoring.py` - golden table for `classify_result`, the score labels, and the rule that a line-anchored `Error:` or `Success: False`, or an extraction rate of at most 50%, cannot score 4.
 - `test_timeout_table.py` - reads the examples' source with `ast` and checks that no harness timeout ties or is below an agent's own `timeout_seconds` budget.
 - `test_stats.py` - Wilson interval, Fisher exact test, `pass_rate`, and exact `below_percent` threshold checks.
-- `test_bench_parity.py` - the stdlib copies of `wilson_ci` and `fisher_exact_two_sided` in `scripts/bench_common.py` equal the `fsm_llm.eval.stats` functions.
 
 ## How to use it
 
@@ -37,7 +36,7 @@ Run from the repository root with the project virtualenv:
 
 ## Things to know
 
-- Run from the repository root. `test_cases.py` imports `tests.conftest`, and several tests read real repository files: `evaluation/datasets/simple_greeting_cases.json`, `scripts/bench_common.py`, and the `examples/` tree.
+- Run from the repository root. `test_cases.py` imports `tests.conftest`, and several tests read real repository files: `evaluation/datasets/simple_greeting_cases.json` and the `examples/` tree.
 - Git tests compare against `git rev-parse HEAD`, so the checkout must be a git repository.
 - Do not regenerate the golden table in `test_scoring.py` from the current code. It pins the original rubric for every input the 2026-11-06 change (`Error:` and `Success: False` lines, extraction at most 50%) does not touch; `TestReportedFailure` pins the change.
 - `test_examples.py` starts real subprocesses and one of them waits for a 1 second timeout. One slow-marked test starts a real `fsm-llm-eval examples` process, sends it SIGTERM and checks the partial report and exit 130. `TestSigtermEndsRunningExamples` runs an example that starts its own subprocess, sends SIGTERM and checks, by pid through `/proc`, that both are gone at once (in-process and with a real CLI process, which must exit promptly), and that a timeout ends the example's subprocess too.

@@ -2,8 +2,9 @@
 Append-only result records, JSON output, and run-directory naming.
 
 ``append_row``/``read_rows`` and the bodies of ``write_json``, ``utc_now`` and
-``git_commit`` were copied from ``scripts/bench_common.py`` (which keeps its
-own stdlib copies to stay offline); ``git_short_hash``, ``model_slug`` and the run-directory name keep the
+``git_commit`` were copied from the bench helper module ``scripts/bench_common.py``
+(deleted with the synthesis bench, plan baa37f40 D-012); ``git_short_hash``,
+``model_slug`` and the run-directory name keep the
 historical ``scripts/eval.py`` rules so new run directories sort and read
 like the old ones.
 """

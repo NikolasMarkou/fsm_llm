@@ -4,7 +4,7 @@
 
 Some conversations cannot be written ahead of time. "Collect what this visa form needs" depends on a goal that only shows up at run time. `fsm_llm.synthesis` lets a host conversation ask for a procedure by goal: a model writes a finite state machine (FSM) for it, a stack of checks decides whether that FSM may run, a library stores it, and a runner executes it as a child of the host conversation.
 
-**Status of the evidence.** The code is tested offline with scripted models. The pre-registered live comparison, `scripts/synthesis_bench.py` (compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check), ran three blocks, `s0`, `s1` and `s2`, and every verdict is INCONCLUSIVE. Every role and every arm used the same model, `ollama_chat/bonsai-2:27b` (Q2_0, 2-bit): there is NO strong/cheap split, so no strong-compile/cheap-run cost asymmetry was tested. No result in these docs says a compiled procedure helps; see "Live results" below.
+**Status of the evidence.** The code is tested offline with scripted models. The pre-registered live comparison (a compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check; its script and rows were deleted and live in git history) ran three blocks, `s0`, `s1` and `s2`, and every verdict is INCONCLUSIVE. Every role and every arm used the same model, `ollama_chat/bonsai-2:27b` (Q2_0, 2-bit): there is NO strong/cheap split, so no strong-compile/cheap-run cost asymmetry was tested. No result in these docs says a compiled procedure helps; see "Live results" below.
 
 ## When to use it
 
@@ -265,7 +265,7 @@ Procedures that fail in use can be improved, and the loop is built so that a use
 
 ## Live results
 
-Three blocks of the comparison in `scripts/synthesis_bench.py` ran against `ollama_chat/bonsai-2:27b` on a local Ollama server (bench id `synthesis`; rows, summaries, reports and pre-registrations in `scripts/bench_data/synthesis/`). The compiler, scenario writer, executor, ReAct agent and hand-written arm are ONE model: there is no strong/cheap split, a G6b pass is partly the model agreeing with itself, and no cost saving from a cheaper runner could appear. 16 judge-free tasks in four families (collect, route, branch, retry), 3 trials each; the primary unit is the first trial of each task. The verdict rule (SUPPORTED needs S above R with Fisher p under 0.05) is byte-identical in all three blocks.
+Three blocks of the comparison ran against `ollama_chat/bonsai-2:27b` on a local Ollama server (bench id `synthesis`; the script, rows, summaries, reports and pre-registrations were deleted from the tree and live in git history). The compiler, scenario writer, executor, ReAct agent and hand-written arm are ONE model: there is no strong/cheap split, a G6b pass is partly the model agreeing with itself, and no cost saving from a cheaper runner could appear. 16 judge-free tasks in four families (collect, route, branch, retry), 3 trials each; the primary unit is the first trial of each task. The verdict rule (SUPPORTED needs S above R with Fisher p under 0.05) is byte-identical in all three blocks.
 
 | Block | S first trial (Wilson 95%) | H first trial | R first trial | All trials S / H / R of 48 | pass^3 S / H / R | S first-trial failures | Verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- |

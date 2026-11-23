@@ -43,6 +43,6 @@ Run from the repository root with the project virtualenv:
 
 ## Things to know
 
-- Run from the repository root. Several tests import `tests.conftest`, and `test_synthesizer.py` reads the reference children of `scripts/synthesis_bench.py` (read only; the script and its recorded blocks are frozen history with no test of their own).
+- Run from the repository root. Several tests import `tests.conftest`, and `test_synthesizer.py` reads the reference children of `reference_tasks.py` (the 16 tasks of the retired synthesis bench; the script and its recorded blocks were deleted, see `docs/synthesis.md` for the results).
 - Do not weaken a test to make a gate pass. Every gate test has a case that must pass AND one that must fail, so a gate that checks nothing is caught.
 - No test uses a marker (`slow`, `integration`, `real_llm`): the whole suite runs in the default and the CI selection.

@@ -83,7 +83,6 @@ The same files run through the repository's step gate with `scripts/gate.sh step
 
 - Extensions are documented as subpackages of `fsm_llm`: `fsm_llm.reasoning`, `fsm_llm.workflows`, `fsm_llm.agents`, `fsm_llm.monitor`, `fsm_llm.eval`, `fsm_llm.synthesis`, `fsm_llm.testing`. This matches the code under `src/fsm_llm/`.
 - Monitor documentation belongs in `api_reference.md` (the Monitor section). Do not create a separate `docs/monitor.md`.
-- Pre-registered benchmark data is not documented here; see `scripts/bench_data/README.md`.
 - `required_context_keys` never blocks a transition. The guides gate transitions with a condition (`requires_context_keys` plus `logic`). Keep new examples consistent with this.
 - The migration record of a release is the `CHANGELOG.md`: each `**BREAKING:**` entry names the old form and the new one. There are no upgrade guides and no generated reference pages.
 - Source code points to these pages by name: `src/fsm_llm/engine/fsm/manager.py` mentions `docs/architecture.md` and `src/fsm_llm/engine/fsm/turns.py` quotes `docs/handlers.md`. Renaming a page breaks those pointers and the tests above.

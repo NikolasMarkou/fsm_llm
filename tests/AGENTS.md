@@ -7,7 +7,7 @@ Purpose: The full pytest tree of FSM-LLM: the suite folders for the `fsm_llm` pa
 
 - In: `conftest.py`, `__init__.py` (empty), `test_packaging.py`, `test_coverage_ratchet.py`, `test_integration_ollama.py`, `fixtures/test_fsm_definitions/minimal_fsm.json`, `fixtures/module_path_map.json`, `fixtures/anchor_multiset.json`, `test_examples/`, and the `test_fsm_llm*` suite folders.
 - Package under test: one top-level package `fsm_llm` (`src/fsm_llm/`) with subpackages `agents`, `reasoning`, `workflows`, `monitor`, `eval`, `synthesis`, `testing`. The old top-level names (`fsm_llm_agents`, ...) no longer exist (no test checks for a leftover directory any more).
-- Out: the bench data under `scripts/bench_data/` and the examples themselves (`examples/`, the evaluation baselines).
+- Out: the examples themselves (`examples/`, the evaluation baselines).
 
 ## Architecture
 
@@ -41,7 +41,7 @@ Suite folders and root files at this level.
 | `test_fsm_llm_workflows/` | `fsm_llm.workflows` steps, DSL, `WorkflowEngine`, timeouts, removed-keyword refusals | Real short sleeps; the `slow` ones are in `test_step_timeouts.py` |
 | `test_fsm_llm_monitor/` | `fsm_llm.monitor` server via `TestClient`, security, `InstanceManager`, `EventCollector`, `OTELExporter` | Local autouse fixture deletes `FSM_LLM_MONITOR_API_KEY`; `TestWorkflowTracking` skips when workflows is missing |
 | `test_fsm_llm_eval/` | `fsm_llm.eval` and `fsm-llm-eval`: config, records, stats, scoring golden table, examples mode, cases mode, exit codes | Reads `evaluation/` files and needs a git checkout |
-| `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end. The synthesis bench script and its recorded blocks are frozen history, with no test (`scripts/bench_data/README.md`) | Own `conftest.py` (`ScriptedRunnerLLM`, `ByTurn`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
+| `test_fsm_llm_synthesis/` | `fsm_llm.synthesis` (policy G5, gates, G6a `dryrun`, G6b `simulation`, `synthesizer`, `library`, `runner`, `tools`, `traces`, `diagnose`, `patch`, `repair`), the concierge end to end. `reference_tasks.py` holds the 16 reference tasks of the retired synthesis bench (read by `test_synthesizer.py` and the kind-equality corpus) | Own `conftest.py` (`ScriptedRunnerLLM`, `ByTurn`, `host_fsm`, `good_fsm`, `stuck_fsm`) that fails on any built `LiteLLMInterface` or provider call; see `test_fsm_llm_synthesis/AGENTS.md` |
 | `test_fsm_llm_testing/` | `fsm_llm.testing` (a subpackage): import probes and source scans for its layering (loaded by no library module, no `pytest`, `litellm` or other subpackage), the skeleton checks | Child-process probes with the model-server variables on a closed port |
 | `test_fsm_llm_regression/` | One class per fixed bug id across core, reasoning, workflows, CLI, packaging text | Many private-method and source-text pins; also the layout safety nets (`test_module_path_map.py`, `test_decision_anchor_multiset.py`, `test_module_size_guard.py`, `test_patch_targets.py`, helper `support.py`) |
 | `test_examples/` | Every `examples/**/*.json` loads as JSON with `name`/`initial_state`/`states`, parses as `FSMDefinition`, passes `FSMValidator.validate()`; at least 5 files exist, so the scan is not vacuous | Marker `examples`. `test_example_scripted_paths.py` also drives shipped example FSMs offline with `fsm_llm.testing` (no example edited); `test_example_import_paths.py` scans the `examples/**/*.py` imports of `fsm_llm` and resolves each one |
@@ -56,7 +56,7 @@ Suite folders and root files at this level.
 - `TestClassifiersMatchFloor`: the version classifiers run contiguously from the `requires-python` floor (3.11), the newest equals the evidenced version, and the build backend asks for setuptools 77 or later.
 - `TestDeclaredRangesMatchPins`: every declared dependency (core, extras, dependency groups) has an upper bound and exactly one `==` pin in `constraints.txt` inside its range, the build backend is pinned inside its range, and `constraints.txt` holds exactly one litellm line. Needs no network.
 - `TestWheelContent` (`slow`): builds a wheel with `python -m build --wheel --no-isolation` from a copy of the tracked `src/` tree in a temporary directory (the repository gets no `build/` or `*.egg-info`), and requires the entries to equal every module plus `py.typed`, `monitor/static/**/*` and `monitor/templates/*` under `fsm_llm/` (all relative to the package root, so it holds before and after the move to `src/fsm_llm/`), nothing from `tests`, `examples`, `scripts`, `docs`, `plans` or `src`; `.dist-info` names the `[project] name` and `entry_points.txt` equals `[project.scripts]`; the wheel file is `llm_fsm-<version>-py3-none-any.whl`, its METADATA holds the `llm-fsm[extra]` self-references of `all`, and the build prints no setuptools warning that a package is "absent from the `packages` configuration" (`include-package-data = false`). `TestWheelComparison` (not `slow`) runs that comparison on synthetic listings. `TestPackageInitImportsNoSubpackage`: the package `__init__` has no import statement naming a subpackage (import-linter cannot express it; `.importlinter` covers the rest).
-- `TestExplicitEncodings`: an AST scan bans a text-mode `open(`, `os.fdopen(`, `Path.open(`, `read_text(` or `write_text(` without `encoding=` in `src/` and `scripts/` (not `scripts/bench_data/`), the scanner is checked on known good and bad shapes, and a UTF-8 session file loads in a subprocess run under the C locale with `-X utf8=0`.
+- `TestExplicitEncodings`: an AST scan bans a text-mode `open(`, `os.fdopen(`, `Path.open(`, `read_text(` or `write_text(` without `encoding=` in `src/` and `scripts/`, the scanner is checked on known good and bad shapes, and a UTF-8 session file loads in a subprocess run under the C locale with `-X utf8=0`.
 
 
 `test_integration_ollama.py`: module `pytestmark` is `integration`, `real_llm`, `slow`; classes needing Ollama carry `requires_ollama` (`ollama_available("qwen3.5:9b-q8_0")`) and retry up to 3 times. It uses `examples/basic/simple_greeting/fsm.json`. `TestWorkflowUTCConsistency` and `TestParallelStepIsolation` need no model but are still `slow`.
@@ -104,7 +104,7 @@ Hooks: `pytest_configure` registers markers `slow`, `integration`, `examples`, `
 
 ## Dependencies
 
-- Internal: every module of `src/`; `scripts/bench_common.py`; repo files `pyproject.toml`, `Makefile`, `tox.ini`, `MANIFEST.in`, `.github/workflows/python-package.yml`, root docs, `docs/*.md`, `examples/`, `evaluation/`, `scripts/bench_data/`.
+- Internal: every module of `src/`; repo files `pyproject.toml`, `Makefile`, `tox.ini`, `MANIFEST.in`, `.github/workflows/python-package.yml`, root docs, `docs/*.md`, `examples/`, `evaluation/`.
 - External: pytest, pytest-asyncio, `unittest.mock`, loguru, pydantic, litellm (patched, never called in offline tests). Optional: httpx (Ollama probe, remote tests), fastapi, mcp, opentelemetry, a local Ollama.
 
 ## Failure modes

@@ -1,9 +1,9 @@
 """
 Binomial statistics for evaluation results (stdlib only, no scipy).
 
-``wilson_ci`` and ``fisher_exact_two_sided`` were moved verbatim from
-``scripts/bench_common.py``, which keeps its own stdlib copies so it stays
-offline (D-008 of plan 581c2634).
+``wilson_ci`` and ``fisher_exact_two_sided`` were moved verbatim from the
+bench helper module ``scripts/bench_common.py`` (deleted with the synthesis
+bench, plan baa37f40 D-012; see git history).
 """
 
 from __future__ import annotations

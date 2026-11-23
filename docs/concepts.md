@@ -170,8 +170,8 @@ The library is organized into these groups of features.
 * **`fsm_llm.eval`**: scores the examples 0 to 4, or runs scripted conversations N times and
   reports pass rates with Wilson confidence intervals (`EvalConfig`, `run_examples`,
   `run_cases`, `run_dataset`, `wilson_ci`).
-* **Pre-registered benches**: `scripts/synthesis_bench.py` records blocks that are run once at a fixed n,
-  so a number in the repository can be recounted from its rows.
+* **Pre-registered benches**: a block is run once at a fixed n, so a number can be recounted from its rows
+  (the synthesis blocks s0 to s2 are recorded in `docs/synthesis.md`; their script and rows are in git history).
 
 ### One LLM layer, security and reliability
 

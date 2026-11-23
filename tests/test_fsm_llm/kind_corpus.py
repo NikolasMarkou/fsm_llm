@@ -39,8 +39,8 @@ a kind refactor, review the diff and commit it with the reason. The file is
 written with ``\\n`` line ends, UTF-8, sorted keys, no timestamp and no path
 outside the repository.
 
-The corpus reads ``examples/`` and ``scripts/synthesis_bench.py`` and never
-changes them.
+The corpus reads ``examples/`` and the reference tasks of
+``tests/test_fsm_llm_synthesis/reference_tasks.py`` and never changes them.
 """
 
 from __future__ import annotations
@@ -49,7 +49,6 @@ import contextlib
 import copy
 import datetime
 import hashlib
-import importlib.util
 import json
 import re
 import sys
@@ -450,33 +449,21 @@ def _reasoning_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
     return {f"reasoning/{name}": (get_reasoning_fsm(name), {}) for name in FSM_NAMES}
 
 
-@contextlib.contextmanager
-def _bench() -> Iterator[Any]:
-    """``scripts/synthesis_bench.py`` loaded by path, leaving ``sys.modules`` as it was."""
-    added = {"kind_corpus_synthesis_bench", "bench_common"} - set(sys.modules)
-    path = ROOT / "scripts" / "synthesis_bench.py"
-    spec = importlib.util.spec_from_file_location("kind_corpus_synthesis_bench", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-        yield module
-    finally:
-        for name in added:  # only what this block put there: a module the bench
-            sys.modules.pop(name, None)  # imports for the first time stays imported
-
-
 def _bench_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
-    """The 16 ``hand_fsm`` and 16 ``host_definition`` of the synthesis bench."""
+    """The 16 ``hand_fsm`` and 16 ``host_definition`` of the retired synthesis bench."""
+    from tests.test_fsm_llm_synthesis.reference_tasks import (
+        TASKS,
+        hand_fsm,
+        host_definition,
+    )
+
     cases: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-    with _bench() as bench:
-        for task in bench.TASKS:
-            cases[f"bench/hand/{task.id}"] = (
-                bench.hand_fsm(task),
-                {"return_keys": sorted(task.gold)},
-            )
-            cases[f"bench/host/{task.id}"] = (bench.host_definition(task), {})
+    for task in TASKS:
+        cases[f"bench/hand/{task.id}"] = (
+            hand_fsm(task),
+            {"return_keys": sorted(task.gold)},
+        )
+        cases[f"bench/host/{task.id}"] = (host_definition(task), {})
     return cases
 
 
