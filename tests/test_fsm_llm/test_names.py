@@ -11,6 +11,8 @@ from __future__ import annotations
 import ast
 import importlib
 import importlib.metadata
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -460,8 +462,9 @@ NAMESPACES: dict[str, tuple[str, str, str]] = {
     "executable_sources": (
         "engine/executables/namespaces.py",
         "EXECUTABLE_SOURCES",
-        "named source factories a package registers by an explicit call "
-        "(agents and reasoning in step 23); entry-point group fsm_llm.executable_sources",
+        "named source factories a package registers by an explicit call (fsm_llm.agents "
+        "and fsm_llm.reasoning register theirs when imported, step 23); "
+        "entry-point group fsm_llm.executable_sources",
     ),
 }
 
@@ -590,7 +593,24 @@ class TestNamespaces:
         assert namespaces.EXECUTABLE_KINDS._group == "fsm_llm.executable_kinds"
         assert namespaces.EXECUTABLE_SOURCES._group == "fsm_llm.executable_sources"
         assert namespaces.EXECUTABLE_KINDS.list() == ["fsm", "procedure", "strategy"]
-        assert namespaces.EXECUTABLE_SOURCES.list() == []  # nothing registers at import
+
+    def test_importing_the_engine_namespace_registers_no_source(self):
+        # In-process the list depends on which packages other tests imported (agents and
+        # reasoning register their source when imported), so ask a fresh interpreter.
+        code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(_SRC.parent)!r})\n"
+            "from fsm_llm.engine.executables import namespaces\n"
+            "assert namespaces.EXECUTABLE_SOURCES.list() == []\n"
+            "assert not any(m in sys.modules for m in ('fsm_llm.agents', 'fsm_llm.reasoning'))\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr
 
     def test_the_state_kind_registry_holds_the_two_builtin_executors(self):
         from fsm_llm.engine.kinds import registry as kinds

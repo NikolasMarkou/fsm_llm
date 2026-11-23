@@ -9,6 +9,7 @@ built-ins through the ``executable_sources`` namespace.
 
 from .adapters import FsmBodyExecutable, FsmInstance
 from .aliases import AliasSpec, is_template_identity, make_alias, pick_route
+from .code_backed import CodeBackedExecutable, CodeBackedInstance
 from .namespaces import EXECUTABLE_KINDS, EXECUTABLE_SOURCES, adapter_for
 from .protocol import (
     DEFAULT_EXECUTABLE_MAX_STEPS,
@@ -35,6 +36,8 @@ __all__ = [
     "MAX_DOCUMENT_BYTES",
     "MAX_RETAINED_TEMPLATES",
     "AliasSpec",
+    "CodeBackedExecutable",
+    "CodeBackedInstance",
     "Executable",
     "ExecutableCollisionError",
     "ExecutableError",

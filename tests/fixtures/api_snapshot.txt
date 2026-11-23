@@ -779,6 +779,17 @@ fsm_llm.engine.context.RunContext class
 # fsm_llm.engine.executables
 fsm_llm.engine.executables.AliasSpec class
   def __init__(self, name: str, target: str, routes: tuple[tuple[str, float], ...]) -> None
+fsm_llm.engine.executables.CodeBackedExecutable class(ABC)
+  def __init__(self, *, id: str, kind: str, impl: str, contract: Contract, requires: Requires | None = None, capabilities: Sequence[Capability] = (), optional_inputs: Sequence[str] = (), optional_callables: Sequence[str] = (), version: str = '1') -> None
+  def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  def execute(self, inputs: Mapping[str, Any], objects: Mapping[str, Any], context: RunContext, identity: Identity) -> RunResult
+  def instantiate(self, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> CodeBackedInstance
+  def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  def stopped(self, status: Status, reason: Reason | None, identity: Identity, **detail: Any) -> RunResult
+fsm_llm.engine.executables.CodeBackedInstance class
+  def __init__(self, executable: CodeBackedExecutable, record: Mapping[str, Any], instance_identity: str | None) -> None
+  def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
 fsm_llm.engine.executables.DEFAULT_EXECUTABLE_MAX_STEPS = 100
 fsm_llm.engine.executables.EXECUTABLE_KINDS NameRegistry
 fsm_llm.engine.executables.EXECUTABLE_SOURCES NameRegistry

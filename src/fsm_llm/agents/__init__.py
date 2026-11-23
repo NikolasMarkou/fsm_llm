@@ -31,6 +31,7 @@ from __future__ import annotations
 from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.fsm_definitions.parallel_react import build_parallel_react_fsm
 from fsm_llm.core.definitions import AgentError
+from fsm_llm.engine.executables.namespaces import EXECUTABLE_SOURCES
 from fsm_llm.policy import (
     ApprovalCallback,
     ApprovalDeniedError,
@@ -277,6 +278,21 @@ def create_agent(
 
 
 from .builders import ConfiguredAgentBuilder
+
+
+def _builtin_executables() -> list:
+    """The ``agents`` source of ``executable_sources``: one executable per pattern.
+
+    Lazy on purpose: ``agents.executables`` is imported on the first call, so importing this
+    package loads the engine's namespace module but not the executables (plan ace7a8c8 D-061).
+    """
+    from .executables import builtin_executables
+
+    return builtin_executables()
+
+
+# `override=True`: re-importing the package (a reload) replaces the factory, never collides.
+EXECUTABLE_SOURCES.register("agents", _builtin_executables, override=True)
 
 __all__ = [
     # Main classes
