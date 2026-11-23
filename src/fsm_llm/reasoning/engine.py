@@ -26,6 +26,7 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.logging import logger
 
+from .choice import _classification_from, _eligible_choices, _strategy_for
 from .constants import (
     RETRY_CLEARED_KEYS,
     SOLVE_DRIVER_KEYS,
@@ -36,15 +37,10 @@ from .constants import (
     HandlerNames,
     LogMessages,
     OrchestratorStates,
-    ReasoningType,
     solve_step_budget,
 )
-from .definitions import ReasoningClassificationResult, ReasoningTrace
-from .exceptions import (
-    ReasoningClassificationError,
-    ReasoningExecutionError,
-    ReasoningRegistryError,
-)
+from .definitions import ReasoningTrace
+from .exceptions import ReasoningClassificationError, ReasoningExecutionError
 from .handlers import (
     ContextManager,
     OutputFormatter,
@@ -52,13 +48,7 @@ from .handlers import (
     register_strategy_handlers,
     retries_exhausted,
 )
-from .selection import (
-    ANALYTICAL,
-    StrategyChoice,
-    classification_intents,
-    find_choice,
-    strategy_choices,
-)
+from .selection import classification_intents
 from .utilities import get_reasoning_fsm
 
 #: What ``ReasoningEngine.model`` shows when an injected interface states no model.
@@ -641,116 +631,6 @@ class ReasoningEngine:
                 types.add(snapshot[ContextKeys.REASONING_TYPE_SELECTED])
 
         return list(types) if types else ["unknown"]
-
-
-def _eligible_choices(
-    registry: ExecutableRegistry,
-) -> tuple[list[StrategyChoice], StrategyChoice]:
-    """The strategies of *registry* a solve may choose and the one it falls back to.
-
-    Contract: ``selection.strategy_choices`` decides (skipped ones are warned there); raises
-    ``ReasoningRegistryError`` naming what is missing when no eligible strategy is named
-    ``analytical`` (the fallback) or fewer than two are eligible (a closed classification needs
-    two intents). Returns ``(choices, the analytical choice)``.
-    """
-    choices = strategy_choices(registry)
-    analytical = find_choice(choices, ANALYTICAL)
-    if analytical is None or analytical.name != ANALYTICAL:
-        raise ReasoningRegistryError(
-            f"the registry has no eligible strategy named {ANALYTICAL!r} (the fallback of "
-            f"every solve); eligible: {[choice.name for choice in choices]}"
-        )
-    if len(choices) < 2:
-        raise ReasoningRegistryError(
-            "the registry has fewer than two eligible strategies: the choice is a closed "
-            f"classification of at least two; eligible: {[c.name for c in choices]}"
-        )
-    return choices, analytical
-
-
-def _strategy_for(
-    recommended: str,
-    preferred: object,
-    choices: list[StrategyChoice],
-    analytical: StrategyChoice,
-) -> StrategyChoice:
-    """The strategy a solve runs: the classified one, then the preferred one.
-
-    Contract: ``recommended`` is the classifier's recommendation, found among ``choices`` by name
-    or alias (an unknown spelling is ``analytical``, with a WARNING). ``preferred`` is
-    ``initial_context["preferred_reasoning_type"]``: when it names a strategy of ``choices`` (a
-    name or an alias, ANY eligible one, not only the intents the classifier saw) it WINS over the
-    classified one; when it names none, ONE WARNING and it is ignored. Never raises for any value.
-    """
-    chosen = find_choice(choices, recommended)
-    if chosen is None:
-        logger.warning(
-            f"Unknown reasoning type '{recommended}', defaulting to analytical"
-        )
-        chosen = analytical
-    if preferred:
-        named = find_choice(choices, str(preferred))
-        if named is None:
-            logger.warning(
-                f"preferred_reasoning_type {preferred!r} names no known strategy; ignoring"
-            )
-        else:
-            logger.debug(f"Using preferred_reasoning_type from context: {named.name!r}")
-            chosen = named
-    return chosen
-
-
-def _classification_from(result: dict[str, Any]) -> ReasoningClassificationResult:
-    """The classification of a finished classifier conversation's ``result``.
-
-    Contract: never raises for any JSON value the model wrote. A
-    ``recommended_reasoning_type`` that is missing (a classification below
-    its confidence threshold, a cut reply or a provider outage writes
-    nothing), not a ``str`` or blank becomes ``"analytical"`` (an unknown
-    name is mapped to analytical later, by ``map_reasoning_type``); a
-    non-``str`` justification or domain becomes ``""``;
-    ``alternative_approaches`` keeps its non-blank ``str`` items (a bare
-    non-blank ``str`` becomes a one-item list), anything else is dropped.
-    Each replaced value, a missing one included, is logged as one WARNING;
-    well-shaped values pass unchanged.
-    """
-    # DECISION plan-2026-10-01T093600-944e2692/D-060: the classifier handler
-    # is critical (D-058), so the model's values are normalised here. Do NOT
-    # build ReasoningClassificationResult from the raw values again: a badly
-    # shaped auxiliary field (a str alternative_approaches, seen live) would
-    # fail the whole solve. Do NOT drop `.critical()` to absorb it instead:
-    # that also hides a spent classifier budget or a provider error.
-    recommended = result.get(ContextKeys.RECOMMENDED_REASONING_TYPE)
-    if not (isinstance(recommended, str) and recommended.strip()):
-        if recommended is None:
-            logger.warning(
-                "No recommended reasoning type was produced (low confidence, a cut "
-                "reply or a failed classification call): using analytical"
-            )
-        else:
-            logger.warning(f"Malformed recommended reasoning type: {recommended!r}")
-        recommended = ReasoningType.ANALYTICAL.value
-    texts: dict[str, str] = {}
-    for key in (ContextKeys.STRATEGY_JUSTIFICATION, ContextKeys.PROBLEM_DOMAIN):
-        value = result.get(key)
-        if value is not None and not isinstance(value, str):
-            logger.warning(f"Malformed classifier field {key} dropped: {value!r}")
-        texts[key] = value if isinstance(value, str) else ""
-    approaches = result.get(ContextKeys.ALTERNATIVE_APPROACHES)
-    items = [approaches] if isinstance(approaches, str) else approaches
-    alternatives = (
-        [item for item in items if isinstance(item, str) and item.strip()]
-        if isinstance(items, list)
-        else []
-    )
-    if approaches is not None and alternatives != approaches:
-        logger.warning(f"Malformed alternative approaches normalised: {approaches!r}")
-    return ReasoningClassificationResult(
-        recommended_type=recommended,
-        justification=texts[ContextKeys.STRATEGY_JUSTIFICATION],
-        domain=texts[ContextKeys.PROBLEM_DOMAIN],
-        alternatives=alternatives,
-    )
 
 
 def _solve_log(conversation_id: str) -> Any:
