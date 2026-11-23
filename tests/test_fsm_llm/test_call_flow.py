@@ -405,3 +405,32 @@ class TestTheValidatorStaysNeverStricter:
         data["states"]["work"]["call"]["result_key"] = ["call_result"]
         result = FSMValidator(data).validate()
         assert not result.is_valid
+
+
+class TestTwoCallStatesSharingAKey:
+    def _two(self, second_key: str | None) -> dict[str, Any]:
+        data = _definition()
+        second = copy.deepcopy(data["states"]["work"])
+        second["id"] = "second"
+        if second_key is not None:
+            second["call"]["result_key"] = second_key
+            second["transitions"] = _gate_edges(second_key)
+        data["states"]["second"] = second
+        data["states"]["start"]["transitions"].append(
+            {"target_state": "second", "description": "to second", "priority": 50}
+        )
+        return data
+
+    def test_a_shared_result_key_is_one_warning_on_the_later_state(self):
+        data = self._two(None)
+        _load(copy.deepcopy(data))  # the loader accepts it
+        result = FSMValidator(data).validate()
+        assert result.is_valid, result.errors
+        warnings = [w for w in result.warnings if "also writes" in w]
+        assert len(warnings) == 1
+        assert "'second'" in warnings[0] and "'work'" in warnings[0]
+        assert _RESULT in warnings[0]
+
+    def test_distinct_result_keys_are_not_warned(self):
+        result = FSMValidator(self._two("second_result")).validate()
+        assert [w for w in result.warnings if "also writes" in w] == []

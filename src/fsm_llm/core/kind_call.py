@@ -277,13 +277,46 @@ def _declared_names(state: Any) -> set[str]:
 def call_lint_raw(
     state_id: str, state: dict[str, Any], fsm_data: dict[str, Any], services: Any
 ) -> list[str]:
-    """A call state whose ``choose`` key nothing can write: a WARNING.
+    """Two WARNINGS (never an error): a call state that shares its result key with an earlier
+    call state (D-025), and a call state whose ``choose`` key nothing can write.
 
     The key is written by a handler (then ``handler_only_keys`` should list it) or by an
     extraction of an earlier state; a call state declares no extraction of its own. With no
     value the call takes its ``fallback`` or ends ``failed`` (``unknown_target``). Quiet for
     any raw shape the loader refuses.
     """
+    return [
+        *_shared_key_lint(state_id, state, fsm_data, services),
+        *_choose_lint(state_id, state, fsm_data),
+    ]
+
+
+def _shared_key_lint(
+    state_id: str, state: dict[str, Any], fsm_data: dict[str, Any], services: Any
+) -> list[str]:
+    """A call state whose result key an EARLIER call state of the definition also writes."""
+    states = fsm_data.get("states")
+    if not isinstance(states, dict):
+        return []
+    key = call_raw_result_key(state, services)
+    for other_id, other in states.items():
+        if other_id == state_id:
+            return []  # it is the first state with this key (or the order says so)
+        call = other.get("call") if isinstance(other, dict) else None
+        if isinstance(call, dict) and call_raw_result_key(other, services) == key:
+            return [
+                f"Call state '{state_id}' writes its result to '{key}', which call state "
+                f"'{other_id}' also writes: each record is stamped with its state, so both "
+                "run, but the later record replaces the earlier one, and an edge that reads "
+                "the first result after the second call ran reads the second; give each call "
+                "state its own result_key"
+            ]
+    return []
+
+
+def _choose_lint(
+    state_id: str, state: dict[str, Any], fsm_data: dict[str, Any]
+) -> list[str]:
     choose = state["call"].get("choose")
     key = choose.get("key") if isinstance(choose, dict) else None
     if not isinstance(key, str) or not key:

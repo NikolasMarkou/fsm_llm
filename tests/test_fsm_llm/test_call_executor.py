@@ -102,6 +102,7 @@ class TestTheRequestRecord:
         record = _record(api, frame)
         assert record == {
             "status": "running",
+            "state": "work",
             "target": _TARGET,
             "template_identity": f"template:{_TARGET}",
             "instance_identity": f"instance:{_TARGET}",
@@ -187,6 +188,46 @@ class TestTheRequestRecord:
             step.state_after == "done"
         )  # the success edge fired on the standing record
 
+    @pytest.mark.parametrize(
+        "stale",
+        [
+            {"status": "ok", "state": "first", "reason": None},
+            {"status": "running", "state": "first", "mode": "frame"},
+            "ok",
+            ["ok"],
+        ],
+        ids=["final-of-another-state", "running-of-another-state", "text", "list"],
+    )
+    async def test_a_value_that_is_not_a_record_of_this_state_is_replaced(self, stale):
+        """Two call states share the default key: the first one's record (or any value that is
+        not a record of ``work``) is not an answer for ``work``. Kills (D-025): the executor
+        skipping on any non-None value."""
+        api, cid, frame, resolver, _ = await _at_the_call()
+        api.fsm_manager.update_conversation_context(frame, {"call_result": stale})
+        await api.aadvance(cid)
+        # the executor asks, and settle asks again when it pushes the child
+        assert resolver.asked and {t for t, _ in resolver.asked} == {_TARGET}
+        record = _record(api, frame)
+        assert record["status"] == "running" and record["state"] == "work"
+
+    async def test_a_final_record_stamped_by_this_state_stands(self):
+        api, cid, frame, resolver, _ = await _at_the_call()
+        mine = {"status": "ok", "state": "work", "reason": None, "target": _TARGET}
+        api.fsm_manager.update_conversation_context(frame, {"call_result": mine})
+        step = await api.aadvance(cid)
+        assert resolver.asked == [] and _record(api, frame) == mine
+        assert step.state_after == "done"
+
+    def test_belonging_is_one_rule(self):
+        from fsm_llm.engine.kinds.call import record_belongs
+
+        assert record_belongs({"status": "ok"}, "work")  # no stamp: a handler's record
+        assert record_belongs({"state": "work"}, "work")
+        assert not record_belongs({"state": "other"}, "work")
+        assert not record_belongs({"state": 5}, "work")
+        assert not record_belongs(None, "work")
+        assert not record_belongs("ok", "work")
+
 
 class TestChoose:
     @pytest.mark.parametrize(
@@ -268,6 +309,7 @@ class TestRefusals:
         record = _record(api, frame)
         assert record == {
             "status": "failed",
+            "state": "work",
             "reason": reason,
             "target": target,
             "template_identity": None if identity is None else f"template:{target}",
@@ -328,6 +370,7 @@ class TestTheWiring:
         )
         request = write_call_request(
             "out",
+            state_id="s",
             target="t",
             resolved=resolved,
             inputs={"a": 1},
@@ -337,18 +380,22 @@ class TestTheWiring:
         assert isinstance(request, DataExtractionResponse)
         assert request.confidence == 1.0 and list(request.extracted_data) == ["out"]
         assert request.extracted_data["out"]["request"]["inputs"] == {"a": 1}
-        refused = refuse("out", "inputs_missing", target="t", resolved=resolved)
+        refused = refuse(
+            "out", "inputs_missing", state_id="s", target="t", resolved=resolved
+        )
         assert refused.extracted_data == {
             "out": {
                 "status": "failed",
+                "state": "s",
                 "reason": "inputs_missing",
                 "target": "t",
                 "template_identity": "template",
                 "instance_identity": "instance",
             }
         }
-        bare = refuse("out", "unknown_target")
+        bare = refuse("out", "unknown_target", state_id="s")
         assert bare.extracted_data["out"]["target"] is None
+        assert request.extracted_data["out"]["state"] == "s"
 
     async def test_a_call_result_is_closed_to_every_extraction_channel(self):
         """The framework result key is handler-only like ``synthesis_result``

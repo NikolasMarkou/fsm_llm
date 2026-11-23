@@ -70,6 +70,30 @@ def _recorded(value: Any) -> Any:
     return f"<{type(value).__name__}, {len(text)} characters of JSON, not recorded>"
 
 
+# DECISION plan-2026-11-23T122249-baa37f40/D-025
+# A call record belongs to the state that wrote it (`state`, the id of the state whose `call`
+# config decided it), and the executor and settle share THIS one rule. Do NOT skip on any
+# non-None value of the result key (two call states share the default `call_result`: the second
+# would see the first's final `ok`, skip, and take its success edge with no child pushed), do NOT
+# read the stamp in one reader only (settle applying a record of another state pushes the wrong
+# target), and do NOT clear the key on arrival instead (an initial call state and an agent-managed
+# FSM have no arrival). A record with no stamp (a handler, a seed, an older snapshot) keeps the
+# skip-if-set of D-022; a revisit of the SAME state keeps its own stale final record (an author
+# clears it with `clear_keys_on_entry`).
+def record_belongs(record: Any, state_id: str) -> bool:
+    """Whether a value at a call state's result key is a record of ``state_id``.
+
+    Contract: ``True`` for a dict whose ``state`` is ``state_id`` or absent; ``False`` for a
+    dict stamped with another id (or a stamp that is not text) and for any non-dict. Never
+    raises. The executor skips only a value that belongs, and ``settle`` applies only a
+    ``running`` record that belongs to the parent's current state.
+    """
+    if not isinstance(record, dict):
+        return False
+    stamp = record.get("state")
+    return stamp is None or stamp == state_id
+
+
 def _identities(resolved: ResolvedTarget | None) -> dict[str, str | None]:
     return {
         "template_identity": None if resolved is None else resolved.template_identity,
@@ -80,15 +104,19 @@ def _identities(resolved: ResolvedTarget | None) -> dict[str, str | None]:
 def write_call_request(
     result_key: str,
     *,
+    state_id: str,
     target: str,
     resolved: ResolvedTarget,
     inputs: Mapping[str, Any],
     max_steps: int | None,
     max_seconds: float | None,
 ) -> DataExtractionResponse:
-    """The ``running`` request record of a call, as the one extracted key ``result_key``."""
+    """The ``running`` request record of a call, as the one extracted key ``result_key``.
+
+    ``state_id`` is the id of the call state, stamped as ``state`` (``record_belongs``)."""
     record = {
         "status": Status.RUNNING.value,
+        "state": state_id,
         "target": target,
         **_identities(resolved),
         "mode": TARGET_MODE_FRAME,
@@ -106,12 +134,16 @@ def refuse(
     result_key: str,
     reason: Reason | str,
     *,
+    state_id: str,
     target: str | None = None,
     resolved: ResolvedTarget | None = None,
 ) -> DataExtractionResponse:
-    """The FINAL ``failed`` record of a refused call, as the one extracted key ``result_key``."""
+    """The FINAL ``failed`` record of a refused call, as the one extracted key ``result_key``.
+
+    ``state_id`` is the id of the call state, stamped as ``state`` (``record_belongs``)."""
     record = {
         "status": Status.FAILED.value,
+        "state": state_id,
         "reason": Reason.from_string(reason).value,
         "target": target,
         **_identities(resolved),
@@ -177,7 +209,7 @@ class CallExecutor(StateExecutor):
         data = instance.context.data
         response = (
             DataExtractionResponse(extracted_data={}, confidence=1.0)
-            if data.get(config.result_key) is not None
+            if record_belongs(data.get(config.result_key), state.id)
             else self._decide(pipeline, data, conversation_id, state, config)
         )
         instance.last_extraction_response = response
@@ -204,20 +236,25 @@ class CallExecutor(StateExecutor):
         key = config.result_key
         target = chosen_target(config, data)
         if target is None:
-            return refuse(key, Reason.UNKNOWN_TARGET)
+            return refuse(key, Reason.UNKNOWN_TARGET, state_id=state.id)
         resolved = resolver.resolve_target(target, conversation_id=conversation_id)
         if resolved is None:
-            return refuse(key, Reason.UNKNOWN_TARGET, target=target)
+            return refuse(key, Reason.UNKNOWN_TARGET, state_id=state.id, target=target)
         inputs: dict[str, Any] = {}
         for name in config.inputs:
             value = data.get(name)
             if value is None:
                 return refuse(
-                    key, Reason.INPUTS_MISSING, target=target, resolved=resolved
+                    key,
+                    Reason.INPUTS_MISSING,
+                    state_id=state.id,
+                    target=target,
+                    resolved=resolved,
                 )
             inputs[name] = value
         return write_call_request(
             key,
+            state_id=state.id,
             target=target,
             resolved=resolved,
             inputs=inputs,

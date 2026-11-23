@@ -37,7 +37,14 @@ from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm import kind_corpus as kc
 from tests.test_fsm_llm.test_async_cancel import _gate_is_free
-from tests.test_fsm_llm.test_call_state import _call, _choose, _parent
+from tests.test_fsm_llm.test_call_state import (
+    _call,
+    _call_state,
+    _choose,
+    _edge,
+    _failure_edge,
+    _parent,
+)
 
 _BOUND = 10  # seconds: a wait that would hang fails instead
 _TARGET = "reasoning.analytical"
@@ -169,6 +176,7 @@ async def _flow(
 def _final(status: str, reason: str | None, target: str = _TARGET) -> dict[str, Any]:
     return {
         "status": status,
+        "state": "work",
         "reason": reason,
         "target": target,
         "template_identity": f"template:{target}",
@@ -707,3 +715,120 @@ class TestTheHooks:
         await flow.api.arun_until_terminal(flow.cid, max_steps=10)
         assert [h[0] for h in heard] == ["pushed", "ended"]
         assert heard[0][1] == heard[1][1] == flow.frame and heard[0][2] == heard[1][2]
+
+
+def _sequence(*, loop: bool = False) -> dict[str, Any]:
+    """``start -> work -> second -> done``: two call states with the DEFAULT result key
+    (``call_result``), each on its own target. With ``loop`` the ``second`` state goes back to
+    ``work`` until it has been entered twice (a handler counts ``visits``)."""
+    first = _call(target=_TARGET, returns={"answer": "solution"})
+    second = _call(target=_OTHER, returns={"answer2": "solution"})
+    definition = _parent(
+        first,
+        extra_states={
+            "second": _call_state(second, id="second", response_instructions="")
+        },
+        response_instructions="",
+    )
+    states = definition["states"]
+    states["start"]["transitions"] = [states["start"]["transitions"][0]]
+    ok = {"==": [{"var": "call_result.status"}, "ok"]}
+    states["work"]["transitions"] = [
+        _edge("second", 1, ok),
+        _failure_edge(),
+    ]
+    if loop:
+        visits = {"var": "visits"}
+        states["second"]["transitions"] = [
+            _edge("work", 1, {"and": [ok, {"<": [visits, 2]}]}),
+            _edge("done", 1, {"and": [ok, {">=": [visits, 2]}]}),
+            _failure_edge(),
+        ]
+    return definition
+
+
+def _two_child_targets() -> dict[str, dict[str, Any]]:
+    one, two = _child_definition(), _child_definition()
+    one["name"], two["name"] = "ChildOne", "ChildTwo"
+    return {_TARGET: one, _OTHER: two}
+
+
+async def _run_sequence(
+    definition: dict[str, Any],
+) -> tuple[API, str, list[str]]:
+    """Run ``definition`` to its end; returns ``(api, id, names of the children pushed)``."""
+    handlers = [
+        create_handler("answer")
+        .on_state_entry("c2")
+        .do(lambda ctx: {"solution": f"solved {ctx.get('topic')}"}),
+        create_handler("count")
+        .on_state_entry("second")
+        .do(lambda ctx: {"visits": (ctx.get("visits") or 0) + 1}),
+    ]
+    api = API.from_definition(
+        definition,
+        llm_interface=ScriptedLLM(default_response="r"),
+        targets=_Resolver(_two_child_targets()),
+        handlers=handlers,
+    )
+    pushed: list[str] = []
+    original = api.apush_fsm
+
+    async def spy(root_id: str, child: Any, *args: Any, **kwargs: Any) -> Any:
+        pushed.append(child.name)
+        return await original(root_id, child, *args, **kwargs)
+
+    api.apush_fsm = spy  # type: ignore[method-assign]
+    cid, _ = await api.astart_conversation({"topic": "why"})
+    await api.arun_until_terminal(cid, max_steps=30)
+    return api, cid, pushed
+
+
+class TestTwoCallStates:
+    async def test_two_call_states_in_sequence_both_run(self):
+        """Both states use the default ``call_result``: the second must not take the first's
+        final ``ok`` for its own answer. Kills (D-025): a skip on any non-None value, and a final
+        record with no ``state`` stamp (the second state would then skip)."""
+        api, cid, pushed = await _run_sequence(_sequence())
+        assert pushed == ["ChildOne", "ChildTwo"]
+        assert api.get_stack_depth(cid) == 1
+        data = api.get_data(cid)
+        assert data["answer"] == "solved why" and data["answer2"] == "solved why"
+        record = data["call_result"]
+        assert (record["status"], record["state"], record["target"]) == (
+            "ok",
+            "second",
+            _OTHER,
+        )
+        assert (
+            api.fsm_manager.get_conversation_state(
+                api.conversation_stacks[cid][0].conversation_id
+            )
+            == "done"
+        )
+
+    async def test_a_state_revisited_after_another_call_state_runs_again(self):
+        """``work -> second -> work -> second -> done``: the record in the key belongs to the
+        OTHER call state at each re-entry, so each visit runs its call (four pushes in order).
+        The stale-record skip of the SAME state is pinned in ``test_call_log``."""
+        api, cid, pushed = await _run_sequence(_sequence(loop=True))
+        assert pushed == ["ChildOne", "ChildTwo", "ChildOne", "ChildTwo"]
+        assert api.get_stack_depth(cid) == 1
+        assert api.get_data(cid)["call_result"]["state"] == "second"
+
+    async def test_settle_never_applies_a_running_record_of_another_state(self):
+        """A ``running`` record stamped by another state (a handler, a snapshot, a log) sits in
+        the key while the parent is in ``work``: settle pushes nothing. Kills (D-025): a settle
+        that reads the status and mode and not the stamp."""
+        flow = await _flow(steps=2)
+        foreign = {
+            "status": "running",
+            "state": "elsewhere",
+            "target": _OTHER,
+            "mode": "frame",
+            "request": {"target": _OTHER, "inputs": {}},
+        }
+        flow.api.update_context(flow.cid, {"call_result": foreign})
+        assert await settle(flow.api, flow.cid) == []
+        assert flow.depth() == 1 and flow.record() == foreign
+        assert flow.resolver.asked == []
