@@ -374,6 +374,38 @@ class TestAgentStepIsNative:
         assert result.success is True and result.data["agent_answer"] == "sync answer"
         assert agent.threads == ["agent26_0"]
 
+    async def test_a_base_agent_with_the_default_arun_keeps_the_executor_route(
+        self,
+    ) -> None:
+        """The default ``BaseAgent.arun`` (X6.1, D-065) is NOT native: ``AgentStep`` still runs its
+        ``run`` in the step executor. Kills: the default treated as native (``arun`` is awaited, which
+        runs ``run`` on the default executor and the recorded thread name is not ``agent27``)."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from fsm_llm.agents.base import BaseAgent
+        from fsm_llm.agents.definitions import AgentResult
+        from fsm_llm.core.codes import Status
+
+        threads: list[str] = []
+
+        class Plain(BaseAgent):
+            def run(self, task, initial_context=None):
+                threads.append(threading.current_thread().name)
+                return AgentResult(answer="plain answer", status=Status.OK)
+
+            def _register_handlers(self, api):
+                pass
+
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent27")
+        token = _STEP_EXECUTOR.set(executor)
+        try:
+            result = await _agent_step(Plain()).execute({"topic": "x"})
+        finally:
+            _STEP_EXECUTOR.reset(token)
+            executor.shutdown()
+        assert result.success is True and result.data["agent_answer"] == "plain answer"
+        assert threads == ["agent27_0"]
+
     async def test_a_time_limit_cancels_a_native_arun(self, timing_factor) -> None:
         agent = _NativeAgent(park=True)
         step = _agent_step(agent, timeout_seconds=0.2 * timing_factor)

@@ -1086,6 +1086,7 @@ fsm_llm.agents.AutoMemoryReactAgent class(ReactAgent)
   def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
 fsm_llm.agents.BaseAgent class(ABC)
   def __init__(self, config: AgentConfig | None = None, **api_kwargs: Any) -> None
+  def arun(self, task: str, *args: Any, **kwargs: Any) -> AgentResult
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.BudgetExhaustedError class(AgentError)
   def __init__(self, budget_type: str, limit: int | float, detail: str = '')

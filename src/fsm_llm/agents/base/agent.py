@@ -22,6 +22,7 @@ from fsm_llm.agents.definitions import (
     AgentTrace,
     default_agent_config,
 )
+from fsm_llm.aio import aoffload
 from fsm_llm.constants import CONTEXT_KEY_OUTPUT_RESPONSE_FORMAT
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.logging import logger
@@ -157,6 +158,26 @@ class BaseAgent(HitlGateMixin, OutcomeMixin, RunsMixin, RegistrationMixin, ABC):
     ) -> AgentResult:
         """Run the agent on a task. Implemented by each agent pattern."""
         ...
+
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-065
+    # The default ``arun`` hops to ``run`` with ``aoffload(self.run, ...)``. Do NOT write
+    # ``acall(self, "run", ...)``: in async mode ``acall`` finds ``self.arun`` first and calls itself
+    # forever. Do NOT make it abstract (a sync-only subclass must still instantiate), and do NOT let
+    # ``AgentStep`` treat it as native (``_fsm_llm_offloads_run`` marks it: the step keeps the engine
+    # ``executor=``). A subclass with its OWN ``async def arun`` is native and its ``run`` is bypassed.
+    async def arun(self, task: str, *args: Any, **kwargs: Any) -> AgentResult:
+        """The awaitable name of ``run``: ``run`` on a worker thread.
+
+        Interface contract: the arguments are forwarded verbatim to ``run`` and its result or error
+        comes back unchanged. Async mode runs ``run`` through ``aoffload`` (``asyncio.to_thread``); a
+        cancelled await returns at once while ``run`` keeps going to its end on the worker and its late
+        result is dropped (tools and handlers of that run are not stopped). Sync mode
+        (``run_sync(agent.arun(...))``) runs it inline. A pattern with its own ``async def arun``
+        replaces this.
+        """
+        return await aoffload(self.run, task, *args, **kwargs)
+
+    arun._fsm_llm_offloads_run = True  # type: ignore[attr-defined]
 
     def __call__(
         self,

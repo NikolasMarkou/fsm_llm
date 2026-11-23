@@ -749,6 +749,11 @@
       "delta": 1,
       "reason": "step 22 of plan ace7a8c8, D-059: new anchor in ExecutableRegistry (leaf lock, validate-first swap, templates retained and never instances)",
       "token": "plan-2026-11-20T055240-ace7a8c8/D-059"
+    },
+    {
+      "delta": 1,
+      "reason": "D-065: the new anchor above the default BaseAgent.arun (X6.1), a new decision with its own anchor",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-065"
     }
   ]
 }

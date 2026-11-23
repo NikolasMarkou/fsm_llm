@@ -27,7 +27,9 @@ class AgentStep(WorkflowStep):
 
     An agent whose class has its own ``async def arun`` is awaited on the loop (a real cancel at
     the time limit, no executor thread, plan ace7a8c8 X5.1); any other agent runs its ``run``
-    through ``_call_user_callable`` (the engine ``executor=``), as before.
+    through ``_call_user_callable`` (the engine ``executor=``), as before. The default
+    ``BaseAgent.arun`` (it only runs ``run`` on a worker, marked ``_fsm_llm_offloads_run``) is not
+    native: such an agent keeps that route (D-065).
 
     Example::
 
@@ -88,7 +90,10 @@ class AgentStep(WorkflowStep):
                 }
 
             arun: Any = getattr(self.agent, "arun", None)
-            if _is_async_callable(arun):
+            # the default BaseAgent.arun only runs `run` on a worker: not native (D-065)
+            if _is_async_callable(arun) and not getattr(
+                arun, "_fsm_llm_offloads_run", False
+            ):
                 run = arun(task, **kwargs)
             else:
                 run = _call_user_callable(self.agent.run, task, **kwargs)
