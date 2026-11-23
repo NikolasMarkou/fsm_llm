@@ -138,8 +138,9 @@ The library is organized into these groups of features.
 * **A meta-builder** that designs FSMs, workflows and agents by chat (`fsm-llm-meta`).
 * **`fsm_llm.synthesis`**: a host FSM names a goal in a `synthesize` state, a model writes a
   child FSM for it, static checks, a bounded simulation and an optional approval decide whether
-  it may run, a file-backed library stores it and a runner pushes it as a child of the host
-  conversation (`FSMSynthesizer`, `ProcedureRunner`, `FSMLibrary`, `create_procedure_tools`).
+  it may run, a file-backed library stores it and a `SynthesizeExecutor` on the host's `API`
+  pushes it as a child of the host conversation (`FSMSynthesizer`, `SynthesizeExecutor`,
+  `FSMLibrary`, `create_procedure_tools`).
   `verified` means those checks passed over a model-written spec, not that the procedure is
   correct. The tests are offline. Bench status: blocks `s0`, `s1` and `s2` are registered, run
   and recorded (one model, `ollama_chat/bonsai-2:27b`, for every role and arm, no strong/cheap

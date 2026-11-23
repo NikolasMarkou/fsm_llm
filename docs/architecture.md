@@ -167,16 +167,17 @@ The transcript is a context list the consumer owns (an internal key), never the 
 ```
 State with "synthesize": {goal, inputs, return_keys, on_failure, result_key, min_lifecycle}
   Pass 1 → no extraction; the pipeline makes result_key handler-only
-  ProcedureRunner (before_step hook of run_until_terminal, or around converse):
-    start   → write {status: running} → obtain(goal) → library hit, or compile + gates G1 to G7
-            → push_fsm(child, inherit_context=False) with only the declared inputs
-    tick    → a child over policy.max_turns steps gets procedure_abort set (priority 0 abort edge)
-    finish  → pop_fsm(context_to_return=return_keys) only on success
+  SynthesizeExecutor (registered with API(executors=...), run by the engine's settle step):
+    start   → Pass 1 on arrival: obtain(goal) → library hit, or compile + gates G1 to G7
+            → write the running record (a refusal is the final failed record, same turn)
+            → settle pushes the child (inherit_context=False) with only the declared inputs
+    tick    → a child over policy.max_turns steps (its frame budget) ends aborted/budget_spent
+    finish  → one merge: return_keys only on success, plus the final record
             → context[result_key] = {status: ok | failed | aborted, procedure_id, version, reason}
   transitions read <result_key>.status
 ```
 
-Core only loads the field and checks the host FSM with the real evaluator (every edge reads the result, none fires before the runner has written one, the failure edge passes for `failed` and `aborted`). The runner is a consumer of the public step driver, as the reasoning engine is: it adds no seam to core. A bare `API.converse` on a synthesize state stays in it. See [synthesis.md](./synthesis.md).
+Core only loads the field and checks the host FSM with the real evaluator (every edge reads the result, none fires before a result was written, the failure edge passes for `failed` and `aborted`). The executor runs on the engine's settle step like any state kind and adds no seam to core. A bare `API.converse` on a synthesize state with no executor stays in it. See [synthesis.md](./synthesis.md).
 
 ### State Kinds and Executors
 
@@ -311,7 +312,7 @@ layers is in Package Layout above.
 | Agents | Auto-generated FSMs + handlers, driven by core `run_until_terminal` | `build_react_fsm()` generates FSM; handlers execute tools on state entry; core owns the step and time budgets; no synthetic message is sent. `native_fc` runs on core completion states (native tool calls); the meta-builder is an FSM driven with `converse`/`advance`. Also covers multi-agent graph/swarm orchestration, MCP tools, A2A remote agents, and semantic tool retrieval |
 | Monitor | Observer handlers + loguru sink + core graph data | Registers observer handlers (priority 9999; not POST_TRANSITION), never modifies state; FSM graphs come from `build_fsm_graph` |
 | Eval | Subprocesses + public API only | `fsm-llm-eval examples` scores example output with a 0-4 heuristic; `fsm-llm-eval run` sends each case's turns through a fresh `API`, reads `get_current_state`/`get_data`/`has_conversation_ended`, and checks declared expectations over N trials. No handlers, no core changes |
-| Synthesis | A silent `synthesize` state + a runner on the core step driver | A model compiles a goal into an FSM, gates G1 to G7 judge it, a content-addressed library stores it, and `ProcedureRunner` pushes it as a child (no inherited context), runs it on the host model and merges back only the declared return keys. Core adds the `synthesize` state field, the loader checks of its edges and `core/verify/flow.py`; no handler and no second engine |
+| Synthesis | A silent `synthesize` state + a `SynthesizeExecutor` on the engine | A model compiles a goal into an FSM, gates G1 to G7 judge it, a content-addressed library stores it, and the `SynthesizeExecutor` pushes it as a child (no inherited context), runs it on the host model and merges back only the declared return keys. Core adds the `synthesize` state field, the loader checks of its edges and `core/verify/flow.py`; no handler and no second engine |
 
 ## Extension Points
 

@@ -34,7 +34,7 @@ The result types of the runners project onto the envelope:
 
 - `AgentResult.run_result()`. `AgentResult` has `status` and `reason`, and its `success` is a read-only property (`status is Status.OK`). You give a `stop_reason` and `status` and `reason` follow from it (`StopReason.ANSWERED` is `ok`; a forced stop such as `MAX_ITERATIONS` is `aborted` with `budget_spent`); `AgentResult(success=...)` is refused. `StopReason` is a `str` Enum with UPPER members and the old wire strings, so `StopReason.ANSWERED == "answered"` holds and a dump still emits `answered`.
 - `WorkflowInstance.run_result()`. A pending, running or waiting instance reads `running` (the workflow status stays in `detail["workflow_status"]`), `completed` is `ok`, `failed` is `failed` with no reason (the error text rides in `detail["error"]`), `cancelled` is `aborted` with `Reason.CANCELLED`. `handle` is the instance id and `outputs` is the public non-secret context: a copy without the top-level keys that have an internal prefix and without any entry the secret filter (`is_forbidden_context_entry`) flags, at any depth. A workflow declares no output keys, so this is not a declared-key list. A context the filter cannot walk gives empty `outputs` and `detail["outputs_withheld"] = "unfilterable"`.
-- `fsm_llm.synthesis.synthesis_run_result(result)` over the `synthesis_result` dict a `ProcedureRunner` writes. The dict stays the wire contract; the procedure id becomes the instance identity.
+- `fsm_llm.synthesis.synthesis_run_result(result)` over the `synthesis_result` dict the synthesize executor writes. The dict stays the wire contract; the procedure id becomes the instance identity.
 
 ## Name registries
 

@@ -409,7 +409,7 @@ A state with empty `response_instructions` is never sent to the interface: no `g
 
 ### Synthesize state
 
-A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen, extras refused; introduced in definition version 4.2). Core only loads and checks it; `fsm_llm.synthesis.ProcedureRunner` gives it meaning (see Synthesis below):
+A state may declare one optional `synthesize` field (`SynthesizeConfig`, frozen, extras refused; introduced in definition version 4.2). Core only loads and checks it; a `fsm_llm.synthesis.SynthesizeExecutor` registered with `API(executors=...)` gives it meaning (see Synthesis below):
 
 ```json
 "gather": {
@@ -1235,17 +1235,18 @@ print(procedure.source, procedure.record.lifecycle)   # compiled verified (libra
 ### Running
 
 ```python
-from fsm_llm.synthesis import ProcedureRunner
+from fsm_llm.synthesis import SynthesizeExecutor
 
-runner = ProcedureRunner(api, host_definition, synth, trace_sink=None)
+executor = SynthesizeExecutor(synth, trace_sink=None)
+api = API.from_definition(host_definition, llm_interface=cheap, executors={"synthesize": executor})
 conv_id, _ = api.start_conversation({"venue": "Luna"})
-runner.run(conv_id, max_steps=40)                 # message-free; RunBudgetExceededError on a spent budget
-reply = runner.converse(conv_id, "four, Friday")  # or one user turn
-for chunk in runner.run_stream(conv_id, max_steps=40): ...  # the same run, reply text as it arrives
-runner.end_conversation(conv_id)
+api.run_until_terminal(conv_id, max_steps=40)     # message-free; RunBudgetExceededError on a spent budget
+reply = api.converse("four, Friday", conv_id)     # or one user turn
+for chunk in api.run_until_terminal_stream(conv_id, max_steps=40): ...  # the same run, reply text as it arrives
+api.end_conversation(conv_id)
 ```
 
-`hook(conversation_id)` is the `before_step` the runner gives core `run_until_terminal`. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child whose frame spends `policy.max_turns` turns in total (the engine's lifetime turn budget, `max_steps=policy.max_turns` at the push) ends as `aborted` with reason `budget_spent` and nothing merges. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. `run_stream(conversation_id, *, max_steps, max_seconds=None)` and `converse_stream(conversation_id, message)` are the streaming forms of `run` and `converse` (thin wrappers over core's streams: the same text, end state and errors; closing `run_stream` early pops a child that has ended and starts nothing). One thread per conversation; the runner holds no lock. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.procedures`.
+`SynthesizeExecutor(synthesizer, *, trace_sink=None)` is the `synthesize` kind on the engine (`executors=[...]` is the list form): Pass 1 on arrival checks the depth and the inputs, `obtain`s through `acall`, re-judges the procedure with `runnable_reason` and writes the running record, so a refusal is a final `failed` result in that same turn and takes `on_failure`; the engine then pushes the child and pops it when it ends, and `aconverse`, `aadvance` and `arun_until_terminal` reach `aobtain`. The compile runs inside the turn, under the conversation's turn gate, for up to `policy.max_synthesis_seconds`. The engine runs no parent turn after the pop and starts no Pass 1 for a child whose first state is itself a synthesize state: a host that wants the same `converse` to go on calls `advance` after it. The child gets only the declared inputs, runs on the host interface, and returns only the declared return keys, and only when all are present and it was not aborted. A child whose frame spends `policy.max_turns` turns in total (the engine's lifetime turn budget, `max_steps=policy.max_turns` at the push) ends as `aborted` with reason `budget_spent` and nothing merges. The result `{status, procedure_id, version, reason}` has `status` in `ok|failed|aborted|running` and `reason` one of `constants.REASONS` or `None`. A bare `API` with no executor leaves the state BLOCKED. The older `ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)` (`run`, `converse`, `run_stream`, `converse_stream`, `hook`, `end_conversation`) still drives a bare `API` and goes when the executor becomes required. `runnable_reason` and `reason_of` are importable from `fsm_llm.synthesis.procedures`.
 
 ### Agents (`fsm_llm.agents`)
 
@@ -1253,7 +1254,7 @@ runner.end_conversation(conv_id)
 
 ### Traces and repair
 
-`TraceRecorder(on_trace)` is a runner `trace_sink`; `RunTrace` holds names, type names, state ids, counts and codes only. `diagnose(traces, definition, policy, *, return_keys=()) -> tuple[Diagnosis, ...]` applies the rules named by `DIAGNOSIS_CODES` and treats every reason other than `budget_spent` and `return_keys_missing` as `not-procedure-fault`. `propose_patch(diagnoses, definition, policy, llm) -> list[dict]` returns RFC 6902 ops (`add`, `remove`, `replace`, `test`); `apply_patch(document, ops, *, scope_states, policy) -> dict` raises `PatchError(code, op)`. `repair_procedure(parent_digest, ops, *, library, synthesizer, simulator, replay_scripts=None, write=False) -> PromotionResult` checks the parent, the lineage limit, the failure count, the patch, G1 to G6b, the approval and a replay on parent and child, and writes nothing unless `write=True` and the verdict is `promote`.
+`TraceRecorder(on_trace)` is a `trace_sink` (of `SynthesizeExecutor`, and of the older runner); `RunTrace` holds names, type names, state ids, counts and codes only. `diagnose(traces, definition, policy, *, return_keys=()) -> tuple[Diagnosis, ...]` applies the rules named by `DIAGNOSIS_CODES` and treats every reason other than `budget_spent` and `return_keys_missing` as `not-procedure-fault`. `propose_patch(diagnoses, definition, policy, llm) -> list[dict]` returns RFC 6902 ops (`add`, `remove`, `replace`, `test`); `apply_patch(document, ops, *, scope_states, policy) -> dict` raises `PatchError(code, op)`. `repair_procedure(parent_digest, ops, *, library, synthesizer, simulator, replay_scripts=None, write=False) -> PromotionResult` checks the parent, the lineage limit, the failure count, the patch, G1 to G6b, the approval and a replay on parent and child, and writes nothing unless `write=True` and the verdict is `promote`.
 
 ### Safety model
 

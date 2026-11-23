@@ -1,7 +1,7 @@
 # fsm_llm.synthesis
 
 Path: `src/fsm_llm/synthesis`
-Purpose: Runtime FSM synthesis inside the core `fsm_llm` package: a model compiles a goal into an FSM, gates G1 to G5 (static), G6a (dead edges through the real evaluator), G6b (bounded simulation) and G7 (approval) judge it, a content-addressed library with a lifecycle (`draft`, `verified`, `trusted`, `deprecated`) stores it, a runner pushes it as a child of a host conversation under a budget, and traces, `diagnose`, an RFC 6902 subset, `propose_patch` and `repair_procedure` repair it. Agent tools `obtain_procedure` and `run_procedure`. No console script.
+Purpose: Runtime FSM synthesis inside the core `fsm_llm` package: a model compiles a goal into an FSM, gates G1 to G5 (static), G6a (dead edges through the real evaluator), G6b (bounded simulation) and G7 (approval) judge it, a content-addressed library with a lifecycle (`draft`, `verified`, `trusted`, `deprecated`) stores it, a `SynthesizeExecutor` registered on the host's `API` pushes it as a child of a host conversation under a budget, and traces, `diagnose`, an RFC 6902 subset, `propose_patch` and `repair_procedure` repair it. Agent tools `obtain_procedure` and `run_procedure`. No console script.
 
 ## Scope
 
@@ -29,10 +29,10 @@ flowchart TD
     sim -- pass --> g7[approval G7: reviewer is True]
     g7 --> put[library.put lifecycle verified, add_scenarios]
     put --> proc2[Procedure source=compiled]
-    proc --> run[ProcedureRunner]
+    proc --> run[SynthesizeExecutor and settle]
     proc2 --> run
-    run --> push[push_fsm child, inherit_context False]
-    push --> pop[pop_fsm: return keys only on ok]
+    run --> push[apush_fsm child, inherit_context False]
+    push --> pop[pop: return keys only on ok]
     pop --> res[synthesis_result: status, procedure_id, version, reason]
 ```
 

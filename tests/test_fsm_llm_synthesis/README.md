@@ -10,7 +10,7 @@ The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of t
 
 - The strong model is `fsm_llm.testing.ScriptedLLM`: it answers `complete` from a queue of replies, keeps every request, and raises `UnscriptedCallError` on an exhausted queue. It is metered; a test that needs a model with no meter sets `llm.usage = None`.
 - The cheap model that runs the host and the pushed child is `ScriptedRunnerLLM` (a subclass of `fsm_llm.testing.MockLLM2Interface`, kept apart from `ScriptedLLM` because it has no bulk extraction and no `complete`): it extracts a fixed dict, writes a reply per state, and has a `usage()` meter that a simulator can read. `ByTurn` is the honest variant: it extracts a key only if the user's turn says `<key> is <value>`.
-- Most tests run on REAL `API`, `FSMLibrary`, `ProcedureRunner`, `Simulator` and `ToolRegistry` objects, so a claim such as "a model cannot forge `procedure_abort`" is proven through the real pipeline.
+- Most tests run on REAL `API`, `FSMLibrary`, `SynthesizeExecutor`, `Simulator` and `ToolRegistry` objects, so a claim such as "a model cannot forge `procedure_abort`" is proven through the real pipeline.
 - An autouse fixture blocks every IPv4 and IPv6 connect for the test (`tests.conftest.block_network`), loopback included, because a live model is a local Ollama. The `foreign_calls` fixture also fails a test that builds a `LiteLLMInterface` or makes a provider call.
 
 ## Files
@@ -27,7 +27,8 @@ The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of t
 - `rig.py` - the rig of the driver rows (an `API`, a driver with the call surface of `ProcedureRunner`, the doubles; `DRIVERS` names the drivers a row runs on: the runner and the executor).
 - `test_driver_rows.py` - what a driver must do on a host FSM with a `synthesize` state, both `run` and `converse`, and every failure the parent can see; every row runs on each driver of the rig.
 - `test_executor.py` - what only `SynthesizeExecutor` does and its census rows: a Pass 2 failure after an obtain leaves nothing pending and counts no run, the child greeting and the next message, the compile under the parent's turn gate, a cancel during `obtain`, a forged record pushes nothing, the child sees the declared inputs only, the persona rule, the layering.
-- `test_runner.py` - the rows that pin `ProcedureRunner` itself (its hook, its bookkeeping, its own push, a signal during the compile).
+- `test_executor_stream.py` - the `synthesize` kind on core's streams (`run_until_terminal_stream`, `converse_stream`): the text and end state of the plain call, the arguments, and the rule of a stream closed early.
+- `test_runner.py` - the rows that pin `ProcedureRunner` itself (its hook, its bookkeeping, its own push, a signal during the compile); it and `test_runner_stream.py` go with the runner at step 22.
 - `test_tools.py` - the agent tools `obtain_procedure` and `run_procedure` through `ToolRegistry.execute`.
 - `test_concierge.py` - the whole pattern end to end, offline.
 - `test_traces.py` - the value-free `RunTrace` and `TraceRecorder`.

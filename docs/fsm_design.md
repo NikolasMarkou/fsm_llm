@@ -217,7 +217,7 @@ Design rules:
 
 ## Procedures Written on Demand (`synthesize`)
 
-A state may declare the optional `synthesize` field when a sub-conversation cannot be written ahead of time. The state carries a goal; `fsm_llm.synthesis.ProcedureRunner` has a model write a child FSM for it, checks it, runs it on the host's model as a pushed child and merges back only the declared `return_keys`. The state itself is silent and routes on the result the runner writes to `synthesis_result`:
+A state may declare the optional `synthesize` field when a sub-conversation cannot be written ahead of time. The state carries a goal; a `fsm_llm.synthesis.SynthesizeExecutor` registered with `API(executors=...)` has a model write a child FSM for it, checks it, runs it on the host's model as a pushed child and merges back only the declared `return_keys`. The state itself is silent and routes on the result the executor writes to `synthesis_result`:
 
 ```json
 "gather": {
@@ -238,11 +238,11 @@ A state may declare the optional `synthesize` field when a sub-conversation cann
 
 Design rules:
 
-- Route on `synthesis_result.status` (`ok`, `failed`, `aborted`; `running` while it works). Every edge must read the result key, or it would fire before the runner has produced a result.
+- Route on `synthesis_result.status` (`ok`, `failed`, `aborted`; `running` while it works). Every edge must read the result key, or it would fire before a result was written.
 - Write the failure edge as `status in [failed, aborted]`. A procedure that spends its turn budget ends `aborted`, so a bare `== "failed"` would strand the host: the loader runs the edges on sample results and refuses it.
 - `on_failure` names the state the failure edge reaches, one of the state's own transition targets. Give that state a reply that apologises or offers an alternative, because a failure is a normal outcome, not an exception.
 - Name what the procedure may use (`inputs`) and what it must return (`return_keys`) with plain key names. Do not use a handler-only key as a return key.
-- The state declares no extraction and no `completion`. Core only loads the field: a bare `API.converse` stays in the state, so drive the host through `ProcedureRunner`.
+- The state declares no extraction and no `completion`. Core only loads the field: a bare `API.converse` stays in the state, so register a `SynthesizeExecutor` on the `API` and drive the host with the core loops.
 - The result is skip-if-set. A state that runs again on re-entry must clear `synthesis_result` first (`clear_keys_on_entry`).
 
 The guide is [synthesis.md](./synthesis.md); the reference is the Synthesis section of [api_reference.md](./api_reference.md).

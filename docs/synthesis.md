@@ -2,18 +2,18 @@
 
 > Covers FSM-LLM v0.13.0
 
-Some conversations cannot be written ahead of time. "Collect what this visa form needs" depends on a goal that only shows up at run time. `fsm_llm.synthesis` lets a host conversation ask for a procedure by goal: a model writes a finite state machine (FSM) for it, a stack of checks decides whether that FSM may run, a library stores it, and a runner executes it as a child of the host conversation.
+Some conversations cannot be written ahead of time. "Collect what this visa form needs" depends on a goal that only shows up at run time. `fsm_llm.synthesis` lets a host conversation ask for a procedure by goal: a model writes a finite state machine (FSM) for it, a stack of checks decides whether that FSM may run, a library stores it, and the engine runs it as a child of the host conversation through a `SynthesizeExecutor` registered on the `API`.
 
 **Status of the evidence.** The code is tested offline with scripted models. The pre-registered live comparison (a compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check; its script and rows were deleted and live in git history) ran three blocks, `s0`, `s1` and `s2`, and every verdict is INCONCLUSIVE. Every role and every arm used the same model, `ollama_chat/bonsai-2:27b` (Q2_0, 2-bit): there is NO strong/cheap split, so no strong-compile/cheap-run cost asymmetry was tested. No result in these docs says a compiled procedure helps; see "Live results" below.
 
 ## When to use it
 
-Use it when the shape of a sub-conversation is known only at run time and you want the host's own, usually cheaper, model to run it with guardrails. Do not use it when you can write the FSM yourself: a hand-written FSM is cheaper, easier to review and is what the bench will compare against. A procedure cannot call tools (the runner refuses a `completion` state), cannot set a persona and cannot be longer than the policy allows (12 states by default).
+Use it when the shape of a sub-conversation is known only at run time and you want the host's own, usually cheaper, model to run it with guardrails. Do not use it when you can write the FSM yourself: a hand-written FSM is cheaper, easier to review and is what the bench will compare against. A procedure cannot call tools (the executor refuses a `completion` state), cannot set a persona and cannot be longer than the policy allows (12 states by default).
 
 `import fsm_llm` loads no synthesis code. Import it by name:
 
 ```python
-from fsm_llm.synthesis import FSMLibrary, FSMSynthesizer, ProcedureRunner
+from fsm_llm.synthesis import FSMLibrary, FSMSynthesizer, SynthesizeExecutor
 ```
 
 The `synthesis` extra adds no dependency, there is no console script, and importing `fsm_llm.synthesis` also imports `fsm_llm.agents` (and through it `fsm_llm.reasoning`) and `fsm_llm.eval`. Nothing in core imports it back.
@@ -88,12 +88,12 @@ A host FSM names a procedure with a `synthesize` state. The state is silent (no 
 
 The loader checks a synthesize state against the real transition evaluator, so a wrong edge fails at load, not in production:
 
-- Every edge of the state must read `synthesis_result` (or a `handler_only_keys` entry), or it would fire before the runner has produced a result.
+- Every edge of the state must read `synthesis_result` (or a `handler_only_keys` entry), or it would fire before a result was written.
 - No edge may pass while the result is absent or `running`.
 - The edge to `on_failure` must pass for `status` `failed` AND for `aborted`. Write it as `status in [failed, aborted]`. A bare `== "failed"` is refused, because an aborted procedure would otherwise strand the host.
 - A synthesize state declares no extraction and no `completion`, and `on_failure` must be one of its own transition targets.
 
-The runner drives the host. This runs offline with scripted interfaces (`Strong` stands in for the strong model, `Host` for the host's cheap model); with real models you pass `FSMSynthesizer(model="...")` and an `API` built the usual way:
+A `SynthesizeExecutor` registered on the `API` gives the state its meaning. This runs offline with scripted interfaces (`Strong` stands in for the strong model, `Host` for the host's cheap model); with real models you pass `FSMSynthesizer(model="...")` and an `API` built the usual way:
 
 ```python
 import json
@@ -106,7 +106,7 @@ from fsm_llm.core.definitions import (
     ResponseGenerationResponse,
 )
 from fsm_llm.llm import LLMInterface
-from fsm_llm.synthesis import FSMLibrary, FSMSynthesizer, ProcedureRunner
+from fsm_llm.synthesis import FSMLibrary, FSMSynthesizer, SynthesizeExecutor
 from fsm_llm.synthesis.prompts import EXAMPLE_FSM
 
 with open("concierge.json", encoding="utf-8") as f:
@@ -142,18 +142,19 @@ class Host(LLMInterface):  # the cheap model that runs the host and the child
 
 
 strong = Strong()
-api = API.from_definition(host, llm_interface=Host())
 with tempfile.TemporaryDirectory() as root:
     synth = FSMSynthesizer(strong, library=FSMLibrary(root))
-    runner = ProcedureRunner(api, host, synth)
+    api = API.from_definition(
+        host, llm_interface=Host(), executors={"synthesize": SynthesizeExecutor(synth)}
+    )
     for _ in range(2):
         conv_id, _ = api.start_conversation({"venue": "Luna"})
-        runner.run(conv_id, max_steps=40)          # message-free; or runner.converse(conv_id, "four, Friday")
+        api.run_until_terminal(conv_id, max_steps=40)  # message-free; or api.converse("four, Friday", conv_id)
         print(api.get_current_state(conv_id), api.get_data(conv_id)["synthesis_result"]["status"])
     print(strong.calls)                            # 1: the second booking reused the stored procedure
 ```
 
-The output is `done ok` twice, then `1`. Drive the host through the runner (`run`, `converse`, `end_conversation`), not through `API` alone: a bare `API.converse` on a synthesize state finds no extraction and no passing edge, so it stays in the state. The runner is the thing that gives the field its meaning.
+The output is `done ok` twice, then `1`. Register the executor: a `synthesize` state is passive without one (a bare `API.converse` finds no extraction and no passing edge, so it stays in the state), and the host drives it with the core loops (`run_until_terminal`, `converse`, `advance`), no runner.
 
 ## The synthesizer
 
@@ -177,7 +178,7 @@ Every compile runs these checks, in this order, and reports all failures, not ju
 
 Classification states: `SynthesisPolicy(allow_classification=True)` adds one rule to the compile prompt that tells the model it may route on what the user means with `classification_extractions` (at least two intents, a fallback, never `model` or `prompt_config`). It is off by default and G5 is unchanged either way; turn it on only when the interface that runs the procedures implements `complete` (a classifying state on one that does not fails G6b and `run_procedure` with `push_failed`).
 
-When the gates pass, an abort path is injected: a silent `abort` terminal state and a priority 0 edge to it from every non-terminal state, gated on the handler-only key `procedure_abort`. The runner no longer sets that key: the engine bounds the child with the lifetime turn budget of its frame (`max_steps=policy.max_turns`), so the injected edge never fires and stays until roadmap P7.1 removes it. G1 and G2 run again on the injected form. The names `abort`, `procedure_abort` and `synthesis_result` are reserved: a compile may not declare, read or write them.
+When the gates pass, an abort path is injected: a silent `abort` terminal state and a priority 0 edge to it from every non-terminal state, gated on the handler-only key `procedure_abort`. Nothing sets that key any more: the engine bounds the child with the lifetime turn budget of its frame (`max_steps=policy.max_turns`), so the injected edge never fires and stays until roadmap P7.1 removes it. G1 and G2 run again on the injected form. The names `abort`, `procedure_abort` and `synthesis_result` are reserved: a compile may not declare, read or write them.
 
 ### What `verified` means
 
@@ -202,7 +203,7 @@ A compile after a miss may be shown a near miss: a stored procedure with the sam
 
 ## Running a procedure
 
-Two drivers give the `synthesize` field its meaning today. The engine one, `SynthesizeExecutor(synthesizer, *, trace_sink=None)`, is registered on the `API` (`API(executors={"synthesize": SynthesizeExecutor(synth)})`, or `executors=[SynthesizeExecutor(synth)]`): the state obtains and checks the procedure in its own turn (so a refusal takes the `on_failure` edge in that same turn), the engine pushes the child after the turn and pops it when it ends, and `run_until_terminal` or `converse` drive it with no runner. What it does not do: it runs no parent turn after the pop and starts nothing for a child whose first state is itself a synthesize state, so a host that wants one `converse` to go on calls `advance` after it; and the compile (`obtain`) runs inside the turn, under the conversation's turn gate, for up to `max_synthesis_seconds` (a reader on a sibling task gets `ConversationBusyError`). A cancel during it stores and counts nothing; an interrupt writes no record and the next turn obtains again. A bare `API` with no executor still leaves the state BLOCKED. The runner below is the older driver and goes in a later step.
+The `synthesize` field gets its meaning from an executor. `SynthesizeExecutor(synthesizer, *, trace_sink=None)` is registered on the `API` (`API(executors={"synthesize": SynthesizeExecutor(synth)})`, or `executors=[SynthesizeExecutor(synth)]`): the state obtains and checks the procedure in its own turn (so a refusal takes the `on_failure` edge in that same turn), the engine pushes the child after the turn and pops it when it ends, and `run_until_terminal` or `converse` drive it with no runner. What it does not do: it runs no parent turn after the pop and starts nothing for a child whose first state is itself a synthesize state, so a host that wants one `converse` to go on calls `advance` after it; and the compile (`obtain`) runs inside the turn, under the conversation's turn gate, for up to `max_synthesis_seconds` (a reader on a sibling task gets `ConversationBusyError`). A cancel during it stores and counts nothing; an interrupt writes no record and the next turn obtains again. A bare `API` with no executor still leaves the state BLOCKED. The older `ProcedureRunner` below still works and goes when the executor becomes required.
 
 `ProcedureRunner(api, definition, synthesizer, *, trace_sink=None)` serves a host definition. Per conversation it settles these as the host runs: it pops an ended child, aborts a child whose frame spent `policy.max_turns` turns (the engine's lifetime count: the runner keeps none, writes `{status: aborted, reason: budget_spent}` and ends the child without a merge), and starts a pending synthesize state (write `running`, `obtain`, check that the procedure may run, push it as a child with no inherited context). `run_stream` and `converse_stream` are the streaming forms of `run` and `converse`, thin wrappers over core's streams (closing `run_stream` early pops a child that has ended and starts nothing).
 
@@ -215,7 +216,7 @@ The child gets only the declared `inputs` and runs on the host's own interface. 
 Things to know when you run one:
 
 - The result key is skip-if-set: a state that must run again on re-entry has to clear `synthesis_result` on entry (core `clear_keys_on_entry`). A child FSM you push yourself with `API.push_fsm` does not inherit the parent's value of its own synthesize `result_key` (the child's edges, which must read it, would route on the stale result before any run wrote one); pass it in `context_to_pass` if you want it.
-- One turn per conversation at a time (per thread and per task), like `API.converse`: a concurrent call is refused, never waited for. The runner holds no lock and has no async twin yet (it drives the sync run loops; carried), so it blocks an event loop for each model call: call it from a worker thread. `FSMSynthesizer` has async twins (`acompile`, `aobtain`, `aapproval`): the strong model is awaited on the loop, while a simulator, the library search and the reviewer run on worker threads, so an awaiting task is never blocked by a human reviewer; a cancel stores and approves nothing, and a reviewer or simulator already running is not stopped (its late result is dropped). A patch or subclass override of the sync `compile`, `obtain` or `approval` intercepts the sync call only: an async caller reaches the base twin, so a stricter `approval` is skipped under `aobtain` (the class statement of such a subclass warns with a `RuntimeWarning`, and the base approval still requires a reviewer that says exactly `True`); override `aapproval` to tighten the async path.
+- One turn per conversation at a time (per thread and per task), like `API.converse`: a concurrent call is refused, never waited for. The executor runs on the engine's turn body, so `aconverse`, `aadvance` and `arun_until_terminal` work and `obtain` is awaited through its async twin; the older runner has no async twin (it drives the sync run loops), so it blocks an event loop for each model call: call it from a worker thread. `FSMSynthesizer` has async twins (`acompile`, `aobtain`, `aapproval`): the strong model is awaited on the loop, while a simulator, the library search and the reviewer run on worker threads, so an awaiting task is never blocked by a human reviewer; a cancel stores and approves nothing, and a reviewer or simulator already running is not stopped (its late result is dropped). A patch or subclass override of the sync `compile`, `obtain` or `approval` intercepts the sync call only: an async caller reaches the base twin, so a stricter `approval` is skipped under `aobtain` (the class statement of such a subclass warns with a `RuntimeWarning`, and the base approval still requires a reviewer that says exactly `True`); override `aapproval` to tighten the async path.
 - A nested synthesize state (depth 2) works only for a procedure that returns one of its inputs.
 - `policy.max_turns` is the child's turn bound, and the engine enforces it: it is the `max_steps` of the child frame's turn budget (core turn budgets, `API.push_fsm(max_steps=)`), counted over the frame's whole life and not per run call. A host can bound its own conversation the same way with `API(max_steps=)`.
 - Two interfaces are metered separately: the strong one inside the synthesizer, the cheap one on the host `API`.
@@ -250,7 +251,7 @@ Approval records who approved (`approved_by`) as provenance. It does NOT make th
 
 Procedures that fail in use can be improved, and the loop is built so that a user cannot talk it into weakening a shared procedure.
 
-- **Traces.** `TraceRecorder(library.add_trace)` is a `trace_sink` for the runner. A `RunTrace` holds names, type names, state ids, counts and codes, never a value, user text or reply. `library.read_traces(digest)` returns `(traces, skipped)`; a torn or hostile line is skipped and counted, and the file keeps the last 200 traces per procedure.
+- **Traces.** `TraceRecorder(library.add_trace)` is the `trace_sink` of `SynthesizeExecutor(synth, trace_sink=...)` (and of the older runner). A `RunTrace` holds names, type names, state ids, counts and codes, never a value, user text or reply. `library.read_traces(digest)` returns `(traces, skipped)`; a torn or hostile line is skipped and counted, and the file keeps the last 200 traces per procedure.
 - **Diagnosis.** `diagnose(traces, definition, policy, *, return_keys=())` applies its rules in a fixed order and returns `Diagnosis` objects with a code, the state, the keys and the share of runs. Only a run that failed for the procedure's own reasons (`budget_spent`, `return_keys_missing`) can justify a rewrite; an outage or a refusal is `not-procedure-fault` and is never patched.
 - **Patch.** `propose_patch(diagnoses, definition, policy, llm)` asks the model for RFC 6902 operations (`add`, `remove`, `replace`, `test` only), scoped to `/states/<diagnosed state>/...`, never the abort state, `initial_state`, `persona` or the handler-only list. `apply_patch` applies them to a copy and checks bounds before it walks anything.
 - **Repair.** `repair_procedure(parent_digest, ops, *, library, synthesizer, simulator, replay_scripts=None, write=False)` re-runs G1 to G6b on the patched child (and asks the approval reviewer again if the child now needs it), replays the parent's stored failing scenarios on parent and child (an empty replay set is refused as `no-replay-set` before the reviewer is asked and before G6b runs), and returns a `PromotionResult` with the decision and the counts: `promote`, `regressed` or `no-improvement`, or a refusal code. By default it writes nothing. Only `write=True` with a `promote` verdict stores the child, as `verified`, never `trusted`, never with the parent's approver, and a `trusted` parent is never deprecated. Replay scripts come from the parent's stored scenarios plus the ones you pass; production traces are never used as scripts.
@@ -311,10 +312,10 @@ Which rows predate which fix: every s0 row predates all of the above; s1 rows pr
 - The live comparison is inconclusive: three blocks, one model for every role and arm, 16 tasks the model has saturated, the later two in-sample after fixes made from earlier failures, and no fourth block. There is no measured claim that a compiled procedure beats a ReAct agent or saves anything; see "Live results".
 - Open defects seen live: a G6b false rejection when a label-restricted extraction instruction meets an edge with no value gate (the gate feeds the filler "sample"; D-106 and D-109 push the model toward an `in` gate, unmeasured); G6b passes some compiles that fail at run time; the 2-bit compiler repeats a dead edge when a repair line gives no reason; the ReAct and hand-written arms sometimes re-ask past `max_iterations`; G6a has an over-cap residual and the outage detection has blind spots (see above).
 - `verified` is not proof of correctness (see above). G6a is coarse and G6b is only as good as the scenarios a model wrote.
-- Procedures cannot call tools. A compile may list `completion` tools (and then needs approval), but the runner and `run_procedure` refuse to run one.
+- Procedures cannot call tools. A compile may list `completion` tools (and then needs approval), but the executor and `run_procedure` refuse to run one.
 - A corrupt library file blocks retrieval for the whole library until a human fixes it.
 - Two signals of misbehaviour (an out-of-scope intent and a raw malformed extraction) are not recorded by core, so `diagnose` cannot use them.
-- The runner marks a provider outage from a position it takes when it pushes the child: the event log of the host `API` when it has one (the errors of the child's frame after that position, so `reset_usage()` mid-run and an interface with no meter do not hide it), else the interface ledger (a position that survives `reset_usage()`), else the interface's own `usage().errors`, else 0. A host interface with no meter and no event log gets an outage recorded as `budget_spent`, which `diagnose` reads as a procedure fault. With only the ledger, a shared interface can give a false outage mark, which fails closed.
+- The executor (and the older runner) marks a provider outage from a position it takes when it pushes the child: the event log of the host `API` when it has one (the errors of the child's frame after that position, so `reset_usage()` mid-run and an interface with no meter do not hide it), else the interface ledger (a position that survives `reset_usage()`), else the interface's own `usage().errors`, else 0. A host interface with no meter and no event log gets an outage recorded as `budget_spent`, which `diagnose` reads as a procedure fault. With only the ledger, a shared interface can give a false outage mark, which fails closed.
 - Importing the package loads `fsm_llm.agents`, `fsm_llm.reasoning` and `fsm_llm.eval`.
 
 See `src/fsm_llm/synthesis/README.md` and `src/fsm_llm/synthesis/AGENTS.md` for the file list and the contracts, and `docs/api_reference.md` for signatures.

@@ -506,7 +506,7 @@ Every user message goes through two LLM passes:
 |------|-------------|------------|
 | `conversation` | Extracts fields and classifications from the user message, then Pass 2 writes the reply | Forms, intake, support flows (the default) |
 | `completion` | One `complete` call with tools or a JSON schema over a transcript you own; the result `{kind, text, calls}` lands in the context | Tool calling and structured turns; your handlers run the tools |
-| `synthesize` | Core only loads and validates the field; `fsm_llm.synthesis.ProcedureRunner` has a model write a child FSM for the goal and runs it behind the gates | A sub-conversation that cannot be written ahead of time |
+| `synthesize` | Core only loads and validates the field; a `fsm_llm.synthesis.SynthesizeExecutor` registered with `API(executors=...)` has a model write a child FSM for the goal and runs it behind the gates | A sub-conversation that cannot be written ahead of time |
 
 ### The layers
 

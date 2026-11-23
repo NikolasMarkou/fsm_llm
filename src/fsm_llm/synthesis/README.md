@@ -1,10 +1,10 @@
 # fsm_llm.synthesis
 
-Runtime FSM synthesis, shipped inside the `llm-fsm` package as the subpackage `fsm_llm.synthesis` (folder `src/fsm_llm/synthesis`). A model compiles a goal into a finite state machine (FSM, a conversation described as states and transitions), a stack of checks decides whether the result may run, a file-backed library stores it, and a runner executes it as a pushed child of a host conversation.
+Runtime FSM synthesis, shipped inside the `llm-fsm` package as the subpackage `fsm_llm.synthesis` (folder `src/fsm_llm/synthesis`). A model compiles a goal into a finite state machine (FSM, a conversation described as states and transitions), a stack of checks decides whether the result may run, a file-backed library stores it, and a `SynthesizeExecutor` runs it as a pushed child of a host conversation.
 
 ## What it is for
 
-Some conversations cannot be written ahead of time: "collect what this particular visa form needs" depends on a goal that only shows up at run time. This package lets a host conversation ask for a procedure by goal. A strong model writes the FSM as JSON. The package does not trust that JSON. It runs it through gates (static checks, a dead-edge check and a bounded simulation), adds a safe abort path, optionally asks a human to approve it, and stores it by content hash so the same goal is not compiled twice. Then a runner, on the host's own (usually cheaper) model, pushes the procedure as a child conversation, runs it without user messages or with them, pops it and hands back only the declared return keys.
+Some conversations cannot be written ahead of time: "collect what this particular visa form needs" depends on a goal that only shows up at run time. This package lets a host conversation ask for a procedure by goal. A strong model writes the FSM as JSON. The package does not trust that JSON. It runs it through gates (static checks, a dead-edge check and a bounded simulation), adds a safe abort path, optionally asks a human to approve it, and stores it by content hash so the same goal is not compiled twice. Then a `SynthesizeExecutor` on the host's `API`, on the host's own (usually cheaper) model, pushes the procedure as a child conversation, runs it without user messages or with them, pops it and hands back only the declared return keys.
 
 It also covers the afterlife of a procedure: run traces that hold no values, a diagnosis of why runs failed, and a repair loop that asks the model for a small patch and promotes it only after re-checking and replaying it.
 
@@ -18,7 +18,7 @@ flowchart TD
     M --> V[G1 to G5 and G6a on the raw JSON, then G6b if a simulator is given]
     V -- failures as text, at most 3 repair rounds --> M
     V -- pass --> A[G7 approval if required, store as verified]
-    A --> R[ProcedureRunner: push child, run, pop, merge return keys on status ok]
+    A --> R[SynthesizeExecutor and settle: push child, run, pop, merge return keys on status ok]
     R --> O[synthesis_result: status, procedure_id, version, reason]
 ```
 
@@ -33,7 +33,7 @@ The gates, in the order they run on a compile:
 - G6b: simulation (`simulation.py`). A `Simulator` plays scripted users against the procedure on the interface it was given: a happy path built from the definition, plus scenarios of several kinds written by one model call (missing info, correction, off topic, adversarial). It passes when the happy-path rate and the overall pass rate both reach `policy.min_pass_rate` (default 0.5) and the happy path moves past the first state. For an edge outside the dead-edge fragment (arithmetic, one key against another) the happy path looks for a value with a bounded search through the real evaluator, so a valid compile gated on `a + b > 10` is no longer rejected for a happy path that could not fire it.
 - G7: approval. Required when `policy.require_approval` is set or a `completion` state lists tools. A reviewer callable must return exactly `True`.
 
-When all pass, an abort path is injected: a silent `abort` terminal state and a priority 0 edge to it on every non-terminal state, gated on the handler-only key `procedure_abort`. The runner no longer sets that key: the engine bounds the child (`max_steps=policy.max_turns` at the push), so the edge never fires and stays, with `inject_abort`, `strip_abort` and the reserved names, until roadmap P7.1 removes it.
+When all pass, an abort path is injected: a silent `abort` terminal state and a priority 0 edge to it on every non-terminal state, gated on the handler-only key `procedure_abort`. Nothing sets that key any more: the engine bounds the child (`max_steps=policy.max_turns` at the push), so the edge never fires and stays, with `inject_abort`, `strip_abort` and the reserved names, until roadmap P7.1 removes it.
 
 The library is a directory keyed by the sha256 of the canonical definition. Each record has a lifecycle: `draft`, `verified`, `trusted`, `deprecated`. A compile is stored `verified`. A human moves it to `trusted` (`FSMLibrary.approve`), or a run count does when `trust_after_successes` is set. Nothing leaves `deprecated`: a compile that reproduces a deprecated digest is refused with `lifecycle_too_low`, one that reproduces a `draft` returns it `verified`.
 
@@ -123,31 +123,36 @@ A host FSM names a procedure with the `synthesize` state field. The state is sil
 }
 ```
 
-The runner drives it. `api` is an `fsm_llm.API` built from that definition on the host's model:
+A `SynthesizeExecutor` registered on the `API` gives the state its meaning; the core loops drive it. `api` is an `fsm_llm.API` built from that definition on the host's model:
 
 ```python
-from fsm_llm.synthesis import ProcedureRunner
+from fsm_llm import API
+from fsm_llm.synthesis import SynthesizeExecutor
 
-runner = ProcedureRunner(api, host_definition, synth)   # host_definition: the JSON above as a dict
+api = API.from_definition(
+    host_definition,                                    # the JSON above as a dict
+    llm_interface=cheap_llm,
+    executors={"synthesize": SynthesizeExecutor(synth)},
+)
 conv_id, _ = api.start_conversation({"venue": "Luna"})
-runner.run(conv_id, max_steps=40)                       # message-free
-# or, with a user in the loop: runner.converse(conv_id, "four people, Friday")
-# streaming forms: runner.run_stream(conv_id, max_steps=40), runner.converse_stream(conv_id, message)
+api.run_until_terminal(conv_id, max_steps=40)           # message-free
+# or, with a user in the loop: api.converse("four people, Friday", conv_id)
+# streaming forms: api.run_until_terminal_stream(conv_id, max_steps=40), api.converse_stream(message, conv_id)
 ```
 
 Agent tools: `create_procedure_tools(synth, runner_llm=cheap_llm)` returns a `ToolRegistry` with `obtain_procedure(goal, return_keys, inputs)` and `run_procedure(procedure_id, inputs)`. Pass it to an agent such as `ReactAgent(tools=registry)`.
 
-Traces and repair: `TraceRecorder(library.add_trace)` is a `trace_sink` for `ProcedureRunner(..., trace_sink=...)`. Later, `diagnose(traces, definition, policy, return_keys=...)` names the fault, `propose_patch(...)` asks the model for ops, and `repair_procedure(parent_digest, ops, library=..., synthesizer=..., simulator=...)` judges them and writes nothing unless you pass `write=True`.
+Traces and repair: `TraceRecorder(library.add_trace)` is a `trace_sink` for `SynthesizeExecutor(..., trace_sink=...)`. Later, `diagnose(traces, definition, policy, return_keys=...)` names the fault, `propose_patch(...)` asks the model for ops, and `repair_procedure(parent_digest, ops, library=..., synthesizer=..., simulator=...)` judges them and writes nothing unless you pass `write=True`.
 
 ## Things to know
 
 - `verified` means the gates passed. G6a is a coarse check, and G6b is a model-driven simulation judged by a scripted happy path and a few generated scenarios, so a passing procedure is not proven correct, and a simulation run on the same model that wrote the procedure is a weak signal.
 - The goal is untrusted caller text. It reaches the strong model only inside a fenced block (`GOAL BEGIN` and `GOAL END` lines), cut to 2000 characters, control characters stripped, and the characters `[ ] < >` replaced so it cannot spell a marker. Generated text shown to a human or an agent carries a fixed untrusted label as its first line. Key names must be plain identifiers.
 - A compile may not set a persona (the host's persona is injected at push), may not use reserved names (`abort`, `procedure_abort`, `synthesis_result`) and may not write a regex. The model is told these rules, and G5 enforces them.
-- Approval fails closed. A reviewer that raises, returns something other than `True`, or is missing when approval is required refuses the procedure. A compile that lists `completion` tools needs approval, but `ProcedureRunner` and `run_procedure` refuse any procedure with a `completion` state (`completion_unsupported`).
+- Approval fails closed. A reviewer that raises, returns something other than `True`, or is missing when approval is required refuses the procedure. A compile that lists `completion` tools needs approval, but `SynthesizeExecutor` and `run_procedure` refuse any procedure with a `completion` state (`completion_unsupported`).
 - The child runs with its own context: only the declared inputs go in, and only the return keys come back, and only when every one is present and the child was not aborted. A child that spends `policy.max_turns` turns in total (counted by the engine over the life of its frame, whoever drives them, a hand-run `API.advance` included) ends as `aborted` with reason `budget_spent` and nothing merges.
-- One runner serves one thread at a time per conversation, like `API.converse`. It holds no lock.
-- `FSMSynthesizer` has async twins `acompile`, `aobtain` and `aapproval` (the sync names are thin wrappers): the strong model is awaited, a simulator, the library search and the reviewer run on worker threads, and a cancel stores and approves nothing. A cancelled await returns at once while a reviewer or simulator already running keeps going to its end and its late result is dropped. `ProcedureRunner`, `Simulator` and `repair_procedure` have no async twin yet.
+- One turn per conversation at a time, like `API.converse` (the engine's turn gate): the executor holds no lock of its own, and the compile runs inside the turn.
+- `FSMSynthesizer` has async twins `acompile`, `aobtain` and `aapproval` (the sync names are thin wrappers): the strong model is awaited, a simulator, the library search and the reviewer run on worker threads, and a cancel stores and approves nothing. A cancelled await returns at once while a reviewer or simulator already running keeps going to its end and its late result is dropped. `Simulator` and `repair_procedure` have no async twin yet; the executor runs on the engine's async turn body.
 - The result key is skip-if-set: a state that should run again on re-entry must clear `synthesis_result` on entry (core `clear_keys_on_entry`).
 - Failures are reported as fixed reason codes in the result (`inputs_missing`, `return_keys_missing`, `provider_error`, `library_error`, `compile_failed`, `push_failed`, `approval_required`, `approval_denied`, `reviewer_error`, `depth_refused`, `completion_unsupported`, `lifecycle_too_low`, `not_simulated`, `budget_spent`, `unexpected_error`), never exception text. The tools reply `failed: <code>` the same way, plus `bad_arguments` and `needs_user_input`. A run that stalled on a provider outage counts no run in the library, in the runner and in the tools alike.
 - Library layout under its root: `definitions/<sha256>.json`, `records/<sha256>.json`, `traces/<sha256>.jsonl`, `scenarios/<sha256>.json`, `patches/<sha256>.json` (named by the child that the patch produced). Every write goes to a temp file, is synced, then replaced into place. A corrupt file raises `LibraryError` and is never overwritten. A symlink is refused. Two processes on one directory are last writer wins on the run counters.
