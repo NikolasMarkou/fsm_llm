@@ -10,7 +10,7 @@ from fsm_llm import API, LiteLLMInterface
 from fsm_llm.agents import AgentConfig, ReactAgent, ToolRegistry, tool
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.reasoning import ReasoningEngine
-from fsm_llm.testing import MockLLM2Interface
+from fsm_llm.testing import MockLLM2Interface, ScriptedLLM
 
 
 @tool
@@ -155,7 +155,8 @@ class TestInjectedInterfaceOwnsItsSettings:
             agent._create_api(build_react_fsm(agent.tools))
 
     def test_the_reasoning_engine_builds_on_an_injected_interface(self):
-        injected = MockLLM2Interface()
+        # the strategy choice is a core classification, so the interface needs `complete`
+        injected = ScriptedLLM()
         engine = ReasoningEngine(model="gpt-4o", llm_interface=injected)
         assert engine.orchestrator.llm_interface is injected
         with pytest.raises(ValueError, match="model"):

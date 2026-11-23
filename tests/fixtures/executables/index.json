@@ -205,9 +205,9 @@
     "sha256": "13fd110501336bf248d06cc4376c1fb0798fcc84713e0fb655f2cefc154f4a20"
   },
   "reasoning/classifier": {
-    "digest64": "d23ba1c250546f2ab35868b4436f19469fa5217c1e2a86342a88aa0e62d6e972",
-    "fsm_id": "fsm_problem_classifier_d23ba1c2",
-    "sha256": "1ada9e1547adb115ae5ad902c4e612dd2290f355ed7b6d897679ef053465b6c7"
+    "digest64": "e2c57c42d061ff5f55a39990299cb20734644fec7a3c6ceb96662ae47e6e3c37",
+    "fsm_id": "fsm_problem_classifier_e2c57c42",
+    "sha256": "fe187a5446ca7564f7de07a9335169ff24c3de91b2f2ceee94818cff69bc29a5"
   },
   "reasoning/creative": {
     "digest64": "e7935e7a3665efb961104f0ae896a141fc9f59c1553740c05e39a8639489866d",

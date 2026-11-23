@@ -45,7 +45,9 @@ _GOLDEN_FSMS = {
     # `handler_only_keys`; `test_orchestrator_hash_moved_only_by_the_calculator_keys`
     # proves it by reproducing the previous hash without those two keys.
     "orchestrator": "9fdeca073453c9408fe39f39cc1a497ef876de2a34a4f844c7d3d2bf4aa2de51",
-    "classifier": "1ada9e1547adb115ae5ad902c4e612dd2290f355ed7b6d897679ef053465b6c7",
+    # Re-baselined on purpose (D-019 of plan baa37f40, step 5b): `recommend_strategy` classifies
+    # through the nine closed intents; `test_classifier_intents` pins the file to its derivation.
+    "classifier": "fe187a5446ca7564f7de07a9335169ff24c3de91b2f2ceee94818cff69bc29a5",
     "simple_calculator": "5e74e1cb5164c203afafedc292131cc5553554c36d68fb2183f92a22bdf2f32b",
     "analytical": "13fd110501336bf248d06cc4376c1fb0798fcc84713e0fb655f2cefc154f4a20",
     "deductive": "d0d5c2cfb7978714284bbc47f3c71415c274e6a07ca15345bb8b9a0d3435174e",

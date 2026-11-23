@@ -58,15 +58,73 @@
     "recommend_strategy": {
       "id": "recommend_strategy",
       "description": "Recommend optimal reasoning strategy",
-      "purpose": "Set 'recommended_reasoning_type', 'strategy_justification', and 'alternative_approaches'",
+      "purpose": "Choose the reasoning strategy that best fits the problem, justify it, and name 1-2 alternative approaches",
       "required_context_keys": [
         "recommended_reasoning_type",
         "strategy_justification",
         "alternative_approaches"
       ],
-      "extraction_instructions": "\n            Recommend the best reasoning strategy:\n\n            Choose from available strategies:\n            - simple_calculator: For basic arithmetic operations\n            - analytical: For systematic breakdown and analysis\n            - deductive: For logical reasoning from premises\n            - inductive: For pattern recognition and generalization\n            - creative: For novel solution generation\n            - critical: For argument and evidence evaluation\n            - abductive: For finding best explanations\n            - analogical: For similarity-based problem solving\n            - hybrid: For complex problems needing multiple approaches\n\n            Provide clear justification and identify 1-2 alternative approaches that could also work.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Make recommendation based on your complete analysis.\n            ",
+      "extraction_instructions": "\n            Recommend the best reasoning strategy for the problem. Provide clear justification and identify 1-2 alternative approaches that could also work.\n\n            IMPORTANT: Do not ask questions or request additional input from the user. Make recommendation based on your complete analysis.\n            ",
       "response_instructions": "Present the final result clearly. Do not ask questions or request additional input from the user.",
-      "transitions": []
+      "transitions": [],
+      "classification_extractions": [
+        {
+          "field_name": "recommended_reasoning_type",
+          "intents": [
+            {
+              "name": "simple_calculator",
+              "description": "Direct arithmetic calculations"
+            },
+            {
+              "name": "analytical",
+              "description": "Breaking down complex problems into components"
+            },
+            {
+              "name": "deductive",
+              "description": "Deriving specific conclusions from general principles"
+            },
+            {
+              "name": "inductive",
+              "description": "Finding patterns from specific observations"
+            },
+            {
+              "name": "creative",
+              "description": "Generating novel solutions through divergent thinking"
+            },
+            {
+              "name": "critical",
+              "description": "Evaluating arguments and evidence"
+            },
+            {
+              "name": "hybrid",
+              "description": "Combining multiple reasoning approaches"
+            },
+            {
+              "name": "abductive",
+              "description": "Finding the best explanation for observations"
+            },
+            {
+              "name": "analogical",
+              "description": "Transferring insights through analogies"
+            }
+          ],
+          "fallback_intent": "analytical",
+          "confidence_threshold": 0.6,
+          "required": false,
+          "prompt_config": {
+            "include_entities": false
+          },
+          "context_keys": [
+            "problem_statement",
+            "problem_type",
+            "problem_components",
+            "problem_domain",
+            "problem_structure",
+            "reasoning_requirements",
+            "key_challenges"
+          ]
+        }
+      ]
     }
   }
 }

@@ -574,13 +574,15 @@ def _classification_from(result: dict[str, Any]) -> ReasoningClassificationResul
     """The classification of a finished classifier conversation's ``result``.
 
     Contract: never raises for any JSON value the model wrote. A
-    ``recommended_reasoning_type`` that is missing, not a ``str`` or blank
-    becomes ``"analytical"`` (an unknown name is mapped to analytical later,
-    by ``map_reasoning_type``); a non-``str`` justification or domain becomes
-    ``""``; ``alternative_approaches`` keeps its non-blank ``str`` items (a
-    bare non-blank ``str`` becomes a one-item list), anything else is
-    dropped. Each replaced value is logged as a WARNING; well-shaped values
-    pass unchanged.
+    ``recommended_reasoning_type`` that is missing (a classification below
+    its confidence threshold, a cut reply or a provider outage writes
+    nothing), not a ``str`` or blank becomes ``"analytical"`` (an unknown
+    name is mapped to analytical later, by ``map_reasoning_type``); a
+    non-``str`` justification or domain becomes ``""``;
+    ``alternative_approaches`` keeps its non-blank ``str`` items (a bare
+    non-blank ``str`` becomes a one-item list), anything else is dropped.
+    Each replaced value, a missing one included, is logged as one WARNING;
+    well-shaped values pass unchanged.
     """
     # DECISION plan-2026-10-01T093600-944e2692/D-060: the classifier handler
     # is critical (D-058), so the model's values are normalised here. Do NOT
@@ -590,7 +592,12 @@ def _classification_from(result: dict[str, Any]) -> ReasoningClassificationResul
     # that also hides a spent classifier budget or a provider error.
     recommended = result.get(ContextKeys.RECOMMENDED_REASONING_TYPE)
     if not (isinstance(recommended, str) and recommended.strip()):
-        if recommended is not None:
+        if recommended is None:
+            logger.warning(
+                "No recommended reasoning type was produced (low confidence, a cut "
+                "reply or a failed classification call): using analytical"
+            )
+        else:
             logger.warning(f"Malformed recommended reasoning type: {recommended!r}")
         recommended = ReasoningType.ANALYTICAL.value
     texts: dict[str, str] = {}

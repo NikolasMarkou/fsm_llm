@@ -9,6 +9,7 @@ its pop and the validation retry loop.
 from __future__ import annotations
 
 import inspect
+import json
 from typing import Any
 
 import pytest
@@ -16,6 +17,8 @@ import pytest
 from fsm_llm import RunBudgetExceededError
 from fsm_llm.core.definitions import (
     BulkExtractionRequest,
+    CompletionRequest,
+    CompletionResponse,
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
@@ -39,6 +42,7 @@ from fsm_llm.reasoning.constants import (
     ReasoningType,
 )
 from fsm_llm.reasoning.handlers import ReasoningHandlers
+from fsm_llm.testing import final_reply
 
 _PROBLEM = "Is the argument valid? All men are mortal; Socrates is a man."
 
@@ -86,11 +90,19 @@ class _ScriptedLLM(LLMInterface):
 
     A field missing from the script is answered with ``None`` (nothing
     extracted). Bulk extraction extracts nothing; Pass 2 replies ``"ok"``.
+    The strategy choice is a core classification (one ``complete`` call with
+    a closed ``intent`` enum, plan baa37f40 step 5b): ``complete`` answers it
+    with ``script["recommended_reasoning_type"]`` as the intent and
+    ``script["classification_confidence"]`` (default 0.9); with no such key,
+    or for any other ``complete`` call, it raises ``LLMResponseError``. The
+    ``complete`` requests are kept apart in ``completions`` so ``requests``
+    holds the extraction and Pass 2 requests only.
     """
 
     def __init__(self, script: dict[str, Any]) -> None:
         self.script = script
         self.requests: list[Any] = []
+        self.completions: list[CompletionRequest] = []
 
     def generate_response(
         self, request: ResponseGenerationRequest
@@ -114,6 +126,21 @@ class _ScriptedLLM(LLMInterface):
     ) -> DataExtractionResponse:
         self.requests.append(request)
         return DataExtractionResponse(extracted_data={}, confidence=0.9)
+
+    def complete(self, request: CompletionRequest) -> CompletionResponse:
+        self.completions.append(request)
+        intent = self.script.get(ContextKeys.RECOMMENDED_REASONING_TYPE)
+        if request.call_type != "classification" or intent is None:
+            raise LLMResponseError("not scripted")
+        return final_reply(
+            json.dumps(
+                {
+                    "reasoning": "scripted",
+                    "intent": intent,
+                    "confidence": self.script.get("classification_confidence", 0.9),
+                }
+            )
+        )
 
     def field_requests(self, field_name: str) -> list[FieldExtractionRequest]:
         return [
@@ -899,8 +926,8 @@ class TestMalformedClassifierValues:
             "alternatives-str",
             "alternatives-dicts",
             "alternatives-number",
-            "recommended-list",
-            "recommended-empty",
+            "intent-list-is-unknown",
+            "intent-empty-is-fallback",
             "justification-list",
             "domain-dict",
         ],
@@ -1034,7 +1061,7 @@ class TestCallerCannotCarryAClassification:
         )
         context = trace_info["final_context"]
 
-        assert llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
+        assert [r.call_type for r in llm.completions] == ["classification"]
         assert context[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
         assert context[ContextKeys.REASONING_TYPE_SELECTED] == "deductive"
         assert "creative_reasoning_completed" not in context
@@ -1093,7 +1120,7 @@ class TestNonStrReasoningStrategy:
         )
         context = trace_info["final_context"]
 
-        assert not llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
+        assert llm.completions == []
         assert (
             context[ContextKeys.REASONING_TYPE_SELECTED]
             == ReasoningType.ANALYTICAL.value

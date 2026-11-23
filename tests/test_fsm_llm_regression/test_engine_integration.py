@@ -108,7 +108,8 @@ class TestReasoningEngineIntegration:
         }
         result = engine._classify_problem(context_without_classification)
         assert result[ContextKeys.CLASSIFIED_PROBLEM_TYPE] == "deductive"
-        assert llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
+        assert [r.call_type for r in llm.completions] == ["classification"]
+        assert not llm.field_requests(ContextKeys.RECOMMENDED_REASONING_TYPE)
 
     def test_fsm_definitions_have_extraction_instructions(self):
         """All reasoning FSM states must have extraction_instructions populated."""

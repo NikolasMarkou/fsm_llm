@@ -26,6 +26,7 @@ from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
@@ -81,6 +82,11 @@ class _NoSelectionLLM(LLMInterface):
         return ResponseGenerationResponse(
             message="final answer", message_type="response", reasoning="mock"
         )
+
+    def complete(self, request: Any) -> Any:
+        # the reasoning engine's strategy choice is a core classification (a
+        # `complete` call): an outage here is a soft failure, analytical runs
+        raise LLMResponseError("not scripted")
 
 
 _REACT_NULL = {"tool_name": None, "tool_input": {}, "should_terminate": False}
@@ -285,6 +291,11 @@ class _UnknownThenRealLLM(LLMInterface):
         return ResponseGenerationResponse(
             message="final answer", message_type="response", reasoning="mock"
         )
+
+    def complete(self, request: Any) -> Any:
+        # the reasoning engine's strategy choice is a core classification (a
+        # `complete` call): an outage here is a soft failure, analytical runs
+        raise LLMResponseError("not scripted")
 
 
 def _build_plan_execute(registry: ToolRegistry, config: AgentConfig, llm):

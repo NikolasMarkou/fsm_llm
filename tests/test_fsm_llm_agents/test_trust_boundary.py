@@ -37,6 +37,7 @@ from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionRequest,
     FieldExtractionResponse,
+    LLMResponseError,
     ResponseGenerationRequest,
     ResponseGenerationResponse,
 )
@@ -101,6 +102,11 @@ class _SelectOnceLLM(LLMInterface):
         return ResponseGenerationResponse(
             message="real answer", message_type="response", reasoning="mock"
         )
+
+    def complete(self, request: Any) -> Any:
+        # the reasoning engine's strategy choice is a core classification (a
+        # `complete` call): an outage here is a soft failure, analytical runs
+        raise LLMResponseError("not scripted")
 
 
 class _Harness:
