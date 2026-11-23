@@ -9,13 +9,66 @@ D-036): the reply text of one solve as it arrives, strategy replies included, an
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Generator, Iterator
+from types import TracebackType
 from typing import Any
 
 from .exceptions import ReasoningExecutionError
 
 #: The ``(solution, trace_info)`` tuple ``solve_problem`` returns.
 SolveResult = tuple[str, dict[str, Any]]
+
+
+# DECISION plan-2026-11-23T122249-baa37f40/D-046
+# The solve lock is held across the yields of a stream, so the thread that holds it must never wait
+# for it: it is told, by name. Do NOT go back to a bare `threading.Lock` (a consumer that solves
+# again inside its own `for` loop hung forever with no error) and do NOT take the lock from
+# another thread's id: only the owner reads its own id, so no second lock guards `_owner`.
+class SolveLock:
+    """The lock that serialises the solves of one engine, with the thread that holds it.
+
+    Interface contract: ``acquire(blocking=True) -> bool``, ``release()``, ``locked() -> bool`` and
+    ``with lock:`` as for ``threading.Lock``. One difference: a BLOCKING ``acquire`` (and ``with``)
+    by the thread that already holds it raises ``ReasoningExecutionError`` instead of waiting for
+    itself; ``acquire(blocking=False)`` by that thread answers ``False`` as a ``Lock`` does; another
+    thread waits its turn. ``release`` by a thread that does not hold the lock is the ``Lock``
+    error (``RuntimeError``).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._owner: int | None = None
+
+    def acquire(self, blocking: bool = True) -> bool:
+        if blocking and self._owner == threading.get_ident():
+            raise ReasoningExecutionError(
+                "a solve of this engine is still open on this thread (an unclosed solve "
+                "stream?): close it before solving again"
+            )
+        taken = self._lock.acquire(blocking)
+        if taken:
+            self._owner = threading.get_ident()
+        return taken
+
+    def release(self) -> None:
+        self._owner = None
+        self._lock.release()
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+    def __enter__(self) -> SolveLock:
+        self.acquire()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.release()
 
 
 class SolveStream(Iterator[str]):

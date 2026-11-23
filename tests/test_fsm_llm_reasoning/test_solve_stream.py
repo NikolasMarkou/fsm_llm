@@ -452,3 +452,98 @@ class TestTheLockAndTheConversationAreReleasedEveryWay:
         del abandoned
         gc.collect()
         _nothing_open(engine)
+
+
+class TestASecondSolveOnTheOwnerThreadIsRefusedNotBlocked:
+    """D7, D-046 (review iter1, concern 7): the lock is held across the yields of a stream, so a
+    consumer that solves again inside its own loop used to wait for itself forever. Every row
+    asserts in the SAME thread (no join on a blocked thread); a hang is cut by the row's timeout."""
+
+    @pytest.mark.timeout(60)
+    def test_a_solve_inside_an_open_stream_raises_and_the_stream_goes_on(self) -> None:
+        """Kills: the owner check removed (the second solve blocks on its own thread's lock)."""
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        stream = engine.solve_problem_stream(_PROBLEM)
+        next(stream)
+
+        with pytest.raises(ReasoningExecutionError, match="still open on this thread"):
+            engine.solve_problem("another problem")
+
+        assert engine._solve_lock.locked()  # the refusal left the open stream alone
+        list(stream)
+        assert stream.result()[0] == _VALID_SCRIPT["final_solution"]
+        _nothing_open(engine)
+        assert engine.solve_problem(_PROBLEM)[0] == _VALID_SCRIPT["final_solution"]
+
+    @pytest.mark.timeout(60)
+    def test_a_second_stream_raises_at_its_first_next(self) -> None:
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        first = engine.solve_problem_stream(_PROBLEM)
+        next(first)
+        second = engine.solve_problem_stream(
+            "another problem"
+        )  # lazy: nothing taken yet
+
+        with pytest.raises(ReasoningExecutionError, match="still open on this thread"):
+            next(second)
+
+        first.close()
+        _nothing_open(engine)
+
+    @pytest.mark.timeout(60)
+    def test_a_closed_stream_frees_the_thread(self) -> None:
+        engine = _engine(_ScriptedLLM(_VALID_SCRIPT))
+        stream = engine.solve_problem_stream(_PROBLEM)
+        next(stream)
+
+        stream.close()
+
+        assert engine.solve_problem(_PROBLEM)[0] == _VALID_SCRIPT["final_solution"]
+
+
+@pytest.mark.timeout(60)
+class TestTheSolveLock:
+    """The lock of one engine: the surface the engine and the rows use, plus the owner."""
+
+    def _lock(self) -> Any:
+        from fsm_llm.reasoning.stream import SolveLock
+
+        return SolveLock()
+
+    def test_the_owner_thread_is_refused_and_a_non_blocking_try_answers_false(
+        self,
+    ) -> None:
+        lock = self._lock()
+        with lock:
+            assert lock.locked()
+            with pytest.raises(ReasoningExecutionError, match="this thread"):
+                lock.acquire()
+            with pytest.raises(ReasoningExecutionError, match="this thread"):
+                with lock:
+                    pass  # never reached
+            assert (
+                lock.acquire(blocking=False) is False
+            )  # it never blocks, never raises
+        assert not lock.locked()
+        assert lock.acquire(blocking=False) is True  # the refusals left it usable
+        lock.release()
+
+    def test_another_thread_waits_its_turn_and_is_never_the_owner(self) -> None:
+        lock = self._lock()
+        trying = threading.Event()
+        got: list[object] = []
+
+        def other() -> None:
+            trying.set()
+            with lock:  # held by the main thread: a wait, never the owner's refusal
+                got.append("held")
+
+        lock.acquire()
+        worker = threading.Thread(target=other)
+        worker.start()
+        trying.wait()  # the worker is about to take the lock (or already waits for it)
+        lock.release()
+        worker.join()  # it cannot block forever: the lock is free
+
+        assert got == ["held"]
+        assert not lock.locked()

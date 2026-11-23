@@ -864,6 +864,11 @@
       "delta": 1,
       "reason": "plan baa37f40 step 27.3 D-045: new anchor on SynthesizeExecutor.aplan_push (a re-found procedure meets the approval and goal rules of obtain)",
       "token": "plan-2026-11-23T122249-baa37f40/D-045"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 step 27.4 D-046: new anchor on SolveLock (a second solve on the owner thread is refused by name, not blocked)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-046"
     }
   ]
 }

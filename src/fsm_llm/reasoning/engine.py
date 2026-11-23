@@ -7,7 +7,6 @@ Enhanced with loop prevention, context management, and standardized handling.
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Generator
 from contextlib import closing
@@ -51,7 +50,7 @@ from .handlers import (
     retries_exhausted,
 )
 from .selection import classification_intents
-from .stream import SolveStream
+from .stream import SolveLock, SolveStream
 from .utilities import get_reasoning_fsm
 
 #: What ``ReasoningEngine.model`` shows when an injected interface states no model.
@@ -103,7 +102,7 @@ class ReasoningEngine:
             raise TypeError(
                 f"registry must be an ExecutableRegistry, got {type(registry).__name__}"
             )
-        self._solve_lock = threading.Lock()
+        self._solve_lock = SolveLock()
         self.api_kwargs = kwargs.copy()
         # DECISION plan-2026-11-12T073150-d454fd62/D-005
         # The model is resolved through llm.resolve_model only, which raises
