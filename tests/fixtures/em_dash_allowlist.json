@@ -159,7 +159,7 @@
  "src/fsm_llm/tools/truncation.py": 2,
  "src/fsm_llm/workflows/__init__.py": 1,
  "src/fsm_llm/workflows/__version__.py": 1,
- "src/fsm_llm/workflows/definitions.py": 2,
+ "src/fsm_llm/workflows/definitions.py": 1,
  "src/fsm_llm/workflows/dependency_resolver.py": 1,
  "src/fsm_llm/workflows/engine/driver.py": 1,
  "src/fsm_llm/workflows/models.py": 1,

@@ -7,6 +7,10 @@ workflow (and therefore break a synchronous step chain).
 
 from __future__ import annotations
 
+#: The ``NameRegistry`` namespace of the objects a workflow document names (a step's function, LLM
+#: interface or agent): ``serialize(callables=)`` and ``load_workflow(objects=)`` both take it.
+CALLABLES_NAMESPACE = "callables"
+
 # --------------------------------------------------------------
 # Engine-owned context keys
 # --------------------------------------------------------------

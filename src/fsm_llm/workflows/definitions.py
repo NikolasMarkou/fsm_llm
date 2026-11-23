@@ -4,16 +4,19 @@ Workflow definition and validation for the FSM-LLM Workflow System.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from fsm_llm.core.definitions import reachable_from
+from fsm_llm.core.names import NameRegistry
 from fsm_llm.logging import logger
 
 # --------------------------------------------------------------
 # local imports
 # --------------------------------------------------------------
+from .constants import CALLABLES_NAMESPACE
 from .exceptions import WorkflowDefinitionError, WorkflowValidationError
 from .steps import (
     ParallelStep,
@@ -40,7 +43,70 @@ _STEP_CALLABLE_EXCLUDE_FIELDS = frozenset(
 )
 
 
-def _serialize_step(step: WorkflowStep) -> dict[str, Any]:
+# The fields a document names instead of holding: the five callable fields above plus the
+# step's agent (``Field(exclude=True)``, so the default dump never carried it). Read by the
+# naming path of ``serialize(callables=)`` and by ``loader.load_workflow``: one table.
+_NAMED_OBJECT_FIELDS = _STEP_CALLABLE_EXCLUDE_FIELDS | {"agent"}
+
+
+def check_callables_registry(registry: object) -> NameRegistry[Any]:
+    """Return ``registry`` when it is a ``NameRegistry`` of namespace ``callables``.
+
+    Interface contract: the one check of ``serialize(callables=)`` and ``load_workflow(objects=)``.
+    Failure mode: ``WorkflowDefinitionError`` for any other value (a caller bug, not a document
+    failure).
+    """
+    if not isinstance(registry, NameRegistry) or (
+        registry.namespace != CALLABLES_NAMESPACE
+    ):
+        got = (
+            f"a NameRegistry of namespace {registry.namespace!r}"
+            if isinstance(registry, NameRegistry)
+            else type(registry).__name__
+        )
+        raise WorkflowDefinitionError(
+            f"the object registry must be a NameRegistry of namespace "
+            f"{CALLABLES_NAMESPACE!r}, got {got}"
+        )
+    return registry
+
+
+def _name_step_objects(
+    step: WorkflowStep, step_dict: dict[str, Any], callables: NameRegistry[Any]
+) -> None:
+    """Write the registered name of each object field of ``step`` into ``step_dict``.
+
+    A field is an object field when it is one of ``_NAMED_OBJECT_FIELDS`` or holds a callable
+    (a custom step's own). ``None`` stays absent, as in the default path. An object the registry
+    cannot name, and a value no JSON document can carry, raise ``WorkflowDefinitionError``
+    naming the step and the field: nothing is dropped silently.
+    """
+    for field in type(step).model_fields:
+        value = getattr(step, field, None)
+        if value is None or not (field in _NAMED_OBJECT_FIELDS or callable(value)):
+            continue
+        name = callables.name_of(value)
+        if name is None:
+            raise WorkflowDefinitionError(
+                f"step '{step.step_id}' field '{field}' holds a "
+                f"{type(value).__name__} that is not registered in the "
+                f"{CALLABLES_NAMESPACE!r} registry: register it so a document can name it"
+            )
+        step_dict[field] = name
+    for field, value in step_dict.items():
+        if field in ("step", "steps"):
+            continue  # nested steps are checked by their own call
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError) as error:
+            raise WorkflowDefinitionError(
+                f"step '{step.step_id}' field '{field}' is not JSON-serializable: {error}"
+            ) from error
+
+
+def _serialize_step(
+    step: WorkflowStep, callables: NameRegistry[Any] | None = None
+) -> dict[str, Any]:
     """Serialize a single step to a plain dict, recursing into nested steps.
 
     Interface contract: takes any ``WorkflowStep`` instance; returns a
@@ -57,21 +123,40 @@ def _serialize_step(step: WorkflowStep) -> dict[str, Any]:
       recursive call so nested steps keep their `type` tag and stripped
       callables.
 
+    With ``callables`` (a ``NameRegistry`` of namespace ``callables``) each object field
+    holds its registered name instead of being stripped (``_name_step_objects``), and the
+    cases the default path passes over are refused: a ``RetryStep.step`` or a
+    ``ParallelStep`` child that is not a ``WorkflowStep``.
+
     Mirrors the ``RetryStep`` recursion precedent in
     ``RetryStep.referenced_step_ids``.
-    Failure mode: none — every `WorkflowStep` subclass either has no nested
-    steps (returned as-is) or is one of the two known nesting shapes above.
+    Failure mode: none without ``callables``; with it ``WorkflowDefinitionError``.
     """
     step_dict = step.model_dump(exclude=set(_STEP_CALLABLE_EXCLUDE_FIELDS))
     # Custom steps may carry other callable fields; never emit a function.
     step_dict = {k: v for k, v in step_dict.items() if not callable(v)}
     step_dict["type"] = step.__class__.__name__
+    if callables is not None:
+        _name_step_objects(step, step_dict, callables)
 
     if isinstance(step, RetryStep) and isinstance(step.step, WorkflowStep):
-        step_dict["step"] = _serialize_step(step.step)
+        step_dict["step"] = _serialize_step(step.step, callables)
+    elif isinstance(step, RetryStep) and callables is not None:
+        raise WorkflowDefinitionError(
+            f"step '{step.step_id}' field 'step' holds a {type(step.step).__name__}, "
+            "not a WorkflowStep: a document cannot carry it"
+        )
     elif isinstance(step, ParallelStep):
+        if callables is not None:
+            for nested in step.steps:
+                if not isinstance(nested, WorkflowStep):
+                    raise WorkflowDefinitionError(
+                        f"step '{step.step_id}' field 'steps' holds a "
+                        f"{type(nested).__name__}, not a WorkflowStep: a document "
+                        "cannot carry it"
+                    )
         step_dict["steps"] = [
-            _serialize_step(nested_step)
+            _serialize_step(nested_step, callables)
             if isinstance(nested_step, WorkflowStep)
             else nested_step
             for nested_step in step.steps
@@ -323,17 +408,47 @@ class WorkflowDefinition(BaseModel):
                         stack.append((succ, False))
         return False
 
-    def serialize(self) -> dict[str, Any]:
-        """Serialize the workflow definition to a dictionary."""
+    def serialize(
+        self, *, callables: NameRegistry[Any] | None = None
+    ) -> dict[str, Any]:
+        """Serialize the workflow definition to a dictionary.
+
+        Without ``callables`` the output is the one every release wrote: the callable and
+        object fields of a step are left out. With ``callables`` (a ``NameRegistry`` of
+        namespace ``callables``) each such field holds its registered name, so
+        ``load_workflow(document, objects=callables)`` can rebuild the steps. Then an object the
+        registry cannot name, a ``RetryStep.step`` or ``ParallelStep`` child that is not a
+        ``WorkflowStep`` and metadata or a step field that is not JSON raise
+        ``WorkflowDefinitionError`` and never drop silently.
+        """
+        if callables is not None:
+            try:
+                check_callables_registry(callables)
+                json.dumps(self.metadata)
+            except WorkflowDefinitionError as error:
+                raise WorkflowDefinitionError(
+                    str(error), workflow_id=self.workflow_id
+                ) from error
+            except (TypeError, ValueError) as error:
+                raise WorkflowDefinitionError(
+                    f"metadata is not JSON-serializable: {error}",
+                    workflow_id=self.workflow_id,
+                ) from error
         # Convert to dict, but handle special cases like callables
         workflow_dict = self.model_dump(exclude={"steps"})
 
         # Handle steps separately, recursing into any nested steps
         # (ParallelStep.steps, RetryStep.step) via _serialize_step so they
         # round-trip with their `type` tag and stripped callables too.
-        steps_dict = {
-            step_id: _serialize_step(step) for step_id, step in self.steps.items()
-        }
+        try:
+            steps_dict = {
+                step_id: _serialize_step(step, callables)
+                for step_id, step in self.steps.items()
+            }
+        except WorkflowDefinitionError as error:
+            raise WorkflowDefinitionError(
+                str(error), workflow_id=self.workflow_id
+            ) from error
 
         workflow_dict["steps"] = steps_dict
         return workflow_dict

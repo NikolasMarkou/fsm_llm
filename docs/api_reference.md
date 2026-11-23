@@ -729,6 +729,18 @@ await engine.close()
 
 Step types: `auto_step`, `api_step`, `condition_step`, `llm_step`, `wait_event_step`, `timer_step`, `parallel_step`, `conversation_step`, `agent_step`, `retry_step`, `switch_step`.
 
+Saving and loading a workflow: `workflow.serialize()` writes the plain dict every release wrote (type tags, no callables). `workflow.serialize(callables=registry)` writes each function, LLM interface or agent as its registered name, where `registry` is a `fsm_llm.core.names.NameRegistry("callables")`; it raises `WorkflowDefinitionError` instead of dropping anything it cannot write (an object the registry does not hold, a `RetryStep.step` or `ParallelStep` child that is not a step, metadata or a field that is not JSON). `fsm_llm.workflows.load_workflow(document, *, objects, step_classes=None)` is its inverse: a step `type` resolves only to a built-in step class or a class in `step_classes` (matched by class name, exactly; nothing is imported), each name resolves only through `objects`, and every failure of the document is reported together in one `WorkflowValidationError`. `load_workflow(workflow.serialize(callables=objs), objects=objs) == workflow`; an `FSMDefinition` object in a conversation step comes back as its dict, so only `serialize(load(x)) == x` holds there.
+
+```python
+from fsm_llm.core.names import NameRegistry
+from fsm_llm.workflows import load_workflow
+
+objs = NameRegistry("callables")
+objs.register("check_fn", fn)
+document = workflow.serialize(callables=objs)
+same = load_workflow(document, objects=objs)
+```
+
 Events and loops: `await engine.process_event(WorkflowEvent(event_type="paid", payload={...}))` wakes waiting instances (set `instance_id=` to target one; `wait_event_step(..., correlation_key=...)` matches a payload key against the instance context). Loops must pass through a `timer_step` or `wait_event_step`; purely synchronous cycles are rejected by `register_workflow`. A step failure with no error route FAILS the instance. `timer_step(..., next_step_id="")` completes the workflow on expiry, like `wait_event_step(..., success_step_id="")`; `api_step(..., failure_step_id="")` still fails the instance. `cancel` on a running chain takes effect between steps (the step in flight finishes) and returns `True`. `engine.add_hook(fn)` observes step and status changes. `WorkflowEngine(*, max_concurrent_workflows=100, max_completed_instances=1000, max_steps=1000, executor=None)` takes keyword arguments only. A `conversation_step` publishes `last_response`/`final_answer` as the last reply that was actually spoken (silent states say nothing), and adds neither key when nothing was spoken.
 
 ## Eval (`fsm_llm.eval`)

@@ -2208,7 +2208,7 @@ fsm_llm.workflows.WorkflowDefinition class(BaseModel)
   def get_terminal_states(self) -> set[str]
   def has_cycles(self) -> bool
   def has_synchronous_cycles(self) -> bool
-  def serialize(self) -> dict[str, Any]
+  def serialize(self, *, callables: NameRegistry[Any] | None = None) -> dict[str, Any]
   classmethod def validate_initial_step(cls, v, info)
   def validate_structure(self) -> None
   def with_initial_step(self, step: WorkflowStep) -> WorkflowDefinition
@@ -2317,6 +2317,7 @@ fsm_llm.workflows.create_linear_workflow def(workflow_id: str, name: str, steps:
 fsm_llm.workflows.create_workflow def(workflow_id: str, name: str, description: str = '') -> WorkflowDefinition
 fsm_llm.workflows.create_workflow_builder def(workflow_id: str, name: str, description: str = '') -> WorkflowBuilder
 fsm_llm.workflows.llm_step def(step_id: str, name: str, llm_interface: Any, prompt_template: str, context_mapping: dict[str, str] | None = None, output_mapping: dict[str, str] | None = None, next_step_id: str = '', error_step_id: str | None = None, description: str = '', timeout_seconds: float | None = None, system_prompt: str | None = None) -> LLMStep
+fsm_llm.workflows.load_workflow def(document: Mapping[str, Any], *, objects: NameRegistry[Any], step_classes: Iterable[type[WorkflowStep]] | None = None) -> WorkflowDefinition
 fsm_llm.workflows.parallel_step def(step_id: str, name: str, steps: list[WorkflowStep], next_step_id: str, error_step_id: str | None = None, aggregation_function: Callable | None = None, description: str = '', timeout_seconds: float | None = None) -> ParallelStep
 fsm_llm.workflows.retry_step def(step_id: str, name: str, step: WorkflowStep, max_retries: int = 3, backoff_factor: float = 1.0, description: str = '', timeout_seconds: float | None = None) -> RetryStep
 fsm_llm.workflows.switch_step def(step_id: str, name: str, key: str, cases: dict[str, str], default_step_id: str | None = None, description: str = '') -> SwitchStep

@@ -60,6 +60,9 @@ from .exceptions import (
     WorkflowTimeoutError,
     WorkflowValidationError,
 )
+
+# The loader: a document back into a definition (the inverse of serialize(callables=))
+from .loader import load_workflow
 from .models import (
     EventListener,
     WaitEventConfig,
@@ -126,6 +129,7 @@ __all__ = [
     "ConversationStep",
     # Definition & Validation
     "WorkflowDefinition",
+    "load_workflow",
     # Engine
     "WorkflowEngine",
     "Timer",
