@@ -28,6 +28,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.classification import Classifier
 from fsm_llm.engine.kinds import StateExecutor
+from fsm_llm.engine.kinds.targets import TargetResolver
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 
@@ -51,6 +52,7 @@ class _PipelineSurface:
         _classifier_cache: dict[str, Classifier]
         _classifier_cache_lock: threading.Lock
         _executors: Mapping[str, StateExecutor]
+        target_resolver: TargetResolver | None
 
         @staticmethod
         def _apply_context_scope(

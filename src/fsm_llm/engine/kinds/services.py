@@ -31,6 +31,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.engine.classification import Classifier
+from fsm_llm.engine.kinds.targets import TargetResolver
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import LLMInterface
 
@@ -42,6 +43,9 @@ class _PipelineServices(Protocol):
     data_extraction_prompt_builder: DataExtractionPromptBuilder
     field_extraction_prompt_builder: FieldExtractionPromptBuilder
     fsm_resolver: Callable[[str], FSMDefinition]
+    # The resolver of the `call` kind, read by its executor (plan baa37f40, D-021); None when
+    # the pipeline was given none.
+    target_resolver: TargetResolver | None
 
     @staticmethod
     def _apply_context_scope(

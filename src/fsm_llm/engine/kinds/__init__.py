@@ -29,6 +29,8 @@ this package; the old dotted path is gone. Modules:
 - ``completion.py``: ``CompletionExecutor``.
 - ``conversation/``: ``ConversationExecutor`` and the conversation Pass-1 machinery.
 - ``records.py``: the records and digests both the executors and the turn pipeline use.
+- ``targets.py``: ``TargetResolver``, ``ResolvedTarget`` and ``check_targets``, the seam through which a
+  ``call`` state reaches a registry it may not import (``API(targets=)``; plan baa37f40 D-021).
 
 Interface contract:
 

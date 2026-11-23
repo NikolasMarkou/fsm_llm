@@ -8,8 +8,8 @@ the others adopt it later (roadmap 1.14 proper). No ``API`` constructor reads it
 Interface contract:
 
 - ``RunContext(llm_interface=None, llm_factory=None, event_log=None, max_steps=None,
-  max_seconds=None, cancel=<a fresh CancelToken>, callables=None, parent=None)``, all keyword
-  or positional in that order, frozen, compared by identity. ``llm_interface`` and
+  max_seconds=None, cancel=<a fresh CancelToken>, callables=None, parent=None,
+  registry=None)``, all keyword or positional in that order, frozen, compared by identity. ``llm_interface`` and
   ``llm_factory`` (a zero-argument callable returning an ``LLMInterface``) are refused
   together, as ``API(llm_interface=...)`` refuses every other LLM setting beside it.
   ``event_log`` is what ``API(event_log=)`` takes (an ``EventLog`` or a path). ``max_steps``
@@ -17,13 +17,17 @@ Interface contract:
   engine's own rule (``check_turn_limits``): an ``int`` of at least 1 and a number above 0,
   never a ``bool``. ``callables`` is an optional ``NameRegistry`` holding the host objects of
   code-backed patterns and workflow callables. ``parent`` is the reference (a conversation
-  or instance id) of the run that asked, or ``None``. A violation raises ``ValueError`` (or
-  ``TypeError`` for a wrong type of ``cancel`` and ``callables``) at construction.
+  or instance id) of the run that asked, or ``None``. ``registry`` is the ``TargetResolver``
+  (``engine.kinds.targets``: an ``ExecutableRegistry`` is one) that the ``API`` of a run is
+  given as ``targets=``, so a body holding a ``call`` state resolves its target the way a
+  bare ``API(targets=)`` does (plan baa37f40 D-021); ``None`` gives that ``API`` no resolver.
+  A violation raises ``ValueError`` (or ``TypeError`` for a wrong type of ``cancel``,
+  ``callables`` and ``registry``) at construction.
 - ``resolve_llm()`` returns the interface, or calls the factory ONCE and returns its result
   (one call per run, nothing cached), or returns ``None`` (the run then resolves a model the
   way ``API`` does, from ``LLM_MODEL``).
 - ``derive(*, parent, max_steps=None, max_seconds=None)`` returns a child context that
-  shares the interface, factory, log, callables and cancel token, names ``parent`` (the
+  shares the interface, factory, log, callables, registry and cancel token, names ``parent`` (the
   handle of the run that is asking, not blank) and narrows each limit that is given: a value
   above the parent's own limit raises ``ValueError`` (a parent with no limit accepts any
   valid one; ``None`` keeps the parent's, it never removes a limit). The limits are per run,
@@ -56,6 +60,7 @@ from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.llm.interface import LLMInterface
 
 if TYPE_CHECKING:
+    from fsm_llm.engine.kinds.targets import TargetResolver
     from fsm_llm.runtime import EventLog
 
 __all__ = ["CancelToken", "RunCancelledError", "RunContext"]
@@ -109,6 +114,7 @@ class RunContext:
     cancel: CancelToken = field(default_factory=CancelToken)
     callables: NameRegistry[Any] | None = None
     parent: str | None = None
+    registry: TargetResolver | None = None
 
     def __post_init__(self) -> None:
         if self.llm_interface is not None and self.llm_factory is not None:
@@ -131,6 +137,13 @@ class RunContext:
                 f"callables must be a NameRegistry, got {type(self.callables).__name__}"
             )
         _check_parent(self.parent)
+        if self.registry is not None and not callable(
+            getattr(self.registry, "resolve_target", None)
+        ):
+            raise TypeError(
+                "registry must provide resolve_target(target_id, *, conversation_id=None) "
+                f"(a TargetResolver), got {type(self.registry).__name__}"
+            )
         check_turn_limits(self.max_steps, self.max_seconds)
 
     def resolve_llm(self) -> LLMInterface | None:

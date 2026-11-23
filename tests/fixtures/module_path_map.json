@@ -1092,6 +1092,7 @@
     "fsm_llm.engine.kinds.conversation.post_transition",
     "fsm_llm.engine.kinds.conversation.surface",
     "fsm_llm.engine.kinds.services",
+    "fsm_llm.engine.kinds.targets",
     "fsm_llm.engine.turn",
     "fsm_llm.engine.turn.driver",
     "fsm_llm.engine.turn.events",

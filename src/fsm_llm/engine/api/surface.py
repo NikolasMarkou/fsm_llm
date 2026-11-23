@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from fsm_llm.core.definitions import AdvanceResult, FSMDefinition
     from fsm_llm.engine.fsm.manager import FSMManager
     from fsm_llm.engine.kinds import StateExecutor
+    from fsm_llm.engine.kinds.targets import TargetResolver
     from fsm_llm.engine.session import SessionState, SessionStore
     from fsm_llm.handlers import HandlerSystem
     from fsm_llm.llm import LLMInterface
@@ -39,6 +40,7 @@ class _ApiSurface:
         handler_system: HandlerSystem
         fsm_manager: FSMManager
         _executors: Mapping[str, StateExecutor]
+        _targets: TargetResolver | None
         _temp_fsm_definitions: dict[str, FSMDefinition]
         _pending_push_ids: set[str]
         _stack_lock: threading.Lock

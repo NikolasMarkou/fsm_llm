@@ -24,6 +24,13 @@ Interface contract:
   sole version of its id), ``get_by_template(identity)``, ``list(kind=None, capability=None,
   launchable=None)`` (sorted by id and version; ``launchable`` is false when ``requires.callables``
   is non-empty): ``ExecutableNotFoundError`` / ``ExecutableEvictedError`` on a miss.
+- ``resolve_target(target_id, *, conversation_id=None) -> ResolvedTarget | None``: the
+  ``TargetResolver`` of the ``call`` kind (``engine.kinds.targets``, plan baa37f40 D-021): the
+  greatest version of *target_id* instantiated with no variables, answered as its
+  ``FSMDefinition`` and both identities when the instance is an FSM body (kinds ``fsm``,
+  ``strategy``, ``procedure``); ``None`` for a miss, a body that does not instantiate and a
+  code-backed kind (``pattern``, ``workflow``). Never raises for a miss, never loads a module
+  by the id and keeps no instance.
 - ``set_alias(name, routes, *, target=None)`` and ``resolve(name, *, experiment=None,
   conversation_id=None, pinned_template_identity=None) -> Resolution`` (see ``aliases``).
 - ``pin(executable)`` / ``unpin(executable)`` (counted, in memory): a pinned template survives
@@ -48,9 +55,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from fsm_llm.core.definitions.executable import Capability
+from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.core.definitions.executable import Capability, InstantiationError
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.verify.executable import load_executable
+from fsm_llm.engine.kinds.targets import ResolvedTarget
 from fsm_llm.logging import logger
 from fsm_llm.security import resolve_within
 
@@ -467,6 +476,36 @@ class ExecutableRegistry:
             )
         rebuilt: Instance = rebuild(record, expected_instance_identity)
         return rebuilt
+
+    # ---- target resolution --------------------------------------------------------------
+
+    def resolve_target(
+        self, target_id: str, *, conversation_id: str | None = None
+    ) -> ResolvedTarget | None:
+        """The definition a ``call`` pushes for *target_id*, or ``None`` (see the module docstring).
+
+        ``conversation_id`` is accepted for the ``TargetResolver`` Protocol; aliases and
+        experiments are not routed here (carried).
+        """
+        try:
+            executable = self.get(target_id)
+        except ExecutableNotFoundError:
+            return None
+        try:
+            instance = executable.instantiate()
+        except InstantiationError as error:
+            logger.warning(
+                f"call target {target_id!r} does not instantiate: {type(error).__name__}"
+            )
+            return None
+        definition = getattr(instance, "definition", None)
+        if not isinstance(
+            definition, FSMDefinition
+        ):  # a code-backed kind has no body to push
+            return None
+        return ResolvedTarget(
+            definition, executable.template_identity, instance.instance_identity
+        )
 
     # ---- aliases ------------------------------------------------------------------------
 

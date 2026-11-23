@@ -1936,6 +1936,13 @@ class TestStep4ConfigPassthrough:
 
 
 # (class, kwarg) -> (API kwarg, non-default value factory, read-back from API)
+class _NoTargets:
+    """A resolver that resolves nothing (a second implementer of the ``TargetResolver`` Protocol)."""
+
+    def resolve_target(self, target_id, *, conversation_id=None):
+        return None
+
+
 _REACHABLE = {
     ("HandlerSystem", "handler_error_mode"): (
         "handler_error_mode",
@@ -1978,6 +1985,12 @@ _REACHABLE = {
         "executors",
         lambda: {"conversation": ConversationExecutor()},
         lambda api: api.fsm_manager._pipeline._executors,
+    ),
+    # the resolver of the call kind (plan baa37f40 step 10): kept by identity
+    ("FSMManager", "targets"): (
+        "targets",
+        lambda: _NoTargets(),
+        lambda api: api.fsm_manager._pipeline.target_resolver,
     ),
 }
 

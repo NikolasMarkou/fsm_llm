@@ -90,7 +90,10 @@ class MissingExecutorError(FSMError, ValueError):
     an ``API`` (construction, ``push_fsm``, the frame of ``fork`` and ``resume``) and at the
     first Pass 1 of a bare ``FSMManager``, for a kind whose ``KindSpec.requires_executor`` is
     set and which the per-instance ``executors`` map and the module table do not hold. It is
-    a ``ValueError`` too, so a caller that maps ``ValueError`` to a refusal shows the message.
+    also raised, at the same sites, for a state of a kind whose ``KindSpec.requires_targets``
+    is set (``call``) on an ``API`` with no ``targets=`` resolver; the message names the
+    resolver. It is a ``ValueError`` too, so a caller that maps ``ValueError`` to a refusal
+    shows the message.
     """
 
     def __init__(

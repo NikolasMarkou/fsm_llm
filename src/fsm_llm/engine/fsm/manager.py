@@ -51,6 +51,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.loaders import load_fsm_definition
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.kinds import ExecutorsArg
+from fsm_llm.engine.kinds.targets import TargetResolver
 from fsm_llm.engine.turn import MessagePipeline
 from fsm_llm.handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
@@ -87,6 +88,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         *,
         executors: ExecutorsArg | None = None,
+        targets: TargetResolver | None = None,
     ):
         """Create the manager.
 
@@ -95,7 +97,9 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         pipeline only (it overrides the module table of ``engine/kinds/registry.py``; see
         ``engine.kinds.check_executors``: ``TypeError`` for a bad value,
         ``ValueError`` for an unknown kind name). Keyword-only, internal until
-        the kind extension point is public.
+        the kind extension point is public. ``targets`` is the ``TargetResolver`` of the
+        ``call`` kind (``engine.kinds.targets.check_targets``: ``TypeError`` for a value with no
+        callable ``resolve_target``), keyword-only, handed to the pipeline.
         """
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
@@ -206,6 +210,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
             fsm_resolver=self.get_fsm_definition,
             field_extraction_prompt_builder=self.field_extraction_prompt_builder,
             executors=executors,
+            targets=targets,
         )
 
         logger.info(

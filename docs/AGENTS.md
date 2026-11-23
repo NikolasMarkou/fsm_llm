@@ -58,7 +58,7 @@ A full FSM snippet has to pass the loader. Minimum per state: `id`, `description
 
 Facts the pages state that must stay in step with the code:
 
-- `API.__init__` defaults: `max_history_size=5`, `max_message_length=1000`, `handler_error_mode="continue"`, `max_fsm_cache_size=64`, keyword-only `executors=None` (internal, no builder setter).
+- `API.__init__` defaults: `max_history_size=5`, `max_message_length=1000`, `handler_error_mode="continue"`, `max_fsm_cache_size=64`, keyword-only `executors=None` and `targets=None` (internal, no builder setter).
 - `DEFAULT_MAX_STACK_DEPTH = 10`; there is no default model anywhere: a missing model raises `ModelNotConfiguredError` (`fsm-llm-eval` exits 1, a monitor launch answers 400).
 - Executable envelope: `schema` is `fsm-llm/executable`, `schema_version` default `1.0` (reads `1.x`), kinds `fsm`, `strategy`, `procedure` (`pattern` and `workflow` refused), `MAX_DOCUMENT_DEPTH = 200`; `load_executable` tags `[schema]`, `[body]`, `[variables]`, `[inputs]`, `[contract]`, `[names]`, `[model]`.
 - Executables run: `DEFAULT_EXECUTABLE_MAX_STEPS = 100`, `MAX_RETAINED_TEMPLATES = 256`, `MAX_DOCUMENT_BYTES` 2 MiB; a run of a document that declares variables goes through `instantiate(variables=...)`, `run` on the executable fills none; the built-ins are served only for packages the process imported (no entry point is wired in `pyproject.toml`); the `ExecutableStep` FSM body takes its model from `LLM_MODEL`.

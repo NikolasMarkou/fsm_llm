@@ -32,6 +32,7 @@ from .events import (
 from .helpers import (
     _require_classifier_interface,
     _require_state_executors,
+    _require_target_resolver,
     _unexpected_error,
 )
 from .surface import _ApiSurface
@@ -167,6 +168,7 @@ class StackMixin(_ApiSurface):
             )
             _require_classifier_interface(processed_fsm_def, self.llm_interface)
             _require_state_executors(processed_fsm_def, self._executors)
+            _require_target_resolver(processed_fsm_def, self._targets)
             with self._stack_lock:
                 self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-011

@@ -57,13 +57,14 @@ class TestRunContextFields:
             "cancel",
             "callables",
             "parent",
+            "registry",
         }
 
     def test_unknown_keywords_are_refused(self) -> None:
         with pytest.raises(TypeError):
             RunContext(policy=object())  # type: ignore[call-arg]
         with pytest.raises(TypeError):
-            RunContext(registry=object())  # type: ignore[call-arg]
+            RunContext(handlers=object())  # type: ignore[call-arg]
 
 
 class TestRunContextRefusals:

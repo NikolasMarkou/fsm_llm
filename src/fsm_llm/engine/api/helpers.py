@@ -13,10 +13,16 @@ from collections.abc import Callable, Mapping
 from functools import wraps
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, FSMError
+from fsm_llm.core.definitions import (
+    ConversationBusyError,
+    FSMDefinition,
+    FSMError,
+    MissingExecutorError,
+)
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import StateExecutor, executor_for
+from fsm_llm.engine.kinds.targets import TargetResolver
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.logging import logger
 
@@ -162,6 +168,33 @@ def _require_state_executors(
     for state in fsm_def.states.values():
         if kind_of(state).requires_executor:
             executor_for(state, executors)
+
+
+def _require_target_resolver(
+    fsm_def: FSMDefinition, targets: TargetResolver | None
+) -> None:
+    """Refuse a definition holding a state that resolves its target when this API has no resolver.
+
+    Contract: ``targets`` is the checked resolver of the ``API`` (``API(targets=)``) or
+    ``None``. For the first state whose kind has ``KindSpec.requires_targets`` set (``call``)
+    and no resolver, raises ``MissingExecutorError`` naming the state id, the kind, the
+    resolver and the remedy. Returns ``None`` otherwise. Called beside
+    ``_require_state_executors`` at its four sites (construction, ``push_fsm``, the frames of
+    ``fork`` and ``resume``); a bare ``FSMManager`` has no such site and the call executor
+    refuses at its first Pass 1.
+    """
+    if targets is not None:
+        return
+    for state in fsm_def.states.values():
+        spec = kind_of(state)
+        if spec.requires_targets:
+            raise MissingExecutorError(
+                f"State '{state.id}' is of kind '{spec.name}', which resolves its target "
+                "through a TargetResolver and this API has none: pass "
+                "targets=<a TargetResolver, for example an ExecutableRegistry> to API",
+                state_id=state.id,
+                kind=spec.name,
+            )
 
 
 def llm_settings_for(api_kwargs: Mapping[str, Any], **settings: Any) -> dict[str, Any]:

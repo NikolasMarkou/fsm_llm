@@ -41,6 +41,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.classification import Classifier
 from fsm_llm.engine.kinds import ExecutorsArg, check_executors
+from fsm_llm.engine.kinds.targets import TargetResolver, check_targets
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
@@ -75,6 +76,7 @@ class MessagePipeline(
         field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
         *,
         executors: ExecutorsArg | None = None,
+        targets: TargetResolver | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder
@@ -93,6 +95,9 @@ class MessagePipeline(
         # thread may read it); they override the module table of `engine/kinds/registry.py`
         # for this pipeline only. See `executors.check_executors`.
         self._executors = check_executors(executors)
+        # The resolver of the `call` kind (None: no state of the pipeline resolves a target);
+        # the call executor reads it through `_PipelineServices.target_resolver` (D-021).
+        self.target_resolver = check_targets(targets)
 
     def get_state(
         self, instance: FSMInstance, conversation_id: str | None = None

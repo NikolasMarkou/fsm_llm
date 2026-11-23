@@ -115,6 +115,7 @@ from fsm_llm.core.transition_evaluator import (
 from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.engine.fsm.manager import FSMManager
 from fsm_llm.engine.kinds import ExecutorsArg, check_executors
+from fsm_llm.engine.kinds.targets import TargetResolver, check_targets
 from fsm_llm.engine.session import SessionStore
 from fsm_llm.handlers import (
     FSMHandler,
@@ -136,7 +137,11 @@ from .events import (
     open_event_log,
 )
 from .forks import ForkMixin
-from .helpers import _require_classifier_interface, _require_state_executors
+from .helpers import (
+    _require_classifier_interface,
+    _require_state_executors,
+    _require_target_resolver,
+)
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin
 from .registration import HandlerRegistrationMixin
 from .run import RunMixin
@@ -184,6 +189,7 @@ class API(
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         *,
         executors: ExecutorsArg | None = None,
+        targets: TargetResolver | None = None,
         event_log: EventLog | str | os.PathLike[str] | None = None,
         max_steps: int | None = None,
         max_seconds: float | None = None,
@@ -224,6 +230,15 @@ class API(
                 none here or in the module table is refused with
                 ``MissingExecutorError`` (at construction, ``push_fsm`` and ``fork``).
                 Internal until the kind extension point is public.
+            targets: Optional ``TargetResolver`` (an object with
+                ``resolve_target(target_id, *, conversation_id=None)``, for example an
+                ``ExecutableRegistry``), keyword-only beside ``executors``: how a ``call``
+                state resolves its target id to a definition (plan baa37f40 D-021).
+                ``TypeError`` for a value with no callable ``resolve_target``. A definition
+                holding a state of a kind that resolves a target (``call``) and no resolver
+                here is refused with ``MissingExecutorError`` naming the resolver (at
+                construction, ``push_fsm`` and ``fork``). Internal until the kind
+                extension point is public.
             event_log: Opt-in durable event log: an ``EventLog`` (shared, left
                 open by ``close``) or a directory path (the API owns the log and
                 closes it). Off by default, and then nothing changes. See
@@ -295,6 +310,8 @@ class API(
         # The checked map the manager is given and the push and fork sites read.
         self._executors = check_executors(executors)
         _require_state_executors(self.fsm_definition, self._executors)
+        self._targets = check_targets(targets)
+        _require_target_resolver(self.fsm_definition, self._targets)
 
         # DECISION plan-2026-11-06T093029-0068b055/D-004
         # No prompt builders are built here: FSMManager builds the defaults with
@@ -345,6 +362,7 @@ class API(
             handler_system=self.handler_system,
             max_fsm_cache_size=max_fsm_cache_size,
             executors=self._executors,
+            targets=self._targets,
         )
 
         # Register provided handlers

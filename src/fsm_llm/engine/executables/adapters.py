@@ -25,7 +25,9 @@ Interface contract:
   ``ValueError``; a missing declared input returns ``failed/inputs_missing``. Then the run takes
   the interface of the context (or the API's own model resolution), its event log, the budget
   (``max_steps`` defaults to ``DEFAULT_EXECUTABLE_MAX_STEPS``) and checks the cancel token before
-  every step. Results: ``ok``; ``aborted/budget_spent`` (``RunBudgetExceededError``);
+  every step. The run's own ``API`` is given ``targets=context.registry``, so a body holding a
+  ``call`` state resolves its target like a bare ``API(targets=)`` does (and, with no registry in
+  the context, is refused with ``MissingExecutorError`` when the run starts). Results: ``ok``; ``aborted/budget_spent`` (``RunBudgetExceededError``);
   ``aborted/cancelled`` (the token); ``failed/provider_error`` (``LLMResponseError``);
   ``failed/return_keys_missing`` (a declared output absent at the terminal state). Anything else
   propagates and an ``asyncio.CancelledError`` is never caught: the engine rolls the turn back
@@ -214,6 +216,7 @@ class FsmInstance:
                 self.definition,
                 llm_interface=context.resolve_llm(),
                 event_log=context.event_log,
+                targets=context.registry,
             )
             if owner.setup is not None:
                 owner.setup(api)

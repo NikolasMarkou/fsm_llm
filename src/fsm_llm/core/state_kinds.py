@@ -129,6 +129,10 @@ Interface contract:
     ``conversation``: the engine then refuses a definition holding such a state, for
     an ``API`` with no executor of the kind, with ``MissingExecutorError``
     (``executor_for`` is the one rule). Data, not a hook; no built-in kind sets it yet.
+  - ``requires_targets``: ``True`` when a state of the kind names its target by id and the
+    engine resolves it through a ``TargetResolver`` (``API(targets=)``): an ``API`` with no
+    resolver then refuses a definition holding such a state, with ``MissingExecutorError``
+    naming the resolver (plan baa37f40 D-021). Data, not a hook; only ``call`` sets it.
 
 - ``RawLintServices``: the facts the raw lint needs and this leaf may not
   import (``result_kinds`` the reply kinds of a completion reply read off
@@ -578,6 +582,7 @@ class KindSpec:
     )
     supported_in_procedure: bool = True
     requires_executor: bool = False
+    requires_targets: bool = False
     read_keys: Callable[[Any], tuple[str, ...]] = _no_read_keys
 
 
@@ -637,7 +642,8 @@ SYNTHESIZE = KindSpec(
 # Plan baa37f40 D-015 (roadmap E3.1): the `call` kind. The engine writes its result key
 # (a record with a `status`); the edges are judged by the same rule as a synthesize
 # state's, in the call wording. `requires_executor` stays False until the call executor
-# registers (step 11).
+# registers (step 11); `requires_targets` is True from step 10 (D-021): the target is
+# resolved through the `TargetResolver` an API is given.
 CALL = KindSpec(
     name=CompletionStateKind.CALL.value,
     config_field="call",
@@ -653,6 +659,7 @@ CALL = KindSpec(
     raw_result_key=call_raw_result_key,
     read_keys=call_read_keys,
     supported_in_procedure=False,
+    requires_targets=True,
 )
 
 KINDS: tuple[KindSpec, ...] = (CONVERSATION, COMPLETION, SYNTHESIZE, CALL)
