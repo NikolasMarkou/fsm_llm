@@ -51,6 +51,7 @@ In `simple_calculator` the model only writes the problem as a single arithmetic 
 - `handlers.py` - answer validation, trace recording, context pruning, mapping strategy results back, picking the final answer.
 - `definitions.py` - Pydantic models for steps, traces, validation, classification, problems and solutions.
 - `constants.py` - reasoning types, state names, context key names, limits, and message text.
+- `executables.py` - the nine strategies as `strategy` executables (`reasoning.<name>`) and the whole engine as `reasoning.solve`, registered as the `reasoning` source of the `executable_sources` namespace when the package is imported. See `docs/executables.md`.
 - `utilities.py` - load an FSM definition, map loose words like "math" to a strategy, list strategies.
 - `exceptions.py` - error classes.
 - `__main__.py` - command-line tool.
@@ -89,6 +90,7 @@ The command line also takes `--context '{"audience": "child"}'` (extra context a
 
 ## Things to know
 
+- The strategies and the engine can be run by id: `registry.get("reasoning.deductive")` is the strategy FSM the engine pushes, run on its own with the four context keys the engine hands it as inputs (`problem_statement`, `problem_components`, `constraints`, `problem_type`) and reporting both identities; `registry.get("reasoning.solve").run({"problem": "..."})` runs `solve_problem` on a worker thread (one engine per run, closed afterwards) and returns a `RunResult` with the solution in `outputs`. `reasoning.solve` takes no `max_steps` or `max_seconds` (the engine has its own 170-step budget), and a cancelled await leaves the worker running. See `docs/executables.md`.
 - One engine solves one problem at a time. Calls to `solve_problem` on the same engine wait for each other.
 - An interrupt (`KeyboardInterrupt`, `SystemExit`) during a solve ends its conversations and reaches you unchanged. `engine.close()` ends whatever is still open (safe to call twice), and `with ReasoningEngine(...) as engine:` does it on exit.
 - Every step is an LLM call, so one problem can take dozens of calls. Small models may loop until a limit stops them: a strategy FSM still running after 30 steps is popped and the solve goes on; a solve that spends its 170 steps raises `ReasoningExecutionError`. Any failed solve raises that error, and its `details["partial_context"]` holds what the solve had collected (for example a validated `proposed_solution`).

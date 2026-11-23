@@ -121,6 +121,7 @@ Error mapping (`_raise_http`, used by the FSM, workflow, and agent routes): `Key
 ## Failure modes
 
 - See the error mapping above. Agent type not launchable or missing tools -> 400 from `/api/agent/launch`; a `NotImplementedError` -> 501.
+- Not built (carried): the monitor does not list or launch executables by id. It still starts agents from its own table of classes and workflows from its own presets, and draws agent graphs from `flows.json`; `fsm_llm.engine.executables` (the registry, the built-in patterns served by id) is not used here, and a code-backed pattern that needs host objects could not be launched from a request anyway (roadmap E2.4, monitor half).
 - `snapshot_from_api` / `get_conversation_snapshot` return `None` on any exception (logged at DEBUG).
 - Calling `configure()` again without `api_key` and without the env var disables auth (WARNING logged).
 - `/ws` errors other than disconnect are logged at DEBUG and the socket is closed; the frontend reconnects with backoff, a 4401 close forces the key prompt, and a 4403 close stops reconnecting (status "Host or origin refused").
