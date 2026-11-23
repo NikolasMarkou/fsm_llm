@@ -158,19 +158,19 @@ The condition is what holds the state until the address is complete; `required_c
 
 **Context scope**: `context_scope.read_keys` restricts which context keys a state's prompts see. `write_keys` is advisory: it is not enforced. Both must be lists of strings, and any other key in `context_scope` (for example a misspelt `read_key`) is a load error.
 
-**Gate keys the user must not set**: a key a transition condition reads (`is_admin`, `is_verified`) can be written by a steered extraction unless you list it in the FSM-level `handler_only_keys`. Listed keys are dropped from the bulk and per-field extraction, in the state's own pass and in the pass after a transition, and stay writable by handlers, `update_context` and `initial_context`. It is opt-in and covers only the listed keys: an unlisted gate key is not protected, and a listed key that a `classification_extractions` entry owns stays classifiable (in Pass 1 and after a transition, since the classifier is the author's own channel for it). The `result_key` of a `completion` or `synthesize` state needs no listing: it is closed to every channel, classification included. `fsm-llm-validate` warns about a listed key no state references (usually a typo) and about a listed key that a `classification_extractions` entry writes.
+**Gate keys the user must not set**: a key a transition condition reads (`is_admin`, `is_verified`) can be written by a steered extraction unless you list it in the FSM-level `handler_only_keys`. Listed keys are dropped from the bulk and per-field extraction, in the state's own pass and in the pass after a transition, and stay writable by handlers, `update_context` and `initial_context`. It is opt-in and covers only the listed keys: an unlisted gate key is not protected, and a listed key that a `classification_extractions` entry owns stays classifiable (in Pass 1 and after a transition, since the classifier is the author's own channel for it). The `result_key` of a `completion`, `synthesize` or `call` state needs no listing: it is closed to every channel, classification included. `fsm-llm-validate` warns about a listed key no state references (usually a typo) and about a listed key that a `classification_extractions` entry writes.
 
 **Corrections**: a later-turn value the LLM returns for an already-set key replaces it only when the pipeline extracted that key itself (handler-set and `update_context` values are never overwritten). A refused correction leaves the stored value in place, and the Pass-2 prompt then carries a `<rejected_corrections>` block so the reply does not claim the change was made. The block appears only when the user's message states the value as a whole word of at least 3 characters (`bored` does not ground `red`; a 1 or 2 character value such as `US` never does), and never for a value that ended up stored. A handler that normalises an extracted value on `CONTEXT_UPDATE` (`blue` -> `BLUE`) counts as a handler edit and turns later corrections of that key off (the stored value stands and the reply is told so).
 
 ## FSM Stacking Patterns
 
-FSM stacking (`push_fsm`/`pop_fsm`) enables modular, composable design.
+FSM stacking (`push_fsm`/`pop_fsm`) enables modular, composable design. A hand-written push is for a host that decides at run time; when the FSM itself should say "run that target now", use a `call` state (below), which pushes and pops the frame for you. In async code `await api.apush_fsm(...)` is the one push body and `push_fsm` its sync wrapper.
 
 ### When to Use
 
 - **Shared sub-flows** -- A "collect address" FSM reused by checkout, returns, account setup
 - **Progressive detail** -- High-level routing FSM pushes specialized FSMs per topic
-- **Reasoning integration** -- The reasoning engine uses stacking internally
+- **Reasoning integration** -- The reasoning engine's orchestrator pushes one strategy FSM per solve through a `call` state (see below)
 
 ### Guidelines
 
@@ -242,10 +242,57 @@ Design rules:
 - Write the failure edge as `status in [failed, aborted]`. A procedure that spends its turn budget ends `aborted`, so a bare `== "failed"` would strand the host: the loader runs the edges on sample results and refuses it.
 - `on_failure` names the state the failure edge reaches, one of the state's own transition targets. Give that state a reply that apologises or offers an alternative, because a failure is a normal outcome, not an exception.
 - Name what the procedure may use (`inputs`) and what it must return (`return_keys`) with plain key names. Do not use a handler-only key as a return key.
-- The state declares no extraction and no `completion`. Core only loads the field: a bare `API.converse` stays in the state, so register a `SynthesizeExecutor` on the `API` and drive the host with the core loops.
+- The state declares no extraction and no `completion`. Core only loads the field; an engine that would run it needs a `SynthesizeExecutor`: an `API`, `FSMManager` or `MessagePipeline` with none refuses the definition with `MissingExecutorError` (at construction, `push_fsm`, `fork` and `resume` for an `API`, at the first turn for a bare manager), so register the executor on the `API` and drive the host with the core loops. `fsm-llm-validate` and `load_fsm_definition` accept the definition without one.
 - The result is skip-if-set. A state that runs again on re-entry must clear `synthesis_result` first (`clear_keys_on_entry`).
 
 The guide is [synthesis.md](./synthesis.md); the reference is the Synthesis section of [api_reference.md](./api_reference.md).
+
+## Running a Named Target From a State (`call`)
+
+A state may declare the optional `call` field (definition version 4.3, the default) when what it needs already exists as an [executable](./executables.md): a document that wraps an FSM, or a built-in strategy. The state names the target by id (`target`), or picks one from a closed list by a context value (`choose`), says which context keys the target receives (`inputs`), which of its outputs come back (`returns`, `{parent_key: child_output}`) and which state takes over when it fails (`on_failure`). The engine pushes the target as a child frame, pops it when it ends and merges only the declared `returns`, and the state routes on the result it writes to `call_result`. The state itself makes no model call and is silent.
+
+```json
+"work": {
+  "id": "work", "description": "Run the greeter", "purpose": "Greet the person",
+  "response_instructions": "",
+  "call": {"target": "support/greeter", "inputs": ["name"],
+           "returns": {"greeting": "greeting"}, "on_failure": "sorry", "max_steps": 5},
+  "transitions": [
+    {"target_state": "done", "description": "It returned", "priority": 1,
+     "conditions": [{"description": "ok", "requires_context_keys": ["call_result"],
+                     "logic": {"==": [{"var": "call_result.status"}, "ok"]}}]},
+    {"target_state": "sorry", "description": "It failed or was stopped", "priority": 2,
+     "conditions": [{"description": "not ok", "requires_context_keys": ["call_result"],
+                     "logic": {"in": [{"var": "call_result.status"}, ["failed", "aborted"]]}}]}
+  ]
+}
+```
+
+The `API` needs a target resolver, because the definition only holds ids. `ExecutableRegistry` is one:
+
+```python
+from fsm_llm import API
+from fsm_llm.engine.executables import ExecutableRegistry
+
+registry = ExecutableRegistry.from_paths(["executables/"])      # holds support/greeter
+api = API.from_file("host.json", llm_interface=llm, targets=registry)
+conversation_id, _ = api.start_conversation({"name": "Ada"})
+api.run_until_terminal(conversation_id, max_steps=10)
+api.get_data(conversation_id)["call_result"]["status"]          # "ok"
+```
+
+Design rules:
+
+- Precondition: `API(targets=...)`, keyword-only and internal like `executors=` (the builders have no setter). A bare `API` refuses a definition that holds a `call` state with `MissingExecutorError` naming the resolver; the loader and `fsm-llm-validate` accept it. Frame mode runs targets of kind `fsm`, `strategy` and `procedure`; any other id, a pattern or a workflow resolves to nothing and the call ends `failed/unknown_target`.
+- Route on `call_result.status` (`ok`, `failed`, `aborted`; `running` while it works) and write the failure edge as `status in [failed, aborted]`, as for `synthesize`: every edge must read the result key and the loader refuses an edge that could fire before a result exists.
+- The child receives only the declared `inputs` (copied, never the parent's whole context, an internal key or an approval grant) and the parent receives only the declared `returns`. Both lists hold public key names; the loader refuses an internal-prefixed or secret-looking name. A declared return the child did not write ends `failed/return_keys_missing` and merges nothing. A `strategy` target that declares no `returns` hands back every key of its own `results` map that the child wrote.
+- `max_steps` and `max_seconds` are the child frame's lifetime budget. A child that spends it ends `aborted/budget_spent` with no merge, and the parent takes the failure edge. The other reasons are `unknown_target`, `inputs_missing`, `depth_refused`, `push_failed` and `provider_error` (the child's greeting could not be generated).
+- `choose` takes `key` (the context key that holds a target id), a closed non-empty `targets` list and an optional `fallback` from that list. A value outside the list takes the fallback, else the call ends `failed/unknown_target`. Write the key from a handler or an earlier state. If a user message must never pick the target, list the key in `handler_only_keys` (the reasoning orchestrator does so for `classified_problem_type`). `targets_from {capability}` records where the list came from and is never resolved by core.
+- The state runs when a transition enters it, in that turn; the engine pushes the child at the end of that turn, so the next message (or the next message-free step) goes to the child. Core pops the child at its end or budget stop, the parent stays in the call state, and the next parent turn takes the exit edge. `run_until_terminal` does all of this for you; a stream does it at its start and at its normal end.
+- The result key is skip-if-set per call state. A call state revisited after a final `call_result` of its own state does not call again unless the state clears the key on entry (`clear_keys_on_entry`).
+- Known limits: a target of kind `procedure` runs with no lifecycle check, so do not list a model-written procedure in a `choose` list an untrusted value can reach; a child ended from outside (`end_conversation` on the child) leaves the parent stuck until the host ends the root; delegated mode (a pattern or workflow as a polled child run) is planned and not built.
+
+The reference is the Call state section of [api_reference.md](./api_reference.md).
 
 ## Designing for Agents
 

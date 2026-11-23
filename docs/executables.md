@@ -2,7 +2,7 @@
 
 > Covers FSM-LLM v0.13.0
 
-An executable is one thing that can be run by id and reports one result. Most are a JSON document that wraps an FSM body with a header: who it is, what it reads and writes, which names it needs, and which `{{variables}}` an operator fills in. This page covers the format, the two identities of a document, the rule that keeps a caller's input out of instruction text, the load sequence that checks a document, how an executable runs (the run context, the protocol and the FSM-body adapter), the registry that serves executables by id, the built-in agent patterns and reasoning strategies, the workflow step that runs one, and the limits that are known.
+An executable is one thing that can be run by id and reports one result. Most are a JSON document that wraps an FSM body with a header: who it is, what it reads and writes, which names it needs, and which `{{variables}}` an operator fills in. This page covers the format, the two identities of a document, the rule that keeps a caller's input out of instruction text, the load sequence that checks a document, how an executable runs (the run context, the protocol and the FSM-body adapter), the registry that serves executables by id, the built-in agent patterns and reasoning strategies, the workflow step that runs one, the `call` state that runs one as a frame, and the limits that are known.
 
 What runs today: a document is parsed and checked, wrapped by `FsmBodyExecutable` (the kinds `fsm`, `strategy` and `procedure`) or implemented in Python (the built-ins), served by an `ExecutableRegistry`, and run with `run` or `arun` under a `RunContext`. The result is a [`RunResult`](results_and_names.md) that carries both identities. Nothing in a document executes code or imports a module: a document names its tools, handlers and callables, and the host supplies them.
 
@@ -384,6 +384,17 @@ The loader resolves a step `type` only through the built-in step classes and the
 
 The model-calling steps are awaited on the loop: a `ConversationStep`, an `AgentStep` whose agent has its own `async def arun` and an `LLMStep` over a real interface run with no worker thread, and their time limit cancels the call in flight. `BaseAgent.arun` has a default that runs the sync `run` on a worker through `aoffload`; `AgentStep` does not count that default as native.
 
+## Executables as `call` targets
+
+A state of the `call` kind (see [FSM Design](fsm_design.md) and the Call state section of the [API Reference](api_reference.md)) names an executable by id and the engine runs its FSM body as a child frame of the host conversation, not through `run`. The registry is the resolver: `API(targets=registry)` (keyword-only, internal like `executors=`) asks `registry.resolve_target(id)`, which answers a `ResolvedTarget(definition, template_identity, instance_identity, mode="frame", returns=...)` or `None`.
+
+- **What resolves.** The greatest version of a plain id of kind `fsm`, `strategy` or `procedure` that instantiates. `None` (the call ends `failed/unknown_target`) for an unknown id, a code-backed kind (`pattern`, `workflow`), a body whose variable is unfilled (one warning naming the error type) and an id that only names an importable module (nothing is ever imported by id). Aliases and experiments are not routed by `resolve_target`.
+- **What the child sees.** Only the `inputs` the call state declares, copied; `contract.inputs` is not read in frame mode. The child never receives the parent's context, an internal key or an approval grant. The parent receives only the declared `returns`, and for a `strategy` that declares none, every key of the strategy's own `results` map that the child wrote (`ResolvedTarget.returns`).
+- **What the record carries.** The final `call_result` holds the template identity of the executable and the instance identity of what was pushed (the identities `run` would report for the same inputs), read from what `settle` pushed and never from the forgeable public record; after a restart that cannot prove it they are `None`.
+- **Nested runs.** `FsmInstance.arun` gives its own `API` the context's registry (`RunContext.registry`), so a body with a `call` state runs under a run; a body with a call state and no registry is refused.
+- **Delegated mode is planned and not built.** A target that is code (a pattern, `reasoning.solve`, a workflow) cannot be a frame, so a call to one ends `failed/unknown_target`. Running one as a polled child run on a thread host is the second half of roadmap E3.2 and nothing in the tree does it.
+- **A `procedure` target is not gated.** The call kind trusts the ids its author or its closed `choose` list names; it checks no lifecycle and no provenance (the `synthesize` kind does, through its executor). Do not list a model-written procedure where an untrusted value can reach the list.
+
 ## Known limits
 
 Each limit has the condition under which it applies.
@@ -399,7 +410,7 @@ Each limit has the condition under which it applies.
 - **The greeting is outside `max_seconds`.** An FSM-body run starts its conversation (the greeting, the first model call when the initial state speaks) before the message-free step loop, and `max_seconds` bounds only that loop, so a slow greeting adds to it. Use the step's `timeout_seconds` (which cancels the whole run) when the total matters.
 - **`ExecutableStep` does not set `RunContext.parent`.** The run is one the step starts; no parent run reference is passed, so a derived child budget or a log link to the workflow instance is not built.
 - **A code-backed pattern or built-in is checked at construction only when the registry serves it.** A target a registry has not loaded yet is judged when the step runs.
-- **Importing `fsm_llm.agents` or `fsm_llm.reasoning` loads the `fsm_llm.engine.executables` package** (about ten modules, with the run context and the document loader), because each registers its source in the namespace that lives there; the executables of the two packages load only when a registry loads the sources.
+- **Importing `fsm_llm.agents` or `fsm_llm.reasoning` loads the `fsm_llm.engine.executables` package** (with the run context and the document loader), because each registers its source in the namespace that lives there; the executables of the two packages load only when a registry loads the sources.
 - **Claims are not authorization.** `lifecycle`, `capabilities`, `contract` and `requires` describe a document; the registry serves a `trusted` or `builtin` one exactly as it serves a `draft`.
 
 ## Next steps

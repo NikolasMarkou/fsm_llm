@@ -69,7 +69,7 @@ flowchart TD
 
 | Subpackage | What it adds | Maturity |
 |------------|--------------|----------|
-| [`fsm_llm.reasoning`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) | Reasoning strategies as stacked FSMs, validation, up to 3 retries | Tested offline; live behavior depends on the model |
+| [`fsm_llm.reasoning`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) | Reasoning strategies as JSON files run through a core `call` state, validation, up to 3 retries | Tested offline; live behavior depends on the model |
 | [`fsm_llm.workflows`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) | Async in-memory workflow engine, its step types, a Python DSL | Runs without an LLM unless you add LLM steps |
 | [`fsm_llm.agents`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) | Agent patterns, tools, human approval, memory, MCP, A2A, meta-builder | Documented known limits in the agents README; open work is in the [2026 roadmap](2026_roadmap.md) |
 | [`fsm_llm.monitor`](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md) | FastAPI dashboard, optional OpenTelemetry export | Needs the `monitor` extra |
@@ -98,7 +98,12 @@ The library is organized into these groups of features.
 * **Intent classification**: `classification_extractions` on a state, plus `Classifier`,
   `HierarchicalClassifier` and `IntentRouter`.
 * **FSM stacking**: hand a conversation to a sub-FSM and come back with its results
-  (`push_fsm` / `pop_fsm`).
+  (`push_fsm` / `pop_fsm`; `apush_fsm` is the async push).
+* **Calling a named target**: a state with the optional `call` field names an executable by id
+  (or picks one from a closed list), the engine pushes it as a child that receives only the
+  declared inputs, pops it when it ends and merges only the declared returns. It needs an
+  `API(targets=...)` resolver such as an `ExecutableRegistry`. See the `call` section of
+  [FSM Design](fsm_design.md).
 * **Streaming**: `converse_stream()` yields reply tokens as they arrive.
 * **Steps without a user message**: `advance()` runs one turn and returns an `AdvanceResult`;
   `run_until_terminal()` repeats it within a step and time budget and raises
@@ -121,9 +126,13 @@ The library is organized into these groups of features.
 
 ### Reasoning, workflows and agents
 
-* **`fsm_llm.reasoning`**: a solver that picks one of the reasoning strategies, runs it as
-  stacked FSMs inside one message-free core run, validates the answer and retries up to 3
-  times. `ReasoningEngine.solve_problem(problem)` returns the solution and a trace.
+* **`fsm_llm.reasoning`**: a solver whose classifier picks one of the reasoning strategies
+  (the strategies are JSON files under `reasoning/strategies/`, the pick is a closed-intent
+  classification that falls to `analytical` below confidence 0.6, and an injected interface
+  needs `complete`). One message-free core run pushes the chosen strategy through a `call` state,
+  validates the answer and retries up to 3 times. `ReasoningEngine.solve_problem(problem)`
+  returns the solution and a trace, `solve_problem_stream` streams it, and
+  `python -m fsm_llm.reasoning --executables DIR` adds your own strategy files.
 * **`fsm_llm.workflows`**: an async in-memory engine with its step types and a Python DSL
   (`create_workflow`, `auto_step`, `condition_step`). It runs without an LLM unless you add LLM
   steps.

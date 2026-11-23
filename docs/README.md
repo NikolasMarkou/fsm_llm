@@ -11,7 +11,7 @@ The pages in the table below are current guides for version 0.13.0, and each sta
 | `index.md` | The landing page of the site: what the library is, the install, a no-model example, where to go next |
 | `quickstart.md` | Install, the model setting, a first bot, a handler, streaming, sessions, the builders, an agent, a workflow, the reasoning engine |
 | `concepts.md` | Why and where it fits, how a turn works, what each subpackage adds, status, references |
-| `fsm_design.md` | How to design states, transitions, priorities, context, classification, `completion` and `synthesize` states |
+| `fsm_design.md` | How to design states, transitions, priorities, context, classification, `completion`, `synthesize` and `call` states |
 | `executables.md` | Executables: the envelope (header and body, the two identities, the caller-input rule, the load sequence V1 to V5 and V7, `fsm-llm-validate`), running one (`RunContext`, the protocol, the FSM-body adapter), the registry (retention, aliases, namespaces), the built-in patterns and strategies, the workflow step and the known limits |
 | `results_and_names.md` | The status and reason codes, `RunResult` and `Identity`, `NameRegistry`, the JSON patch applier, how the model is chosen |
 | `handlers.md` | The handler timings, `HandlerBuilder`, error modes, patterns |
@@ -19,7 +19,7 @@ The pages in the table below are current guides for version 0.13.0, and each sta
 | `testing.md` | `fsm_llm.testing`: test doubles, the scripted user and the assertions, with runnable examples |
 | `api_reference.md` | The public API of the core and of every subpackage, hand written |
 | `cli.md` | Every console script and `python -m fsm_llm.reasoning`: options, exit codes, `--model`, `--env-file` |
-| `architecture.md` | The two-pass turn, the layers and the import contracts, the state kinds and executors, the extension points |
+| `architecture.md` | The two-pass turn, the layers and the import contracts, the state kinds (the `call` state and its settle step included) and executors, the extension points |
 | `examples.md` | The runnable examples of the repository, by category |
 
 Beside them:

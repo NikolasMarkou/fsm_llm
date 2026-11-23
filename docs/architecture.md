@@ -179,20 +179,43 @@ State with "synthesize": {goal, inputs, return_keys, on_failure, result_key, min
 
 Core only loads the field and checks the host FSM with the real evaluator (every edge reads the result, none fires before a result was written, the failure edge passes for `failed` and `aborted`). The executor runs on the engine's settle step like any state kind and adds no seam to core. A bare `API`, `FSMManager` or `MessagePipeline` with no executor for the kind refuses a definition holding a synthesize state with `MissingExecutorError` (the kind sets `requires_executor`; the definition itself still loads and validates). See [synthesis.md](./synthesis.md).
 
+### Call States (a named target run as a frame)
+
+```
+State with "call": {target | choose, inputs, returns, on_failure, result_key, max_steps, max_seconds}
+  CallExecutor (the module table, no model call), Pass 1 on arrival or when a turn begins in the state:
+    resolve → the target id (`target`, or the `choose.key` value if in the closed list, else `fallback`)
+              through the TargetResolver of API(targets=)
+    write   → context[result_key] = {status: running, state, target, template_identity,
+              instance_identity, mode: frame, request {target, inputs, max_steps, max_seconds}}
+              (handler-only; a refusal is the FINAL record {status: failed, reason, ...} in the same turn:
+              unknown_target, inputs_missing)
+  settle(api, root_id), after the turn (start and end of aconverse and aadvance, start and normal end of a stream):
+    push    → apush_fsm(inherit_context=False): the child gets only the declared inputs,
+              the call's max_steps/max_seconds as its frame budget
+    pop     → when the child ended or spent its frame budget: ONE pop_fsm merge of the declared
+              returns and the final record {status: ok | failed | aborted, reason, identities}
+  transitions read <result_key>.status
+```
+
+The executor only decides; the stack belongs to `API`, so `settle` (`engine/api/calls.py`, a module-level `async def`) runs in the turn entries after the manager released the conversation lock. It is idempotent, never waits (a second driver on the same root is refused with `FSMError`) and never trusts the record: the target, inputs and budgets are read again from the parent frame's own definition and context, so a forged public `call_result` cannot make it push a target the state does not declare. A cancel during the push or the end settle is never swallowed; the turn stays committed with the request `running`, which the next entry pushes. The resolver is a `TargetResolver` (`engine/kinds/targets.py`); `ExecutableRegistry.resolve_target` answers for the kinds `fsm`, `strategy` and `procedure` and the engine layers below `engine.executables` never import a registry. The kind sets `requires_targets`: an `API` that holds a call state and has no resolver is refused with `MissingExecutorError`. `run_until_terminal` pops an ended call child itself, so a pop whose end the manager refused is retried instead of stranding the run. Frame mode is the only mode: delegated mode (a pattern or workflow run as a polled child on a thread host) is planned and not built.
+
+The reasoning orchestrator is the first user: its `execute_reasoning` state is a `call` with `choose` on the handler-written `classified_problem_type`.
+
 ### State Kinds and Executors
 
-A state has exactly one kind, derived from the config it carries: `conversation` (the default: field, bulk and classification extraction, then a reply), `completion` (a `completion` config) or `synthesize` (a `synthesize` config). `State.kind` returns the name. It is a plain read-only property, not a field: it is absent from `model_dump`, `model_fields` and the JSON schema, so a definition cannot declare it and no `fsm_id` or library digest moves.
+A state has exactly one kind, derived from the config it carries: `conversation` (the default: field, bulk and classification extraction, then a reply), `completion` (a `completion` config), `synthesize` (a `synthesize` config) or `call` (a `call` config). `State.kind` returns the name. It is a plain read-only property, not a field: it is absent from `model_dump`, `model_fields` and the JSON schema, so a definition cannot declare it and no `fsm_id` or library digest moves.
 
 The extension point has two halves, and a new kind needs both:
 
-- **Declaration** (core). A frozen `KindSpec` in `fsm_llm.core.state_kinds` names the kind, the `State` field that carries its config (`config_field`) and the rules the rest of core reads: `result_key`, `inherits_result_on_push`, `forbidden_declarations`, `check_state`, `check_definition` and `sample_results` (the loader), `dryrun_judged`, `mentioned_keys` and `typed_keys` (gate G6a), `minted_keys` and `produced_keys` (the pipeline, G3 and G4), `lint_raw` and `raw_result_key` (the validator, which reads raw dicts), `declared_tools`, `raw_declared_tools` and `supported_in_procedure` (synthesis). The registry (`KINDS`, `kind_of`, `get_kind`) is static and process-wide; `fsm_llm.core.state_kinds` is a leaf that imports only the standard library.
-- **Execution** (engine). A `StateExecutor` in `fsm_llm.engine.kinds` says what the kind does in Pass 1: `extract(...)` produces the turn's extraction result, `cleans_extracted` says whether the data goes through `clean_context_keys`, and `after_transition(...)` runs when a transition lands in a state of the kind. The pipeline picks the executor with `executor_for(state, executors)` at the one Pass-1 seam that the sync and the stream path share. The executor table is per instance: `API(..., executors={kind_name: executor})`, passed down to `FSMManager` and `MessagePipeline`, is validated, copied read-only and visible to that `API` only. A kind with no executor and no `requires_executor` flag (a runtime kind nobody registered) runs as conversation, resolved through that `API`'s own `conversation` entry first and the module's second, so an `executors={"conversation": X}` override covers it too. A kind that sets the flag (`synthesize`) has no such fallback: with no executor of its own name `executor_for` raises `MissingExecutorError`, and `API` construction, `push_fsm` and the frames of `fork` and `resume` check it once per definition. `executors=` also takes a list of executors, each registered under its `kind` attribute.
+- **Declaration** (core). A frozen `KindSpec` in `fsm_llm.core.state_kinds` names the kind, the `State` field that carries its config (`config_field`) and the rules the rest of core reads: `result_key`, `inherits_result_on_push`, `forbidden_declarations`, `check_state`, `check_definition` and `sample_results` (the loader), `dryrun_judged`, `mentioned_keys` and `typed_keys` (gate G6a), `minted_keys` and `produced_keys` (the pipeline, G3 and G4), `read_keys` (G3: what the state reads on arrival), `requires_executor` and `requires_targets` (what an engine must be given before it may hold such a state), `lint_raw` and `raw_result_key` (the validator, which reads raw dicts), `declared_tools`, `raw_declared_tools` and `supported_in_procedure` (synthesis). The registry (`KINDS`, `kind_of`, `get_kind`) is static and process-wide; `fsm_llm.core.state_kinds` is a leaf that imports only the standard library.
+- **Execution** (engine). A `StateExecutor` in `fsm_llm.engine.kinds` says what the kind does in Pass 1: `extract(...)` produces the turn's extraction result, `cleans_extracted` says whether the data goes through `clean_context_keys`, and `after_transition(...)` runs when a transition lands in a state of the kind. The pipeline picks the executor with `executor_for(state, executors)` at the one Pass-1 seam that the sync and the stream path share. The executor table is per instance: `API(..., executors={kind_name: executor})`, passed down to `FSMManager` and `MessagePipeline`, is validated, copied read-only and visible to that `API` only. A kind with no executor and no `requires_executor` flag (a runtime kind nobody registered) runs as conversation, resolved through that `API`'s own `conversation` entry first and the module's second, so an `executors={"conversation": X}` override covers it too. A kind that sets the flag (`synthesize`) has no such fallback (`call` has an executor in the module table and needs a resolver instead): with no executor of its own name `executor_for` raises `MissingExecutorError`, and `API` construction, `push_fsm` and the frames of `fork` and `resume` check it once per definition. `executors=` also takes a list of executors, each registered under its `kind` attribute.
 
 What the engine guarantees to an executor: `process()` takes the one snapshot of the turn and restores it on a failure (see Turn atomicity in `src/fsm_llm/AGENTS.md`), so an executor takes none of its own; handler-only keys (a kind's `result_key`) are never minted as extraction targets; Pass 2 stays shared and kind-agnostic. What it does not: the conversation Pass-1 methods (`_extract_after_transition`, `_execute_data_extraction` and their field, bulk and classification helpers) still live on `MessagePipeline` and the conversation executor calls them; they move with the module layout split (roadmap 0.4), they were not deleted. A test-only kind registered at runtime runs a full conversation with no edit in core (`tests/test_fsm_llm/test_executor_map.py`).
 
 The module-level table of registered executors is a `NameRegistry` named `state_kinds` (`engine/kinds/registry.py`, see [Runs, results and names](results_and_names.md#name-registries)): `register_executor` replaces an entry on purpose, one executor instance cannot serve two kind names, and the registry declares no entry-point group yet.
 
-Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both packages (`core.state_kinds` and `engine.kinds`) are internal. The `executors` keyword of `API`, `FSMManager` and `MessagePipeline` shows in the API snapshot fixture (`tests/fixtures/api_snapshot.txt`) as `Mapping[str, StateExecutor] | None`: `StateExecutor` is imported from `fsm_llm.engine.kinds` (not from `fsm_llm`) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.
+Nothing here is public yet: `fsm_llm/__init__.py` exports neither module, `executors=` is not on the builders, and the entry-point group for third-party kinds arrives with the plugin work (roadmap C10, row 5.5). Until then both packages (`core.state_kinds` and `engine.kinds`) are internal. The `executors` keyword of `API`, `FSMManager` and `MessagePipeline` shows in the API snapshot fixture (`tests/fixtures/api_snapshot.txt`) as `ExecutorsArg | None` (a mapping or a list of executors): `StateExecutor` is imported from `fsm_llm.engine.kinds` (not from `fsm_llm`) and is internal until the kind registry is exported, so the annotation names a class the package does not export, on purpose.
 
 ### Conversation Start
 
@@ -293,10 +316,10 @@ fsm_llm (core, includes classification)
 ├── fsm_llm.monitor    -- Uses API + handlers (observer callbacks at priority 9999)
 ├── fsm_llm.eval       -- Runs example scripts as subprocesses; drives scripted conversations
 │                          through API (one instance per trial) and checks the outcome
-├── fsm_llm.synthesis  -- Uses API (push_fsm/pop_fsm, run_until_terminal's before_step hook), agents
-│                          (tools, human approval) and eval (scripted trials for simulation); core
-│                          loads its `synthesize` state field and runs the data-flow and liveness
-│                          analyses (`core/verify/flow.py`)
+├── fsm_llm.synthesis  -- A `SynthesizeExecutor` on the API's executor table (the engine pushes and pops the child
+│                          through settle), agents (tools, human approval) and eval (scripted trials
+│                          for simulation); core loads its `synthesize` state field and runs the
+│                          data-flow and liveness analyses (`core/verify/flow.py`)
 └── fsm_llm.testing    -- Public test doubles, scripted user and assertions; imports core only
 ```
 

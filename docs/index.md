@@ -96,7 +96,7 @@ Each subpackage is imported by name (`from fsm_llm.agents import create_agent`);
 
 | Subpackage | What it adds | README |
 |---|---|---|
-| `fsm_llm.reasoning` | Reasoning strategies as stacked FSMs | [reasoning](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) |
+| `fsm_llm.reasoning` | Reasoning strategies as JSON files, run through a core `call` state | [reasoning](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/reasoning/README.md) |
 | `fsm_llm.workflows` | An async in-memory workflow engine with its step types | [workflows](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/workflows/README.md) |
 | `fsm_llm.agents` | Agent patterns, tools, human approval, memory, MCP, A2A | [agents](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/agents/README.md) |
 | `fsm_llm.monitor` | A FastAPI dashboard and OpenTelemetry export | [monitor](https://github.com/NikolasMarkou/fsm_llm/blob/main/src/fsm_llm/monitor/README.md) |
