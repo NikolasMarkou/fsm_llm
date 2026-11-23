@@ -537,14 +537,15 @@ class TestTheRealWorkflow:
 
     def test_a_test_that_hangs_dumps_its_stacks_well_before_the_job_limit(self):
         # `faulthandler_timeout` is built in: it prints every thread's stack after N seconds
-        # inside one test and kills nothing (pytest-timeout would `os._exit` the whole run on
-        # Windows and lose every other failure summary).
+        # inside one test and kills nothing, so it fires BEFORE the hard 300 s limit of
+        # pytest-timeout, which then `os._exit`s the whole run (D-060, review note 6).
         ini = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
             "tool"
         ]["pytest"]["ini_options"]
         job_seconds = _load(_real_text())["jobs"]["test"]["timeout-minutes"] * 60
 
-        assert ini["faulthandler_timeout"] == 900
+        assert ini["faulthandler_timeout"] == 240
+        assert ini["faulthandler_timeout"] < ini["timeout"]
         assert ini["faulthandler_timeout"] * 2 < job_seconds
 
     def test_the_default_shell_is_bash_so_windows_legs_run_the_same_scripts(self):

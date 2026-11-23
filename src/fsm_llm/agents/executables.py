@@ -112,6 +112,10 @@ _ROWS: dict[str, _Row] = {
 class PatternExecutable(CodeBackedExecutable):
     """One built-in agent pattern, served by its ``create_agent`` name."""
 
+    refused_budgets = (
+        "max_steps",
+    )  # `execute` refuses it: set `AgentConfig.max_iterations`
+
     def __init__(self, pattern: str) -> None:
         row = _ROWS[pattern]
         cls = _PATTERNS[pattern]

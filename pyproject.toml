@@ -185,9 +185,10 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
-# Built in (no plugin): dump every thread's stack after 900 s inside one test, kill nothing. A hang on
-# a CI leg then names the test and the line instead of running to the job limit with no output.
-faulthandler_timeout = 900
+# Built in (no plugin): dump every thread's stack after 240 s inside one test, kill nothing. It fires
+# BEFORE the hard 300 s limit below (which ends the process), so a slow test is named while it is
+# still running and a hang on a CI leg shows the line instead of ending with no output.
+faulthandler_timeout = 240
 # A HARD limit (pytest-timeout, in the `dev` extra; plan ace7a8c8 D-060): a test that runs longer than 300 s
 # is stopped with a stack dump of every thread. The thread method works on Windows (the signal method
 # does not) and ends the whole pytest process, so a hang costs 5 minutes, not the CI job limit.

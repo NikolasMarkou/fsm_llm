@@ -31,9 +31,13 @@ class TestTheTimeoutIsConfigured:
         assert float(config.getini("timeout")) == float(ini["timeout"]) == 300
         assert config.getini("timeout_method") == ini["timeout_method"] == "thread"
 
-    def test_the_stack_dump_stays_beside_the_hard_limit(self):
-        # the dump (a diagnostic) is kept: it names every thread when a test is slow but not yet killed
-        assert _ini()["faulthandler_timeout"] > 0
+    def test_the_stack_dump_fires_before_the_hard_limit_kills(self):
+        # The dump is a diagnostic that kills nothing; it only means something when it fires
+        # BEFORE the thread method ends the process (at 900 s it could never fire: the 300 s
+        # limit killed first, review note 6 of plan ace7a8c8). It names every thread when a
+        # test is slow but not yet killed.
+        ini = _ini()
+        assert 0 < ini["faulthandler_timeout"] < ini["timeout"]
 
     def test_the_dev_extra_declares_the_plugin(self):
         data = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -67,3 +71,35 @@ class TestTheTimeoutStopsAHungTest:
         out = proc.stdout + proc.stderr
         assert proc.returncode != 0
         assert "Timeout" in out, out
+
+    def test_the_stack_dump_comes_before_the_kill_when_it_is_set_lower(self, tmp_path):
+        # The configured order (dump at 240 s, kill at 300 s) at a small scale: the built-in
+        # dump prints "Timeout (0:00:01)!" with every thread, then the thread method kills.
+        (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+        (tmp_path / "test_hang.py").write_text(
+            "import time\n\ndef test_hang():\n    time.sleep(30)\n", encoding="utf-8"
+        )
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "--timeout=4",
+                "--timeout-method=thread",
+                "-o",
+                "faulthandler_timeout=1",
+                str(tmp_path),
+            ],
+            cwd=tmp_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # one pipe, so the order of the two reports is real
+            text=True,
+            timeout=60,
+        )
+        out = proc.stdout
+        assert proc.returncode != 0
+        assert "Timeout (0:00:01)!" in out, out
+        assert out.index("Timeout (0:00:01)!") < out.index("+ Timeout +"), out

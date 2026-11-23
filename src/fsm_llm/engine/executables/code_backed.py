@@ -35,7 +35,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from fsm_llm.__version__ import __version__ as _FSM_LLM_VERSION
 from fsm_llm.aio import run_sync
@@ -57,6 +57,11 @@ __all__ = ["CodeBackedExecutable", "CodeBackedInstance"]
 
 class CodeBackedExecutable(ABC):
     """A template whose body is code. See the module docstring."""
+
+    #: The ``RunContext`` budgets (``"max_steps"``, ``"max_seconds"``) this executable's
+    #: ``execute`` refuses with a ``ValueError``. A caller that knows the executable before a run
+    #: (``ExecutableStep``) refuses them at construction; the run still refuses them itself.
+    refused_budgets: ClassVar[tuple[str, ...]] = ()
 
     def __init__(
         self,

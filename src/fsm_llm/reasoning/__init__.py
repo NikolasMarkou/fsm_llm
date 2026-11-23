@@ -49,7 +49,8 @@ def _builtin_executables() -> list:
     """The ``reasoning`` source of ``executable_sources``: nine strategies and ``reasoning.solve``.
 
     Lazy on purpose: ``reasoning.executables`` is imported on the first call, so importing this
-    package loads the engine's namespace module but not the executables (plan ace7a8c8 D-061).
+    package loads the ``fsm_llm.engine.executables`` package (its namespaces live there; about ten
+    modules come with it) but not ``reasoning.executables`` itself (plan ace7a8c8 D-061, D-070).
     """
     from .executables import builtin_executables
 

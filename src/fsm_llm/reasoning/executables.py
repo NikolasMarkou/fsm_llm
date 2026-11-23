@@ -119,6 +119,8 @@ def _strategy_executable(name: str) -> FsmBodyExecutable:
 class SolveExecutable(CodeBackedExecutable):
     """``reasoning.solve``: the whole reasoning engine behind one ``run(problem)``."""
 
+    refused_budgets = ("max_steps", "max_seconds")  # the engine has its own budget
+
     def __init__(self) -> None:
         super().__init__(
             id=SOLVE_ID,

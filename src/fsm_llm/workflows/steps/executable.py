@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.codes import Status
@@ -92,6 +92,27 @@ class ExecutableStep(WorkflowStep):
     def _validate_returns(cls, v: dict[str, str]) -> dict[str, str]:
         _refuse_internal_keys(v)
         return v
+
+    @model_validator(mode="after")
+    def _validate_budgets(self) -> ExecutableStep:
+        """Refuse a budget the executable names in ``refused_budgets``, when the registry has it.
+
+        A target the registry does not serve yet (or a registry that raises) is judged at run time,
+        which still refuses the same budgets (an assignment skips this validator).
+        """
+        try:
+            refused = tuple(
+                getattr(self.registry.get(self.target), "refused_budgets", ())
+            )
+        except Exception:
+            return self
+        for budget in refused:
+            if getattr(self, budget) is not None:
+                raise ValueError(
+                    f"executable {self.target!r} takes no {budget} (it refuses that budget "
+                    "of a run context): leave it unset"
+                )
+        return self
 
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Run the executable and map its result back into the workflow context."""

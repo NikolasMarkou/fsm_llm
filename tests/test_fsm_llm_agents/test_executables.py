@@ -336,6 +336,9 @@ class TestTheSource:
             "import sys\n"
             f"sys.path.insert(0, {str(REPO / 'src')!r})\n"
             "import fsm_llm.agents\n"
+            # the docstring of the package says exactly this (D-070): the engine package loads, the
+            # executables of the package itself do not
+            "assert 'fsm_llm.engine.executables' in sys.modules\n"
             "from fsm_llm.engine.executables import EXECUTABLE_SOURCES, ExecutableRegistry\n"
             "assert 'agents' in EXECUTABLE_SOURCES.list(), EXECUTABLE_SOURCES.list()\n"
             "assert 'fsm_llm.agents.executables' not in sys.modules\n"

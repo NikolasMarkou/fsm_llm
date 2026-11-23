@@ -284,7 +284,8 @@ def _builtin_executables() -> list:
     """The ``agents`` source of ``executable_sources``: one executable per pattern.
 
     Lazy on purpose: ``agents.executables`` is imported on the first call, so importing this
-    package loads the engine's namespace module but not the executables (plan ace7a8c8 D-061).
+    package loads the ``fsm_llm.engine.executables`` package (its namespaces live there; about ten
+    modules come with it) but not ``agents.executables`` itself (plan ace7a8c8 D-061, D-070).
     """
     from .executables import builtin_executables
 

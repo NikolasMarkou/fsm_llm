@@ -483,6 +483,52 @@ class TestCancelAndOverlap:
 # ---- the type, the factory, the loader --------------------------------------------------------
 
 
+class TestBudgetsAreCheckedWhenTheStepIsBuilt:
+    """D-070: a budget the executable refuses is a construction error when the registry has it."""
+
+    def test_a_budget_the_executable_refuses_is_refused_at_construction(self) -> None:
+        class _Refuses(_Code):
+            refused_budgets: ClassVar[tuple[str, ...]] = ("max_steps",)
+
+        registry = _registry(_Refuses())
+        with pytest.raises(ValidationError, match="max_steps"):
+            _step(registry, "code", max_steps=5)
+        _step(registry, "code", max_seconds=3.0)  # the other budget is honoured
+        _step(registry, "code")
+
+    def test_the_builtins_name_what_they_refuse(self) -> None:
+        from fsm_llm.agents.executables import PatternExecutable
+        from fsm_llm.reasoning.executables import SolveExecutable
+
+        registry = ExecutableRegistry()
+        registry.register(PatternExecutable("debate"))
+        registry.register(SolveExecutable())
+        with pytest.raises(ValidationError, match="max_steps"):
+            _step(registry, "debate", max_steps=3)
+        _step(registry, "debate", max_seconds=3.0)
+        for budget in ({"max_steps": 3}, {"max_seconds": 3.0}):
+            with pytest.raises(ValidationError, match=r"reasoning\.solve"):
+                _step(registry, "reasoning.solve", **budget)
+        _step(registry, "reasoning.solve")
+
+    def test_an_executable_not_yet_in_the_registry_is_judged_at_run_time(self) -> None:
+        step = _step(ExecutableRegistry(), "later", max_steps=5)
+        assert step.max_steps == 5
+
+    async def test_the_run_time_refusal_stays_for_a_budget_set_after_construction(
+        self,
+    ) -> None:
+        from fsm_llm.agents.executables import PatternExecutable
+
+        registry = ExecutableRegistry()
+        registry.register(PatternExecutable("debate"))
+        step = _step(registry, "debate", inputs={"task": "q"}, error_step_id="bad")
+        step.max_steps = 5  # an assignment skips the validators
+        result = await step.execute({"q": "hello"})
+        assert result.success is False and result.next_step_id == "bad"
+        assert "max_iterations" in str(result.error)
+
+
 class TestTheStepClass:
     def test_the_serialize_tag_is_the_class_name_and_no_object_is_written(self) -> None:
         registry = _registry(_Code())
