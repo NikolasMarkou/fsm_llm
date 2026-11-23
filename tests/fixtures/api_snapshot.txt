@@ -776,6 +776,67 @@ fsm_llm.engine.context.RunContext class
   def __init__(self, llm_interface: LLMInterface | None = None, llm_factory: Callable[[], LLMInterface] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken = <factory>, callables: NameRegistry[Any] | None = None, parent: str | None = None) -> None
   def derive(self, *, parent: str, max_steps: int | None = None, max_seconds: float | None = None) -> RunContext
   def resolve_llm(self) -> LLMInterface | None
+# fsm_llm.engine.executables
+fsm_llm.engine.executables.AliasSpec class
+  def __init__(self, name: str, target: str, routes: tuple[tuple[str, float], ...]) -> None
+fsm_llm.engine.executables.DEFAULT_EXECUTABLE_MAX_STEPS = 100
+fsm_llm.engine.executables.EXECUTABLE_KINDS NameRegistry
+fsm_llm.engine.executables.EXECUTABLE_SOURCES NameRegistry
+fsm_llm.engine.executables.Executable class(Protocol)
+  def __init__(self, *args, **kwargs)
+  def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  def instantiate(self, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> Instance
+  def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+fsm_llm.engine.executables.ExecutableCollisionError class(ExecutableError)
+fsm_llm.engine.executables.ExecutableError class(FSMError)
+fsm_llm.engine.executables.ExecutableEvictedError class(ExecutableError)
+fsm_llm.engine.executables.ExecutableKindError class(ExecutableError)
+fsm_llm.engine.executables.ExecutableNotFoundError class(ExecutableError)
+fsm_llm.engine.executables.ExecutableRegistry class
+  def __init__(self, paths: Iterable[str | os.PathLike[str]] = (), *, kinds: NameRegistry[Callable[..., Any]] | None = None, sources: NameRegistry[Callable[[], Iterable[Any]]] | None = None, max_retained_templates: int = 256) -> None
+  def add_document(self, data: object, *, variables: Mapping[str, str] | None = None, resolver: Callable[[str, str], bool] | None = None) -> Executable
+  classmethod def from_paths(cls, paths: Iterable[str | os.PathLike[str]], **options: Any) -> ExecutableRegistry
+  def get(self, id: str, version: str | None = None) -> Executable
+  def get_by_template(self, template_identity: str) -> Executable
+  def list(self, kind: str | None = None, capability: Capability | str | None = None, launchable: bool | None = None) -> builtins.list[Executable]
+  def load_sources(self) -> ReloadReport
+  def pin(self, executable: Executable) -> None
+  def rebuild(self, template_identity: str, record: Mapping[str, Any], expected_instance_identity: str) -> Instance
+  def register(self, executable: Executable) -> Executable
+  def reload(self) -> ReloadReport
+  def resolve(self, name: str, *, experiment: str | None = None, conversation_id: str | None = None, pinned_template_identity: str | None = None) -> Resolution
+  def set_alias(self, name: str, routes: Mapping[str, float], *, target: str | None = None) -> None
+  def unpin(self, executable: Executable) -> None
+fsm_llm.engine.executables.FsmBodyExecutable class
+  def __init__(self, envelope: ExecutableEnvelope, *, setup: Callable[[API], None] | None = None, pins: PinSink | None = None) -> None
+  def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  property capabilities
+  property contract
+  property id
+  def instantiate(self, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> FsmInstance
+  property kind
+  property lifecycle
+  def rebuild(self, record: Mapping[str, Any], expected_instance_identity: str) -> FsmInstance
+  property requires
+  def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  property version
+fsm_llm.engine.executables.FsmInstance class
+  def __init__(self, executable: FsmBodyExecutable, definition: FSMDefinition, record: Mapping[str, Any], instance_identity: str) -> None
+  def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+fsm_llm.engine.executables.Instance class(Protocol)
+  def __init__(self, *args, **kwargs)
+  def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+  def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
+fsm_llm.engine.executables.MAX_DOCUMENT_BYTES = 2097152
+fsm_llm.engine.executables.MAX_RETAINED_TEMPLATES = 256
+fsm_llm.engine.executables.ReloadReport class
+  def __init__(self, ids: tuple[tuple[str, str], ...], failed: Mapping[str, tuple[str, ...]], collisions: tuple[str, ...]) -> None
+fsm_llm.engine.executables.Resolution class(tuple)
+fsm_llm.engine.executables.adapter_for def(kind: str, kinds: NameRegistry[Callable[..., Any]] | None = None) -> Callable[..., Any]
+fsm_llm.engine.executables.is_template_identity def(key: str) -> bool
+fsm_llm.engine.executables.make_alias def(name: str, routes: Mapping[str, float], target: str | None = None) -> AliasSpec
+fsm_llm.engine.executables.pick_route def(spec: AliasSpec, experiment: str | None, conversation_id: str | None) -> str
 # fsm_llm.engine.okf_bridge
 fsm_llm.engine.okf_bridge.bundle_from_memory_entries def(entries: Iterable[Any], *, generated_by: str | None = None, now: datetime | str | None = None) -> OKFBundle
 fsm_llm.engine.okf_bridge.create_okf_handler def(bundle: OKFBundle, *, context_key: str = 'okf_concepts', timing: HandlerTiming = HandlerTiming.PRE_PROCESSING, states: Iterable[str] = (), query_key: str | None = None, max_items: int = 20, include_deprecated: bool = False, name: str = 'OKFContext') -> BaseHandler

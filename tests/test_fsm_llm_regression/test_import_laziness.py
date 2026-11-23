@@ -97,6 +97,10 @@ MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
         "the load sequence loads when a caller imports it; `core/verify/cli.py` imports it "
         "inside the function, `core/verify/__init__.py` not at all"
     ),
+    "fsm_llm.engine.executables": (
+        "the executable protocol, adapter, registry and aliases load when a runner imports them; "
+        "the engine packages below import none of them (an import contract)"
+    ),
     "fsm_llm.engine.context": (
         "the run context (C12) loads when a runner imports it; `engine/__init__.py` imports nothing"
     ),

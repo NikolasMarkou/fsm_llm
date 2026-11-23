@@ -240,6 +240,21 @@ class TestTheContractRuns:
                 "import fsm_llm.skills  # planted",
                 "policy imports no context, okf or skills module",
             ),
+            (
+                "engine/api/helpers.py",
+                "import fsm_llm.engine.executables  # planted",
+                "engine peers import no executables or run context",
+            ),
+            (
+                "engine/turn/driver.py",
+                "import fsm_llm.engine.context  # planted",
+                "engine peers import no executables or run context",
+            ),
+            (
+                "engine/executables/adapters.py",
+                "import fsm_llm.agents  # planted",
+                "Section 5.2 layers",
+            ),
         ]
         for rel, line, contract in plants:
             path = tree / "fsm_llm" / rel

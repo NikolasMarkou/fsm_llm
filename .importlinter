@@ -413,6 +413,30 @@ source_modules =
 forbidden_modules =
     fsm_llm.engine.okf_bridge
 
+# Plan ace7a8c8 step 22 (D-059): `engine/context.py` (the run context) and `engine/executables/`
+# (the executable protocol, the FSM-body adapter, the registry) sit ABOVE the API. The engine
+# packages below them import neither, so `import fsm_llm` can never load them through the engine
+# and a turn never depends on a registry. They import no subpackage: the layers contract already
+# keeps the engine off every L6 package, so a built-in reaches the registry through the
+# `executable_sources` namespace. No `ignore_imports`.
+[importlinter:contract:engine-below-executables-imports-no-executables-or-context]
+name = engine peers import no executables or run context
+type = forbidden
+source_modules =
+    fsm_llm.engine.api
+    fsm_llm.engine.builders
+    fsm_llm.engine.classification
+    fsm_llm.engine.events
+    fsm_llm.engine.fsm
+    fsm_llm.engine.intent_router
+    fsm_llm.engine.kinds
+    fsm_llm.engine.okf_bridge
+    fsm_llm.engine.session
+    fsm_llm.engine.turn
+forbidden_modules =
+    fsm_llm.engine.executables
+    fsm_llm.engine.context
+
 # Step 87 (agents/base.py became the package agents/base/, D-039). `BaseAgent` is the base of every
 # pattern, so the package imports no pattern module (a pattern imports it; the reverse would be a
 # cycle), no meta-builder module and no transport (`mcp`, `remote`): it reads its sibling support

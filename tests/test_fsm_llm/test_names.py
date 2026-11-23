@@ -451,6 +451,18 @@ NAMESPACES: dict[str, tuple[str, str, str]] = {
         "the conversation and completion executors registered at import; "
         "register_executor (a runtime kind); a per-API executors= map sits outside it",
     ),
+    "executable_kinds": (
+        "engine/executables/namespaces.py",
+        "EXECUTABLE_KINDS",
+        "the fsm, strategy and procedure adapter factories registered at import; "
+        "entry-point group fsm_llm.executable_kinds (E2.3 wires pyproject later)",
+    ),
+    "executable_sources": (
+        "engine/executables/namespaces.py",
+        "EXECUTABLE_SOURCES",
+        "named source factories a package registers by an explicit call "
+        "(agents and reasoning in step 23); entry-point group fsm_llm.executable_sources",
+    ),
 }
 
 #: The private name tables that remain, each with the roadmap row that retires it (docs/2026_roadmap.md).
@@ -571,6 +583,14 @@ class TestNamespaces:
             "a NameRegistry at module level is missing from NAMESPACES (or a row is "
             f"stale): {sorted(set(found) ^ listed)}"
         )
+
+    def test_the_executable_namespaces_have_their_entry_point_groups(self):
+        from fsm_llm.engine.executables import namespaces
+
+        assert namespaces.EXECUTABLE_KINDS._group == "fsm_llm.executable_kinds"
+        assert namespaces.EXECUTABLE_SOURCES._group == "fsm_llm.executable_sources"
+        assert namespaces.EXECUTABLE_KINDS.list() == ["fsm", "procedure", "strategy"]
+        assert namespaces.EXECUTABLE_SOURCES.list() == []  # nothing registers at import
 
     def test_the_state_kind_registry_holds_the_two_builtin_executors(self):
         from fsm_llm.engine.kinds import registry as kinds

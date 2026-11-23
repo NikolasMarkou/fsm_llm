@@ -744,6 +744,11 @@
       "delta": 1,
       "reason": "step 19.1 of plan ace7a8c8, D-056: new anchor on identity_of (the free-form body is walked by _json_tree, never dumped by pydantic, whose depth guard is per platform)",
       "token": "plan-2026-11-20T055240-ace7a8c8/D-056"
+    },
+    {
+      "delta": 1,
+      "reason": "step 22 of plan ace7a8c8, D-059: new anchor in ExecutableRegistry (leaf lock, validate-first swap, templates retained and never instances)",
+      "token": "plan-2026-11-20T055240-ace7a8c8/D-059"
     }
   ]
 }
