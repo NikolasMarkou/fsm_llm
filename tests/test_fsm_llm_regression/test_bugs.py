@@ -511,6 +511,11 @@ class TestConversationMemoryLeak:
         # end (D-050), no longer inside a swallow-everything try; mirror __init__.
         api._ended_conversations = {}
         api._MAX_ENDED_CACHE = 10_000
+        # end_conversation also forgets what settle kept for the child frames
+        # (the call kind); mirror __init__ again.
+        from fsm_llm.engine.api.calls import CallMarks
+
+        api._call_marks = CallMarks()
 
         # Bypass the decorator by calling the underlying logic
         api.end_conversation.__wrapped__(api, "conv1")
