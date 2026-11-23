@@ -2079,9 +2079,10 @@ def _edge(target: str):
 
 
 class TestLeafModule:
-    #: The one `fsm_llm` module the registry may import: its sibling leaf (plan baa37f40,
-    #: D-014: the edge rule the result-key kinds share; it imports nothing from `fsm_llm`).
-    _SIBLING_LEAVES = ("fsm_llm.core.kind_call",)
+    #: The `fsm_llm` modules the registry may import: its sibling leaves (plan baa37f40,
+    #: D-014: the edge rule the result-key kinds share; D-037: the completion hooks; neither
+    #: imports anything from `fsm_llm`).
+    _SIBLING_LEAVES = ("fsm_llm.core.kind_call", "fsm_llm.core.kind_completion")
 
     def _imports(self, module: Path = _MODULE) -> list[str]:
         tree = ast.parse(module.read_text(encoding="utf-8"))
@@ -2107,11 +2108,12 @@ class TestLeafModule:
         for name in self._imports():
             assert name.split(".")[0] in stdlib or name in self._SIBLING_LEAVES, name
 
-    def test_the_sibling_leaf_imports_nothing_from_fsm_llm(self):
-        """Guards: `kind_call` is imported by `state_kinds`, so it may import nothing
-        of the package (a cycle) and only the standard library."""
+    @pytest.mark.parametrize("leaf", ["kind_call.py", "kind_completion.py"])
+    def test_the_sibling_leaf_imports_nothing_from_fsm_llm(self, leaf):
+        """Guards: `kind_call` and `kind_completion` are imported by `state_kinds`, so
+        they may import nothing of the package (a cycle) and only the standard library."""
         stdlib = set(__import__("sys").stdlib_module_names)
-        for name in self._imports(_PKG / "core" / "kind_call.py"):
+        for name in self._imports(_PKG / "core" / leaf):
             assert not name.startswith("."), name
             assert name.split(".")[0] in stdlib, name
 

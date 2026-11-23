@@ -13,8 +13,9 @@ spec per kind: those places now read the spec instead of testing
 engine and the analyses).
 
 A leaf core module, like ``definitions.schema`` and ``codes``: it imports only the
-standard library and its sibling leaf ``kind_call`` (the edge rule the result-key
-kinds share), never logs and never raises on a loaded state. A state is read
+standard library and its sibling leaves ``kind_call`` (the edge rule the result-key
+kinds share) and ``kind_completion`` (the completion hooks, D-037), never logs and
+never raises on a loaded state. A state is read
 through ``getattr`` (its kind config by field name), so this module needs no
 ``State`` import and ``definitions`` can import it. ``fsm_llm/__init__.py`` does
 not import it; the registry is internal until the kind extension point is
@@ -182,6 +183,13 @@ from fsm_llm.core.kind_call import (
     call_read_keys,
     check_result_edges,
 )
+from fsm_llm.core.kind_completion import (
+    _completion_check_state,
+    _completion_declared_tools,
+    _completion_lint_raw,
+    _completion_raw_declared_tools,
+    _completion_raw_result_key,
+)
 
 __all__ = [
     "CALL",
@@ -344,59 +352,11 @@ def _no_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
     return None
 
 
-def _completion_lint_raw(
-    state_id: str, state: dict[str, Any], fsm_data: dict[str, Any], services: Any
-) -> list[str]:
-    """A completion state whose transitions do not cover every result kind it
-    can produce (``calls``, ``final``, ``malformed`` with tools; ``final``,
-    ``malformed`` for a structured turn): no unconditional transition and a kind
-    no condition names as a string literal. An uncovered kind stalls the state,
-    and skip-if-set makes no further call, so the step budget burns."""
-    kinds = (
-        services.result_kinds
-        if state["completion"].get("tools")
-        else tuple(k for k in services.result_kinds if k != "calls")
-    )
-    transitions = state.get("transitions") or []
-    if any(not t.get("conditions") for t in transitions):
-        return []
-    named: set[str] = set()
-    for transition in transitions:
-        for condition in transition.get("conditions") or []:
-            named |= services.string_literals(condition.get("logic"))
-    missing = [kind for kind in kinds if kind not in named]
-    if not missing:
-        return []
-    return [
-        f"Completion state '{state_id}' has no transition for result "
-        f"kind(s) {missing} and no unconditional transition: such a "
-        "turn stays in the state and makes no further call"
-    ]
-
-
-def _completion_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
-    key: str = state["completion"].get("result_key") or services.default_result_key
-    return key
-
-
 def _synthesize_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
     key: str = (
         state["synthesize"].get("result_key") or services.default_synthesis_result_key
     )
     return key
-
-
-def _tool_names(tools: object) -> tuple[str | None, ...]:
-    """One entry per declared tool: its function name, or ``None`` for an entry
-    with no readable (string, non-empty) name. ``tools`` is read as given, so a
-    raw value (absent, a single dict, a string) never raises."""
-    entries = () if tools is None else tools if isinstance(tools, list) else (tools,)
-    names: list[str | None] = []
-    for tool in entries:
-        function = tool.get("function") if isinstance(tool, dict) else None
-        name = function.get("name") if isinstance(function, dict) else None
-        names.append(name if isinstance(name, str) and name else None)
-    return tuple(names)
 
 
 def _no_declared_tools(state: Any) -> tuple[str, ...]:
@@ -405,16 +365,6 @@ def _no_declared_tools(state: Any) -> tuple[str, ...]:
 
 def _no_raw_declared_tools(state: dict[str, Any]) -> tuple[str | None, ...]:
     return ()
-
-
-def _completion_declared_tools(state: Any) -> tuple[str, ...]:
-    config = getattr(state, "completion", None)
-    names = _tool_names(getattr(config, "tools", None))
-    return tuple(name for name in names if name is not None)
-
-
-def _completion_raw_declared_tools(state: dict[str, Any]) -> tuple[str | None, ...]:
-    return _tool_names(state["completion"].get("tools"))
 
 
 def _no_read_keys(state: Any) -> tuple[str, ...]:
@@ -435,13 +385,6 @@ def _call_produced_keys(
 
 
 def _no_state_problem(state: Any) -> str | None:
-    return None
-
-
-def _completion_check_state(state: Any) -> str | None:
-    # A terminal state runs no turn, so its completion call would never run.
-    if not getattr(state, "transitions", None):
-        return "a completion state needs a transition (a terminal state runs no turn)"
     return None
 
 
