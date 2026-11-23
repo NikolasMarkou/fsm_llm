@@ -1830,7 +1830,7 @@ fsm_llm.reasoning.ReasoningClassificationResult class(TimestampedModel)
 fsm_llm.reasoning.ReasoningEngine class
   def __init__(self, model: str | None = None, **kwargs)
   def close(self) -> None
-  def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]
+  def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, dict[str, Any]]
 fsm_llm.reasoning.ReasoningError class(FSMError)
 fsm_llm.reasoning.ReasoningExecutionError class(ReasoningError)
   def __init__(self, message: str, reasoning_type: str | None = None, **kwargs)

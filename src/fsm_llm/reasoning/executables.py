@@ -28,10 +28,11 @@ Interface contract:
   leaves the worker running). ``outputs`` is ``{"solution": text}``, ``answer`` the same text,
   ``detail`` holds ``reasoning_trace`` and ``summary``. A ``ReasoningExecutionError`` whose cause is
   a ``RunBudgetExceededError`` ends ``aborted/budget_spent``, one whose cause is an
-  ``LLMResponseError`` ends ``failed/provider_error``, any other error propagates. ``max_steps`` and
-  ``max_seconds`` are refused (the engine has its own budget, ``Defaults.MAX_SOLVE_STEPS``; E3.3
-  maps them). The cancel token is checked before the run starts. The identity has no instance
-  (code-backed). ``solve_problem`` itself stays a tuple.
+  ``LLMResponseError`` ends ``failed/provider_error``, any other error propagates. The ``max_steps``
+  and ``max_seconds`` of the run context are the two keywords of ``solve_problem`` (plan baa37f40
+  D-032): ``None`` keeps the engine's own derived step budget and no seconds limit. The cancel token
+  is checked before the run starts. The identity has no instance (code-backed). ``solve_problem``
+  itself stays a tuple.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.engine.executables.adapters import FsmBodyExecutable
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
 
-from .constants import ContextKeys, Defaults
+from .constants import ContextKeys
 from .engine import ReasoningEngine
 from .exceptions import ReasoningExecutionError
 from .handlers import register_strategy_handlers
@@ -88,8 +89,6 @@ def _strategy_executable(name: str) -> FsmBodyExecutable:
 class SolveExecutable(CodeBackedExecutable):
     """``reasoning.solve``: the whole reasoning engine behind one ``run(problem)``."""
 
-    refused_budgets = ("max_steps", "max_seconds")  # the engine has its own budget
-
     def __init__(self) -> None:
         super().__init__(
             id=SOLVE_ID,
@@ -107,11 +106,6 @@ class SolveExecutable(CodeBackedExecutable):
         context: RunContext,
         identity: Identity,
     ) -> RunResult:
-        if context.max_steps is not None or context.max_seconds is not None:
-            raise ValueError(
-                "reasoning.solve takes no max_steps or max_seconds: the engine has its "
-                f"own budget (Defaults.MAX_SOLVE_STEPS = {Defaults.MAX_SOLVE_STEPS})"
-            )
         problem = inputs["problem"]
         if not isinstance(problem, str):
             raise ValueError(
@@ -157,7 +151,12 @@ class SolveExecutable(CodeBackedExecutable):
             kwargs["event_log"] = context.event_log
         engine = ReasoningEngine(**kwargs)
         try:
-            return engine.solve_problem(problem, initial_context)
+            return engine.solve_problem(
+                problem,
+                initial_context,
+                max_steps=context.max_steps,
+                max_seconds=context.max_seconds,
+            )
         finally:
             engine.close()
 

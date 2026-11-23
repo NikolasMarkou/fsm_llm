@@ -41,7 +41,7 @@ from fsm_llm.engine.executables import (
 from fsm_llm.llm import ModelNotConfiguredError
 from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
 from fsm_llm.reasoning import executables as module
-from fsm_llm.reasoning.constants import ContextKeys, Defaults
+from fsm_llm.reasoning.constants import ContextKeys
 from fsm_llm.reasoning.executables import SOLVE_ID, builtin_executables, strategy_id
 from fsm_llm.reasoning.handlers import register_strategy_handlers
 from fsm_llm.reasoning.strategy_files import STRATEGY_ORDER, strategy_facts
@@ -290,11 +290,15 @@ class _SpyEngine:
         self.kwargs = kwargs
         self.closed = 0
         self.solved: tuple[str, Any] | None = None
+        self.limits: dict[str, Any] = {}
         self.thread: int | None = None
         type(self).instances.append(self)
 
-    def solve_problem(self, problem: str, initial_context: Any = None) -> Any:
+    def solve_problem(
+        self, problem: str, initial_context: Any = None, **limits: Any
+    ) -> Any:
         self.solved = (problem, initial_context)
+        self.limits = limits
         self.thread = threading.get_ident()
         if isinstance(self.outcome, BaseException):
             raise self.outcome
@@ -470,15 +474,16 @@ class TestSolve:
             )
 
     @pytest.mark.parametrize("limit", [{"max_steps": 5}, {"max_seconds": 5.0}])
-    def test_a_budget_the_engine_cannot_honour_is_refused(
+    def test_a_budget_of_the_run_context_is_mapped_not_refused(
         self, spy_engine: type[_SpyEngine], limit: dict[str, Any]
     ) -> None:
-        with pytest.raises(ValueError, match="MAX_SOLVE_STEPS"):
-            _registry().get(SOLVE_ID).run(
-                _solve(), context=RunContext(llm_interface=ScriptedLLM(), **limit)
-            )
-        assert spy_engine.instances == []
-        assert Defaults.MAX_SOLVE_STEPS > 0
+        """Plan baa37f40 step 16 (D-032): the engine takes the limits, so the executable
+        hands them over (the budget rows proper are in ``test_solve_budgets.py``)."""
+        _registry().get(SOLVE_ID).run(
+            _solve(), context=RunContext(llm_interface=ScriptedLLM(), **limit)
+        )
+        (engine,) = spy_engine.instances
+        assert engine.limits == {"max_steps": None, "max_seconds": None, **limit}
 
     def test_a_set_cancel_token_ends_aborted_cancelled_before_the_engine(
         self, spy_engine: type[_SpyEngine]

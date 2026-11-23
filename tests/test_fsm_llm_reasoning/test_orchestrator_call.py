@@ -35,6 +35,7 @@ from fsm_llm.reasoning.constants import (
     ContextKeys,
     Defaults,
     OrchestratorStates,
+    solve_step_budget,
 )
 from fsm_llm.reasoning.strategy_files import STRATEGY_ORDER, load_fsm, strategy_id
 from fsm_llm.runtime import EventLog
@@ -131,7 +132,7 @@ class TestTheOrchestratorFile:
 
     def test_the_budget_of_a_solve_is_derived_from_the_file(self) -> None:
         max_steps = load_fsm("orchestrator")["states"][CALL_STATE]["call"]["max_steps"]
-        assert Defaults.MAX_SOLVE_STEPS == (
+        assert solve_step_budget(max_steps) == (
             Defaults.MAX_TOTAL_STEPS + (Defaults.MAX_RETRIES + 1) * max_steps
         )
 
@@ -354,7 +355,7 @@ class TestTheChoice:
                 ContextKeys.RETRY_COUNT: 0,
             }
         )
-        engine.orchestrator.run_until_terminal(cid, max_steps=Defaults.MAX_SOLVE_STEPS)
+        engine.orchestrator.run_until_terminal(cid, max_steps=engine._solve_steps)
         context = engine.orchestrator.get_data(cid)
 
         assert _the_call(context)["target"] == "reasoning.analytical"

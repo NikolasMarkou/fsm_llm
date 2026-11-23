@@ -17,6 +17,7 @@ from fsm_llm.reasoning.constants import (
     LogMessages,
     OrchestratorStates,
     ReasoningType,
+    solve_step_budget,
 )
 from fsm_llm.reasoning.handlers import ReasoningHandlers
 from fsm_llm.reasoning.utilities import get_reasoning_fsm
@@ -149,13 +150,15 @@ class TestDefaults:
     def test_solve_steps_budget_is_cumulative(self):
         """D-013: orchestrator steps plus one full strategy run per attempt. The strategy
         budget is ``call.max_steps`` of ``execute_reasoning`` in the orchestrator file
-        (``MAX_SUB_FSM_STEPS`` is gone, D-031); step 16 of plan baa37f40 computes it."""
+        (``MAX_SUB_FSM_STEPS`` is gone, D-031) and ``solve_step_budget`` derives the
+        total (plan baa37f40 step 16, D-032: the literal ``MAX_SOLVE_STEPS`` is gone)."""
         call = get_reasoning_fsm("orchestrator")["states"]["execute_reasoning"]["call"]
         assert not hasattr(Defaults, "MAX_SUB_FSM_STEPS")
-        assert Defaults.MAX_SOLVE_STEPS == (
+        assert not hasattr(Defaults, "MAX_SOLVE_STEPS")
+        assert solve_step_budget(call["max_steps"]) == (
             Defaults.MAX_TOTAL_STEPS + (Defaults.MAX_RETRIES + 1) * call["max_steps"]
         )
-        assert Defaults.MAX_SOLVE_STEPS == 170
+        assert solve_step_budget(call["max_steps"]) == 170
 
     def test_hybrid_back_edge_limit(self):
         assert Defaults.MAX_HYBRID_LOOPS == 2

@@ -19,6 +19,7 @@ from fsm_llm import (
     clear_keys_on_entry,
 )
 from fsm_llm.engine.api.helpers import llm_settings_for
+from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.engine.kinds.call import chosen_target
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import interface_model, resolve_model
@@ -34,6 +35,7 @@ from .constants import (
     LogMessages,
     OrchestratorStates,
     ReasoningType,
+    solve_step_budget,
 )
 from .definitions import ReasoningClassificationResult, ReasoningTrace
 from .exceptions import ReasoningClassificationError, ReasoningExecutionError
@@ -112,7 +114,14 @@ class ReasoningEngine:
                 f"state {OrchestratorStates.EXECUTE_REASONING!r} of the orchestrator "
                 "file is not a call state"
             )
+        if call.max_steps is None:  # a packaging bug too: the budget lives in the file
+            raise ReasoningExecutionError(
+                f"state {OrchestratorStates.EXECUTE_REASONING!r} of the orchestrator "
+                "file declares no call max_steps"
+            )
         self._call_config = call
+        # the default step budget of a solve, derived from the file (plan baa37f40 D-032)
+        self._solve_steps = solve_step_budget(call.max_steps)
 
     def _initialize_apis(self):
         """Initialize APIs with all necessary handlers."""
@@ -365,7 +374,12 @@ class ReasoningEngine:
         self.close()
 
     def solve_problem(
-        self, problem: str, initial_context: dict[str, Any] | None = None
+        self,
+        problem: str,
+        initial_context: dict[str, Any] | None = None,
+        *,
+        max_steps: int | None = None,
+        max_seconds: float | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """
         Solve a problem using structured reasoning.
@@ -375,14 +389,30 @@ class ReasoningEngine:
 
         :param problem: The problem statement
         :param initial_context: Optional initial context
+        :param max_steps: Ceiling on the steps of the one orchestrator run (strategy
+            frames included); ``None`` derives it from the orchestrator file
+            (``solve_step_budget(call.max_steps)``, 170 for the shipped file)
+        :param max_seconds: Wall-clock ceiling of that run; ``None`` is no limit
         :return: Tuple of (solution, trace_info)
-        :raises ReasoningExecutionError: If reasoning execution fails
+        :raises ValueError: If a limit is not a valid run limit (before any model call)
+        :raises ReasoningExecutionError: If reasoning execution fails, a spent budget
+            included (chained from ``RunBudgetExceededError``)
         """
+        check_turn_limits(max_steps, max_seconds)
         with self._solve_lock:
-            return self._solve_problem_locked(problem, initial_context)
+            return self._solve_problem_locked(
+                problem,
+                initial_context,
+                self._solve_steps if max_steps is None else max_steps,
+                max_seconds,
+            )
 
     def _solve_problem_locked(
-        self, problem: str, initial_context: dict[str, Any] | None = None
+        self,
+        problem: str,
+        initial_context: dict[str, Any] | None,
+        max_steps: int,
+        max_seconds: float | None,
     ) -> tuple[str, dict[str, Any]]:
         """Internal solve logic, must be called while holding ``_solve_lock``."""
         # Initialize context (copy to avoid mutating caller's dict)
@@ -411,7 +441,7 @@ class ReasoningEngine:
             # One message-free run drives the orchestrator, every strategy FSM its
             # `execute_reasoning` call pushes (and pops) and every retry.
             results = self.orchestrator.run_until_terminal(
-                conversation_id, max_steps=Defaults.MAX_SOLVE_STEPS
+                conversation_id, max_steps=max_steps, max_seconds=max_seconds
             )
         except RunBudgetExceededError as e:
             # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an

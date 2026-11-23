@@ -593,7 +593,7 @@ class TestSpentBudget:
 
         error = info.value
         assert isinstance(error.__cause__, RunBudgetExceededError)
-        assert error.__cause__.steps_done == Defaults.MAX_SOLVE_STEPS
+        assert error.__cause__.steps_done == engine._solve_steps == 170
         details = error.details
         assert set(details) == {
             "conversation_id",

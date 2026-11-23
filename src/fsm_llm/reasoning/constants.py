@@ -341,12 +341,18 @@ class Defaults:
     MAX_CLASSIFICATION_STEPS = 10  # Steps budget of the classifier FSM run
     MAX_TOTAL_STEPS = 50  # Orchestrator steps of one solve
     MAX_HYBRID_LOOPS = 2  # Times the hybrid critical_evaluation back edge runs
-    # Steps budget of the one orchestrator run of a solve (D-013): the
-    # orchestrator's own steps plus a full strategy run for the first attempt
-    # and each retry. The 30 is ``call.max_steps`` of ``execute_reasoning`` in
-    # ``strategies/orchestrator.json`` (a test pins the equality; plan baa37f40
-    # step 16 computes it). A pop of an ended strategy FSM is not a step.
-    MAX_SOLVE_STEPS = 170  # MAX_TOTAL_STEPS + (MAX_RETRIES + 1) * 30
+
+
+def solve_step_budget(strategy_steps: int) -> int:
+    """The step budget of the one orchestrator run of a solve (D-013, plan baa37f40 D-032).
+
+    The orchestrator's own steps (``Defaults.MAX_TOTAL_STEPS``) plus a full strategy run for
+    the first attempt and each retry, ``strategy_steps`` each: ``strategy_steps`` is
+    ``call.max_steps`` of ``execute_reasoning`` in ``strategies/orchestrator.json`` (the
+    engine reads it from the file it loaded, so the number lives once). A pop of an ended
+    strategy FSM is not a step. With the shipped file (30) the result is 170.
+    """
+    return Defaults.MAX_TOTAL_STEPS + (Defaults.MAX_RETRIES + 1) * strategy_steps
 
 
 class ErrorMessages:
