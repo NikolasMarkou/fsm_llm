@@ -4,7 +4,7 @@
 
 An executable is one JSON document that wraps an FSM body with a header: who it is, what it reads and writes, which names it needs, and which `{{variables}}` an operator fills in. This page covers the format, the two identities of a document, the rule that keeps a caller's input out of instruction text, the load sequence that checks a document, and how `fsm-llm-validate` reports it.
 
-What exists today is the format and its loader. A document is parsed and checked, and `instantiate_envelope` turns it into an `FSMDefinition` that you hand to `API.from_definition`. The engine does not read an executable file by itself, no built-in agent or reasoning strategy is shipped as one yet, and nothing here runs a model or executes anything from a document.
+What exists today is the format and its loader. A document is parsed and checked, and `instantiate_envelope` turns it into an `FSMDefinition` that you hand to `API.from_definition`. The engine does not read an executable file by itself and nothing here executes anything from a document. The built-in agent patterns, the reasoning strategies and `reasoning.solve` are served by id as executables (see [Built-in executables](#built-in-executables)).
 
 ## The document
 
@@ -104,6 +104,28 @@ identity = identity_of(envelope, definition)           # template_identity, inst
 `instantiate_envelope(envelope, *, options=None, variables=None)` replaces `{{name}}` in the string values of `body.fsm` for the declared variables. It never touches a key, never rescans a replacement, and leaves an unknown `{{name}}` as text. It raises `InstantiationError` for a declared variable with no value, a value for a name that is not declared, a value that is not text, a non-empty `options` (no kind has an option schema yet), or a body that is not a valid FSM definition. The returned `record` is what you log. `rebuild_instance(envelope, record, expected_instance_identity)` re-instantiates from a record and raises `InstanceIdentityMismatchError` unless the digest equals the one that was logged, so a replay can prove it ran the same body.
 
 `identity_of(template, instance=None)` returns an `Identity` with `instance_identity` left `None` when no instance is given. The instance may be an `FSMDefinition` or a dict: a dict that loads as an FSM definition gives the same instance identity as the definition (one instance, one identity), and only a dict that is not an FSM is hashed as written. Parse and instantiation functions raise `ExecutableDocumentError` and `InstantiationError`, both `ValueError`s and `FSMError`s.
+
+## Built-in executables
+
+`fsm_llm.agents` and `fsm_llm.reasoning` declare their built-ins through the `executable_sources` namespace: each registers one lazy factory, named `agents` and `reasoning`, when the package is imported, and `ExecutableRegistry().load_sources()` calls the factories of the packages your process has imported (there is no entry-point wiring yet, so import the package first). The built-ins have lifecycle `builtin`: the 18 agent patterns under their `create_agent` names (`react`, `debate`, and so on), nine strategies (`reasoning.deductive`, and so on) and `reasoning.solve`.
+
+```python
+import fsm_llm.agents
+from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.executables import ExecutableRegistry
+
+registry = ExecutableRegistry()
+registry.load_sources()
+result = registry.get("debate").run(
+    {"task": "Is tea better than coffee?"}, context=RunContext(llm_interface=llm)
+)  # a RunResult
+```
+
+- A pattern's input is `task` (and an optional `initial_context`). A pattern that needs Python objects (its tools, a chain, an evaluation function, maker and checker instructions, the members of a swarm) names them in `requires.callables` and is not `launchable`: the host supplies them in `RunContext(callables=...)`, a `NameRegistry` of that name, and an unresolved name raises `ExecutableError` before any model call. Optional objects, such as `hitl` and `config`, are read from the same registry when present.
+- An executable never supplies an approval. The `hitl` object you give passes through unchanged, and a tool that needs approval without one is refused when the agent is built.
+- `max_seconds` of the context becomes the agent's `timeout_seconds`; `max_steps` is refused for a pattern (set `max_iterations` on the config) and both are refused by `reasoning.solve`, which has its own step budget.
+- A strategy takes the four keys the reasoning engine hands it (`problem_statement`, `problem_components`, `constraints`, `problem_type`) as inputs and reports both identities. A pattern and `reasoning.solve` report the template identity only: their instance identity is `None`, because the body is code and the task sits in the FSM description until patterns become files.
+- Known limits: a pattern or `reasoning.solve` runs its synchronous body on a worker thread, checks the cancel token only before it starts, and leaves the worker running if its await is cancelled.
 
 ## A caller's input is data, never instruction text
 

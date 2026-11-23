@@ -1156,6 +1156,7 @@
     "fsm_llm.reasoning.definitions",
     "fsm_llm.reasoning.engine",
     "fsm_llm.reasoning.exceptions",
+    "fsm_llm.reasoning.executables",
     "fsm_llm.reasoning.handlers",
     "fsm_llm.reasoning.utilities",
     "fsm_llm.runner",

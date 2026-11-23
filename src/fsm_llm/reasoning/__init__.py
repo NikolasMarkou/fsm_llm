@@ -25,6 +25,8 @@ Available Reasoning Types:
     - ANALOGICAL: Learning through analogies
 """
 
+from fsm_llm.engine.executables.namespaces import EXECUTABLE_SOURCES
+
 from .__version__ import __version__
 from .constants import ReasoningType
 from .definitions import (
@@ -41,6 +43,21 @@ from .exceptions import (
     ReasoningExecutionError,
 )
 from .utilities import get_available_reasoning_types
+
+
+def _builtin_executables() -> list:
+    """The ``reasoning`` source of ``executable_sources``: nine strategies and ``reasoning.solve``.
+
+    Lazy on purpose: ``reasoning.executables`` is imported on the first call, so importing this
+    package loads the engine's namespace module but not the executables (plan ace7a8c8 D-061).
+    """
+    from .executables import builtin_executables
+
+    return builtin_executables()
+
+
+# `override=True`: re-importing the package (a reload) replaces the factory, never collides.
+EXECUTABLE_SOURCES.register("reasoning", _builtin_executables, override=True)
 
 __all__ = [
     # Main classes
