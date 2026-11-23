@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 import warnings
+from collections.abc import Iterable
 from types import FrameType
 from typing import TYPE_CHECKING, Any
 
@@ -46,11 +47,12 @@ def _is_machinery(frame: FrameType) -> bool:
     )
 
 
-def warn_bypassed_twins(cls: type) -> None:
+def warn_bypassed_twins(cls: type, twins: Iterable[str] = _SYNC_TWINS) -> None:
     """Warn once per sync twin that ``cls`` defines without its async twin.
 
-    Interface contract: ``cls`` is a ``LiteLLMInterface`` subclass being created (call it
-    from ``__init_subclass__``). A name of ``_SYNC_TWINS`` defined in the body of ``cls``
+    Interface contract: ``cls`` is a class being created (call it from ``__init_subclass__``:
+    ``LiteLLMInterface`` with the default ``twins``, ``FSMSynthesizer`` with its own three names,
+    plan ace7a8c8 D-068); ``twins`` are the sync names to check. A name of ``twins`` defined in the body of ``cls``
     and not its ``async_name`` gets one ``RuntimeWarning`` attributed to the first frame
     outside this package, ``abc`` and any ``__init_subclass__`` (the class statement, also
     through an intermediate class with its own hook); nothing else is read or changed.
@@ -62,7 +64,7 @@ def warn_bypassed_twins(cls: type) -> None:
     # The reverse (an `a` twin overridden alone) is NOT warned (D-045): it is the normal way to
     # wrap a twin with `await super()`, and a body that really suspends is a documented rule.
     # See decisions.md D-009.
-    for name in _SYNC_TWINS:
+    for name in twins:
         twin = async_name(name)
         if name in vars(cls) and twin not in vars(cls):
             frame: FrameType | None = sys._getframe()

@@ -644,6 +644,31 @@ class TestBudgetsAndErrors:
         assert (config.max_iterations, config.timeout_seconds) == (3, 7.5)
         assert mine.timeout_seconds == 99.0  # the host's object is not changed
 
+    def test_a_run_budget_never_widens_the_hosts_own_timeout(
+        self, spy: list[_SpyAgent]
+    ) -> None:
+        # D-068: a host that capped its agent at 30 s keeps the cap under a 600 s run budget
+        mine = AgentConfig(model="m", max_iterations=3, timeout_seconds=30.0)
+        context = RunContext(
+            llm_interface=_Filler(),
+            max_seconds=600.0,
+            callables=_callables(config=mine),
+        )
+        _exe("debate").run({"task": TASK}, context=context)
+        config = spy[0].kwargs["config"]
+        assert (config.max_iterations, config.timeout_seconds) == (3, 30.0)
+        assert mine.timeout_seconds == 30.0
+
+    def test_a_run_budget_equal_to_the_hosts_timeout_changes_nothing(
+        self, spy: list[_SpyAgent]
+    ) -> None:
+        mine = AgentConfig(model="m", timeout_seconds=30.0)
+        context = RunContext(
+            llm_interface=_Filler(), max_seconds=30.0, callables=_callables(config=mine)
+        )
+        _exe("debate").run({"task": TASK}, context=context)
+        assert spy[0].kwargs["config"].timeout_seconds == 30.0
+
     def test_a_swarm_with_max_seconds_builds_a_config_without_a_model(
         self, spy: list[_SpyAgent], monkeypatch: pytest.MonkeyPatch
     ) -> None:

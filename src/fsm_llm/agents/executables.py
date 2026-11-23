@@ -22,7 +22,7 @@ Interface contract:
   ``memory``) are read from ``RunContext.callables`` when present. A name is the keyword of the
   pattern's constructor; ``tools`` and ``config`` reach ``create_agent``'s own parameters.
 - Run: the cancel token is checked before the run starts (a built-in is not interruptible between
-  steps); ``context.max_seconds`` becomes ``AgentConfig.timeout_seconds``; ``context.max_steps``
+  steps); ``context.max_seconds`` becomes ``AgentConfig.timeout_seconds`` (the smaller of it and the host config's own, never wider); ``context.max_steps``
   is refused (``ValueError`` naming ``max_iterations``); the interface of the context and its event
   log are passed to the agent (a swarm takes neither: its members own theirs). The run is the
   agent's sync ``run`` on a worker thread (``aoffload``: a cancelled await leaves the worker
@@ -177,13 +177,19 @@ class PatternExecutable(CodeBackedExecutable):
             if context.event_log is not None:
                 kwargs["event_log"] = context.event_log
         if context.max_seconds is not None:
+            # DECISION plan-2026-11-20T055240-ace7a8c8/D-068: a run budget NARROWS the host's own
+            # timeout and never widens it (the derive rule of `RunContext`); with no host config
+            # there is no host choice to keep. Do NOT assign `max_seconds` unconditionally.
+            timeout = context.max_seconds
             if config is None:
                 config = (
                     AgentConfig(model=model_or_placeholder())
                     if swarm
                     else default_agent_config(llm)
                 )
-            config = config_with(config, timeout_seconds=context.max_seconds)
+            else:
+                timeout = min(timeout, config.timeout_seconds)
+            config = config_with(config, timeout_seconds=timeout)
         return create_agent(self.pattern, tools, config=config, **kwargs)
 
     def _result(self, outcome: Any, identity: Identity) -> RunResult:

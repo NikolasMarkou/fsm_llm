@@ -16,6 +16,7 @@ import inspect
 import json
 import re
 import threading
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -437,6 +438,92 @@ class TestApproval:
         assert calls == [GOAL]
         assert proc.record is not None
         assert proc.record.provenance["approved_by"] == "patched"
+
+
+class TestSubclassBypass:
+    """D-068: an override of a sync name without its twin is warned about and is bypassed async."""
+
+    @pytest.mark.parametrize(
+        ("sync", "twin"),
+        [("compile", "acompile"), ("obtain", "aobtain"), ("approval", "aapproval")],
+    )
+    def test_a_sync_override_without_its_twin_warns_at_the_class_statement(
+        self, sync: str, twin: str
+    ) -> None:
+        with pytest.warns(
+            RuntimeWarning, match=f"overrides {sync} but not {twin}"
+        ) as w:
+            type("Sub", (FSMSynthesizer,), {sync: lambda self, *a, **k: None})
+        assert len(w) == 1
+        assert Path(w[0].filename).name == Path(__file__).name
+
+    def test_a_subclass_with_the_twin_or_the_twin_alone_or_neither_is_silent(
+        self,
+    ) -> None:
+        async def twin(self, *a, **k):
+            return None
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            type("Both", (FSMSynthesizer,), {"approval": twin, "aapproval": twin})
+            type("TwinOnly", (FSMSynthesizer,), {"aapproval": twin})
+            type("Neither", (FSMSynthesizer,), {"x": 1})
+
+    def test_the_base_class_itself_does_not_warn(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _synth([])
+
+    async def test_an_async_caller_of_a_sync_only_approval_override_gets_the_base_approval(
+        self, tmp_path, valid_fsm
+    ) -> None:
+        # The pinned limit: the stricter sync override never runs under aobtain (it does under
+        # the sync name). The base G7 still holds: the reviewer must say exactly True.
+        def deny(self, goal, return_keys, result):
+            raise SynthesisRefusedError("never", "approval_denied")
+
+        with pytest.warns(RuntimeWarning, match="overrides approval but not aapproval"):
+            Strict = type("Strict", (FSMSynthesizer,), {"approval": deny})
+        seen: list[Any] = []
+        strict = Strict(
+            ScriptedLLM([_text(valid_fsm), _text(valid_fsm)]),
+            policy=STRICT,
+            library=FSMLibrary(tmp_path / "lib"),
+            reviewer=_reviewer(seen),
+        )
+        proc = await strict.aobtain(GOAL, return_keys=RET)
+        assert proc.record is not None and len(seen) == 1  # the base G7 ran
+        denying = Strict(
+            ScriptedLLM([_text(valid_fsm)]),
+            policy=STRICT,
+            library=FSMLibrary(tmp_path / "lib2"),
+            reviewer=_reviewer([], verdict="yes"),
+        )
+        with pytest.raises(SynthesisRefusedError) as info:
+            await denying.aobtain(GOAL, return_keys=RET)
+        assert info.value.code == "approval_denied"  # the base fail-closed rule
+        with pytest.raises(SynthesisRefusedError, match="never"):
+            strict.obtain(
+                GOAL + " other", return_keys=RET
+            )  # sync mode runs the override
+
+    async def test_an_override_of_the_async_twin_is_honoured_by_aobtain(
+        self, tmp_path, valid_fsm
+    ) -> None:
+        class Strict(FSMSynthesizer):
+            async def aapproval(self, goal, return_keys, result):
+                raise SynthesisRefusedError("never", "approval_denied")
+
+        seen: list[Any] = []
+        synth = Strict(
+            ScriptedLLM([_text(valid_fsm)]),
+            policy=STRICT,
+            library=FSMLibrary(tmp_path / "lib"),
+            reviewer=_reviewer(seen),
+        )
+        with pytest.raises(SynthesisRefusedError, match="never"):
+            await synth.aobtain(GOAL, return_keys=RET)
+        assert seen == [] and _empty(synth)
 
 
 class TestCancel:

@@ -50,6 +50,7 @@ from fsm_llm.llm import (
     implements_complete,
     interface_model,
 )
+from fsm_llm.llm.providers.call import warn_bypassed_twins
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
 from fsm_llm.policy import HumanInTheLoop
@@ -284,6 +285,18 @@ class FSMSynthesizer:
         ``LLMResponseError``. Bad arguments raise ``ValueError`` before any
         call. Caller data is never mutated.
     """
+
+    # DECISION plan-2026-11-20T055240-ace7a8c8/D-068
+    # An async caller reaches `acompile`, `aobtain` and `aapproval` directly, so a subclass that
+    # overrides only the sync `compile`, `obtain` or `approval` is BYPASSED in async mode (a stricter
+    # G7 in `approval` would silently not run). This only WARNS at the class statement, as
+    # `LiteLLMInterface` does (51fde95b D-009); the base `aapproval` still enforces the policy and
+    # a reviewer that says exactly True. Do NOT run the sync override from `aobtain` (the base sync
+    # `approval` is a `run_sync` wrapper over `aapproval`: a call that reaches it from a worker
+    # recurses or nests a loop) and do NOT make `acall` MRO-aware. Override the `a` twin instead.
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        warn_bypassed_twins(cls, ("compile", "obtain", "approval"))
 
     def __init__(
         self,
