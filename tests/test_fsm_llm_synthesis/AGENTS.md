@@ -23,7 +23,7 @@ Doubles and helpers (`conftest.py` unless named):
 | `_offline_network` (autouse) | `tests.conftest.block_network`: refuses every IPv4 and IPv6 connect, loopback too |
 | `foreign_calls` | Fails on any `LiteLLMInterface` built or provider call made; the test asserts the list is empty |
 
-Layout: most files test one module, named `test_<module>.py`. Cross-module files are `test_concierge.py` (the whole pattern on real `API` objects, both ways the runner drives a conversation) and `test_happy_path.py` (G6b with an honest executor).
+Layout: most files test one module, named `test_<module>.py`. Cross-module files are `test_concierge.py` (the whole pattern on real `API` objects, both ways a host drives a conversation: `converse` and `run_until_terminal`) and `test_happy_path.py` (G6b with an honest executor).
 
 ## Key files
 
@@ -36,11 +36,12 @@ Layout: most files test one module, named `test_<module>.py`. Cross-module files
 | `test_happy_path.py` | the happy path built from the definition, an honest executor, value-typed edges |
 | `test_synthesizer.py` | compile and repair rounds, cut or malformed replies, outage, the goal fence read from the REAL request, approval, reuse |
 | `test_library.py` | digest, lifecycle `_EDGES`, atomic write, corruption never overwritten, search, traces, scenarios, lineage |
-| `rig.py` | The rig of the driver rows: a real `API` on a host with a `synthesize` state, a driver with the call surface of `ProcedureRunner` (`run`, `converse`, `end_conversation`; `DRIVERS` maps a name to a `DriverSpec`: the runner on a bare `API`, and the executor, a thin wrapper over an `API(executors=[SynthesizeExecutor])` that steps the parent after a pop as the runner's `_settle` did), `make_rig` (`host_edit`, `driver`) and the helpers `make_host`, `make_procedure`, `serve_procedure`, `Metered` |
+| `rig.py` | The rig of the driver rows: a real `API` on a host with a `synthesize` state and `SynthesizeExecutor` registered, and `ExecutorDriver` (`run`, `converse`, `end_conversation`: a thin wrapper over the `API` that steps the parent after a pop, which the engine does not do), `make_rig` (`host_edit`) and the helpers `make_host`, `make_procedure`, `serve_procedure`, `Metered` |
 | `test_executor.py` | What only `SynthesizeExecutor` does: a Pass 2 failure after an obtain, the child greeting, the compile under the turn gate, a cancel and an interrupt during `obtain`, a forged running record, the declared inputs only and no grant, a restart proved by the frame's `fsm_id`, the persona rule, trace mode, one lock-order row, the layering |
-| `test_driver_rows.py` | What a driver must do, run on every entry of `DRIVERS`: the ok path, abort at `max_turns`, an outage is no procedure fault, return keys, every failure the parent sees as a fixed reason, nesting, trace events that carry no value |
+| `test_driver_rows.py` | What a host sees of a run: the ok path, abort at `max_turns`, an outage is no procedure fault, return keys, every failure the parent sees as a fixed reason, nesting, trace events that carry no value |
 | `test_executor_stream.py` | The `synthesize` kind on core's streams over a bare `API` with a `SynthesizeExecutor`: `run_until_terminal_stream` and `converse_stream` give the text and end state of the plain call, the arguments are checked at call time, a stream closed early leaves the ended child for the next entry (settle is never a closing action) |
-| `test_runner.py`, `test_runner_stream.py` | What pins `ProcedureRunner` itself: `hook`, `_runs` and `_refused`, its own push, its own `run_stream` and `converse_stream` and their settle on close, a signal during the compile, the bare `converse` on a synthesize state, `TestPushedChildOwnsItsSynthesisResult`; they go with the runner (plan baa37f40 step 22) |
+| `test_executor_bounds.py` | The rows of the deleted runner file that carried an invariant of the engine or the trace, on the executor: the engine bounds the child (`max_turns`, a spent host budget is not the child's), a refused start is the same turn's failure edge in `converse` and `run`, a settled result is never obtained twice, a conversation ended under a child counts no run, the trace is value free |
+| `test_pushed_child_result.py` | A pushed child owns its synthesis result (`inherits_result_on_push`, D-022 of plan d454fd62), on a passive executor |
 | `test_tools.py` | the tool pair through `ToolRegistry.execute`: labels, caps, codes, `max_obtains` |
 | `test_concierge.py` | end to end on a bare `API` with a `SynthesizeExecutor`, both modes (`converse` and `run_until_terminal`), plus the tool pair |
 | `reference_tasks.py`, `test_reference_tasks.py` | the 16 reference tasks of the retired synthesis bench, their `hand_fsm` and `host_definition`, the scripted `User`, the grader and `drive_fsm` (arms S and H on one host, a bare `API` with a `SynthesizeExecutor`, and library); the hand arm runs every task offline with no strong call |

@@ -51,8 +51,7 @@ A compile after a miss may carry one near miss in its request: the stored proced
 - `simulation.py` - `Simulator`, `SimulationReport`, `happy_path` (G6b).
 - `prompts.py` - the compile and patch prompts, the goal fence, a worked example FSM.
 - `library.py` - `FSMLibrary`, `LibraryRecord`, `LibraryMatch`, `digest_of`.
-- `runner.py` - `ProcedureRunner`.
-- `executor.py` - `SynthesizeExecutor`: the same `synthesize` state run on the engine (`API(executors=...)`), no second driver (plan baa37f40, step 20; the runner coexists until step 22).
+- `executor.py` - `SynthesizeExecutor`: the `synthesize` state run on the engine (`API(executors=...)`), the only driver; a bare `API` refuses the state with `MissingExecutorError` (plan baa37f40, steps 20 and 22; `ProcedureRunner` is gone).
 - `procedures.py` - the pure helpers of a run: `runnable_reason`, `reason_of`, the result record and the round strings.
 - `tools.py` - `create_procedure_tools`: the agent tools `obtain_procedure` and `run_procedure`.
 - `traces.py` - `RunTrace`, `TraceRecorder`.
@@ -159,5 +158,5 @@ Traces and repair: `TraceRecorder(library.add_trace)` is a `trace_sink` for `Syn
 - Traces hold names, type names, state ids, codes and counts and no value, user text or reply. Only a run that failed for the procedure's own reasons (`budget_spent`, `return_keys_missing`) can justify a patch; an outage or a refusal never does.
 - Repair is propose-only by default. A repaired child is stored `verified`, never `trusted`, and only after it passes G1 to G6b and a replay against the parent. A trusted parent is never deprecated.
 - A provider outage during a compile raises `SynthesisError` chained from `LLMResponseError`, with no retry and no provider text.
-- Layering: this package imports core, the layer packages `fsm_llm.tools`, `fsm_llm.policy`, `fsm_llm.okf`, `fsm_llm.llm`, `fsm_llm.engine` and `fsm_llm.runtime` (the runner reads `fsm_llm.runtime.usage` for the outage position), and the kernel; it reaches `fsm_llm.agents` only for `semantic_tools` (roadmap 3.2 debt) and `fsm_llm.eval` only for the simulator and the repair statistics (roadmap 6.6 and P7.6 debt), the edges `.importlinter` names; none of `agents`, `eval` or the layers import it. It makes no provider call of its own: every request goes through an `LLMInterface`.
+- Layering: this package imports core, the layer packages `fsm_llm.tools`, `fsm_llm.policy`, `fsm_llm.okf`, `fsm_llm.llm`, `fsm_llm.engine` and `fsm_llm.runtime` (the engine's settle step reads `fsm_llm.runtime.usage` for the outage position on behalf of the executor), and the kernel; it reaches `fsm_llm.agents` only for `semantic_tools` (roadmap 3.2 debt) and `fsm_llm.eval` only for the simulator and the repair statistics (roadmap 6.6 and P7.6 debt), the edges `.importlinter` names; none of `agents`, `eval` or the layers import it. It makes no provider call of its own: every request goes through an `LLMInterface`.
 - Bench: the pre-registered comparison (compiled FSM against an in-context ReAct agent, with a hand-written FSM as a harness check) ran blocks `s0`, `s1` and `s2`; all three verdicts are INCONCLUSIVE. Its script and rows were deleted and live in git history (plan baa37f40 D-012); the results and their limits are in `docs/synthesis.md`. Every role and every arm used the same model, so there is no strong and cheap split.

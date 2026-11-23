@@ -15,7 +15,7 @@ The pages in the table below are current guides for version 0.13.0, and each sta
 | `executables.md` | Executables: the envelope (header and body, the two identities, the caller-input rule, the load sequence V1 to V5 and V7, `fsm-llm-validate`), running one (`RunContext`, the protocol, the FSM-body adapter), the registry (retention, aliases, namespaces), the built-in patterns and strategies, the workflow step and the known limits |
 | `results_and_names.md` | The status and reason codes, `RunResult` and `Identity`, `NameRegistry`, the JSON patch applier, how the model is chosen |
 | `handlers.md` | The handler timings, `HandlerBuilder`, error modes, patterns |
-| `synthesis.md` | Runtime FSM synthesis: a model writes a procedure, gates judge it, a runner executes it |
+| `synthesis.md` | Runtime FSM synthesis: a model writes a procedure, gates judge it, an executor on the engine runs it |
 | `testing.md` | `fsm_llm.testing`: test doubles, the scripted user and the assertions, with runnable examples |
 | `api_reference.md` | The public API of the core and of every subpackage, hand written |
 | `cli.md` | Every console script and `python -m fsm_llm.reasoning`: options, exit codes, `--model`, `--env-file` |
