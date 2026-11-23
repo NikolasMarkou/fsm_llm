@@ -12,7 +12,8 @@ spec per kind: those places now read the spec instead of testing
 engine and the analyses).
 
 A leaf core module, like ``definitions.schema`` and ``codes``: it imports only the
-standard library, never logs and never raises on a loaded state. A state is read
+standard library and its sibling leaf ``kind_call`` (the edge rule the result-key
+kinds share), never logs and never raises on a loaded state. A state is read
 through ``getattr`` (its kind config by field name), so this module needs no
 ``State`` import and ``definitions`` can import it. ``fsm_llm/__init__.py`` does
 not import it; the registry is internal until the kind extension point is
@@ -77,7 +78,7 @@ Interface contract:
     ``definitions.logic_referenced_keys``; ``definition`` is read by ``getattr``
     (``states``, ``handler_only_keys``). Default accepts. The edge check stays
     in the loader, never in ``validator.py`` (it may not be stricter than the
-    loader): see the anchor at ``_synthesize_check_definition``.
+    loader): see the anchor at ``kind_call.check_result_edges``.
 
   - ``mentioned_keys(state)``: the key names the state declares or requires
     (``required_context_keys``, each extraction's ``field_name``, each
@@ -159,6 +160,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypeVar
+
+from fsm_llm.core.kind_call import check_result_edges
 
 __all__ = [
     "COMPLETION",
@@ -427,7 +430,7 @@ def _no_definition_problem(
 # producer: `fsm_llm.synthesis.procedures._result`, which core may not import). `None`
 # is "no result yet". The strings are the wire values of `codes.Status` and
 # `codes.Reason`: this leaf cannot import `codes`, so `test_codes` pins them
-# against the enums (and `_RUNNING` below). `definitions._SYNTHESIZE_SAMPLES` is
+# against the enums (and `kind_call._RUNNING`). `definitions._SYNTHESIZE_SAMPLES` is
 # this tuple under the name `test_codes` reads.
 SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
     ("absent", None),
@@ -435,7 +438,6 @@ SYNTHESIZE_SAMPLES: tuple[tuple[str, dict[str, Any] | None], ...] = (
     ("failed", {"status": "failed", "reason": "compile_failed"}),
     ("aborted", {"status": "aborted", "reason": "budget_spent"}),
 )
-_RUNNING = "running"
 
 
 def _synthesize_samples(state: Any) -> tuple[tuple[str, dict[str, Any] | None], ...]:
@@ -456,103 +458,28 @@ def owned_result_keys(states: Iterable[Any]) -> dict[str, str]:
     }
 
 
-# DECISION plan-2026-11-10T194139-2cefeb61/D-034 and
-# plan-2026-11-10T194139-2cefeb61/D-035: an edge of a synthesize state may
-# read the result key OR a handler-only key (the runner's injected abort
-# edge, handler-only `procedure_abort`, sits on every state of a compiled
-# procedure, nested synthesize states included), and is then RUN on four
-# sample results by the real evaluator. Do NOT
-# require the result key alone, do NOT move this check to validator.py (it may
-# never be stricter than the loader; the loader calls it, see
-# `FSMDefinition._check_synthesize_states`), and do NOT fall back to a
-# structural "mentions the key" rule alone: review pass 2 reproduced both holes
-# (`status == "failed"` strands the parent after an abort; a `!` edge on
-# the result fires only when there is none).
 def _synthesize_check_definition(
     definition: Any, state: Any, evaluator: Any, logic_keys: Callable[[Any], set[str]]
 ) -> str | None:
-    """Cross-state rules for a synthesize state (they need the whole FSM).
-
-    1. Every transition must read the state's ``result_key`` (a condition that
-       requires it or reads it in its logic) or a ``handler_only_keys`` entry
-       (only a handler or the runner writes one; the runner's injected abort
-       edge is of this kind). This is necessary, not enough (rule 2 runs the
-       edges); it also catches an edge on an unrelated key, which the samples
-       of rule 2 cannot see.
-    2. The real evaluator (``TransitionEvaluator.transition_passes``, never a
-       copy of its logic) runs the state's edges on the four sample results,
-       shaped as the runner writes them (``status`` of ``running``, ``failed``
-       or ``aborted``, or no result at all). No edge may pass the absent or the
-       ``running`` sample (it would fire before the runner has decided), and an
-       edge to ``on_failure`` must pass the ``failed`` sample and an edge to it
-       the ``aborted`` sample (or the parent is stranded after a failure). An
-       edge on a handler-only key alone passes no sample: fine, but it cannot
-       be the failure edge.
-    3. Host keys a synthesize state returns or takes may not be runner-owned: a
-       return key merged by ``pop_fsm`` would write a value the child's model
-       extracted over a handler-only key, a synthesize result or a completion
-       result; an input named like a result would be overwritten by the runner.
-       (A completion ``messages_key`` is internal-prefixed and so can never be a
-       public return key.)
-    """
+    """Cross-state rules for a synthesize state: ``kind_call.check_result_edges``
+    (the one body, with its D-034/D-035 anchor) in the synthesize wording."""
     config = state.synthesize
-    handler_only = frozenset(getattr(definition, "handler_only_keys", None) or ())
-    reads = {config.result_key, *handler_only}
-    for transition in state.transitions:
-        if not any(
-            reads.intersection(condition.requires_context_keys or ())
-            or reads.intersection(logic_keys(condition.logic))
-            for condition in transition.conditions or ()
-        ):
-            return (
-                f"the transition to {transition.target_state!r} must read the "
-                f"synthesize result key {config.result_key!r} (a condition that "
-                "requires it or reads it in its logic), or it fires "
-                "before the runner has produced a result"
-            )
-    # other keys the edges require are present: an edge also gated on
-    # one (an AND) must not escape the samples for lacking it
-    others = {
-        key: "x"
-        for transition in state.transitions
-        for condition in transition.conditions or ()
-        for key in condition.requires_context_keys or ()
-        if key != config.result_key and key not in handler_only
-    }
-    for label, result in SYNTHESIZE.sample_results(state):
-        context: dict[str, Any] = dict(others)
-        if result is not None:
-            context[config.result_key] = result
-        passing = [
-            t for t in state.transitions if evaluator.transition_passes(t, context)
-        ]
-        if result is None or result["status"] == _RUNNING:
-            for transition in passing:
-                return (
-                    f"the transition to {transition.target_state!r} fires before "
-                    f"the runner has produced a result (it passes when "
-                    f"{config.result_key!r} is {label})"
-                )
-        elif not any(t.target_state == config.on_failure for t in passing):
-            return (
-                f"no transition to {config.on_failure!r} fires when the "
-                f"procedure failed or aborted (it does not pass when "
-                f"{config.result_key!r} is {label}, {result!r})"
-            )
-    owned = owned_result_keys(getattr(definition, "states", {}).values())
-    for entry, names in (
-        ("return_keys", config.return_keys),
-        ("inputs", config.inputs),
-    ):
-        for name in names:
-            if entry == "return_keys" and name in handler_only:
-                reason = "a handler_only_keys entry"
-            elif name in owned:
-                reason = owned[name]
-            else:
-                continue
-            return f"synthesize {entry} entry {name!r} collides with {reason}"
-    return None
+    return check_result_edges(
+        definition,
+        state,
+        evaluator,
+        logic_keys,
+        kind="synthesize",
+        producer="the runner",
+        outcome="the procedure",
+        result_key=config.result_key,
+        on_failure=config.on_failure,
+        inputs=config.inputs,
+        return_names=config.return_keys,
+        return_entry="return_keys",
+        samples=SYNTHESIZE.sample_results(state),
+        owned=lambda: owned_result_keys(getattr(definition, "states", {}).values()),
+    )
 
 
 def _result_key_of(config_field: str) -> Callable[[Any], str | None]:

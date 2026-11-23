@@ -1104,12 +1104,13 @@ class TestDefinitionCheckHooks:
         """`test_codes` reads `definitions._SYNTHESIZE_SAMPLES`; the name stays and
         its value is the one tuple the hook returns (the leaf cannot import
         `codes.Status`, so test_codes pins the strings against the enum)."""
+        from fsm_llm.core import kind_call
         from fsm_llm.core.codes import Status
         from fsm_llm.core.definitions import fsm as definitions
 
         state = _plain_state(synthesize=_synthesize())
         assert definitions._SYNTHESIZE_SAMPLES is sk.SYNTHESIZE.sample_results(state)
-        assert sk._RUNNING == Status.RUNNING.value
+        assert kind_call._RUNNING == Status.RUNNING.value
 
     def test_only_the_synthesize_kind_has_a_definition_check(self):
         for spec in (sk.CONVERSATION, sk.COMPLETION):
@@ -2065,8 +2066,12 @@ def _edge(target: str):
 
 
 class TestLeafModule:
-    def _imports(self) -> list[str]:
-        tree = ast.parse(_MODULE.read_text(encoding="utf-8"))
+    #: The one `fsm_llm` module the registry may import: its sibling leaf (plan baa37f40,
+    #: D-014: the edge rule the result-key kinds share; it imports nothing from `fsm_llm`).
+    _SIBLING_LEAVES = ("fsm_llm.core.kind_call",)
+
+    def _imports(self, module: Path = _MODULE) -> list[str]:
+        tree = ast.parse(module.read_text(encoding="utf-8"))
         found: list[str] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -2077,14 +2082,24 @@ class TestLeafModule:
 
     def test_it_imports_nothing_from_fsm_llm(self):
         """Guards: the registry is a leaf the loader, the flow analyses and the
-        engine all import (D-015); an import back would make a cycle."""
+        engine all import (D-015); an import back would make a cycle. The only
+        `fsm_llm` import is its sibling leaf `kind_call`."""
         for name in self._imports():
             assert not name.startswith("."), name
-            assert name.split(".")[0] != "fsm_llm", name
+            if name.split(".")[0] == "fsm_llm":
+                assert name in self._SIBLING_LEAVES, name
 
-    def test_it_imports_only_the_standard_library(self):
+    def test_it_imports_only_the_standard_library_and_its_sibling_leaf(self):
         stdlib = set(__import__("sys").stdlib_module_names)
         for name in self._imports():
+            assert name.split(".")[0] in stdlib or name in self._SIBLING_LEAVES, name
+
+    def test_the_sibling_leaf_imports_nothing_from_fsm_llm(self):
+        """Guards: `kind_call` is imported by `state_kinds`, so it may import nothing
+        of the package (a cycle) and only the standard library."""
+        stdlib = set(__import__("sys").stdlib_module_names)
+        for name in self._imports(_PKG / "core" / "kind_call.py"):
+            assert not name.startswith("."), name
             assert name.split(".")[0] in stdlib, name
 
     def test_it_is_not_loaded_by_the_package_init(self):

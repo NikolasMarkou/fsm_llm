@@ -1058,6 +1058,7 @@
     "fsm_llm.core.definitions.executable",
     "fsm_llm.core.definitions.patch",
     "fsm_llm.core.expressions",
+    "fsm_llm.core.kind_call",
     "fsm_llm.core.names",
     "fsm_llm.core.results",
     "fsm_llm.core.verify",

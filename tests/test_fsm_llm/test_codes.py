@@ -186,10 +186,10 @@ class TestAgainstThePinnedVocabularies:
         """The samples live in the `state_kinds` leaf, which cannot import
         `codes.Status`; the loader's name for them is the same tuple, and the
         one status the hook compares against is the enum's value."""
-        from fsm_llm.core import state_kinds
+        from fsm_llm.core import kind_call, state_kinds
 
         assert definitions._SYNTHESIZE_SAMPLES is state_kinds.SYNTHESIZE_SAMPLES
-        assert state_kinds._RUNNING == Status.RUNNING.value
+        assert kind_call._RUNNING == Status.RUNNING.value
 
     def test_synthesize_samples_use_status_values(self):
         statuses = {
