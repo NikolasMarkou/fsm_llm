@@ -1086,6 +1086,7 @@
     "fsm_llm.engine.fsm.gate",
     "fsm_llm.engine.intent_router",
     "fsm_llm.engine.kinds",
+    "fsm_llm.engine.kinds.call",
     "fsm_llm.engine.kinds.conversation",
     "fsm_llm.engine.kinds.conversation.classification",
     "fsm_llm.engine.kinds.conversation.extraction",

@@ -16,6 +16,7 @@ from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.state_kinds import get_kind, kind_of
 
 from .base import StateExecutor
+from .call import CallExecutor
 from .completion import CompletionExecutor
 from .conversation import ConversationExecutor
 
@@ -36,6 +37,7 @@ _CONVERSATION_KIND = "conversation"
 _EXECUTORS: NameRegistry[StateExecutor] = NameRegistry("state_kinds")
 _EXECUTORS.register(_CONVERSATION_KIND, _CONVERSATION)
 _EXECUTORS.register("completion", CompletionExecutor())
+_EXECUTORS.register("call", CallExecutor())
 
 
 def register_executor(kind_name: str, executor: StateExecutor) -> None:

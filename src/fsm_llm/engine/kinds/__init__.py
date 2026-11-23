@@ -12,9 +12,11 @@ d454fd62, D-004, D-015):
   (the conversation kind re-extracts what the same message holds for the new
   state; the other kinds do nothing).
 
-Three kinds, two registrations: ``conversation`` (the field, bulk and classification
+Four kinds, three registrations: ``conversation`` (the field, bulk and classification
 extraction, owned by the executor since step 80: ``conversation/``), ``completion``
-(one ``LLMInterface.complete`` call over a consumer-owned transcript, ``completion.py``) and
+(one ``LLMInterface.complete`` call over a consumer-owned transcript, ``completion.py``),
+``call`` (no model call: Pass 1 resolves a target and writes a request or a refusal record
+that ``engine/api/calls.py`` applies after the turn, ``call.py``, plan baa37f40) and
 ``synthesize`` (passive, no registration: it runs as conversation, because a runner outside core
 pushes the compiled procedure and a bare ``converse`` on such a state stays BLOCKED, D-002 of
 plan 2cefeb61; a later synthesize executor registers under its own name and replaces the
@@ -27,6 +29,7 @@ this package; the old dotted path is gone. Modules:
 - ``services.py``: ``_PipelineServices``, the protocol of what an executor may ask of the pipeline.
 - ``registry.py``: the module table, ``register_executor``, ``check_executors``, ``executor_for``.
 - ``completion.py``: ``CompletionExecutor``.
+- ``call.py``: ``CallExecutor`` and the shared body ``write_call_request`` / ``refuse``.
 - ``conversation/``: ``ConversationExecutor`` and the conversation Pass-1 machinery.
 - ``records.py``: the records and digests both the executors and the turn pipeline use.
 - ``targets.py``: ``TargetResolver``, ``ResolvedTarget`` and ``check_targets``, the seam through which a
@@ -89,11 +92,13 @@ point is public (roadmap C10).
 """
 
 from .base import StateExecutor
+from .call import CallExecutor
 from .completion import CompletionExecutor
 from .conversation import ConversationExecutor
 from .registry import ExecutorsArg, check_executors, executor_for, register_executor
 
 __all__ = [
+    "CallExecutor",
     "CompletionExecutor",
     "ConversationExecutor",
     "ExecutorsArg",
