@@ -141,7 +141,8 @@ API.advance(conversation_id)
 API.run_until_terminal(conversation_id, *, max_steps, max_seconds=None, before_step=None,
                        seconds_exempt_states=())
   → per round: ended? → seconds budget → steps budget → before_step(n) → advance()
-  → an ended PUSHED FSM on top: before_step(n) once (not a step) so the hook can pop it;
+  → an ended PUSHED FSM on top: a call state's child is popped by settle first; any other:
+    before_step(n) once (not a step) so the hook can pop it;
     the run then continues on the parent, or returns if nothing was popped
   → RunBudgetExceededError when a budget is spent; a conversation closed mid-run ends it normally
 ```

@@ -789,6 +789,11 @@
       "delta": 1,
       "reason": "D-023 (plan baa37f40 step 12): the new anchor on settle, which applies a call record after the turn and supersedes 5a6a1f80 D-010 for call frames only",
       "token": "plan-2026-11-23T122249-baa37f40/D-023"
+    },
+    {
+      "delta": 1,
+      "reason": "D-024: the run loops let settle pop an ended call child (one anchor on _settle_ended_call_child)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-024"
     }
   ]
 }

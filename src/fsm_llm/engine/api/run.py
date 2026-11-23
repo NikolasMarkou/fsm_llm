@@ -29,6 +29,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.engine.fsm.budget import _check_run_budgets
 
+from .calls import settle
 from .surface import _ApiSurface
 
 #: ``before_step``: called with the number of the next step; an async hook may return an
@@ -93,7 +94,9 @@ async def _run_rounds(
 
     Contract: the caller runs exactly one step of ``conversation_id`` per
     yielded number and then asks for the next. Each round, in order: when
-    the top of the FSM stack has ended, stop (normal return) unless it is a
+    the top of the FSM stack has ended, first let ``settle`` pop it when it is the
+    child of a call state (D-024; the round then starts again on the new top),
+    then stop (normal return) unless it is a
     pushed frame (stack depth above 1) and ``before_step(n)``, called once
     for it, pops it (``_hook_popped_ended_frame``), in which case the round
     starts again on the new top (that call is not a step and is not gated
@@ -142,6 +145,8 @@ async def _run_rounds(
         # NOT add this loop in a subpackage (the reasoning engine's outer
         # pop-and-rerun loop is what D-013 replaced). See D-052.
         if api.has_conversation_ended(conversation_id):
+            if await _settle_ended_call_child(api, conversation_id):
+                continue
             if before_step is None or not await _hook_popped_ended_frame(
                 api, conversation_id, before_step, steps_done + 1
             ):
@@ -167,6 +172,29 @@ def _stack_depth(api: _ApiSurface, conversation_id: str) -> int:
     """
     with api._stack_lock:
         return len(api.conversation_stacks.get(conversation_id, ()))
+
+
+# DECISION plan-2026-11-23T122249-baa37f40/D-024
+# An ended CALL child on the stack is the engine's to pop (D-023), and `settle` runs only inside
+# the turn entries, so a run loop that returns at once on an ended top leaves a call that never
+# finishes (a resume after a death between the child's end and its pop, or a pop whose end the
+# manager refused) while the conversation reads as ended. Do NOT drop this call so that "an ended
+# frame is the hook's" (944e2692/D-052 holds for every frame that is not a call child), do NOT pop
+# here by hand or write a second pop path (settle owns the single merge), do NOT count it as a
+# step or gate it on the budgets, and do NOT make `has_conversation_ended` false for the frame.
+async def _settle_ended_call_child(api: _ApiSurface, conversation_id: str) -> bool:
+    """Let ``settle`` pop an ended call child; True when the stack got shallower.
+
+    Contract: called by ``_run_rounds`` only when the top of the stack has ended. Returns False
+    without a call when the depth is 1 or less. Otherwise awaits ``settle`` (a no-op unless the
+    top is a child of a ``running`` call record; it can only pop here, so it drops no greeting)
+    and answers whether the frame is gone. What ``settle`` raises propagates unchanged.
+    """
+    depth = _stack_depth(api, conversation_id)
+    if depth <= 1:
+        return False
+    await settle(api, conversation_id)
+    return _stack_depth(api, conversation_id) < depth
 
 
 async def _hook_popped_ended_frame(
