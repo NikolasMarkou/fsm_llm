@@ -45,6 +45,7 @@ class CompletionExecutor(StateExecutor):
     # drop ``text: None`` and a tool argument such as ``{"_id": 1}`` from the
     # calls the consumer runs.
     cleans_extracted = False
+    kind = "completion"
 
     def extract(
         self,

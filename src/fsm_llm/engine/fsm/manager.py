@@ -19,7 +19,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -50,7 +50,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.loaders import load_fsm_definition
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
-from fsm_llm.engine.kinds import StateExecutor
+from fsm_llm.engine.kinds import ExecutorsArg
 from fsm_llm.engine.turn import MessagePipeline
 from fsm_llm.handlers import HandlerErrorMode, HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
@@ -86,11 +86,12 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         *,
-        executors: Mapping[str, StateExecutor] | None = None,
+        executors: ExecutorsArg | None = None,
     ):
         """Create the manager.
 
-        ``executors`` is a ``{kind_name: StateExecutor}`` map for THIS manager's
+        ``executors`` is a ``{kind_name: StateExecutor}`` map (or a list of executors, each
+        naming its ``kind``) for THIS manager's
         pipeline only (it overrides the module table of ``engine/kinds/registry.py``; see
         ``engine.kinds.check_executors``: ``TypeError`` for a bad value,
         ``ValueError`` for an unknown kind name). Keyword-only, internal until

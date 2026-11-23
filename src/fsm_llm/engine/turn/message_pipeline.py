@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import copy
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm.constants import (
@@ -40,7 +40,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.classification import Classifier
-from fsm_llm.engine.kinds import StateExecutor, check_executors
+from fsm_llm.engine.kinds import ExecutorsArg, check_executors
 from fsm_llm.handlers import HandlerSystem, HandlerTiming
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
@@ -74,7 +74,7 @@ class MessagePipeline(
         fsm_resolver: Callable[[str], FSMDefinition],
         field_extraction_prompt_builder: FieldExtractionPromptBuilder | None = None,
         *,
-        executors: Mapping[str, StateExecutor] | None = None,
+        executors: ExecutorsArg | None = None,
     ):
         self.llm_interface = llm_interface
         self.data_extraction_prompt_builder = data_extraction_prompt_builder

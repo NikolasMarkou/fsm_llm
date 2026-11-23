@@ -116,6 +116,10 @@ Interface contract:
   - ``supported_in_procedure``: ``False`` when a stored procedure may not hold a
     state of the kind (the runner refuses it with ``completion_unsupported``).
     Data, not a hook.
+  - ``requires_executor``: ``True`` when a state of the kind may not run as
+    ``conversation``: the engine then refuses a definition holding such a state, for
+    an ``API`` with no executor of the kind, with ``MissingExecutorError``
+    (``executor_for`` is the one rule). Data, not a hook; no built-in kind sets it yet.
 
 - ``RawLintServices``: the facts the raw lint needs and this leaf may not
   import (``result_kinds`` the reply kinds of a completion reply read off
@@ -593,6 +597,7 @@ class KindSpec:
         _no_raw_declared_tools
     )
     supported_in_procedure: bool = True
+    requires_executor: bool = False
 
 
 # The extraction channels a kind that replaces Pass 1 cannot also declare: they

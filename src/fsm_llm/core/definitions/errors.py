@@ -81,6 +81,31 @@ class BuildError(FSMError, ValueError):
         self.errors = list(errors) if errors is not None else [message]
 
 
+class MissingExecutorError(FSMError, ValueError):
+    """A state's kind needs an executor and none is registered for it.
+
+    Interface contract: ``MissingExecutorError(message, *, state_id=None, kind=None,
+    details=None)``; ``state_id`` and ``kind`` are the state that was refused and the name of
+    its kind (``None`` when the raiser has no state). Raised, once, where a definition enters
+    an ``API`` (construction, ``push_fsm``, the frame of ``fork`` and ``resume``) and at the
+    first Pass 1 of a bare ``FSMManager``, for a kind whose ``KindSpec.requires_executor`` is
+    set and which the per-instance ``executors`` map and the module table do not hold. It is
+    a ``ValueError`` too, so a caller that maps ``ValueError`` to a refusal shows the message.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        state_id: str | None = None,
+        kind: str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(message, details)
+        self.state_id = state_id
+        self.kind = kind
+
+
 class ModelNotConfiguredError(FSMError, ValueError):
     """No LLM model was named anywhere: not by argument, not by ``LLM_MODEL``.
 

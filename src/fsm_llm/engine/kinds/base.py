@@ -18,6 +18,11 @@ class StateExecutor:
     """What the turn pipeline calls for a state of one kind (see the module
     docstring for the contract). Subclass it and register the instance."""
 
+    # The kind name this executor serves, read by the list form of ``executors=``
+    # (``check_executors``): a list entry is registered under it. ``None`` on the base class: an
+    # executor that is only ever given in a ``{kind_name: executor}`` mapping needs no ``kind``.
+    kind: str | None = None
+
     # Whether the extracted data is passed through ``clean_context_keys`` before
     # it is committed (it drops None values and internal-prefixed keys).
     cleans_extracted: bool = True

@@ -97,7 +97,6 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -115,7 +114,7 @@ from fsm_llm.core.transition_evaluator import (
 )
 from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.engine.fsm.manager import FSMManager
-from fsm_llm.engine.kinds import StateExecutor
+from fsm_llm.engine.kinds import ExecutorsArg, check_executors
 from fsm_llm.engine.session import SessionStore
 from fsm_llm.handlers import (
     FSMHandler,
@@ -137,7 +136,7 @@ from .events import (
     open_event_log,
 )
 from .forks import ForkMixin
-from .helpers import _require_classifier_interface
+from .helpers import _require_classifier_interface, _require_state_executors
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin
 from .registration import HandlerRegistrationMixin
 from .run import RunMixin
@@ -184,7 +183,7 @@ class API(
         handler_timeout: float | None = None,
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         *,
-        executors: Mapping[str, StateExecutor] | None = None,
+        executors: ExecutorsArg | None = None,
         event_log: EventLog | str | os.PathLike[str] | None = None,
         max_steps: int | None = None,
         max_seconds: float | None = None,
@@ -215,12 +214,16 @@ class API(
                 every conversation of this API (one ``HandlerSystem``).
             max_fsm_cache_size: Bound of the FSM definition LRU cache
                 (at least 1; a smaller value raises ``ValueError``)
-            executors: Optional ``{kind_name: StateExecutor}`` map for this
-                ``API`` only: it overrides the module table of ``engine/kinds/registry.py``
-                and never changes another ``API``. ``TypeError`` for a value
-                that is not a mapping of ``StateExecutor``, ``ValueError`` for
-                a kind name no ``KindSpec`` carries. Internal until the kind
-                extension point is public.
+            executors: Optional ``{kind_name: StateExecutor}`` map, or a list of
+                executors each naming its ``kind``, for this ``API`` only: it overrides
+                the module table of ``engine/kinds/registry.py`` and never changes
+                another ``API``. ``TypeError`` for a value that is neither or holds a
+                non-``StateExecutor``, ``ValueError`` for a kind name no ``KindSpec``
+                carries, ``NameCollisionError`` for a kind named twice in a list. A
+                definition holding a state of a kind that requires an executor and has
+                none here or in the module table is refused with
+                ``MissingExecutorError`` (at construction, ``push_fsm`` and ``fork``).
+                Internal until the kind extension point is public.
             event_log: Opt-in durable event log: an ``EventLog`` (shared, left
                 open by ``close``) or a directory path (the API owns the log and
                 closes it). Off by default, and then nothing changes. See
@@ -289,6 +292,9 @@ class API(
         # Process FSM definition
         self.fsm_definition, self.fsm_id = self.process_fsm_definition(fsm_definition)
         _require_classifier_interface(self.fsm_definition, self.llm_interface)
+        # The checked map the manager is given and the push and fork sites read.
+        self._executors = check_executors(executors)
+        _require_state_executors(self.fsm_definition, self._executors)
 
         # DECISION plan-2026-11-06T093029-0068b055/D-004
         # No prompt builders are built here: FSMManager builds the defaults with
@@ -338,7 +344,7 @@ class API(
             max_message_length=max_message_length,
             handler_system=self.handler_system,
             max_fsm_cache_size=max_fsm_cache_size,
-            executors=executors,
+            executors=self._executors,
         )
 
         # Register provided handlers

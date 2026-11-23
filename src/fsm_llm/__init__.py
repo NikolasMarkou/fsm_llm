@@ -76,6 +76,7 @@ from .core.definitions import (
     LLMCallCounts,
     LLMResponseError,
     LLMUsage,
+    MissingExecutorError,
     ModelNotConfiguredError,
     ModelToolCall,
     MultiClassificationResult,
@@ -315,6 +316,7 @@ __all__ = [
     # Exceptions
     "FSMError",
     "BuildError",
+    "MissingExecutorError",
     "ModelNotConfiguredError",
     "FSMDefinitionNotFoundError",
     "ConversationBusyError",

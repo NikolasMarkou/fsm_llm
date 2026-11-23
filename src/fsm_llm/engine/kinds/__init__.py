@@ -58,16 +58,21 @@ Interface contract:
   module table; a kind with neither runs as ``conversation`` (a passive kind),
   resolved through the per-instance ``conversation`` entry first, then the
   module's, so an override of ``conversation`` covers ``synthesize`` and a
-  runtime kind nobody registered.
+  runtime kind nobody registered. A kind whose ``KindSpec.requires_executor`` is
+  set has no such fallback: with no entry of its own it raises
+  ``MissingExecutorError`` (no built-in kind sets the flag yet).
 - ``register_executor(kind_name, executor)``: add or replace the executor of a
   kind in the MODULE table, which every pipeline in the process reads (a test
   kind registers its own beside its ``KindSpec``; the caller removes it again).
 - ``check_executors(executors)``: validate the ``executors=`` argument of
   ``MessagePipeline``, ``FSMManager`` and ``API`` and return a read-only copy.
-  A ``{kind_name: StateExecutor}`` mapping, or ``None`` (empty). ``TypeError``
-  for a value that is not a mapping or a mapping value that is not a
-  ``StateExecutor``; ``ValueError`` for a name no registered ``KindSpec``
-  carries (a typo would otherwise be a silent no-op). The map belongs to one
+  A ``{kind_name: StateExecutor}`` mapping, a list or tuple of executors (each
+  registered under its ``StateExecutor.kind`` class attribute; the built-in two set
+  theirs, a custom one sets its own; a kind named twice is a ``NameCollisionError``), or
+  ``None`` (empty). ``ExecutorsArg`` is the type of the argument. ``TypeError``
+  for a value that is neither, a mapping value or list entry that is not a
+  ``StateExecutor`` or a list entry with no ``kind``; ``ValueError`` for a name no
+  registered ``KindSpec`` carries (a typo would otherwise be a silent no-op). The map belongs to one
   pipeline, is never written after construction (safe to read from any
   thread) and overrides the module table for that pipeline only; the spec
   registry (``state_kinds.KINDS``) stays static and process-wide.
@@ -84,11 +89,12 @@ point is public (roadmap C10).
 from .base import StateExecutor
 from .completion import CompletionExecutor
 from .conversation import ConversationExecutor
-from .registry import check_executors, executor_for, register_executor
+from .registry import ExecutorsArg, check_executors, executor_for, register_executor
 
 __all__ = [
     "CompletionExecutor",
     "ConversationExecutor",
+    "ExecutorsArg",
     "StateExecutor",
     "check_executors",
     "executor_for",

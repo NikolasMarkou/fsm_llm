@@ -7,16 +7,21 @@ unchanged. Interface contract: the package docstring of ``fsm_llm.engine.kinds``
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from types import MappingProxyType
+from typing import TypeAlias
 
-from fsm_llm.core.definitions import State
+from fsm_llm.core.definitions import MissingExecutorError, State
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.state_kinds import get_kind, kind_of
 
 from .base import StateExecutor
 from .completion import CompletionExecutor
 from .conversation import ConversationExecutor
+
+# The ``executors=`` argument of ``API``, ``FSMManager`` and ``MessagePipeline``: a
+# ``{kind_name: executor}`` mapping or a list (or tuple) of executors, each naming its ``kind``.
+ExecutorsArg: TypeAlias = Mapping[str, StateExecutor] | Sequence[StateExecutor]
 
 _CONVERSATION = ConversationExecutor()
 
@@ -41,22 +46,54 @@ def register_executor(kind_name: str, executor: StateExecutor) -> None:
     _EXECUTORS.register(kind_name, executor, override=True)
 
 
+def _by_kind(executors: Sequence[StateExecutor]) -> dict[str, StateExecutor]:
+    """The ``{kind name: executor}`` mapping of the list form of ``executors=``.
+
+    Each entry must be a ``StateExecutor`` with a non-blank ``kind`` (``TypeError`` naming the
+    index). A kind named twice raises ``NameCollisionError``: the entries go through one local
+    ``NameRegistry``, the same primitive and the same refusal as the module table.
+    """
+    by_kind: NameRegistry[StateExecutor] = NameRegistry("executors")
+    for index, executor in enumerate(executors):
+        if not isinstance(executor, StateExecutor):
+            raise TypeError(
+                f"executors[{index}] must be a StateExecutor, got "
+                f"{type(executor).__name__}"
+            )
+        kind = executor.kind
+        if not isinstance(kind, str) or not kind.strip():
+            raise TypeError(
+                f"executors[{index}] ({type(executor).__name__}) names no kind: set its "
+                "`kind` attribute to the state kind it serves, or pass a "
+                "{kind_name: executor} mapping"
+            )
+        by_kind.register(kind, executor)
+    return dict(by_kind.items())
+
+
 def check_executors(
-    executors: Mapping[str, StateExecutor] | None,
+    executors: ExecutorsArg | None,
 ) -> Mapping[str, StateExecutor]:
     """Validate an ``executors=`` argument and return a read-only copy.
 
+    ``executors`` is a ``{kind_name: executor}`` mapping, a list or tuple of executors (each
+    registered under its ``kind``), or ``None`` (empty).
+
     Raises:
-        TypeError: ``executors`` is not a mapping, a key is not a ``str``, or a
-            value is not a ``StateExecutor``.
-        ValueError: a key names no registered state kind.
+        TypeError: ``executors`` is neither a mapping nor a list or tuple, a key is not a
+            ``str``, a value or list entry is not a ``StateExecutor``, or a list entry names
+            no ``kind``.
+        ValueError: a key (or an entry's ``kind``) names no registered state kind.
+        NameCollisionError: a list names one kind twice.
     """
     if executors is None:
         return MappingProxyType({})
+    if isinstance(executors, (list, tuple)):
+        executors = _by_kind(executors)
     if not isinstance(executors, Mapping):
         raise TypeError(
-            "executors must be a mapping of kind name to StateExecutor, got "
-            f"{type(executors).__name__}"
+            "executors must be a mapping of kind name to StateExecutor, or a list of "
+            f"StateExecutor, got {type(executors).__name__}"
         )
     checked: dict[str, StateExecutor] = {}
     for name, executor in executors.items():
@@ -93,8 +130,11 @@ def executor_for(
           registered, runs as conversation, so an override of ``conversation``
           in the per-instance map applies to it too), then the built-in
           conversation executor.
-        - Never raises for a kind name; ``kind_of`` raises nothing for a
-          state.
+        - A kind whose spec says ``requires_executor`` has no such fallback: with no entry of
+          its own name in either table, ``MissingExecutorError`` (naming the state id, the kind
+          and the remedy). This is the one rule; ``_require_state_executors`` of ``engine/api``
+          asks it for every such state of a definition. No built-in kind sets the flag yet.
+        - Raises nothing else; ``kind_of`` raises nothing for a state.
     """
     # DECISION plan-2026-11-12T073150-d454fd62/D-026
     # A passive kind falls back through the per-instance "conversation" entry.
@@ -103,11 +143,22 @@ def executor_for(
     # ``API(executors={"conversation": X})`` override for a synthesize state
     # (review gate 1, concern 11). A real synthesize executor registers under
     # its own name and then wins.
-    name = kind_of(state).name
-    for kind in (name, _CONVERSATION_KIND):
+    spec = kind_of(state)
+    name = spec.name
+    for kind in (name,) if spec.requires_executor else (name, _CONVERSATION_KIND):
         if executors is not None and kind in executors:
             return executors[kind]
         module_executor = _EXECUTORS.get(kind)
         if module_executor is not None:
             return module_executor
+    if spec.requires_executor:
+        state_id = getattr(state, "id", None)
+        raise MissingExecutorError(
+            f"State '{state_id}' is of kind '{name}', which needs an executor and none is "
+            f"registered for it: pass executors={{'{name}': <executor>}} (or a list of "
+            f"executors naming their kind) to API, FSMManager or MessagePipeline, or call "
+            f"register_executor('{name}', <executor>)",
+            state_id=state_id,
+            kind=name,
+        )
     return _CONVERSATION

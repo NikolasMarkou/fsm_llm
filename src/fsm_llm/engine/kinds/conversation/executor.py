@@ -49,6 +49,8 @@ class ConversationExecutor(StateExecutor):
     plan d454fd62 step 80, D-030); also the passive executor of ``synthesize``.
     """
 
+    kind = "conversation"
+
     # DECISION plan-2026-11-12T073150-d454fd62/D-030
     # The conversation Pass 1 is owned here and bound to ONE pipeline's services per call
     # (``ConversationPass1(pipeline)``). Do NOT keep the pipeline on this executor or cache the

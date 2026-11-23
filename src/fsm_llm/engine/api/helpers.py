@@ -14,7 +14,9 @@ from functools import wraps
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, FSMError
+from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.fsm.manager import FSMManager
+from fsm_llm.engine.kinds import StateExecutor, executor_for
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.logging import logger
 
@@ -141,6 +143,25 @@ def _require_classifier_interface(
                     f"{type(llm_interface).__name__} does not implement "
                     "complete (LLMInterface.complete)"
                 )
+
+
+def _require_state_executors(
+    fsm_def: FSMDefinition, executors: Mapping[str, StateExecutor]
+) -> None:
+    """Refuse a definition holding a state whose kind needs an executor this API lacks.
+
+    Contract: ``executors`` is the checked per-instance map (``check_executors``). For every
+    state whose kind has ``KindSpec.requires_executor`` set, asks ``executor_for``, the one
+    lookup rule, which raises ``MissingExecutorError`` naming the state id, the kind and the
+    remedy when neither the map nor the module table holds an executor of the kind. Returns
+    ``None`` otherwise; no built-in kind sets the flag yet, so nothing is refused today.
+    Checked once per definition (construction, push, the frames of fork and resume) beside
+    ``_require_classifier_interface``, instead of failing at the first turn; a bare
+    ``FSMManager`` has no such site and fails at its first Pass 1 through ``executor_for``.
+    """
+    for state in fsm_def.states.values():
+        if kind_of(state).requires_executor:
+            executor_for(state, executors)
 
 
 def llm_settings_for(api_kwargs: Mapping[str, Any], **settings: Any) -> dict[str, Any]:

@@ -61,7 +61,7 @@ from fsm_llm.runtime.stores.session import public_context
 
 from .budget import budget_kwargs
 from .events import record_forked, record_restored_frame, record_resumed
-from .helpers import _require_classifier_interface
+from .helpers import _require_classifier_interface, _require_state_executors
 from .stack import FSMStackFrame
 from .surface import _ApiSurface
 
@@ -121,6 +121,8 @@ def _prepare(api: _ApiSurface, log: EventLog, frame: FrameProjection) -> _Prepar
         raise LogCorruptError(
             f"{where} classifies through an interface this API does not have"
         ) from None
+    # a configuration fact, not a log fact: raised as itself, not as `LogCorruptError`
+    _require_state_executors(definition, api._executors)
     kept = {k: v for k, v in frame.return_context.items() if v != REDACTED}
     if len(kept) != len(frame.return_context):
         logger.warning(

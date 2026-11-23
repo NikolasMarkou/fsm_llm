@@ -283,8 +283,10 @@ _BUILDERS = [_build_api, _build_manager, _build_pipeline]
 class TestRefusals:
     @pytest.mark.parametrize("build", _BUILDERS)
     def test_a_value_that_is_not_a_mapping_raises_type_error(self, build):
+        # the list form is accepted since plan baa37f40 step 3 (test_required_executor.py),
+        # so the value here is a bare executor, which is neither a mapping nor a list
         with pytest.raises(TypeError, match="mapping of kind name to StateExecutor"):
-            build([("conversation", ex.ConversationExecutor())])
+            build(ex.ConversationExecutor())
 
     @pytest.mark.parametrize("build", _BUILDERS)
     @pytest.mark.parametrize(
