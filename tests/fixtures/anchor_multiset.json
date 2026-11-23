@@ -799,6 +799,11 @@
       "delta": 1,
       "reason": "plan baa37f40 D-025: new anchor on record_belongs (the stamp rule of the call record), a gain",
       "token": "plan-2026-11-23T122249-baa37f40/D-025"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 D-026: new anchor on _settle_after (the end settle never loses the committed turn), a gain",
+      "token": "plan-2026-11-23T122249-baa37f40/D-026"
     }
   ]
 }

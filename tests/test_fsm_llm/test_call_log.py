@@ -442,10 +442,10 @@ class TestAForkOfACallRun:
     def test_a_fork_at_every_turn_goes_on_to_the_one_result(
         self, golden: _Golden, tmp_path: Path
     ) -> None:
-        """The fork before the request (turn 1), with the request and no child (turn 2: rule (b)
-        pushes in the fork), with the child alive (3), with the child ended and unpopped (4) and
-        after the pop (5): every fork shows what the live source showed and finishes with one
-        push and one pop in ITS log."""
+        """The fork before any turn (0), with the request and no child (1, the arrival turn:
+        its `turn/end` holds the request and rule (b) pushes in the fork), with the child alive
+        (2), with the child ended and unpopped (3) and after the success edge (4): every fork
+        shows what the live source showed and finishes with one push and one pop in ITS log."""
         root = tmp_path / "log"
         shutil.copytree(golden.root, root)
         ends = golden.seqs("turn/end")
@@ -467,14 +467,7 @@ class TestAForkOfACallRun:
                     api, log, new_id, f"fork at turn {turn}", pushes=one, pops=one
                 )
                 api.end_conversation(new_id)
-        assert depths == [
-            1,
-            1,
-            1,
-            2,
-            2,
-            1,
-        ]  # non-vacuity: depth 2 seen at turns 3 and 4
+        assert depths == [1, 1, 2, 2, 1]  # non-vacuity: depth 2 seen at turns 2 and 3
 
 
 class TestAPlainRestoreMidCall:
@@ -661,8 +654,8 @@ class TestARunLoopSettlesAnEndedCallChild:
     async def test_the_live_run_loop_pops_a_child_whose_end_was_refused_after_the_merge(
         self,
     ) -> None:
-        """The merge landed and ending the child was refused: the entry raised and the record is
-        final with the child still on the stack and ended. Another ``arun_until_terminal`` pops
+        """The merge landed and ending the child was refused: the entry returned its step (the
+        refusal is a warning, D-026) and the record is final with the child still on the stack and ended. Another ``arun_until_terminal`` pops
         it (no second merge) and finishes the run."""
         flow = await _flow(steps=1)
         await flow.api.aadvance(flow.cid)  # the request, the push
@@ -678,10 +671,9 @@ class TestARunLoopSettlesAnEndedCallChild:
             return real_end(conversation_id, *args, **kwargs)
 
         manager.end_conversation = refuse_once  # type: ignore[method-assign]
-        with pytest.raises(ConversationBusyError):
-            await flow.api.aadvance(
-                flow.cid
-            )  # the child's last step; its pop is refused
+        # the child's last step; its pop is refused and the committed step is not lost (D-026)
+        step = await flow.api.aadvance(flow.cid)
+        assert step.state_after == "c2"
         assert flow.depth() == 2 and flow.record() == _final("ok", None)
         results = await flow.api.arun_until_terminal(flow.cid, max_steps=10)
         assert [r.state_after for r in results] == ["done"]

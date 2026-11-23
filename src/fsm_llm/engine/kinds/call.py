@@ -40,6 +40,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from fsm_llm.aio import run_sync
+from fsm_llm.context import commit_with_key_rollback
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import (
     CallStateConfig,
@@ -49,6 +50,8 @@ from fsm_llm.core.definitions import (
     MissingExecutorError,
     State,
 )
+from fsm_llm.handlers import HandlerTiming
+from fsm_llm.logging import logger
 from fsm_llm.runtime import to_jsonable
 
 from .base import StateExecutor
@@ -214,6 +217,71 @@ class CallExecutor(StateExecutor):
         )
         instance.last_extraction_response = response
         return response
+
+    def after_transition(
+        self,
+        pipeline: _PipelineServices,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        extraction_response: DataExtractionResponse,
+        previous_state: str | None,
+        new_state: State,
+    ) -> None:
+        run_sync(
+            self.aafter_transition(
+                pipeline,
+                instance,
+                user_message,
+                conversation_id,
+                extraction_response,
+                previous_state,
+                new_state,
+            )
+        )
+
+    async def aafter_transition(
+        self,
+        pipeline: _PipelineServices,
+        instance: FSMInstance,
+        user_message: str | None,
+        conversation_id: str,
+        extraction_response: DataExtractionResponse,
+        previous_state: str | None,
+        new_state: State,
+    ) -> None:
+        """Decide ON ARRIVAL (D-026 (1)): the request or the refusal is written in the turn
+        that enters the call state, so the end-of-entry settle pushes the child in that turn
+        and the user's next message goes to it. The write is the post-transition commit shape
+        (the keys, then the CONTEXT_UPDATE handlers for them; a failed handler undoes only
+        them); the source state's ``extraction_response`` is not touched. A value at the key
+        that already belongs to the state (a revisit) is skipped, as in ``aextract``."""
+        config = new_state.call
+        if config is None:
+            raise FSMError(
+                f"CallExecutor.after_transition needs a state with a call config; state "
+                f"'{new_state.id}' has none"
+            )
+        data = instance.context.data
+        if record_belongs(data.get(config.result_key), new_state.id):
+            return
+        committed = self._decide(
+            pipeline, data, conversation_id, new_state, config
+        ).extracted_data
+        commit_with_key_rollback(
+            instance.context,
+            committed,
+            lambda: pipeline.execute_handlers(
+                instance,
+                HandlerTiming.CONTEXT_UPDATE,
+                current_state=instance.current_state,
+                updated_keys=set(committed),
+            ),
+            lambda error: logger.warning(
+                f"CONTEXT_UPDATE handler failed ({type(error).__name__}: {error}), "
+                f"rolling back the call record of state '{new_state.id}'"
+            ),
+        )
 
     @staticmethod
     def _decide(

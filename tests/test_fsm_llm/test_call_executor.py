@@ -63,29 +63,42 @@ class _Resolver:
         )
 
 
+def _initial_call(definition: dict[str, Any]) -> dict[str, Any]:
+    """The call state is where the conversation BEGINS (``start`` removed): the next step runs
+    ``aextract`` (the executor of a turn that begins in the state). ``arrive=True`` leaves the
+    parent in ``start``: the transition into ``work`` runs ``aafter_transition``."""
+    definition["initial_state"] = "work"
+    del definition["states"]["start"]
+    return definition
+
+
 async def _at_the_call(
     config: dict[str, Any] | None = None,
     *,
+    arrive: bool = False,
     context: dict[str, Any] | None = None,
     resolver: _Resolver | None = None,
     llm: ScriptedLLM | None = None,
     **state_overrides: Any,
 ):
-    """A parent API that has moved from ``start`` into the call state ``work`` (the next step
-    runs the executor). Returns ``(api, cid, frame, resolver, llm)``; ``frame`` is the id of
-    the PARENT frame, so a row reads the same conversation before and after settle."""
+    """A parent API whose conversation begins in the call state ``work`` (the next step runs
+    the executor); with ``arrive`` it begins in ``start``. Returns ``(api, cid, frame,
+    resolver, llm)``; ``frame`` is the id of the PARENT frame, so a row reads the same
+    conversation before and after settle."""
     resolver = _Resolver() if resolver is None else resolver
     llm = ScriptedLLM(default_response="r") if llm is None else llm
     state_overrides.setdefault(
         "response_instructions", ""
     )  # silent: `None` is not silent
+    parent = _parent(config, **state_overrides)
     api = API.from_definition(
-        _parent(config, **state_overrides), llm_interface=llm, targets=resolver
+        parent if arrive else _initial_call(parent), llm_interface=llm, targets=resolver
     )
     cid, _ = await api.astart_conversation({"topic": "why", **(context or {})})
     frame = api.conversation_stacks[cid][0].conversation_id
-    await api.aadvance(cid)  # start -> work: the arrival runs nothing
-    assert api.fsm_manager.get_conversation_state(frame) == "work"
+    assert api.fsm_manager.get_conversation_state(frame) == (
+        "start" if arrive else "work"
+    )
     assert "call_result" not in api.fsm_manager.copy_raw_context_data(frame)
     return api, cid, frame, resolver, llm
 
@@ -349,18 +362,20 @@ class TestTheWiring:
         assert isinstance(executor, CallExecutor)
         assert executor.kind == "call" and executor.cleans_extracted is False
 
-    def test_a_bare_manager_with_no_resolver_refuses_at_the_first_pass_one(self):
+    @pytest.mark.parametrize("arrive", [False, True], ids=["initial", "arrival"])
+    def test_a_bare_manager_with_no_resolver_refuses(self, arrive):
         """The call executor refuses itself when the pipeline holds no resolver (a bare
-        ``FSMManager`` has no construction site). Kills: a silent skip."""
-        definition = _parent()
+        ``FSMManager`` has no construction site): at the first Pass 1 of a state the
+        conversation begins in, and on arrival when a transition enters it. Kills: a silent
+        skip on either path."""
+        definition = _parent() if arrive else _initial_call(_parent())
         manager = FSMManager(
             fsm_loader=lambda fsm_id: FSMDefinition(**definition),
             llm_interface=ScriptedLLM(default_response="r"),
         )
         cid, _ = manager.start_conversation("any", initial_context={"topic": "t"})
-        manager.advance(cid)  # start -> work
         with pytest.raises(MissingExecutorError, match="work"):
-            manager.advance(cid)
+            manager.advance(cid)  # start -> work arrives; the other begins in work
 
     def test_the_two_shared_bodies_return_one_key(self):
         """``write_call_request`` and ``refuse`` are what ``SynthesizeExecutor`` reuses (step
@@ -414,6 +429,8 @@ class TestTheWiring:
         )
         api = API.from_definition(definition, llm_interface=llm, targets=_Resolver())
         cid, _ = await api.astart_conversation({"topic": "t"})
-        await api.aadvance(cid)
+        await api.aadvance(cid)  # start -> work: the executor writes the real request
         frame = api.conversation_stacks[cid][0].conversation_id
-        assert "call_result" not in api.fsm_manager.copy_raw_context_data(frame)
+        record = api.fsm_manager.copy_raw_context_data(frame)["call_result"]
+        # the model's `{"status": "ok"}` never landed: the record is the executor's own
+        assert record["status"] == "running" and record["state"] == "work"

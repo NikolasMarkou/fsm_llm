@@ -5,14 +5,17 @@ Layer ``engine`` (plan baa37f40, step 12, D-023, roadmap E3.2). The call executo
 ..., mode: frame, request}`` as handler-only turn data, which rolls back with the turn. Pushing
 and popping a frame is the stack's, and the stack belongs to ``API``, so ``settle`` runs in the
 turn entries (``turn_entries.py``) after the manager released the conversation: at the START
-and the END of ``aconverse`` and ``aadvance`` and at the NORMAL end of a stream (never in a
-stream ``finally``: an abandoned stream defers to the next entry's start).
+and the END of ``aconverse`` and ``aadvance``, at the START and at the NORMAL end of a stream
+(never in a stream ``finally``: an abandoned stream defers to the next entry's start). The
+executor also writes the request ON ARRIVAL (D-026), so the end settle of the arriving turn
+pushes the child and the next message goes to it.
 
 Interface contract:
 
-- ``settle(api, root_id) -> list[str]``: idempotent. Returns the greetings of the children it
-  pushed (empty when it pushed none); the caller joins them to the reply of its step (D-023
-  item 9). A stack with no frame whose definition holds a call state costs one list copy.
+- ``settle(api, root_id) -> Settled``: idempotent. Returns the greetings of the children it
+  pushed (a ``list`` of text, empty when it pushed none; ``changed`` is true when a round
+  pushed, popped or wrote a record); the caller joins them to the reply of its step (D-023
+  item 9, D-026 (4): the START greetings before it, the END greetings after it). A stack with no frame whose definition holds a call state costs one list copy.
   Never blocks: it reads frames through ``FSMManager.peek_turn`` (no conversation lock) and
   does NOTHING while a turn of the frame is in flight. A second driver on the same root while
   one is settling is refused with ``FSMError`` (the root mark, released in ``finally``).
@@ -25,8 +28,11 @@ Interface contract:
   PARENT frame's own definition and context. A forged public ``call_result`` cannot name a
   target the state does not declare.
 - Errors: ``FSMError`` for a second driver and for a pop the manager refuses (the next settle
-  retries); an ``LLMResponseError`` of the child's greeting, a ``CancelledError`` and any other
-  ``BaseException`` propagate and leave the record ``running``, which the next entry re-requests.
+  retries); an ``LLMResponseError`` of the child's greeting is the FINAL record
+  ``failed/provider_error`` (the push rolled itself back; D-026 (6)); a ``CancelledError`` and
+  any other ``BaseException`` propagate and leave the record ``running``, which the next entry
+  re-requests. The END settle of a turn entry runs inside ``_settle_after`` (``turn_entries.py``):
+  an ``Exception`` of it never loses the committed turn's reply (D-026 (5)).
 """
 
 from __future__ import annotations
@@ -56,6 +62,16 @@ _SETTLED_KINDS = frozenset({"call"})
 _MAX_ROUNDS = 4 * DEFAULT_MAX_STACK_DEPTH
 
 
+class Settled(list[str]):
+    """The greetings ``settle`` collected (a ``list`` of text, empty when it pushed none).
+
+    ``changed`` is true when a round pushed a child, popped one or wrote a record: the entry
+    that called ``settle`` saves the session again only then (D-026).
+    """
+
+    changed: bool = False
+
+
 @dataclass
 class CallMarks:
     """What settle remembers in memory, guarded by ``API._stack_lock`` (never persisted).
@@ -83,12 +99,13 @@ class CallMarks:
 # cancel leaves the record `running` and the next entry re-requests it). Do NOT merge twice: the
 # pop writes the returns and the final record in ONE `pop_fsm` merge, and a retry of a refused
 # end (`ending`) pops with no merge. Do NOT run it in a stream `finally`. See D-023.
-async def settle(api: _ApiSurface, root_id: str) -> list[str]:
+async def settle(api: _ApiSurface, root_id: str) -> Settled:
     """Apply the call record at the top of ``root_id``'s stack (see the module docstring)."""
+    settled = Settled()
     with api._stack_lock:
         frames = list(api.conversation_stacks.get(root_id) or ())
     if not any(_call_states(frame) for frame in frames):
-        return []
+        return settled
     marks = api._call_marks
     with api._stack_lock:
         if root_id in marks.settling:
@@ -98,11 +115,11 @@ async def settle(api: _ApiSurface, root_id: str) -> list[str]:
             )
         marks.settling.add(root_id)
     try:
-        greetings: list[str] = []
         for _ in range(_MAX_ROUNDS):
-            if not await _round(api, root_id, greetings):
+            if not await _round(api, root_id, settled):
                 break
-        return greetings
+            settled.changed = True
+        return settled
     finally:
         with api._stack_lock:
             marks.settling.discard(root_id)
@@ -315,7 +332,12 @@ async def _try_push(
             max_seconds=config.max_seconds,
         )
     except LLMResponseError:
-        raise  # an outage is not a refusal: the record stays `running` and is asked again
+        # the push rolled itself back (D-020): an outage of the greeting is a final `failed`
+        # record, so the failure edge fires on the next turn (D-026 (6)); it is not asked again
+        await _refuse(
+            api, root_id, state_id, config, Reason.PROVIDER_ERROR, target, resolved
+        )
+        return True
     except (FSMError, ValueError) as error:
         logger.warning(
             f"Call state '{state_id}' could not push its target: "

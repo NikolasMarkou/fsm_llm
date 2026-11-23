@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from fsm_llm import API, create_handler
+from fsm_llm import API, FileSessionStore, create_handler
 from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.core.definitions import (
     ConversationBusyError,
@@ -127,8 +127,19 @@ class Flow:
         return self.api.conversation_stacks[self.cid][1].conversation_id
 
 
+def _initial_call(definition: dict[str, Any]) -> dict[str, Any]:
+    """The call state is where the conversation BEGINS (``start`` removed): its first step
+    runs ``CallExecutor.aextract`` and no transition enters it, so the request is written by
+    the step that follows the setup. The arrival path (``aafter_transition``) is the
+    ``arrive=True`` form."""
+    definition["initial_state"] = "work"
+    del definition["states"]["start"]
+    return definition
+
+
 async def _flow(
     *,
+    arrive: bool = False,
     config: dict[str, Any] | None = None,
     steps: int = 1,
     greeting: str | None = None,
@@ -140,8 +151,10 @@ async def _flow(
     api_kwargs: dict[str, Any] | None = None,
     **state_overrides: Any,
 ) -> Flow:
-    """A parent API that has moved from ``start`` into the call state ``work``: the NEXT step
-    runs the executor. The child writes ``solution`` as it enters its last state."""
+    """A parent API whose conversation begins in the call state ``work``: the NEXT step runs
+    the executor. With ``arrive`` it begins in ``start`` and the caller drives the transition
+    into ``work`` (the request is then written on arrival). The child writes ``solution`` as
+    it enters its last state."""
     resolver = _Resolver(
         known
         if known is not None
@@ -158,8 +171,9 @@ async def _flow(
             .on_state_entry(f"c{steps + 1}")
             .do(lambda ctx: {"solution": f"solved {ctx.get('topic')}"})
         )
+    parent = _parent(config, **state_overrides)
     api = API.from_definition(
-        _parent(config, **state_overrides),
+        parent if arrive else _initial_call(parent),
         llm_interface=llm,
         targets=resolver,
         handlers=parts,
@@ -167,9 +181,9 @@ async def _flow(
     )
     cid, _ = await api.astart_conversation({"topic": "why", **(context or {})})
     frame = api.conversation_stacks[cid][0].conversation_id
-    await api.aadvance(cid)  # start -> work: the arrival runs nothing
     flow = Flow(api, cid, frame, resolver, llm)
-    assert flow.parent_state() == "work" and flow.record() is None
+    assert flow.parent_state() == ("start" if arrive else "work")
+    assert flow.record() is None
     return flow
 
 
@@ -271,7 +285,8 @@ class TestTheSyncNames:
         )
         cid, _ = api.start_conversation({"topic": "why"})
         results = api.run_until_terminal(cid, max_steps=10)
-        assert [r.state_after for r in results] == ["work", "work", "c2", "done"]
+        # start -> work (the arrival writes the request, settle pushes), the child, the edge
+        assert [r.state_after for r in results] == ["work", "c2", "done"]
         assert api.get_data(cid)["answer"] == "solved why"
         assert api.get_stack_depth(cid) == 1
 
@@ -327,10 +342,8 @@ class TestEveryFailureHasItsReason:
             inherit_context=False,
         )
         assert api.get_stack_depth(cid) == DEFAULT_MAX_STACK_DEPTH
-        await api.aadvance(cid)  # start -> work
-        await api.aadvance(
-            cid
-        )  # the executor writes the request; settle refuses the push
+        # start -> work: the arrival writes the request; settle refuses the push
+        await api.aadvance(cid)
         frame = api.conversation_stacks[cid][-1].conversation_id
         record = api.fsm_manager.copy_raw_context_data(frame)["call_result"]
         assert (record["status"], record["reason"]) == ("failed", "depth_refused")
@@ -360,20 +373,24 @@ class TestEveryFailureHasItsReason:
         assert flow.depth() == 1
         assert (await flow.api.aadvance(flow.cid)).state_after == "apology"
 
-    async def test_a_provider_error_of_the_greeting_keeps_the_request(self):
-        """An outage in the child's greeting propagates (v1 maps no ``provider_error``): the
-        record stays ``running``, nothing is orphaned and the next entry asks again."""
+    async def test_a_provider_error_of_the_greeting_fails_the_call_with_that_reason(
+        self,
+    ):
+        """An outage in the child's greeting (the push rolled itself back) is the FINAL record
+        ``failed/provider_error`` and the entry returns (D-026 (6)): nothing is orphaned, the
+        edge fires on the next turn and the call is not asked again. Kills: an outage that
+        propagates, one that leaves the request ``running`` (re-asked at every entry)."""
         llm = ScriptedLLM(default_response="r")
         flow = await _flow(greeting="Hello.", llm=llm, steps=2)
         with patch.object(
             llm, "generate_response", side_effect=LLMResponseError("down")
         ):
-            with pytest.raises(LLMResponseError):
-                await flow.api.aadvance(flow.cid)
-        assert flow.record()["status"] == "running" and flow.depth() == 1
-        assert _gate_is_free(flow.api, flow.cid)
-        await flow.api.aadvance(flow.cid)  # the start of this entry pushes it again
-        assert flow.depth() == 2
+            step = await flow.api.aadvance(flow.cid)
+        assert step.state_after == "work"  # the committed step is returned, not lost
+        assert flow.record() == _final("failed", "provider_error")
+        assert flow.depth() == 1 and _gate_is_free(flow.api, flow.cid)
+        assert list(flow.api.fsm_manager.instances) == [flow.frame]
+        assert (await flow.api.aadvance(flow.cid)).state_after == "apology"
 
 
 class TestTheRecordIsNotTrusted:
@@ -674,10 +691,10 @@ class TestOnePopOneMerge:
             return real_end(conversation_id, *args, **kwargs)
 
         manager.end_conversation = refuse_once  # type: ignore[method-assign]
-        with pytest.raises(ConversationBusyError):
-            await flow.api.aadvance(
-                flow.cid
-            )  # the child's last step; its pop is refused
+        # the child's last step: its pop is refused AFTER the merge; the committed step is
+        # returned (a warning, not an error: D-026 (5)) and the next entry retries the end
+        step = await flow.api.aadvance(flow.cid)
+        assert step.state_after == "c2"
         assert flow.depth() == 2 and flow.record() == _final("ok", None)
         assert passes == ["solved why"]
         # a host edit of the merged key between the refusal and the retry survives the retry:
@@ -832,3 +849,211 @@ class TestTwoCallStates:
         assert await settle(flow.api, flow.cid) == []
         assert flow.depth() == 1 and flow.record() == foreign
         assert flow.resolver.asked == []
+
+
+async def _leave_running(flow: Flow) -> None:
+    """Commit the next step (the request) and cancel its push: the parent holds the ``running``
+    record and no child, as an abandoned stream, a restore or a resume leave it."""
+    original = flow.api.apush_fsm
+
+    async def cancelled(*args: Any, **kwargs: Any) -> str:
+        raise asyncio.CancelledError
+
+    flow.api.apush_fsm = cancelled  # type: ignore[method-assign]
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await flow.api.aadvance(flow.cid)
+    finally:
+        flow.api.apush_fsm = original  # type: ignore[method-assign]
+    assert flow.depth() == 1 and flow.record()["status"] == "running"
+
+
+def _says(*pairs: tuple[str, str]) -> ScriptedLLM:
+    return ScriptedLLM(responses=dict(pairs), default_response="r")
+
+
+class TestArrival:
+    """The executor decides ON ARRIVAL (D-026 (1)): the request is written in the turn that
+    enters the call state and the end-of-entry settle pushes the child in that turn."""
+
+    async def test_the_request_is_written_and_the_child_pushed_in_the_arriving_turn(
+        self,
+    ):
+        """Kills: an executor that waits for the next turn (the parent would sit in ``work``
+        with no record at depth 1)."""
+        flow = await _flow(arrive=True, steps=2)
+        step = await flow.api.aadvance(flow.cid)
+        assert (step.state_before, step.state_after) == ("start", "work")
+        record = flow.record()
+        assert record["status"] == "running" and record["state"] == "work"
+        assert flow.depth() == 2
+
+    async def test_the_message_after_the_arrival_goes_to_the_child_not_the_parent(self):
+        """The reviewer's probe: ``converse`` entered the call state and the next message was
+        consumed by the parent before the child asked anything."""
+        flow = await _flow(
+            arrive=True, steps=2, greeting="Hello.", llm=_says(("c1", "Hello."))
+        )
+        assert await flow.api.aconverse("hi", flow.cid) == "Hello."
+        assert flow.depth() == 2
+        manager = flow.api.fsm_manager
+        parent_before = list(manager.get_conversation_history(flow.frame))
+        await flow.api.aconverse("my name is Bob", flow.cid)
+        assert flow.api.get_current_state(flow.cid) == "c2"  # the child took its step
+        assert list(manager.get_conversation_history(flow.frame)) == parent_before
+        child = manager.get_conversation_history(flow.child_frame())
+        assert "my name is Bob" in repr(child)
+
+    async def test_a_refusal_on_arrival_is_final_and_its_edge_fires_on_the_next_turn(
+        self,
+    ):
+        flow = await _flow(
+            arrive=True, known={}, config=_call(target="no.such.id"), steps=1
+        )
+        step = await flow.api.aadvance(flow.cid)
+        assert (step.state_after, flow.depth()) == ("work", 1)
+        assert flow.record()["reason"] == "unknown_target"
+        assert (await flow.api.aadvance(flow.cid)).state_after == "apology"
+
+    async def test_a_failed_pass_two_after_the_arrival_drops_the_record(self):
+        """The call state speaks and its Pass 2 fails: the whole turn is restored, the parent
+        is back in ``start`` with no record and no child."""
+        llm = ScriptedLLM(default_response="r")
+        flow = await _flow(arrive=True, llm=llm, response_instructions="Working.")
+        with patch.object(llm, "generate_response", side_effect=RuntimeError("down")):
+            with pytest.raises(FSMError):
+                await flow.api.aadvance(flow.cid)
+        assert flow.parent_state() == "start" and flow.record() is None
+        assert flow.depth() == 1
+        await flow.api.aadvance(flow.cid)  # the retry arrives again
+        assert flow.record()["status"] == "running" and flow.depth() == 2
+
+    async def test_the_exit_edge_takes_one_parent_turn(self):
+        """The documented finish side (D-026 (2)): the pop leaves the parent in the call state
+        with the final record, and the parent's next turn evaluates the exit edge."""
+        flow = await _flow(arrive=True, steps=1)
+        await flow.api.aadvance(flow.cid)  # arrive, request, push
+        await flow.api.aadvance(flow.cid)  # the child's only step; settle pops it
+        assert flow.depth() == 1 and flow.parent_state() == "work"
+        assert flow.record()["status"] == "ok"
+        assert (await flow.api.aconverse("thanks", flow.cid)) == "r"
+        assert flow.parent_state() == "done"
+
+
+class TestStreamEntriesSettleAtTheirStart:
+    @pytest.mark.parametrize("entry", ["converse", "advance"])
+    async def test_a_pending_request_is_applied_before_the_stream_reads_its_frame(
+        self, entry
+    ):
+        """An abandoned stream committed its turn and never settled: the record is ``running``
+        at depth 1. The NEXT stream pushes the child first (its greeting is the first chunk)
+        and the step runs on the child. Kills: a stream that resolves its frame before it
+        settles (the parent's history would gain the message, the child's would not)."""
+        llm = _says(("work", "Working."), ("c1", "GREETING"), ("c2", "STEP-REPLY"))
+        flow = await _flow(
+            arrive=True,
+            steps=2,
+            greeting="GREETING",
+            speaks="STEP-REPLY",
+            llm=llm,
+            response_instructions="Working.",
+        )
+        async with aclosing(flow.api.aconverse_stream("go", flow.cid)) as stream:
+            async for _ in stream:
+                break  # the reader walks away after the first chunk
+        assert flow.depth() == 1 and flow.record()["status"] == "running"
+        parent_before = list(flow.api.fsm_manager.get_conversation_history(flow.frame))
+        if entry == "converse":
+            stream = flow.api.aconverse_stream("my name is Bob", flow.cid)
+        else:
+            stream = flow.api.aadvance_stream(flow.cid)
+        chunks = [c async for c in stream]
+        assert flow.depth() == 2 and chunks[0] == "GREETING"
+        assert "".join(chunks) == "GREETING\nSTEP-REPLY"
+        assert (
+            list(flow.api.fsm_manager.get_conversation_history(flow.frame))
+            == parent_before
+        )
+
+    async def test_the_sync_stream_settles_at_its_start_too(self):
+        resolver = _Resolver({_TARGET: _child_definition(2, "GREETING", "STEP-REPLY")})
+        api = API.from_definition(
+            _parent(response_instructions=""),
+            llm_interface=_says(("c1", "GREETING"), ("c2", "STEP-REPLY")),
+            targets=resolver,
+        )
+        cid, _ = api.start_conversation({"topic": "why"})
+        api.advance(cid)  # start -> work: request and push in the arriving turn
+        assert api.get_stack_depth(cid) == 2
+        assert "".join(api.advance_stream(cid)) == "STEP-REPLY"
+
+
+class TestThePostTurnSettleNeverLosesTheTurn:
+    async def test_a_start_greeting_comes_before_the_reply_of_the_step(self):
+        """The recovery path pushes the child at the START of the entry: its greeting is the
+        first thing the caller reads (note 9 of the review)."""
+        llm = _says(("c1", "GREETING"), ("c2", "STEP-REPLY"))
+        flow = await _flow(steps=2, greeting="GREETING", speaks="STEP-REPLY", llm=llm)
+        await _leave_running(flow)
+        step = await flow.api.aadvance(flow.cid)
+        assert step.response == "GREETING\nSTEP-REPLY"
+        assert flow.depth() == 2
+
+    @pytest.mark.parametrize("use_stream", [False, True], ids=["converse", "stream"])
+    async def test_the_end_settle_error_never_loses_the_reply(self, use_stream):
+        """The child's last step commits, the end of the child is refused: ``aconverse``
+        returns the reply and a stream finishes its chunks; neither raises (D-026 (5))."""
+        flow = await _flow(
+            steps=1, speaks="STEP-REPLY", llm=_says(("c2", "STEP-REPLY"))
+        )
+        await flow.api.aadvance(flow.cid)  # the request and the push
+        child = flow.child_frame()
+        manager = flow.api.fsm_manager
+        real_end = manager.end_conversation
+
+        def refuse(conversation_id: str, *args: Any, **kwargs: Any) -> None:
+            if conversation_id == child:
+                raise ConversationBusyError("refused", conversation_id=child)
+            return real_end(conversation_id, *args, **kwargs)
+
+        manager.end_conversation = refuse  # type: ignore[method-assign]
+        if use_stream:
+            chunks = [c async for c in flow.api.aconverse_stream("go", flow.cid)]
+            reply = "".join(chunks)
+        else:
+            reply = await flow.api.aconverse("go", flow.cid)
+        assert reply == "STEP-REPLY"
+        assert flow.depth() == 2 and flow.record()["status"] == "ok"
+
+    async def test_the_committed_turn_is_saved_before_the_settle(self, tmp_path):
+        """A cancel in the child's greeting (after the commit): the session already holds the
+        parent in ``work`` with the ``running`` record. Kills: a save that runs only after the
+        settle (nothing would be saved), and a cancel that is swallowed."""
+        store = FileSessionStore(tmp_path / "sessions")
+        llm = _Gate(default_response="r")
+        flow = await _flow(
+            greeting="Hello.", llm=llm, steps=2, api_kwargs={"session_store": store}
+        )
+        llm.arm()
+        task = asyncio.create_task(flow.api.aadvance(flow.cid))
+        await asyncio.wait_for(llm.entered.wait(), _BOUND)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, _BOUND)
+        saved = store.load(flow.cid)
+        assert saved is not None and saved.current_state == "work"
+        assert saved.context_data["call_result"]["status"] == "running"
+        assert flow.depth() == 1  # the turn is committed, the push is not
+        await flow.api.aadvance(flow.cid)  # the next entry heals
+        assert flow.depth() == 2
+
+    async def test_the_session_is_saved_again_when_the_settle_changed_the_stack(
+        self, tmp_path
+    ):
+        """The first save (the committed turn) says depth 1, the settle pushes, the second save
+        says depth 2. Kills: no second save."""
+        store = FileSessionStore(tmp_path / "sessions")
+        flow = await _flow(steps=2, api_kwargs={"session_store": store})
+        await flow.api.aadvance(flow.cid)
+        saved = store.load(flow.cid)
+        assert saved is not None and saved.stack_depth == 2

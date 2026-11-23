@@ -24,7 +24,7 @@ from fsm_llm.core.definitions import AdvanceResult, FSMError
 from fsm_llm.logging import logger
 
 from .budget import budget_kwargs
-from .calls import settle
+from .calls import Settled, settle
 from .events import event_scope, event_stream, record_started
 from .helpers import _unexpected_error
 from .stack import FSMStackFrame
@@ -61,15 +61,48 @@ def _turn_errors(doing: str, do: str) -> Iterator[None]:
         ) from e
 
 
-def _with_greetings(reply: str | None, greetings: list[str]) -> str | None:
-    """The reply of a step followed by the greetings of the children a call state pushed.
+def _with_greetings(
+    reply: str | None, before: list[str], after: list[str]
+) -> str | None:
+    """The reply of a step between the greetings of the children a call state pushed.
 
-    Contract: ``reply`` unchanged when ``greetings`` is empty; else the non-empty reply and
-    every greeting joined by one newline (D-023 of plan baa37f40, item 9). Never raises.
+    Contract: ``before`` are the greetings of the START settle (a child pushed before the step
+    ran) and ``after`` those of the END settle. ``reply`` unchanged when both are empty; else
+    the greetings of ``before``, the non-empty reply and the greetings of ``after``, joined by
+    one newline (D-023 item 9, order of D-026 (4) of plan baa37f40). Never raises.
     """
-    if not greetings:
+    if not before and not after:
         return reply
-    return "\n".join([*([reply] if reply else []), *greetings])
+    return "\n".join([*before, *([reply] if reply else []), *after])
+
+
+# DECISION plan-2026-11-23T122249-baa37f40/D-026
+# The settle AFTER a committed turn must never lose that turn: the reply is the caller's and the
+# turn is already in the history. Do NOT let an `Exception` of the END settle (a refused end, a
+# second driver, a push failure) escape this guard (the reply would be lost, the session never
+# saved, and a caller that retries would resend the message to the child), do NOT save the
+# session only after the settle (an error or a cancel there would skip it), and do NOT catch
+# `BaseException` or `CancelledError` here: a cancel after the commit leaves the turn committed
+# with the request `running`, which the next entry heals (D-023). A START settle is not guarded:
+# it runs before the turn, so a raise loses nothing and a retry is safe.
+async def _settle_after(api: _ApiSurface, conversation_id: str) -> Settled:
+    """The END settle of a turn entry, after the committed turn was saved.
+
+    Contract: returns the greetings of the children pushed (empty when none or when settle
+    raised an ``Exception``, which is logged at WARNING); saves the session again when settle
+    changed something. A ``BaseException`` propagates.
+    """
+    try:
+        settled = await settle(api, conversation_id)
+    except Exception as error:
+        logger.warning(
+            f"Post-turn settle of conversation {conversation_id} failed, the next entry "
+            f"retries it: {type(error).__name__}: {error}"
+        )
+        return Settled()
+    if settled.changed:
+        _auto_save_session(api, conversation_id)
+    return settled
 
 
 def _auto_save_session(api: _ApiSurface, conversation_id: str) -> None:
@@ -118,22 +151,32 @@ def _open_stream(
         with _turn_errors(doing, do):
             try:
                 sent = False
+                frame_id = current_fsm_id
+                # A pending request (an abandoned stream, a restore, a resume, a failed
+                # greeting) is applied BEFORE the frame is read, so the message goes to the
+                # child it pushes (D-026 (3)); its greetings come first.
+                started = await settle(api, conversation_id)
+                for greeting in started:
+                    yield greeting
+                    sent = True
+                if started.changed:
+                    frame_id = api._get_current_fsm_conversation_id(conversation_id)
+                lead = "\n" if sent else ""
                 async with aclosing(
                     event_stream(
                         api,
                         conversation_id,
-                        acall_stream(
-                            api.fsm_manager, manager_name, current_fsm_id, *args
-                        ),
+                        acall_stream(api.fsm_manager, manager_name, frame_id, *args),
                     )
                 ) as chunks:
                     async for chunk in chunks:
+                        yield lead + chunk
+                        lead = ""
                         sent = True
-                        yield chunk
                 # Only at the NORMAL end (never in the `finally`: an abandoned or cancelled
                 # stream defers to the next entry's settle). A pushed child's greeting is one
                 # more chunk. See the D-023 anchor of `calls.py`.
-                for greeting in await settle(api, conversation_id):
+                for greeting in await _settle_after(api, conversation_id):
                     yield f"\n{greeting}" if sent else greeting
                     sent = True
             finally:
@@ -268,17 +311,18 @@ class TurnEntriesMixin(_ApiSurface):
         with _turn_errors("processing", "process"):
             # A call state's request (a cancelled settle, a restore) is applied BEFORE the turn
             # resolves its frame, so the message goes to the child it pushes.
-            greetings = await settle(self, conversation_id)
+            before = await settle(self, conversation_id)
             # D-014: _get_current_fsm_conversation_id already refreshed _last_accessed.
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with event_scope(self, conversation_id):
                 response: str = await acall(
                     self.fsm_manager, "process_message", current_fsm_id, user_message
                 )
-            greetings += await settle(self, conversation_id)
-            # Auto-save session if store is configured
+            # Auto-save session if store is configured: the committed turn is saved BEFORE
+            # the end settle (an error or a cancel there must not skip it), see `_settle_after`
             _auto_save_session(self, conversation_id)
-            joined = _with_greetings(response, greetings)
+            after = await _settle_after(self, conversation_id)
+            joined = _with_greetings(response, before, after)
             return response if joined is None else joined
 
     def advance(self, conversation_id: str) -> AdvanceResult:
@@ -316,17 +360,17 @@ class TurnEntriesMixin(_ApiSurface):
     async def aadvance(self, conversation_id: str) -> AdvanceResult:
         """The async twin of ``advance`` (see ``aconverse``)."""
         with _turn_errors("advancing without a", "advance without a"):
-            greetings = await settle(self, conversation_id)
+            before = await settle(self, conversation_id)
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             with event_scope(self, conversation_id):
                 result: AdvanceResult = await acall(
                     self.fsm_manager, "advance", current_fsm_id
                 )
-            greetings += await settle(self, conversation_id)
             _auto_save_session(self, conversation_id)
-            if greetings:
+            after = await _settle_after(self, conversation_id)
+            if before or after:
                 result = result.model_copy(
-                    update={"response": _with_greetings(result.response, greetings)}
+                    update={"response": _with_greetings(result.response, before, after)}
                 )
             return result
 
