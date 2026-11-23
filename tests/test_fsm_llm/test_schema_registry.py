@@ -814,7 +814,7 @@ def _without_version(data: dict[str, Any]) -> dict[str, Any]:
 
 
 class TestUpgradeFsmFile:
-    """`upgrade_fsm_file` validates first and stamps only a 4.0 or 4.1 file (any 4.0 up to below the default)."""
+    """`upgrade_fsm_file` validates first and stamps a file of any version from 4.0 up to below the default (4.0, 4.1 and 4.2 today)."""
 
     @pytest.mark.parametrize("version", ["4.0", "4.1"])
     def test_an_older_version_is_rewritten_and_loads_clean(self, tmp_path, version):

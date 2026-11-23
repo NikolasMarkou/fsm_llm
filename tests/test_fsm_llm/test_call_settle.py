@@ -450,15 +450,20 @@ class TestTheRecordIsNotTrusted:
         await flow.api.aadvance(flow.cid)
         assert flow.depth() == 2 and flow.resolver.asked == [_OTHER]
 
-    async def test_a_record_with_another_mode_is_left_alone(self):
-        """Rule (b) re-requests a ``frame`` record only (the delegated mode of a later phase
-        owns its own)."""
+    @pytest.mark.parametrize("mode", ["delegated", None, 5])
+    async def test_a_running_record_of_an_unknown_mode_fails_the_call(self, mode):
+        """Only ``frame`` is applied in this phase (a delegated mode would own its own value):
+        a ``running`` record with another mode is written ``failed/unknown_target`` instead of
+        leaving the parent waiting forever, and nothing is pushed or resolved."""
         flow = await _flow()
-        self._forge(flow, mode="delegated", target=_TARGET)
-        before = flow.record()
-        await flow.api.aadvance(flow.cid)
+        self._forge(flow, mode=mode, target=_TARGET)
+        step = await flow.api.aadvance(flow.cid)
         assert flow.depth() == 1 and flow.resolver.asked == []
-        assert flow.record() == before
+        assert flow.record() == _final("failed", "unknown_target", target=_TARGET) | {
+            "template_identity": None,
+            "instance_identity": None,
+        }
+        assert step.state_after == "apology"
 
     @pytest.mark.parametrize("status", ["ok", "failed", "aborted"])
     async def test_a_final_record_pushes_nothing(self, status):
@@ -775,6 +780,25 @@ class TestOnePopOneMerge:
         assert flow.api.get_data(flow.cid)["answer"] == "host edit"
         assert flow.record() == _final("ok", None)
         assert flow.api._call_marks.ending == set()
+
+    async def test_an_end_that_raised_after_the_teardown_leaves_no_mark(self):
+        """The merge landed, the child's end tore it down and then raised: the frame is gone, so
+        there is nothing to retry. Kills: an ``ending`` entry (or a ``pushed`` one) for a frame
+        that is no longer on the stack, which nothing would ever discard."""
+        flow = await _flow(steps=1)
+        await flow.api.aadvance(flow.cid)  # the request and the push
+        manager = flow.api.fsm_manager
+        real_end = manager.end_conversation
+
+        def late_failure(conversation_id: str, *args: Any, **kwargs: Any) -> None:
+            real_end(conversation_id, *args, **kwargs)
+            raise RuntimeError("raised after the teardown")
+
+        manager.end_conversation = late_failure  # type: ignore[method-assign]
+        await flow.api.aadvance(flow.cid)  # the child's last step; its pop fails late
+        assert flow.depth() == 1 and flow.record() == _final("ok", None)
+        marks = flow.api._call_marks
+        assert marks.ending == set() and marks.pushed == {}
 
     async def test_the_log_holds_one_push_and_one_pop(self, tmp_path):
         log = EventLog(tmp_path)

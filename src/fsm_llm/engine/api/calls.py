@@ -166,6 +166,16 @@ def _is_request(record: Any, state_id: str) -> TypeGuard[dict[str, Any]]:
     )
 
 
+def _is_unknown_mode(record: Any, state_id: str) -> bool:
+    """A ``running`` record of this state whose ``mode`` is not ``frame`` (a handler, an older
+    snapshot, a host of a mode this phase does not build)."""
+    return (
+        record_belongs(record, state_id)
+        and record.get("status") == Status.RUNNING.value
+        and record.get("mode") != TARGET_MODE_FRAME
+    )
+
+
 def _pushed_target(
     api: _ApiSurface,
     child: FSMStackFrame,
@@ -261,9 +271,21 @@ async def _try_pop(
         # the merge landed when the parent's record is final now: the retry must not merge again
         now = api.fsm_manager.copy_raw_context_data(parent.conversation_id) or {}
         landed = now.get(config.result_key)
-        if isinstance(landed, dict) and not _is_request(landed, state.id):
-            with api._stack_lock:
+        with api._stack_lock:
+            # only a frame that is still on the stack can be retried: an end that raised after
+            # the teardown removed it leaves nothing for a mark to point at (D-028 (4))
+            on_stack = any(
+                frame.conversation_id == top.conversation_id
+                for frame in api.conversation_stacks.get(root_id) or ()
+            )
+            if (
+                on_stack
+                and isinstance(landed, dict)
+                and not _is_request(landed, state.id)
+            ):
                 api._call_marks.ending.add(top.conversation_id)
+            elif not on_stack:
+                api._call_marks.forget([top.conversation_id])
         raise
     with api._stack_lock:
         api._call_marks.forget([top.conversation_id])
@@ -327,6 +349,13 @@ async def _try_push(
     data = api.fsm_manager.copy_raw_context_data(top.conversation_id) or {}
     record = data.get(config.result_key)
     if not _is_request(record, state_id):
+        if _is_unknown_mode(record, state_id):
+            # no host of another mode exists in this phase: fail, never wait forever (D-028 (2))
+            target = chosen_target(config, data)
+            await _refuse(
+                api, root_id, state_id, config, Reason.UNKNOWN_TARGET, target, None
+            )
+            return True
         return False
     # Everything below comes from the parent's own definition and context, never the record.
     target = chosen_target(config, data)

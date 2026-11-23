@@ -301,6 +301,6 @@ class State(BaseModel):
     @property
     def kind(self) -> str:
         """The state's kind name: ``conversation``, ``completion``,
-        ``synthesize`` or ``call`` or ``call`` (see ``fsm_llm.core.state_kinds``). Derived from the config
+        ``synthesize`` or ``call`` (see ``fsm_llm.core.state_kinds``). Derived from the config
         fields; not part of the definition, its dump or its ``fsm_id``."""
         return kind_of(self).name
