@@ -410,8 +410,10 @@ class TestTheStartIsAfterTheCommit:
         self, make_flow, monkeypatch
     ):
         """The reservation of Pass 1 survives a settle that raised before the start; the next
-        entry's settle starts the SAME handle once."""
-        flow = await make_flow()
+        entry's settle starts the SAME handle once. The probe parks (``hold``), so the record
+        is still the running one when it is read: a probe that returns at once can land the
+        final record, which carries no handle, before the read (a CI-only race)."""
+        flow = await make_flow(probe=_Probe(hold=True))
         real = delegated.settle_delegated
         calls = {"n": 0}
 
