@@ -22,7 +22,7 @@ import pytest
 import fsm_llm
 from fsm_llm import API
 from fsm_llm.aio import aoffload
-from fsm_llm.core.codes import Status
+from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import FSMDefinition, FSMError
 from fsm_llm.core.definitions.executable import Contract
 from fsm_llm.core.results import RunResult
@@ -941,3 +941,416 @@ class TestAFailedRunStartKeepsTheReservation:
         assert host.wait("h1", _BOUND)
         result = host.poll("h1", conversation_id="c1").result
         assert result is not None and result.status is Status.OK
+
+
+# ---- K7R.4: the identity of the run, a host that cannot start, the guards -----------------------
+
+
+def _newer_version() -> _Probe:
+    """The same id, a newer version and another template identity: a registry reload."""
+    newer = _Probe()
+    newer.version = "2"
+    newer.template_identity = "template:newer-version"
+    return newer
+
+
+class TestTheFinalRecordNamesTheTemplateThatRan:
+    """K7R.4, note 8: ``_poll.settled`` re-resolved the template at the finish."""
+
+    def test_a_reload_during_the_run_does_not_change_the_identities(
+        self, tmp_path
+    ) -> None:
+        probe = _Probe(hold=True)
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)  # the run starts on the first template
+            newer = _newer_version()
+            targets.registry.register(newer)
+            assert newer.template_identity != probe.template_identity
+            assert targets.resolve_run(_TARGET).template_identity == (
+                newer.template_identity
+            )  # the registry serves the new one now
+            probe.release.set()
+            _drive(api, cid)
+            record = api.get_data(cid)["call_result"]
+            assert record["status"] == "ok"
+            assert record["template_identity"] == probe.template_identity
+            start, end = _types(log, cid, "run/start", "run/end")
+            assert start["template_identity"] == probe.template_identity
+            assert end["template_identity"] == probe.template_identity
+        finally:
+            probe.release.set()
+            api.close()
+            assert log is not None
+            log.close()
+
+    def test_a_forged_running_record_cannot_name_the_identities_of_the_end(
+        self, tmp_path
+    ) -> None:
+        """The identities come from the host, never from the public record."""
+        probe = _Probe(hold=True)
+        api, _targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)
+            frame = api.conversation_stacks[cid][0].conversation_id
+            record = dict(api.fsm_manager.copy_raw_context_data(frame)["call_result"])
+            record["template_identity"] = "forged"
+            api.fsm_manager.update_conversation_context(frame, {"call_result": record})
+            probe.release.set()
+            _drive(api, cid)
+            final = api.get_data(cid)["call_result"]
+            assert final["template_identity"] == probe.template_identity
+        finally:
+            probe.release.set()
+            api.close()
+            assert log is not None
+            log.close()
+
+
+class _LateFullHost(RunHost):
+    """A host whose ``claim`` ignores the cap: the state of two reservations made before any
+    start, which a real host reaches by racing two conversations."""
+
+    def claim(self, handle: str, *, conversation_id: str) -> bool:
+        with self._lock:
+            self._reserved[handle] = runs._Run(handle, conversation_id)
+        return True
+
+
+class _FailingThread(threading.Thread):
+    def start(self) -> None:
+        raise RuntimeError("can't start new thread")
+
+
+class TestAHostThatCannotStartReportsPushFailed:
+    """K7R.4, note 9: a host that could not start the run reported ``run_lost``."""
+
+    def test_a_thread_that_cannot_start_ends_the_call_push_failed(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """``run/start`` was announced before the thread failed, so the pair is written: the run
+        started in the log and ended ``failed/push_failed`` at once."""
+        monkeypatch.setattr(runs, "Thread", _FailingThread)
+        probe = _Probe()
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            _drive(api, cid)
+            record = api.get_data(cid)["call_result"]
+            assert (record["status"], record["reason"]) == ("failed", "push_failed")
+            assert probe.runs == []
+            events = _types(log, cid, "run/start", "run/end")
+            assert [e["type"] for e in events] == ["run/start", "run/end"]
+            assert (events[1]["status"], events[1]["reason"]) == (
+                "failed",
+                "push_failed",
+            )
+            assert list(targets.host._finished) == []  # the refusal is consumed
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+    def test_a_host_full_when_the_run_starts_ends_the_call_push_failed(
+        self, tmp_path
+    ) -> None:
+        """Two reservations made before either run starts: the second finds the host full AT
+        START. It ends ``push_failed`` at once and logs no ``run/start`` (nothing was announced)."""
+        holder = _Probe(hold=True)
+        host = _LateFullHost(max_runs=1)
+        registry = ExecutableRegistry()
+        registry.register(holder)
+        log = EventLog(tmp_path / "logs")
+        targets = ExecutableTargets(registry, RunContext(event_log=log), host=host)
+        api = API.from_definition(
+            _initial_call(
+                _parent(
+                    _call(
+                        target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+                    ),
+                    response_instructions="",
+                )
+            ),
+            llm_interface=_Gate(default_response="r"),
+            targets=targets,
+            event_log=log,
+        )
+        try:
+            first, _ = api.start_conversation({"topic": "one"})
+            second, _ = api.start_conversation({"topic": "two"})
+            api.advance(first)  # starts: the single slot is taken and parked
+            api.advance(
+                second
+            )  # reserves (late-full claim) and finds the host full at start
+            record = api.get_data(second)["call_result"]
+            assert (record["status"], record["reason"]) == ("failed", "push_failed")
+            assert _types(log, second, "run/start", "run/end") == []
+            assert len(holder.runs) == 1
+            assert list(host._finished) == []  # consumed by settle
+        finally:
+            holder.release.set()
+            api.close()
+            log.close()
+
+    def test_a_host_full_at_start_stores_a_push_failed_result(self) -> None:
+        host = RunHost(max_runs=1)
+        release = threading.Event()
+
+        async def hold(token):
+            await aoffload(release.wait, _BOUND)
+            return RunResult(status=Status.OK)
+
+        async def other(token):
+            return RunResult(status=Status.OK)
+
+        assert host.claim("h1", conversation_id="c1")
+        assert host.claim("h2", conversation_id="c2")  # both reserved while none runs
+        try:
+            assert host.start("h1", hold, conversation_id="c1")
+            assert host.start("h2", other, conversation_id="c2") is False
+            polled = host.poll("h2", conversation_id="c2")
+            assert polled is not None and polled.finished
+            assert polled.result is not None
+            assert (polled.result.status, polled.result.reason) == (
+                Status.FAILED,
+                Reason.PUSH_FAILED,
+            )
+        finally:
+            release.set()
+
+    def test_a_handle_with_no_reservation_is_still_unknown(self) -> None:
+        host = RunHost()
+
+        async def body(token):
+            return RunResult(status=Status.OK)
+
+        assert host.start("never", body, conversation_id="c1") is False
+        assert host.poll("never", conversation_id="c1") is None
+
+
+class TestASettleFailureEndsTheCallAtOnce:
+    """K7R.4, note 10: a deterministic failure before the start left the call pending until its
+    deadline (600 seconds by default)."""
+
+    def test_an_input_that_cannot_be_copied_fails_the_call_fast(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The copy of a declared input fails (the manager's own snapshot copies a context too, so
+        the failure is injected at the seam of settle). Kills: the failure left to repeat on every
+        entry until the deadline."""
+        probe = _Probe()
+        api, _targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+
+        def boom(config, data):
+            raise TypeError("cannot copy this value")
+
+        monkeypatch.setattr(delegated, "_declared_inputs", boom)
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            started = time.monotonic()
+            for _ in range(4):
+                api.advance(cid)
+                if api.get_data(cid)["call_result"]["status"] != "running":
+                    break
+            record = api.get_data(cid)["call_result"]
+            assert (record["status"], record["reason"]) == ("failed", "push_failed")
+            assert probe.runs == []
+            assert time.monotonic() - started < _BOUND
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+    def test_a_resolver_that_raises_fails_the_call_fast(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        probe = _Probe()
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            calls = {"n": 0}
+            real = targets.resolve_run
+
+            def flaky(*args, **kwargs):
+                calls["n"] += 1
+                if calls["n"] > 1:  # Pass 1 resolved fine; the settle resolution raises
+                    raise RuntimeError("registry is broken")
+                return real(*args, **kwargs)
+
+            monkeypatch.setattr(targets, "resolve_run", flaky)
+            for _ in range(4):
+                api.advance(cid)
+                if api.get_data(cid)["call_result"]["status"] != "running":
+                    break
+            record = api.get_data(cid)["call_result"]
+            assert (record["status"], record["reason"]) == ("failed", "push_failed")
+            assert probe.runs == []
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+
+class TestTheWaitIsGuarded:
+    """K7R.4, note 11."""
+
+    async def test_a_failing_wait_never_loses_a_committed_step(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        probe = _Probe(hold=True)
+        api, _targets, log = _build(
+            tmp_path, probe, config=_call(target=_TARGET, inputs=["topic"])
+        )
+
+        def boom(self, handle, timeout_seconds):
+            raise RuntimeError("the wait is broken")
+
+        monkeypatch.setattr(RunHost, "wait", boom)
+        try:
+            cid, _ = await api.astart_conversation({"topic": "why"})
+            result = await api.aadvance(cid)  # the step committed: it is returned
+            assert result.state_before == "work"
+            async for _chunk in api.aadvance_stream(
+                cid
+            ):  # and the stream ends normally
+                pass
+        finally:
+            probe.release.set()
+            api.close()
+            assert log is not None
+            log.close()
+
+    async def test_a_cancel_during_the_wait_is_not_swallowed(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        probe = _Probe(hold=True)
+        api, _targets, log = _build(
+            tmp_path, probe, config=_call(target=_TARGET, inputs=["topic"])
+        )
+        try:
+            cid, _ = await api.astart_conversation({"topic": "why"})
+            await api.aadvance(cid)  # starts the run
+
+            async def cancelled(*args, **kwargs):
+                raise asyncio.CancelledError
+
+            monkeypatch.setattr(delegated, "aoffload", cancelled)
+            with pytest.raises(asyncio.CancelledError):
+                await delegated.wait_for_run(api, cid)
+        finally:
+            probe.release.set()
+            api.close()
+            assert log is not None
+            log.close()
+
+
+class _Plain:
+    """A class with the six launcher methods (a real implementer)."""
+
+    def resolve_run(
+        self, target_id, *, input_keys=(), max_steps=None, conversation_id=None
+    ):
+        return None
+
+    def claim(self, handle, *, conversation_id):
+        return True
+
+    def start(self, handle, target, inputs, **kwargs):
+        return False
+
+    def poll(self, handle, *, conversation_id):
+        return None
+
+    def cancel(self, handle, *, conversation_id=None):
+        return False
+
+    def cancel_for(self, conversation_id):
+        return 0
+
+
+class TestAMockIsNoLauncher:
+    """K7R.4, note 13."""
+
+    def test_the_check_reads_the_class_not_the_attributes(self) -> None:
+        from unittest.mock import MagicMock, Mock
+
+        from fsm_llm.engine.kinds.targets import is_run_launcher
+
+        assert is_run_launcher(_Plain())
+        assert is_run_launcher(ExecutableTargets(ExecutableRegistry()))
+        assert not is_run_launcher(MagicMock())
+        assert not is_run_launcher(Mock())
+        assert not is_run_launcher(Mock(spec=ExecutableTargets))
+        assert not is_run_launcher(None)
+        assert not is_run_launcher(object())
+
+    def test_a_mock_resolver_takes_no_delegated_branch(self, tmp_path) -> None:
+        """Kills: the Protocol-only check (a ``MagicMock`` resolver answered ``resolve_run``)."""
+        from unittest.mock import MagicMock
+
+        resolver = MagicMock()
+        resolver.resolve_target.return_value = None
+        api = API.from_definition(
+            _initial_call(
+                _parent(
+                    _call(target=_TARGET, inputs=["topic"]), response_instructions=""
+                )
+            ),
+            llm_interface=_Gate(default_response="r"),
+            targets=resolver,
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)
+            record = api.get_data(cid)["call_result"]
+            assert (record["status"], record["reason"]) == ("failed", "unknown_target")
+            resolver.resolve_run.assert_not_called()
+            resolver.claim.assert_not_called()
+        finally:
+            api.close()
+
+    def test_the_registry_refuses_a_mock_launcher(self) -> None:
+        from unittest.mock import MagicMock
+
+        registry = ExecutableRegistry()
+        registry.register(_Probe())
+        assert registry.resolve_delegated(_TARGET, launcher=MagicMock()) is None
+        assert registry.resolve_delegated(_TARGET, launcher=_Plain()) is not None
+
+
+def test_the_changelog_names_every_public_name_of_the_run_host() -> None:
+    text = (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    for name in runs.__all__:
+        assert name in text, name

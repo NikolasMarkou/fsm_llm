@@ -85,8 +85,9 @@ from .targets import (
     TARGET_MODE_FRAME,
     DelegatedTarget,
     ResolvedTarget,
-    RunLauncher,
+    RunPoll,
     delegated_seconds,
+    is_run_launcher,
 )
 
 if TYPE_CHECKING:  # the result envelope loads on request, never with `import fsm_llm`
@@ -465,7 +466,7 @@ class CallExecutor(StateExecutor):
         target = chosen_target(config, data)
         if target is None:
             return refuse(key, Reason.UNKNOWN_TARGET, state_id=state.id)
-        launcher = resolver if isinstance(resolver, RunLauncher) else None
+        launcher = resolver if is_run_launcher(resolver) else None
         resolved = resolver.resolve_target(target, conversation_id=conversation_id)
         delegated: DelegatedTarget | None = None
         if resolved is None and launcher is not None:
@@ -523,9 +524,10 @@ class CallExecutor(StateExecutor):
     # A delegated call is POLLED, never skipped and never waited for. Do NOT skip on a `running`
     # record of `mode: delegated` (the run lives on a host thread and its end must land in a later
     # turn), do NOT wait inside the turn (a lock may be held and the loop would stall: the one
-    # bounded wait is at the end of `aadvance`, K7.4), do NOT read the target or the identities of
-    # the final record from the record (a forged public `call_result` could name any: re-derive
-    # them from the parent's own state), do NOT trust a `deadline` that is not a finite number (a
+    # bounded wait is at the end of `aadvance` and of the step streams), do NOT read the target or
+    # the identities of the final record from the record (a forged public `call_result` could name
+    # any: the target is re-derived from the parent's own state, the identities are the host's own,
+    # taken from the poll, D-058), do NOT trust a `deadline` that is not a finite number (a
     # forged one that never comes is a run that never stops: fail closed), and do NOT write the
     # returns and the final record in two passes (ONE extraction, so no window shows the returns
     # with the record still `running`). A handle the launcher never saw FOR THIS conversation is
@@ -546,9 +548,15 @@ class CallExecutor(StateExecutor):
             status: Status,
             reason: Reason | None,
             merged: Mapping[str, Any] | None = None,
+            polled: RunPoll | None = None,
         ) -> DataExtractionResponse:
             template_identity = instance_identity = None
-            if isinstance(launcher, RunLauncher) and target is not None:
+            if polled is not None and polled.template_identity is not None:
+                # what the host STARTED the run with: a reload during the run, or a forged
+                # public record, never changes the identities of the end (D-058)
+                template_identity = polled.template_identity
+                instance_identity = polled.instance_identity
+            elif is_run_launcher(launcher) and target is not None:
                 now = launcher.resolve_run(
                     target,
                     input_keys=config.inputs,
@@ -567,7 +575,7 @@ class CallExecutor(StateExecutor):
             )
 
         handle = record.get("handle")
-        if not isinstance(launcher, RunLauncher) or not isinstance(handle, str):
+        if not is_run_launcher(launcher) or not isinstance(handle, str):
             return settled(Status.FAILED, Reason.RUN_LOST)
         polled = (
             launcher.poll(handle, conversation_id=conversation_id)
@@ -579,7 +587,13 @@ class CallExecutor(StateExecutor):
         if polled.finished:
             if polled.result is None:  # a finished run with no result is a lost one
                 return settled(Status.FAILED, Reason.RUN_LOST)
-            return _finished(polled.result, config, settled)
+            return _finished(
+                polled.result,
+                config,
+                lambda status, reason, merged=None: settled(
+                    status, reason, merged, polled
+                ),
+            )
         deadline = record.get("deadline")
         if (
             isinstance(deadline, (int, float))
@@ -591,7 +605,7 @@ class CallExecutor(StateExecutor):
         launcher.cancel(
             handle, conversation_id=conversation_id
         )  # a pattern is only detached
-        return settled(Status.ABORTED, Reason.BUDGET_SPENT)
+        return settled(Status.ABORTED, Reason.BUDGET_SPENT, None, polled)
 
 
 def is_delegated_running(record: Any, state_id: str) -> TypeGuard[dict[str, Any]]:

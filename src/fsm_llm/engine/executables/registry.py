@@ -35,7 +35,7 @@ Interface contract:
 - ``resolve_delegated(target_id, *, launcher, context=None, input_keys=(), max_steps=None) ->
   DelegatedTarget | None`` (plan baa37f40 phase K7, D-049): the delegated twin, for the kinds
   ``pattern`` only (a ``workflow`` kind is no target: D-053, D-055). ``None`` (the one answer a caller maps to
-  ``failed/unknown_target``) for: a *launcher* that is not a ``RunLauncher``, an unknown or
+  ``failed/unknown_target``) for: a *launcher* that is not a ``RunLauncher`` (``is_run_launcher``), an unknown or
   deprecated id, a kind that is not code-backed (a body kind stays a frame target), the
   capability ``conversational`` (a delegated run has no user to talk to), a name of
   ``requires.callables`` that ``context.callables`` lacks (judged against the HOST context, not
@@ -72,7 +72,11 @@ from fsm_llm.core.definitions.executable import Capability, InstantiationError
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.context import RunContext
-from fsm_llm.engine.kinds.targets import DelegatedTarget, ResolvedTarget, RunLauncher
+from fsm_llm.engine.kinds.targets import (
+    DelegatedTarget,
+    ResolvedTarget,
+    is_run_launcher,
+)
 from fsm_llm.logging import logger
 from fsm_llm.security import resolve_within
 
@@ -540,7 +544,7 @@ class ExecutableRegistry:
         max_steps: int | None = None,
     ) -> DelegatedTarget | None:
         """The code-backed executable a delegated ``call`` runs, or ``None`` (see the docstring)."""
-        if not isinstance(launcher, RunLauncher):
+        if not is_run_launcher(launcher):
             return None  # no launcher injected: a code-backed kind is never a target
         try:
             executable = self.get(target_id)

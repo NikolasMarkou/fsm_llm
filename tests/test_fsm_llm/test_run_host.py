@@ -211,7 +211,9 @@ class TestTheHostRunsABody:
         )  # and the same handle starts now
         assert host.wait("h1", _BOUND) and ran.is_set()
 
-    def test_a_thread_that_cannot_start_is_dropped(self, monkeypatch) -> None:
+    def test_a_thread_that_cannot_start_stores_a_push_failed_refusal(
+        self, monkeypatch
+    ) -> None:
         class _NoThread:
             def __init__(self, *args, **kwargs) -> None:
                 pass
@@ -223,7 +225,13 @@ class TestTheHostRunsABody:
         host = RunHost(max_runs=1)
         assert host.claim("h1", conversation_id="c1")
         assert host.start("h1", _instant, conversation_id="c1") is False
-        assert host.poll("h1", conversation_id="c1") is None
+        # D-058: no run, no leaked slot, and the refusal is an answer (not `None` = run_lost)
+        polled = host.poll("h1", conversation_id="c1")
+        assert polled is not None and polled.finished and polled.result is not None
+        assert (polled.result.status, polled.result.reason) == (
+            Status.FAILED,
+            Reason.PUSH_FAILED,
+        )
         monkeypatch.undo()
         assert _launch(host, "h2", _instant)
         assert host.wait("h2", _BOUND)
@@ -332,7 +340,9 @@ class TestCapsAndScope:
         assert host.start("a", body, conversation_id="c1")
         assert entered.wait(_BOUND)
         assert host.start("b", _instant, conversation_id="c1") is False
-        assert host.poll("b", conversation_id="c1") is None
+        polled = host.poll("b", conversation_id="c1")  # D-058: the refusal is an answer
+        assert polled is not None and polled.finished and polled.result is not None
+        assert polled.result.reason == Reason.PUSH_FAILED
         host.cancel("a")
         assert host.wait("a", _BOUND)
 

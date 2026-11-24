@@ -28,8 +28,8 @@ Interface contract:
     or running, ``RunPoll(True, result)`` once finished, ``None`` when the host never saw the handle
     FOR THAT CONVERSATION (or it was evicted or dropped): the ``run_lost`` answer.
   - ``cancel(handle, *, conversation_id=None) -> bool``: set the token of a reserved or running
-    run (a run is checked BETWEEN steps; a pattern is not interruptible and may keep running: it is
-    detached, never joined). ``False`` for an unknown, finished or foreign handle.
+    run (a pattern checks it ONCE, before the run starts, never between steps, so a cancel after
+    the start only detaches it: it may keep running and is never joined; D-058). ``False`` for an unknown, finished or foreign handle.
   - ``cancel_for(conversation_id) -> int``: set the token of every running run of the conversation,
     drop its reservations and finished results, and orphan the running ones (their result is
     dropped at the finish). Returns the number of running runs told to stop.
@@ -117,6 +117,7 @@ class _Run:
     finished: Event = field(default_factory=Event)
     result: RunResult | None = None
     orphaned: bool = False
+    identity: tuple[str | None, str | None] = (None, None)
 
 
 def _check_name(value: object, what: str, *, limit: int | None = None) -> str:
@@ -135,7 +136,10 @@ def _check_name(value: object, what: str, *, limit: int | None = None) -> str:
 # joiner holds hung Windows 3.15 in plan ace7a8c8), do NOT nest a manager lock or import
 # `engine.api`/`engine.fsm` here (a worker that calls back into the parent API breaks the one-turn
 # rule), do NOT store an exception's text (type only), and do NOT start the thread before
-# `announce` (the `run/start` record must be on disk first).
+# `announce` (the `run/start` record must be on disk first). When `announce` raises, the
+# reservation goes BACK (D-057: do NOT drop the run, a transient log failure would end a call that
+# never started as `run_lost`), and a start that cannot happen (full, no thread) stores a finished
+# `failed/push_failed` result (D-058: do NOT drop it silently, the parent would read `run_lost`).
 class RunHost:
     """One daemon thread per delegated run. See the module docstring."""
 
@@ -168,6 +172,7 @@ class RunHost:
         body: _Body,
         *,
         conversation_id: str,
+        identity: tuple[str | None, str | None] = (None, None),
         announce: Callable[[], None] | None = None,
     ) -> bool:
         """Consume the reservation, announce, then start the daemon thread."""
@@ -176,9 +181,16 @@ class RunHost:
             if run is None or run.conversation_id != conversation_id:
                 return False
             del self._reserved[handle]
+            run.identity = identity
             if len(self._running) >= self._max_runs:
-                return False
-            self._running[handle] = run
+                self._refuse_locked(run)
+                full = True
+            else:
+                self._running[handle] = run
+                full = False
+        if full:
+            run.finished.set()  # a poll answers the finished refusal (push_failed)
+            return False
         try:
             if announce is not None:
                 announce()
@@ -194,7 +206,10 @@ class RunHost:
         try:
             thread.start()
         except RuntimeError:  # the process cannot start another thread
-            self._drop_running(run)
+            with self._lock:
+                self._running.pop(run.handle, None)
+                self._refuse_locked(run)
+            run.finished.set()
             logger.warning("a delegated run could not start its thread")
             return False
         return True
@@ -207,7 +222,10 @@ class RunHost:
                 return None
             finished = handle in self._finished
             result = run.result
-        return RunPoll(True, result) if finished else RunPoll(False, None)
+            template_identity, instance_identity = run.identity
+        return RunPoll(
+            finished, result if finished else None, template_identity, instance_identity
+        )
 
     def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool:
         """Set the token of a reserved or running run of that conversation."""
@@ -284,6 +302,15 @@ class RunHost:
                 while len(self._finished) > MAX_FINISHED_RUNS:
                     self._finished.popitem(last=False)
         run.finished.set()
+
+    def _refuse_locked(self, run: _Run) -> None:
+        """Store a FINISHED ``failed/push_failed`` result for a run that could not start (a full
+        host, a thread the process cannot start): the poll answers it, settle ends the call at
+        once and nothing is ever logged as started (D-058). Caller holds the lock."""
+        run.result = RunResult(status=Status.FAILED, reason=Reason.PUSH_FAILED)
+        self._finished[run.handle] = run
+        while len(self._finished) > MAX_FINISHED_RUNS:
+            self._finished.popitem(last=False)
 
     def _unstart(self, run: _Run) -> None:
         """An ``announce`` that failed: the run never started, so it is reserved again."""
@@ -430,7 +457,11 @@ class ExecutableTargets:
             return _bounded_result(result)  # capped BEFORE the host stores it (D-057)
 
         return self._host.start(
-            handle, body, conversation_id=conversation_id, announce=announce
+            handle,
+            body,
+            conversation_id=conversation_id,
+            identity=(target.template_identity, target.instance_identity),
+            announce=announce,
         )
 
     def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None:

@@ -53,8 +53,14 @@ Delegated mode (plan baa37f40 phase K7, D-049, roadmap E3.2 second half): a code
   conversation); ``cancel(handle, *, conversation_id=None) -> bool``; ``cancel_for(conversation_id)
   -> int`` (every run and reservation of one conversation). A launcher never raises for an
   unknown handle, never nests a manager lock and never calls back into the ``API`` it serves.
-- ``RunPoll(finished, result)``: frozen; ``result`` is the ``RunResult`` of a finished run, else
-  ``None``.
+- ``RunPoll(finished, result, template_identity=None, instance_identity=None)``: frozen;
+  ``result`` is the ``RunResult`` of a finished run, else ``None``; the two identities are those
+  the host STARTED the run with (a custom launcher may leave them ``None``), the source of the
+  identities of the final record and of ``run/end``, never the public record (D-058).
+- ``is_run_launcher(obj)``: the one test of "this resolver is also a launcher": the six methods
+  found on the CLASS of ``obj``, so a ``MagicMock`` (whose attributes exist only on the
+  instance) is none, while any real implementer is. A proxy that forwards names through
+  ``__getattr__`` is no launcher: define the methods on the class (D-058).
 - ``DEFAULT_DELEGATED_MAX_SECONDS`` (600.0), ``MAX_DELEGATED_MAX_SECONDS`` (3600.0) and
   ``delegated_seconds(max_seconds)``: the wall-clock bound of a delegated call (the default when the
   call declares none, cut to the cap), the one rule of the executor's ``deadline`` and of the limit
@@ -67,7 +73,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeGuard, runtime_checkable
 
 from fsm_llm.core.definitions import FSMDefinition
 
@@ -87,6 +93,7 @@ __all__ = [
     "TargetResolver",
     "check_targets",
     "delegated_seconds",
+    "is_run_launcher",
 ]
 
 #: The one mode of a resolved target: a child FSM pushed as a frame of the parent's stack.
@@ -175,6 +182,8 @@ class RunPoll:
 
     finished: bool
     result: RunResult | None = None
+    template_identity: str | None = None
+    instance_identity: str | None = None
 
 
 @runtime_checkable
@@ -209,6 +218,20 @@ class RunLauncher(Protocol):
     def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool: ...
 
     def cancel_for(self, conversation_id: str) -> int: ...
+
+
+_LAUNCHER_METHODS = ("resolve_run", "claim", "start", "poll", "cancel", "cancel_for")
+
+
+def is_run_launcher(obj: object) -> TypeGuard[RunLauncher]:
+    """Whether *obj* is a ``RunLauncher``: the six methods are defined on its CLASS.
+
+    Contract: never raises; ``False`` for ``None``, for a mock (``MagicMock()``, ``Mock()``,
+    ``Mock(spec=...)``: their methods live on the instance) and for an object that forwards names
+    through ``__getattr__``. The runtime Protocol check only asks that the attributes exist, which
+    every mock satisfies, so every site that takes the delegated branch uses this function."""
+    kind = type(obj)
+    return all(callable(getattr(kind, name, None)) for name in _LAUNCHER_METHODS)
 
 
 def check_targets(targets: Any) -> TargetResolver | None:

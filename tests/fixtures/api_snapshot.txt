@@ -878,7 +878,7 @@ fsm_llm.engine.executables.RunHost class
   def claim(self, handle: str, *, conversation_id: str) -> bool
   def forget(self, handle: str, *, conversation_id: str) -> bool
   def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None
-  def start(self, handle: str, body: _Body, *, conversation_id: str, announce: Callable[[], None] | None = None) -> bool
+  def start(self, handle: str, body: _Body, *, conversation_id: str, identity: tuple[str | None, str | None] = (None, None), announce: Callable[[], None] | None = None) -> bool
   def wait(self, handle: str, timeout_seconds: float) -> bool
 fsm_llm.engine.executables.adapter_for def(kind: str, kinds: NameRegistry[Callable[..., Any]] | None = None) -> Callable[..., Any]
 fsm_llm.engine.executables.is_template_identity def(key: str) -> bool
