@@ -21,6 +21,8 @@ Interface contract:
 - ``end_tool(handle, ...)`` never raises: an observer error is a WARNING (type name only) and the
   call goes on. The caller that ran the tool writes it, once, after the body returned, raised or
   timed out; a worker thread never does.
+- ``begin_approval`` and ``end_approval`` bracket one ask of ``HumanInTheLoop`` (D-007): BEST EFFORT,
+  they never raise, so an unwritable log changes no verdict; nothing reads their handle back.
 """
 
 from __future__ import annotations
@@ -68,6 +70,19 @@ class ToolObserver(Protocol):
         error_code: str | None,
         truncated: bool,
         elapsed_ms: float,
+    ) -> None: ...
+
+    def begin_approval(
+        self, *, tool_name: str, arguments: Mapping[str, Any], has_callback: bool
+    ) -> object | None: ...
+
+    def end_approval(
+        self,
+        token: object | None,
+        *,
+        approved: bool,
+        reason: str,
+        error_type: str | None,
     ) -> None: ...
 
 
@@ -136,3 +151,43 @@ def end_tool(
         )
     except Exception as e:
         logger.warning(f"Tool observer end_tool failed: {type(e).__name__}")
+
+
+# DECISION plan-2026-11-24T193347-3f4530d3/D-007
+# Unlike `begin_tool`, these swallow every observer error: an approval event is evidence, never a
+# gate. Do NOT let them raise, return what a caller could branch on, or pass live arguments.
+def begin_approval(
+    tool_name: str, arguments: Mapping[str, Any], *, has_callback: bool
+) -> ToolHandle | None:
+    """Tell the active observer an approval is about to be asked; never raises."""
+    observer = _ACTIVE.get()
+    if observer is None:
+        return None
+    try:
+        token = observer.begin_approval(
+            tool_name=tool_name,
+            arguments=MappingProxyType(arguments),
+            has_callback=has_callback,
+        )
+    except Exception as e:
+        logger.warning(f"Tool observer begin_approval failed: {type(e).__name__}")
+        return None
+    return ToolHandle(observer, token)
+
+
+def end_approval(
+    handle: ToolHandle | None,
+    *,
+    approved: bool,
+    reason: str,
+    error_type: str | None = None,
+) -> None:
+    """Hand the verdict of the ask to the observer; never raises."""
+    if handle is None:
+        return
+    try:
+        handle.observer.end_approval(
+            handle.token, approved=approved, reason=reason, error_type=error_type
+        )
+    except Exception as e:
+        logger.warning(f"Tool observer end_approval failed: {type(e).__name__}")

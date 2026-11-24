@@ -46,6 +46,7 @@ Interface contract:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,7 +61,7 @@ from fsm_llm.runtime.stores import FrameProjection, fold_stack, turn_cut
 from fsm_llm.runtime.stores.session import public_context
 
 from .budget import budget_kwargs
-from .events import record_forked, record_restored_frame, record_resumed
+from .events import event_scope, record_forked, record_restored_frame, record_resumed
 from .helpers import (
     _require_classifier_interface,
     _require_state_executors,
@@ -154,6 +155,10 @@ class ForkMixin(_ApiSurface):
         a conversation through ``fsm_llm.runtime.usage`` without building a second one.
         """
         return self._event_log
+
+    def event_scope(self, conversation_id: str) -> AbstractContextManager[Any]:
+        """Bind the event log scope of *conversation_id* (its top frame) for work outside a turn."""
+        return event_scope(self, conversation_id)
 
     def fork(self, conversation_id: str, *, at_turn: int) -> tuple[str, SessionState]:
         """Start a NEW conversation from *conversation_id* as it stood at the end of turn *at_turn*.

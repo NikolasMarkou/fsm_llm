@@ -146,6 +146,12 @@ SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
                 "call_frame",
             }
         ),
+        EventType.APPROVAL_REQUEST: frozenset(
+            {"tool_name", "has_callback", "argument_keys"}
+        ),
+        EventType.APPROVAL_OUTCOME: frozenset(
+            {"request_seq", "approved", "reason", "error_type"}
+        ),
         EventType.CONTEXT_RECORD: frozenset(
             {
                 "source",

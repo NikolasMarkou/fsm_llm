@@ -139,8 +139,6 @@ class TestVocabulary:
     def test_the_declared_but_not_produced_types(self) -> None:
         assert DECLARED_TYPES - PRODUCED_TYPES == NOT_YET_PRODUCED
         assert {t.value for t in NOT_YET_PRODUCED} >= {
-            "approval/request",
-            "approval/outcome",
             "extraction",
             "extraction/miss",
             "intent/out_of_scope",

@@ -18,6 +18,7 @@ fsm_llm.API class
   def create_handler(self, name: str = 'CustomHandler', timing: HandlerTiming | None = None, action: Any | None = None) -> HandlerBuilder
   def end_conversation(self, conversation_id: str) -> None
   property event_log
+  def event_scope(self, conversation_id: str) -> AbstractContextManager[Any]
   def fork(self, conversation_id: str, *, at_turn: int) -> tuple[str, SessionState]
   classmethod def from_definition(cls, fsm_definition: FSMDefinition | dict[str, Any] | None = None, *, definition: FSMDefinition | dict[str, Any] | None = None, **kwargs: Any) -> API
   classmethod def from_file(cls, path: Path | str, **kwargs: Any) -> API

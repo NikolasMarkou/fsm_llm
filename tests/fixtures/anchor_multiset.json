@@ -1089,6 +1089,11 @@
       "delta": 1,
       "reason": "plan 3f4530d3 step 3: two new anchors, D-005 at core/tool_observer.py (the tool seam) and D-006 at tools/registry.py (the execute hook)",
       "token": "plan-2026-11-24T193347-3f4530d3/D-006"
+    },
+    {
+      "delta": 3,
+      "reason": "plan 3f4530d3 step 4: D-007 approval events are evidence (best effort, never a grant), three anchors: core/tool_observer.py, policy/hitl.py, agents/base/hitl_gate.py",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-007"
     }
   ]
 }

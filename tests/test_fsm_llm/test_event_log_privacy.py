@@ -24,6 +24,7 @@ from fsm_llm import API, FileSessionStore, HandlerTiming, create_handler
 from fsm_llm.core.definitions import FSMError
 from fsm_llm.engine.session import EventLogSessionStore
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.runtime import (
     PRODUCED_TYPES,
     EventLog,
@@ -38,6 +39,7 @@ from fsm_llm.runtime import (
 from fsm_llm.runtime.privacy import SHAPE_FIELDS, run_redaction
 from fsm_llm.runtime.stores import fold_session, fold_stack
 from fsm_llm.testing import ScriptedLLM
+from fsm_llm.tools import ToolCall
 from tests.test_fsm_llm.event_log_support import _reply, tree_bytes, tree_files
 from tests.test_fsm_llm.support import _c_log_capture
 from tests.test_fsm_llm.test_call_delegated_settle import run_delegated
@@ -217,6 +219,12 @@ class TestAShapeLog:
             with log.tool_call("tools-1", name="pay", call_id="c1", arguments=secret):
                 pass
             run_delegated(log)  # run/start and run/end of a delegated call
+            with capped.event_scope(
+                capped_id
+            ):  # an approval ask (plan 3f4530d3 step 4)
+                HumanInTheLoop(approval_callback=lambda request: True).request_approval(
+                    ToolCall(tool_name="pay", parameters=secret), {}
+                )
             events = _all_events(log)
         # `tool/call` has no product producer yet (step 3): the helper above writes it, so its
         # allow-list is still walked here
@@ -228,6 +236,8 @@ class TestAShapeLog:
         call = next(e for e in events if e["type"] == "tool/call")
         assert call["argument_keys"] == ["a", "b", "card"]
         assert "arguments" not in call
+        ask = next(e for e in events if e["type"] == "approval/request")
+        assert ask["argument_keys"] == ["a", "b", "card"] and "arguments" not in ask
         assert b"4111" not in tree_bytes(tmp_path / "ev")
         budget = next(e for e in events if e["type"] == "decision")
         assert (budget["kind"], budget["budget"]) == ("budget_spent", "steps")
@@ -753,7 +763,7 @@ class TestEveryProducerGoesThroughPutJson:
             "__init__",
             "put_blob",
             "put_json",
-            "tool_begin",
+            "_append_call",
             "get_blob",
             "get_json",
         }

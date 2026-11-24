@@ -490,6 +490,28 @@ class EventLog:
             or not call_id
         ):
             raise EventPayloadError("a tool call needs a non-empty name and call_id")
+        self._append_call(
+            EventType.TOOL_CALL,
+            conversation_id,
+            frame,
+            arguments,
+            gated,
+            name=name,
+            call_id=call_id,
+            side_effecting=bool(side_effecting),
+        )
+
+    def _append_call(
+        self,
+        kind: EventType,
+        conversation_id: str,
+        frame: int,
+        arguments: Mapping[str, Any],
+        gated: bool | None = None,
+        **fields: Any,
+    ) -> int:
+        """Append *kind* with *fields* and the *arguments* as ``arguments``, ``arguments_ref`` or (at
+        shape) ``argument_keys``, after ``redact_context`` and the user hook (kind ``arguments``)."""
         if not isinstance(arguments, Mapping):
             raise EventPayloadError("tool call arguments are a mapping")
         safe = to_jsonable(redact_context(dict(arguments)))
@@ -510,15 +532,7 @@ class EventLog:
                 where = {"arguments_ref": self._blobs.put_json(safe)}
         if gated is not None:
             where["gated"] = bool(gated)
-        self.append(
-            conversation_id,
-            EventType.TOOL_CALL,
-            frame=frame,
-            name=name,
-            call_id=call_id,
-            side_effecting=bool(side_effecting),
-            **where,
-        )
+        return self.append(conversation_id, kind, frame=frame, **fields, **where)
 
     def tool_end(
         self,
@@ -557,6 +571,26 @@ class EventLog:
             call_id=call_id,
             status=status,
             **extra,
+        )
+
+    def approval_request(
+        self,
+        conversation_id: str,
+        *,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        has_callback: bool,
+        frame: int = 0,
+    ) -> int:
+        """Append ``approval/request`` BEFORE the ask and return its ``seq``: ``tool_name``,
+        ``has_callback`` and the arguments as ``tool/call`` has them; never the context or a grant."""
+        return self._append_call(
+            EventType.APPROVAL_REQUEST,
+            conversation_id,
+            frame,
+            arguments,
+            tool_name=tool_name,
+            has_callback=bool(has_callback),
         )
 
     @contextmanager

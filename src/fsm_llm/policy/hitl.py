@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
+from fsm_llm.core.tool_observer import begin_approval, end_approval
 from fsm_llm.logging import logger
 from fsm_llm.tools import (
     ToolCall,
@@ -109,7 +110,16 @@ class HumanInTheLoop:
         )
 
         callback = self._approval_callback
+        # DECISION plan-2026-11-24T193347-3f4530d3/D-007
+        # The ask is evidence only: `approval/request` BEFORE the callback is asked, `approval/outcome`
+        # after, both best effort (a failed write changes no verdict). Do NOT read an event or handle
+        # back into a decision, write a grant or the context into an event, or move the request
+        # after the callback. See decisions.md D-007.
+        handle = begin_approval(
+            tool_call.tool_name, tool_call.parameters, has_callback=callback is not None
+        )
         if callback is None:
+            end_approval(handle, approved=False, reason="no_callback")
             raise ApprovalDeniedError(
                 "No approval callback configured; cannot request approval"
             )
@@ -137,24 +147,34 @@ class HumanInTheLoop:
             ),
         )
 
-        if self._approval_timeout is None:
-            approved = callback(request)
-        else:
-            # The callback runs as a timed tool does: in a copy of the caller's
-            # context variables, its exception (SystemExit too) raised here, a
-            # late one logged, a bad timeout refused (F-AB-04).
-            try:
-                approved = call_with_timeout(
-                    lambda: callback(request),
-                    "approval_callback",
-                    self._approval_timeout,
-                )
-            except ToolTimedOut:
-                logger.warning(
-                    f"Approval timed out after {self._approval_timeout}s, "
-                    "treating as denied"
-                )
-                approved = False
+        reason = None
+        try:
+            if self._approval_timeout is None:
+                approved = callback(request)
+            else:
+                # The callback runs as a timed tool does: in a copy of the caller's
+                # context variables, its exception (SystemExit too) raised here, a
+                # late one logged, a bad timeout refused (F-AB-04).
+                try:
+                    approved = call_with_timeout(
+                        lambda: callback(request),
+                        "approval_callback",
+                        self._approval_timeout,
+                    )
+                except ToolTimedOut:
+                    logger.warning(
+                        f"Approval timed out after {self._approval_timeout}s, "
+                        "treating as denied"
+                    )
+                    approved = False
+                    reason = "timeout"
+        except BaseException as exc:
+            end_approval(
+                handle, approved=False, reason="error", error_type=type(exc).__name__
+            )
+            raise
+        reason = reason or ("approved" if approved is True else "denied")
+        end_approval(handle, approved=approved is True, reason=reason)
 
         logger.info(
             LogMessages.APPROVAL_RESULT.format(

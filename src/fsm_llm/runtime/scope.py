@@ -406,6 +406,38 @@ class _ToolObserver:
                 elapsed_ms=elapsed_ms,
             )
 
+    def begin_approval(
+        self, *, tool_name: str, arguments: Mapping[str, Any], has_callback: bool
+    ) -> object | None:
+        scope = self._scope
+        return scope.log.approval_request(
+            scope.root_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            has_callback=has_callback,
+            frame=scope.frame,
+        )
+
+    def end_approval(
+        self,
+        token: object | None,
+        *,
+        approved: bool,
+        reason: str,
+        error_type: str | None,
+    ) -> None:
+        scope = self._scope
+        extra: dict[str, Any] = {} if error_type is None else {"error_type": error_type}
+        scope.log.append(
+            scope.root_id,
+            EventType.APPROVAL_OUTCOME,
+            frame=scope.frame,
+            request_seq=token,
+            approved=approved,
+            reason=reason,
+            **extra,
+        )
+
 
 class LlmCall:
     """The recorder ``llm_call`` yields (see the module docstring). An internal helper, not

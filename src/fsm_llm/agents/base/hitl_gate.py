@@ -9,6 +9,7 @@ method bodies are the old ones (plan d454fd62 step 87).
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any
 
 from fsm_llm import API
@@ -222,7 +223,12 @@ class HitlGateMixin(_AgentSurface):
             return
         if not current_context.get(ContextKeys.APPROVAL_REQUIRED):
             return
-        approved = hitl.request_approval(tool_call, current_context) is True
+        # DECISION plan-2026-11-24T193347-3f4530d3/D-007
+        # The driver asks outside a turn, so the ask runs in this conversation's log scope (getattr
+        # keeps an API double without it working). Do NOT branch on an approval event.
+        open_scope = getattr(api, "event_scope", None)
+        with open_scope(conversation_id) if open_scope else nullcontext():
+            approved = hitl.request_approval(tool_call, current_context) is True
         # DECISION plan-2026-09-24T091842-c1d5bfbc/D-004
         # The public keys only route the FSM (the model can forge them). The
         # driver-only grant, bound to the exact call the human saw, is what

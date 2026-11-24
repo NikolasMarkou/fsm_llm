@@ -8,9 +8,8 @@ Two model paths: ``ScriptedLLM`` (an engine-path double that never reaches
 seam writes them). Bytes, counts and sequences, never timing. Unverified until the Windows run:
 nothing here opens a file itself (the files are ``stores.jsonl``'s and ``blobs``').
 
-Not produced yet (``NOT_YET_PRODUCED``, declared in ``DECLARED_TYPES``): ``tool/call``,
-``approval/*``, ``extraction``, ``extraction/miss``, ``intent/out_of_scope``, ``handler``,
-``executable/resolve`` and ``compaction/epoch``. ``TestTheProductPathMatrix`` runs one product
+Not produced yet (``NOT_YET_PRODUCED``, declared in ``DECLARED_TYPES``): ``extraction``, ``extraction/miss``,
+``intent/out_of_scope``, ``handler``, ``executable/resolve`` and ``compaction/epoch``. ``TestTheProductPathMatrix`` runs one product
 scenario per produced type and bans a direct log write in this module. ``decision`` (the budget
 stop, plan 5a6a1f80 step 7) is produced; its tests are in ``test_turn_budgets.py``.
 """
@@ -38,6 +37,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.engine.turn.events import _priority
 from fsm_llm.llm import LiteLLMInterface
+from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.runtime import (
     DECLARED_TYPES,
     PRODUCED_TYPES,
@@ -51,6 +51,7 @@ from fsm_llm.runtime import (
 )
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM, final_reply
+from fsm_llm.tools import ToolCall
 from tests.test_fsm_llm import event_log_child as crash_child
 from tests.test_fsm_llm.event_log_support import (
     _chunk,
@@ -609,6 +610,21 @@ def _scenario_registry_tool(log: EventLog) -> set[str]:
     return _types_of(log, cid)
 
 
+def _scenario_approval(log: EventLog) -> set[str]:
+    """``HumanInTheLoop.request_approval`` asked inside ``API.event_scope`` (the agent driver's
+    path): ``approval/request`` before the callback, ``approval/outcome`` after."""
+    api = API(
+        copy.deepcopy(_CHAT),
+        llm_interface=ScriptedLLM(responses={"chat": "hi"}),
+        event_log=log,
+    )
+    cid, _ = api.start_conversation()
+    hitl = HumanInTheLoop(approval_callback=lambda request: True)
+    with api.event_scope(cid):
+        hitl.request_approval(ToolCall(tool_name="send", parameters={"to": "a"}), {})
+    return _types_of(log, cid)
+
+
 #: Per type, the product scenario that writes it: through ``API``, ``API.resume`` or a delegated
 #: run, never through ``EventLog.tool_call`` or ``EventLog.append`` (an AST row below bans both
 #: in this module). Later steps move a type from ``NOT_YET_PRODUCED`` to this table.
@@ -629,14 +645,14 @@ _PRODUCT_SCENARIOS: dict[EventType, Callable[[EventLog], set[str]]] = {
     EventType.RUN_END: _scenario_delegated_call,
     EventType.TOOL_CALL: _scenario_registry_tool,
     EventType.TOOL_RESULT: _scenario_resume_of_a_tool_in_flight,
+    EventType.APPROVAL_REQUEST: _scenario_approval,
+    EventType.APPROVAL_OUTCOME: _scenario_approval,
 }
 
-#: Declared and with no product producer yet: the approval pair, the extraction family, handler, executable/resolve; and
+#: Declared and with no product producer yet: the extraction family, handler, executable/resolve; and
 #: compaction/epoch, which needs roadmap row 2.5 and is out of plan 3f4530d3.
 NOT_YET_PRODUCED = frozenset(
     {
-        EventType.APPROVAL_REQUEST,
-        EventType.APPROVAL_OUTCOME,
         EventType.EXTRACTION,
         EventType.EXTRACTION_MISS,
         EventType.INTENT_OUT_OF_SCOPE,

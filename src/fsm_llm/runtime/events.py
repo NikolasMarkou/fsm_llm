@@ -112,10 +112,11 @@ class TurnOutcome(str, Enum):
 #: Every type the format declares (the 21 of roadmap row 1.1 and the three run types).
 DECLARED_TYPES: frozenset[EventType] = frozenset(EventType)
 
-#: The types product code writes today (16): ``tool/call`` and ``tool/result`` come from
+#: The types product code writes today: ``tool/call`` and ``tool/result`` come from
 #: ``ToolRegistry.execute`` through ``core.tool_observer`` (``tool/result`` also as the ``unknown``
-#: record of ``API.resume``). The set test builds the table of scenarios from product paths only,
-#: never from ``EventLog.tool_call`` or ``EventLog.append``.
+#: record of ``API.resume``), the approval pair from ``HumanInTheLoop.request_approval`` through the
+#: same seam. The set test builds the table of scenarios from product paths only, never from
+#: ``EventLog.tool_call`` or ``EventLog.append``.
 PRODUCED_TYPES: frozenset[EventType] = frozenset(
     {
         EventType.TURN_START,
@@ -125,6 +126,8 @@ PRODUCED_TYPES: frozenset[EventType] = frozenset(
         EventType.PROVIDER_ERROR,
         EventType.TOOL_CALL,
         EventType.TOOL_RESULT,
+        EventType.APPROVAL_REQUEST,
+        EventType.APPROVAL_OUTCOME,
         EventType.CONTEXT_RECORD,
         EventType.STACK_PUSH,
         EventType.STACK_POP,
