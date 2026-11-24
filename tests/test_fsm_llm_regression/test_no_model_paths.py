@@ -455,9 +455,9 @@ class TestNoModelNeeded:
         _NO_MODEL_NEEDED[name](tmp_path)
 
     def test_every_create_agent_pattern_has_a_row(self) -> None:
-        from fsm_llm.agents import _PATTERNS as registered
+        from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS as registered
 
-        assert set(_PATTERNS) == set(registered)
+        assert set(_PATTERNS) == set(registered.list())
         for pattern in set(_PATTERNS) - {"swarm"}:
             assert f"agents: create_agent({pattern!r}, llm_interface=)" in (
                 _NO_MODEL_NEEDED

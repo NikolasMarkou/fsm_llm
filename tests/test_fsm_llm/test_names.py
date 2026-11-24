@@ -478,13 +478,18 @@ NAMESPACES: dict[str, tuple[str, str, str]] = {
         "generator functions a pattern file names instead of an FSM (empty until the prompt_chain "
         "step); entry-point group fsm_llm.generators",
     ),
+    "pattern_agents": (
+        "engine/executables/namespaces.py",
+        "PATTERN_AGENTS",
+        "the agent class create_agent builds for each built-in pattern id, filled by fsm_llm.agents "
+        "at import (plan a555dcfe D-030); no entry-point group",
+    ),
 }
 
 #: The private name tables that remain, each with the roadmap row that retires it (docs/2026_roadmap.md).
 #: ``_EXECUTORS``, the ninth, is on the registry above. A NEW table is refused: a module-level dict
 #: that a ``register*`` function mutates is not in this table, so the scan below fails.
 KNOWN_PRIVATE_TABLES: dict[str, tuple[str, str]] = {
-    "_PATTERNS": ("agents/__init__.py", "E4.2"),
     "SOPRegistry": ("agents/sop.py", "E4.5"),
     "_AGENT_CLASSES": ("monitor/instance_manager/agent.py", "E2.4"),
     "_WORKFLOW_PRESETS": ("monitor/instance_manager/workflow_presets.py", "E5.1"),

@@ -169,9 +169,9 @@ _PATTERNS = [
 
 class TestEveryPatternUsesItsInterface:
     def test_the_pattern_list_is_every_pattern_but_swarm(self):
-        from fsm_llm.agents import _PATTERNS as registered
+        from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS as registered
 
-        assert sorted(_PATTERNS) == sorted(set(registered) - {"swarm"})
+        assert sorted(_PATTERNS) == sorted(set(registered.list()) - {"swarm"})
 
     @pytest.mark.parametrize("pattern", _PATTERNS)
     def test_every_model_call_reaches_the_injected_interface(

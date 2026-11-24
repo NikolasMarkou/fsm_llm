@@ -1,11 +1,11 @@
 """The built-in agent patterns as executables (roadmap E2.4; plan ace7a8c8 D-061).
 
 ``builtin_executables()`` returns one ``PatternExecutable`` per pattern of ``create_agent``
-(``fsm_llm.agents._PATTERNS``: the one id list, never copied here). ``fsm_llm.agents`` registers
+(the ``pattern_agents`` namespace, ``PATTERN_AGENTS``: the one id list, never copied here). ``fsm_llm.agents`` registers
 that function as the ``agents`` source of the ``executable_sources`` namespace, so
 ``ExecutableRegistry().load_sources()`` serves them by id without the engine importing this
 package. They run on today's classes: the executable builds the agent PER RUN through
-``create_agent`` (never ``_PATTERNS`` directly, no per-run state on the executable: plan
+``create_agent`` (never the class table directly, no per-run state on the executable: plan
 089d0ec7 D-014, plan 06a5ec0a D-052) and calls its ``run``. Roadmap E4.2 replaces the bodies
 with files under the same ids, one pattern per step: a pattern with a file under
 ``agents/patterns/`` is served by a ``PatternExecutable`` built from its file (plan a555dcfe step 9, D-015), and
@@ -58,7 +58,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fsm_llm.agents import _PATTERNS, create_agent
+from fsm_llm.agents import create_agent
 from fsm_llm.agents.definitions import (
     AgentConfig,
     MetaBuilderResult,
@@ -81,6 +81,7 @@ from fsm_llm.core.definitions.executable_instance import identity_of
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
+from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
 from fsm_llm.tools import ToolRegistry, registry_from
 
 __all__ = [
@@ -104,7 +105,7 @@ class _Row:
     initial_context: bool = True
 
 
-# One row per key of ``fsm_llm.agents._PATTERNS`` (a test holds the key sets equal).
+# One row per id of the ``pattern_agents`` namespace (a test holds the key sets equal).
 _ROWS: dict[str, _Row] = {
     "react": _Row(("tools",), ("hitl", "config"), "some", (_TOOLS, _HITL)),
     "rewoo": _Row(("tools",), ("config",), "some", (_TOOLS,)),
@@ -157,7 +158,7 @@ class PatternExecutable(CodeBackedExecutable):
             self._init_from_file(envelope, agent_class)
             return
         row = _ROWS[pattern]
-        cls = _PATTERNS[pattern]
+        cls = PATTERN_AGENTS.resolve(pattern)
         self._row = row
         outputs = ["artifact", "artifact_type"] if pattern == "meta_builder" else []
         super().__init__(
@@ -324,14 +325,17 @@ def pattern_adapter(
 
 
 def builtin_executables() -> list[PatternExecutable]:
-    """One executable per ``create_agent`` pattern, in ``_PATTERNS`` order.
+    """One executable per ``create_agent`` pattern, in the order of ``PATTERN_AGENTS``.
 
     A pattern with a shipped file (``pattern_files.PATTERN_ORDER``) is served by its file.
     """
     shipped = {
         name: PatternExecutable(
-            name, envelope=load_envelope(name), agent_class=_PATTERNS[name]
+            name, envelope=load_envelope(name), agent_class=PATTERN_AGENTS.resolve(name)
         )
         for name in PATTERN_ORDER
     }
-    return [shipped.get(pattern) or PatternExecutable(pattern) for pattern in _PATTERNS]
+    return [
+        shipped.get(pattern) or PatternExecutable(pattern)
+        for pattern in (name for name, _ in PATTERN_AGENTS.items())
+    ]

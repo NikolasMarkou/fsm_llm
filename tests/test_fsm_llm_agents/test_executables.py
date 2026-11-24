@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 import fsm_llm
-from fsm_llm.agents import _PATTERNS, create_agent
+from fsm_llm.agents import create_agent
 from fsm_llm.agents import executables as module
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import (
@@ -49,6 +49,7 @@ from fsm_llm.engine.executables import (
     Executable,
     ExecutableRegistry,
 )
+from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
 from fsm_llm.llm import LLMInterface
 from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.testing import ScriptedLLM
@@ -275,20 +276,24 @@ class TestTheSource:
 
     def test_the_registry_lists_the_eighteen_pattern_ids(self) -> None:
         registry = _registry()
-        assert {e.id for e in registry.list(kind="pattern")} >= set(_PATTERNS)
-        assert {e.id for e in registry.list()} >= set(_PATTERNS)
-        for pattern in _PATTERNS:
+        assert {e.id for e in registry.list(kind="pattern")} >= set(
+            PATTERN_AGENTS.list()
+        )
+        assert {e.id for e in registry.list()} >= set(PATTERN_AGENTS.list())
+        for pattern in PATTERN_AGENTS.list():
             assert registry.get(pattern).id == pattern
 
     def test_the_table_and_create_agent_hold_the_same_patterns(self) -> None:
-        assert set(module._ROWS) == set(_PATTERNS)
-        assert [e.id for e in builtin_executables()] == list(_PATTERNS)
+        assert set(module._ROWS) == set(PATTERN_AGENTS.list())
+        assert [e.id for e in builtin_executables()] == [
+            name for name, _ in PATTERN_AGENTS.items()
+        ]
 
     def test_launchable_is_false_exactly_for_the_twelve_that_need_objects(
         self,
     ) -> None:
         registry = _registry()
-        ids = set(_PATTERNS)
+        ids = set(PATTERN_AGENTS.list())
         launchable = {e.id for e in registry.list(launchable=True)} & ids
         refused = {e.id for e in registry.list(launchable=False)} & ids
         assert launchable == LAUNCHABLE
@@ -303,7 +308,7 @@ class TestTheSource:
             "react", "rewoo", "parallel_react", "native_fc",
             "verified_react", "auto_memory", "reflexion", "reasoning_react",
         }  # fmt: skip
-        for pattern in _PATTERNS:
+        for pattern in PATTERN_AGENTS.list():
             exe = _exe(pattern)
             expected = "some" if pattern in tool_patterns else "none"
             assert exe.requires.tools == expected, pattern
@@ -317,7 +322,7 @@ class TestTheSource:
             exe.run({"task": "t", "initial_context": {}})
 
     def test_every_pattern_is_a_builtin_with_its_class_as_impl(self) -> None:
-        for pattern, cls in _PATTERNS.items():
+        for pattern, cls in PATTERN_AGENTS.items():
             exe = _exe(pattern)
             assert exe.kind == "pattern"
             assert exe.lifecycle is Lifecycle.BUILTIN
@@ -538,7 +543,7 @@ class TestRunsWithCallables:
         assert result.detail["pattern"] == "swarm"
         assert isinstance(result.status, Status)
 
-    @pytest.mark.parametrize("pattern", sorted(_PATTERNS))
+    @pytest.mark.parametrize("pattern", PATTERN_AGENTS.list())
     def test_each_pattern_gets_exactly_its_objects(
         self, pattern: str, spy: list[_SpyAgent]
     ) -> None:

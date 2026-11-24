@@ -10,6 +10,8 @@ how a package such as ``fsm_llm.agents`` declares its built-ins without the engi
 ``factory(ctx, binding) -> list[Handler]`` (called once per run, never a built handler: per-run state is
 never in a registry) and ``GENERATORS`` (group ``fsm_llm.generators``) maps a generator name to the
 function that writes a pattern FSM; ``fsm_llm.agents.handlers`` registers its library at import.
+``PATTERN_AGENTS`` (``pattern_agents``, plan a555dcfe D-030) maps a built-in pattern id to the agent
+class ``create_agent`` builds for it: the one class table, filled by ``fsm_llm.agents`` at import.
 
 Interface contract:
 
@@ -39,6 +41,7 @@ __all__ = [
     "EXECUTABLE_SOURCES",
     "GENERATORS",
     "HANDLERS",
+    "PATTERN_AGENTS",
     "adapter_for",
     "namespace_resolver",
 ]
@@ -60,6 +63,7 @@ HANDLERS: NameRegistry[Callable[..., Any]] = NameRegistry(
 GENERATORS: NameRegistry[Callable[..., Any]] = NameRegistry(
     "generators", entry_point_group="fsm_llm.generators"
 )
+PATTERN_AGENTS: NameRegistry[type] = NameRegistry("pattern_agents")
 
 
 def namespace_resolver(

@@ -1034,6 +1034,11 @@
       "delta": -1,
       "reason": "step 18 of plan a555dcfe (evaluator_optimizer as a pattern file, D-029, owner D-029 of plan ace7a8c8): the builder of evalopt is replaced by patterns/evaluator_optimizer.json; the rule that generate keeps an unconditional lowest-priority fallback edge to evaluate (core runs no PRE_TRANSITION limiter on a BLOCKED turn) lives in the file and is held by test_pattern_shapes (the loop-state fallback rows) and the generate fallback row of test_evaluator_optimizer; the other evaluator_optimizer anchors moved with their handler bodies to handlers/evaluator_optimizer.py and library_stepwise.py or stay in the class",
       "token": "plan-2026-09-24T045559-3e4eb3e5/D-002"
+    },
+    {
+      "delta": 1,
+      "reason": "step 19 of plan a555dcfe (create_agent through the registry, D-030): a new anchor token on create_agent; the anchors of the replaced _PATTERNS dict (none) are unchanged",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-030"
     }
   ]
 }

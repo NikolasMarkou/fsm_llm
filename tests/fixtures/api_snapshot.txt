@@ -1562,7 +1562,7 @@ fsm_llm.agents.WorkflowArtifactBuilder class(ArtifactBuilder)
   def validate_partial(self) -> list[str]
 fsm_llm.agents.augment_task_with_memories def(task: str, memory: MemoryBackend, recall_k: int = 3, header: str = '[Relevant things you remember]', min_score: float = 0.0) -> str
 fsm_llm.agents.build_parallel_react_fsm def(registry: ToolRegistry, task_description: str = '', output_schema: type | None = None, context_keys: Sequence[str] = ()) -> dict[str, Any]
-fsm_llm.agents.create_agent def(pattern: str = 'react', tools: list | ToolRegistry | None = None, *, config: AgentConfig | None = None, system_prompt: str | None = None, **kwargs)
+fsm_llm.agents.create_agent def(pattern: str = 'react', tools: list | ToolRegistry | None = None, *, registry: ExecutableRegistry | None = None, config: AgentConfig | None = None, system_prompt: str | None = None, **kwargs)
 fsm_llm.agents.create_agent_tools def(builder: AgentArtifactBuilder) -> ToolRegistry
 fsm_llm.agents.create_builder_tools def(builder: FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder, artifact_type: ArtifactType) -> ToolRegistry
 fsm_llm.agents.create_fsm_tools def(builder: FSMArtifactBuilder) -> ToolRegistry

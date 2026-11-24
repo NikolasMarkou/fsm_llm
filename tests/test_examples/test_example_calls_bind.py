@@ -41,9 +41,10 @@ from typing import Any
 import pytest
 
 from fsm_llm import API
-from fsm_llm.agents import _PATTERNS, create_agent
+from fsm_llm.agents import create_agent
 from fsm_llm.agents.base import BaseAgent, reject_misplaced_kwargs
 from fsm_llm.constants import RESERVED_LLM_CALL_KWARGS
+from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
 
 pytestmark = pytest.mark.examples
 
@@ -176,7 +177,7 @@ class _Checker:
             return self.returns[expr.func.id]
         target, _ = self._callee(expr.func, types, report=False)
         if target is create_agent:
-            return _PATTERNS.get(_literal_pattern(expr) or "")
+            return PATTERN_AGENTS.get(_literal_pattern(expr) or "")
         if inspect.isclass(target):
             return _package_class(target)
         try:
@@ -318,7 +319,7 @@ class _Checker:
         if _is_api_factory(target):
             return self._bind_and_forward(API, 0, leftover | {"fsm_definition"}, call)
         if target is create_agent:
-            pattern = _PATTERNS.get(_literal_pattern(call) or "")
+            pattern = PATTERN_AGENTS.get(_literal_pattern(call) or "")
             if pattern is None:
                 return []
             return self._bind_and_forward(pattern, 0, leftover, call)

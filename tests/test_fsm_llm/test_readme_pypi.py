@@ -209,12 +209,12 @@ class TestTheReadmeNamesAreTrue:
     """Every name the showcase README gives is checked against the code; no number is asserted."""
 
     def test_the_agent_patterns_are_the_ones_create_agent_accepts(self, readme):
-        from fsm_llm.agents import _PATTERNS
+        from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
 
         line = next(x for x in readme.splitlines() if "agent patterns (`react`" in x)
         named = set(re.findall(r"`([a-z_]+)`", line.split("agent patterns", 1)[1]))
         named -= {"AgentGraph"}
-        assert named == set(_PATTERNS)
+        assert named == set(PATTERN_AGENTS.list())
 
     def test_the_readme_names_the_reasoning_engine(self, readme):
         from fsm_llm.reasoning import ReasoningEngine
