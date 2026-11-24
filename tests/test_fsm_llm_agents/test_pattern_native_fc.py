@@ -24,7 +24,7 @@ from fsm_llm.agents.constants import NativeFCContextKeys, NativeLoopEnd
 from fsm_llm.agents.definitions import AgentConfig
 from fsm_llm.agents.fsm_definitions import build_native_fc_fsm
 from fsm_llm.agents.fsm_definitions.native_fc import native_fc_options
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_react as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.native_fc import _SYSTEM_PROMPT
 from fsm_llm.agents.pattern_agent import PatternAgent

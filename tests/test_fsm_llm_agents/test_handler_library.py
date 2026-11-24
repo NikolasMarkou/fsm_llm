@@ -23,8 +23,8 @@ from fsm_llm.agents.constants import (
     HandlerNames,
 )
 from fsm_llm.agents.definitions import AgentConfig
-from fsm_llm.agents.handlers import AgentHandlers, make_iteration_limiter
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import AgentHandlers, library, make_iteration_limiter
+from fsm_llm.agents.handlers import library_react as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.handlers.library import LIBRARY
 from fsm_llm.agents.react import ReactAgent
@@ -160,7 +160,7 @@ class TestTheNamespaces:
 
     def test_the_library_is_registered_one_function_per_name(self):
         names = [name for name, _ in LIBRARY]
-        assert sorted([*names, *(name for name, _ in lib.HOOKS)]) == HANDLERS.list()
+        assert sorted([*names, *(name for name, _ in library.HOOKS)]) == HANDLERS.list()
         assert names == [
             "agents.tool_executor",
             "agents.think_turn_limiter",
@@ -187,16 +187,16 @@ class TestTheNamespaces:
             "agents.force_pass",
             "agents.approval_gate",
         ]
-        assert [name for name, _ in lib.HOOKS] == [
+        assert [name for name, _ in library.HOOKS] == [
             "agents.raise_run_ending_error",
             "agents.rewoo_cut_off_answer",
         ]
-        for name, factory in (*LIBRARY, *lib.HOOKS):
+        for name, factory in (*LIBRARY, *library.HOOKS):
             assert HANDLERS.resolve(name) is factory
             assert HANDLERS.name_of(factory) == name
-        assert len({id(factory) for _, factory in (*LIBRARY, *lib.HOOKS)}) == len(
+        assert len({id(factory) for _, factory in (*LIBRARY, *library.HOOKS)}) == len(
             LIBRARY
-        ) + len(lib.HOOKS)
+        ) + len(library.HOOKS)
 
     def test_the_gate_name_is_the_one_the_verifier_holds_equal_to_the_hitl_claim(self):
         # D-012 of plan a555dcfe: core names the gate by a constant, the library registers it

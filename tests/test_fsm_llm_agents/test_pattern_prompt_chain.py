@@ -22,7 +22,7 @@ from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.agents.definitions import ChainStep
 from fsm_llm.agents.fsm_definitions import build_prompt_chain_fsm
 from fsm_llm.agents.fsm_definitions.prompt_chain import chain_options, prompt_chain_fsm
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_react as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.agents.pattern_files import load_document, load_envelope

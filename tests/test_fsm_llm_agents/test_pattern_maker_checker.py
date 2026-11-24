@@ -23,7 +23,7 @@ from fsm_llm.agents.base import BaseAgent, accepts_tools
 from fsm_llm.agents.constants import ContextKeys, Defaults, MakerCheckerStates
 from fsm_llm.agents.fsm_definitions import build_maker_checker_fsm
 from fsm_llm.agents.fsm_definitions.maker_checker import maker_checker_texts
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_stepwise as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.agents.pattern_inputs import pattern_fsm

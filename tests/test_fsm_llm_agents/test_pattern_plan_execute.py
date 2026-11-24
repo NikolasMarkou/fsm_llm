@@ -24,7 +24,8 @@ from fsm_llm.agents import pattern_files as pf
 from fsm_llm.agents.base import BaseAgent, accepts_tools
 from fsm_llm.agents.constants import ContextKeys, Defaults
 from fsm_llm.agents.fsm_definitions import build_plan_execute_fsm
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_react
+from fsm_llm.agents.handlers import library_stepwise as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.agents.pattern_inputs import pattern_fsm
@@ -239,7 +240,7 @@ class TestTheRegistration:
 
     def test_the_executor_without_the_optional_param_needs_the_registry(self):
         with pytest.raises(AgentError, match="needs the run's tools"):
-            lib.tool_executor(HandlerContext())
+            library_react.tool_executor(HandlerContext())
 
 
 class TestTheFactories:
@@ -302,7 +303,7 @@ class TestTheFactories:
         assert done[ContextKeys.STEP_FAILED] is False
 
     def test_the_checker_runs_after_the_executor_on_check_result(self):
-        executor = lib.tool_executor(
+        executor = library_react.tool_executor(
             HandlerContext(tools=runs._tools()),
             _binding(_agent(), "agents.tool_executor"),
         )[0]

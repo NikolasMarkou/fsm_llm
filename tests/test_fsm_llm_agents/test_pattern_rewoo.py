@@ -22,7 +22,8 @@ from fsm_llm.agents.base import BaseAgent, accepts_tools
 from fsm_llm.agents.constants import ContextKeys, ErrorMessages
 from fsm_llm.agents.definitions import AgentResult
 from fsm_llm.agents.fsm_definitions import build_rewoo_fsm
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_react
+from fsm_llm.agents.handlers import library_workers as lib
 from fsm_llm.agents.handlers.context import RUN_RESULT, HandlerContext
 from fsm_llm.agents.handlers.rewoo import (
     evidence_id,
@@ -201,7 +202,7 @@ class TestTheLimiterOfTheFile:
             for b in agent.envelope.body.handlers
             if b.handler == "agents.iteration_limiter"
         )
-        limiter = lib.iteration_check(agent._handler_context(), binding)
+        limiter = library_react.iteration_check(agent._handler_context(), binding)
 
         forced = limiter({ContextKeys.ITERATION_COUNT: agent.config.max_iterations})
 
@@ -322,7 +323,9 @@ class TestTheRun:
         def cut(context: dict[str, Any], tools: Any) -> dict[str, Any]:
             return {ContextKeys.PLAN_CUT_OFF: True, ContextKeys.EVIDENCE_STATUS: []}
 
-        monkeypatch.setattr("fsm_llm.agents.handlers.library.execute_plans", cut)
+        monkeypatch.setattr(
+            "fsm_llm.agents.handlers.library_workers.execute_plans", cut
+        )
 
         result = agent.run("go")
 

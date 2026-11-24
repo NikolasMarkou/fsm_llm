@@ -24,7 +24,7 @@ from fsm_llm.tools import ToolRegistry, require_int_limit
 
 from .definitions import AgentConfig, AgentResult
 from .handlers import RunEndingErrorHolder
-from .handlers.library import iteration_check
+from .handlers.library_react import iteration_check
 from .handlers.orchestrator import delegate_to_workers
 from .pattern_agent import PatternAgent
 

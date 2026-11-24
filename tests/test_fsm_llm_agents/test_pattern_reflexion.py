@@ -20,7 +20,7 @@ from fsm_llm.agents.base import BaseAgent, accepts_tools
 from fsm_llm.agents.constants import ContextKeys, StopReason
 from fsm_llm.agents.definitions import AgentResult, AgentTrace, EvaluationResult
 from fsm_llm.agents.fsm_definitions import build_reflexion_fsm
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_react as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.core.definitions import AgentError

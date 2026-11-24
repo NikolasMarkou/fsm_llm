@@ -22,7 +22,7 @@ from fsm_llm.agents.constants import ContextKeys, Defaults, OrchestratorStates
 from fsm_llm.agents.definitions import AgentResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
 from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
-from fsm_llm.agents.handlers import library as lib
+from fsm_llm.agents.handlers import library_workers as lib
 from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.core.codes import Status

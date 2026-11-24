@@ -15,7 +15,10 @@ from fsm_llm.agents.definitions import AgentConfig, ChainStep
 from fsm_llm.agents.fsm_definitions import build_prompt_chain_fsm
 from fsm_llm.agents.fsm_definitions.prompt_chain import chain_options
 from fsm_llm.agents.handlers.context import HandlerContext
-from fsm_llm.agents.handlers.library import chain_gate_checker, iteration_limiter
+from fsm_llm.agents.handlers.library_react import (
+    chain_gate_checker,
+    iteration_limiter,
+)
 from fsm_llm.agents.pattern_files import load_envelope
 from fsm_llm.agents.prompt_chain import PromptChainAgent
 from fsm_llm.core.definitions import (

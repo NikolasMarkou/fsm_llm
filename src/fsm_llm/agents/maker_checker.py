@@ -20,7 +20,7 @@ from fsm_llm.agents.fsm_definitions.maker_checker import maker_checker_texts
 from fsm_llm.tools import require_int_limit
 
 from .definitions import AgentConfig
-from .handlers.library import iteration_check
+from .handlers.library_react import iteration_check
 from .handlers.maker_checker import force_pass_at_limit, track_revisions
 from .pattern_agent import PatternAgent
 

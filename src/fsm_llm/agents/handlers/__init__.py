@@ -31,7 +31,8 @@ became this package at the same dotted path; the import surface is unchanged):
   ``fsm_llm.agents.handlers.context``; it is not in ``__all__``)
 - ``library`` -- the named factories a pattern file binds (``agents.tool_executor``, ...),
   registered at import in the ``HANDLERS`` namespace of ``fsm_llm.engine.executables.namespaces``
-  (``from fsm_llm.agents.handlers.library import LIBRARY``; not in ``__all__``)
+  (``from fsm_llm.agents.handlers.library import LIBRARY``; not in ``__all__``); the factories live in ``library_react``, ``library_workers``,
+  ``library_stepwise`` and ``library_support`` (not in ``__all__``)
 
 A private name is imported from its defining module; a patch aims at the module
 that performs the lookup (``fsm_llm.agents.handlers.executor.logger``), never
