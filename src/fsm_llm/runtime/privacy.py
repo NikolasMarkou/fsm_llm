@@ -146,6 +146,17 @@ SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
                 "call_frame",
             }
         ),
+        EventType.EXTRACTION: frozenset({"state", "keys"}),
+        EventType.EXTRACTION_MISS: frozenset({"state", "keys"}),
+        EventType.INTENT_OUT_OF_SCOPE: frozenset(
+            {"state", "field", "intent", "confidence", "low_confidence"}
+        ),
+        EventType.HANDLER: frozenset(
+            {"name", "timing", "outcome", "error_type", "keys"}
+        ),
+        EventType.EXECUTABLE_RESOLVE: frozenset(
+            {"target", "mode", "template_identity", "instance_identity"}
+        ),
         EventType.APPROVAL_REQUEST: frozenset(
             {"tool_name", "has_callback", "argument_keys"}
         ),

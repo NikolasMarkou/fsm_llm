@@ -138,14 +138,7 @@ class TestVocabulary:
 
     def test_the_declared_but_not_produced_types(self) -> None:
         assert DECLARED_TYPES - PRODUCED_TYPES == NOT_YET_PRODUCED
-        assert {t.value for t in NOT_YET_PRODUCED} >= {
-            "extraction",
-            "extraction/miss",
-            "intent/out_of_scope",
-            "handler",
-            "executable/resolve",
-            "compaction/epoch",
-        }
+        assert {t.value for t in NOT_YET_PRODUCED} == {"compaction/epoch"}
 
     def test_turn_outcome_is_the_four_values_and_closed(self) -> None:
         assert [m.value for m in TurnOutcome] == [

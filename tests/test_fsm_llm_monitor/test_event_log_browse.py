@@ -53,7 +53,9 @@ def _write(root, privacy: str = "values") -> None:
         total_tokens=7,
         response_ref="sha256:cc",
     )
-    log.append("abc", "handler", name="h", secret="hunter2")  # no allow-list entry
+    log.append(
+        "abc", "compaction/epoch", name="h", secret="hunter2"
+    )  # no allow-list entry
     log.append(
         "abc",
         "transition",
@@ -114,7 +116,7 @@ def test_events_are_cut_to_the_whitelist_and_hold_no_reference_or_text(tmp_path)
         "turn/start",
         "llm/request",
         "llm/response",
-        "handler",
+        "compaction/epoch",
         "transition",
         "turn/end",
     ]

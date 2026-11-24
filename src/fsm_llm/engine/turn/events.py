@@ -12,28 +12,44 @@ Interface contract (callers: ``pass1.py`` and ``transitions.py``):
       adds ``extracted_keys`` (the key NAMES of the extracted data, sorted, never a value) and
       ``extraction_failed``. Written around the one dispatch seam of Pass 1 only, so the
       re-extraction after a transition (``after_transition``) is not an executor event of its own.
+    - ``record_extraction`` and ``record_extraction_miss`` append ``extraction`` (``keys``, and
+      ``delta_ref`` at level ``values``) and ``extraction/miss`` (the declared keys still ``None``
+      after the Pass-1 commit): best effort, never an internal-prefixed or secret-looking key.
     - ``record_transition(state, evaluation, target, *, executed)`` appends ``transition``:
       ``from_state``, ``to_state`` (``None`` when the turn stays), ``outcome`` (the evaluation's
       ``deterministic``, ``ambiguous`` or ``blocked``), ``executed`` and, only when the log can
       state it exactly, ``priority`` (an AMBIGUOUS tie: the tied priority; a DETERMINISTIC win:
       the priority of the one edge to the target, omitted when several edges share the target
       and the evaluation does not say which one passed) and ``candidates`` (the tied targets).
-    - Failure mode: a failing append raises ``EventLogError`` (``runtime.emit``); the writer is
-      poisoned, so the next checkpoint refuses the turn.
+    - Failure mode: a failing executor or transition append raises ``EventLogError``
+      (``runtime.emit``); the writer is poisoned, so the next checkpoint refuses the turn. The
+      extraction pair never raises (a WARNING).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
+    FSMDefinition,
+    FSMInstance,
     State,
     TransitionEvaluation,
     TransitionEvaluationResult,
+    handler_only_names,
 )
 from fsm_llm.core.state_kinds import kind_of
-from fsm_llm.runtime import EventType, current_scope, emit
+from fsm_llm.runtime import (
+    EventType,
+    RedactionKind,
+    current_scope,
+    emit,
+    filter_context,
+    visible_entries,
+    warn_on_failure,
+)
 
 
 def record_executor_start(state: State) -> None:
@@ -52,6 +68,44 @@ def record_executor_result(state: State, response: DataExtractionResponse) -> No
             extracted_keys=sorted(str(key) for key in response.extracted_data),
             extraction_failed=bool(response.extraction_failed),
         )
+
+
+def record_extraction(state: State, data: Mapping[str, Any]) -> None:
+    """Append ``extraction`` for the visible entries of *data*, minus the kind's result key."""
+    scope = current_scope()
+    if scope is None:
+        return
+    with warn_on_failure(EventType.EXTRACTION):
+        own = kind_of(state).result_key(state)
+        visible = visible_entries({k: v for k, v in data.items() if k != own})
+        if not visible:
+            return
+        fields: dict[str, Any] = {}
+        if scope.log.stores_values:
+            fields["delta_ref"] = scope.log.put_json(
+                filter_context(visible), kind=RedactionKind.DELTA
+            )
+        emit(EventType.EXTRACTION, state=state.id, keys=sorted(visible), **fields)
+
+
+def record_extraction_miss(
+    state: State,
+    instance: FSMInstance,
+    fsm_resolver: Callable[[str], FSMDefinition],
+) -> None:
+    """Append ``extraction/miss``: declared keys (minted plus classification fields, minus the
+    handler-only names, which include every result key) still ``None`` in the context."""
+    if current_scope() is None:
+        return
+    with warn_on_failure(EventType.EXTRACTION_MISS):
+        declared = {
+            *kind_of(state).minted_keys(state),
+            *(c.field_name for c in state.classification_extractions or ()),
+        } - handler_only_names(fsm_resolver(instance.fsm_id))
+        data = instance.context.data
+        missing = visible_entries({k: None for k in declared if data.get(k) is None})
+        if missing:
+            emit(EventType.EXTRACTION_MISS, state=state.id, keys=sorted(missing))
 
 
 def _priority(

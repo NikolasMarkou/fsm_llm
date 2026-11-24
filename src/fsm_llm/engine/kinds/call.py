@@ -75,7 +75,13 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
-from fsm_llm.runtime import to_jsonable
+from fsm_llm.runtime import (
+    EventType,
+    current_scope,
+    emit,
+    to_jsonable,
+    warn_on_failure,
+)
 
 from .base import StateExecutor
 from .services import _PipelineServices
@@ -165,6 +171,18 @@ def _identities(
         "template_identity": None if resolved is None else resolved.template_identity,
         "instance_identity": None if resolved is None else resolved.instance_identity,
     }
+
+
+def _record_resolve(target: str, found: ResolvedTarget | DelegatedTarget) -> None:
+    """Append ``executable/resolve``: a target id and the identities and mode it resolved to."""
+    if current_scope() is not None:
+        with warn_on_failure(EventType.EXECUTABLE_RESOLVE):
+            emit(
+                EventType.EXECUTABLE_RESOLVE,
+                target=target,
+                mode=found.mode,
+                **_identities(found),
+            )
 
 
 def record_response(
@@ -480,6 +498,7 @@ class CallExecutor(StateExecutor):
         found = resolved or delegated
         if found is None:
             return refuse(key, Reason.UNKNOWN_TARGET, state_id=state.id, target=target)
+        _record_resolve(target, found)
         inputs: dict[str, Any] = {}
         for name in config.inputs:
             value = data.get(name)

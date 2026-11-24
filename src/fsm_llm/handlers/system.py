@@ -16,9 +16,48 @@ from typing import Any
 
 from fsm_llm.constants import MAX_TIMED_HANDLER_STRAGGLERS
 from fsm_llm.logging import logger
+from fsm_llm.runtime import (
+    EventType,
+    current_scope,
+    emit,
+    visible_entries,
+    warn_on_failure,
+)
 
 from .errors import HandlerExecutionError
 from .protocol import FSMHandler, HandlerErrorMode, HandlerTiming
+
+
+class _HandlerTimedOut(TimeoutError):
+    """The timeout or the straggler cap of a timed handler: the one ``TimeoutError`` the
+    ``handler`` event calls ``timeout`` (a handler's own ``TimeoutError`` is an ``error``)."""
+
+
+# DECISION plan-2026-11-24T193347-3f4530d3/D-008
+# The `handler` event is written HERE, by the CALLER's thread after the handler returned, raised
+# or was joined, never by the worker of a timed handler: a straggler that returns late must write
+# nothing (it could reopen a released writer). It is evidence and best effort (a failed write is a
+# WARNING, the handler outcome and the order of handlers are untouched), carries NAMES only (the
+# handler's name, its timing, the keys it wrote, never a value) and no fsync. Do NOT write it from
+# the worker, add the handler's data, or let a write failure reach the turn.
+def _record_handler(
+    name: str,
+    timing: HandlerTiming,
+    error: Exception | None,
+    result: dict[str, Any] | None = None,
+) -> None:
+    """Append ``handler``: ``outcome`` ``ok``, ``error`` or ``timeout`` and the keys written."""
+    if current_scope() is None:
+        return
+    with warn_on_failure(EventType.HANDLER):
+        fields: dict[str, Any] = {"name": name, "timing": timing.value, "outcome": "ok"}
+        if isinstance(error, _HandlerTimedOut):
+            fields["outcome"] = "timeout"
+        elif error is not None:
+            fields.update(outcome="error", error_type=type(error).__name__)
+        elif isinstance(result, dict):
+            fields["keys"] = sorted(visible_entries(result))
+        emit(EventType.HANDLER, **fields)
 
 
 class HandlerSystem:
@@ -235,6 +274,7 @@ class HandlerSystem:
                 result = self._execute_single_handler(
                     handler, updated_context, handler_name
                 )
+                _record_handler(handler_name, timing, None, result)
 
                 # Update context with handler result if valid
                 if isinstance(result, dict):
@@ -249,6 +289,7 @@ class HandlerSystem:
                 logger.debug(f"Handler {handler_name} completed successfully")
 
             except Exception as e:
+                _record_handler(handler_name, timing, e)
                 _report_and_maybe_raise(handler_name, handler, e)
                 continue  # handler_error_mode == "continue": move to the next handler
 
@@ -289,7 +330,7 @@ class HandlerSystem:
                 f"handler threads are still running (cap "
                 f"MAX_TIMED_HANDLER_STRAGGLERS={MAX_TIMED_HANDLER_STRAGGLERS})"
             )
-            raise TimeoutError(
+            raise _HandlerTimedOut(
                 f"Handler '{handler_name}' refused: {straggling} timed-out "
                 f"straggler threads still running (cap "
                 f"{MAX_TIMED_HANDLER_STRAGGLERS})"
@@ -332,7 +373,7 @@ class HandlerSystem:
         if worker.is_alive():
             with self._stragglers_lock:
                 self._stragglers.append(worker)
-            raise TimeoutError(
+            raise _HandlerTimedOut(
                 f"Handler '{handler_name}' timed out after {self.handler_timeout}s"
             )
         # D-049: the thread is done, so `private` is final. Adopt it wholesale

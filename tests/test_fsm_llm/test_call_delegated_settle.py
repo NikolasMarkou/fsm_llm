@@ -732,7 +732,10 @@ class TestTheRunEvents:
         for kind in (EventType.RUN_START, EventType.RUN_END):
             assert kind in PRODUCED_TYPES and kind in SHAPE_FIELDS
             assert not any(name.endswith("_ref") for name in SHAPE_FIELDS[kind])
-        assert EventType.EXECUTABLE_RESOLVE not in PRODUCED_TYPES
+        # `executable/resolve` is the call executor's own event (plan 3f4530d3 step 5c)
+        resolve = EventType.EXECUTABLE_RESOLVE
+        assert resolve in PRODUCED_TYPES and resolve in SHAPE_FIELDS
+        assert not any(name.endswith("_ref") for name in SHAPE_FIELDS[resolve])
 
     async def test_at_the_shape_level_a_run_event_carries_only_its_allow_list(
         self, make_flow

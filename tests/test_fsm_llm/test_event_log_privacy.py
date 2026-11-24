@@ -44,6 +44,10 @@ from tests.test_fsm_llm.event_log_support import _reply, tree_bytes, tree_files
 from tests.test_fsm_llm.support import _c_log_capture
 from tests.test_fsm_llm.test_call_delegated_settle import run_delegated
 from tests.test_fsm_llm.test_event_log_engine import _FSM_PARTIAL
+from tests.test_fsm_llm.test_event_log_extraction import _llm as extraction_llm
+from tests.test_fsm_llm.test_event_log_extraction import _turn as extraction_turn
+from tests.test_fsm_llm.test_event_log_handlers import _ok as handler_ok
+from tests.test_fsm_llm.test_event_log_handlers import _turn as handler_turn
 from tests.test_fsm_llm.test_event_log_producers import (
     _CHAT,
     _CHILD,
@@ -190,7 +194,9 @@ class TestAShapeLog:
                     (e["frame"], e["type"]) for e in events if first <= e["seq"] <= last
                 ]
                 assert got == _TABLE[name], name
-            assert len(events) == 44  # the root greeting's pair included
+            assert (
+                len(events) == 46
+            )  # the root greeting's pair and two extractions included
             assert {e["lvl"] for e in events} == {"shape"}
             assert not [e for e in events if any(k.endswith("_ref") for k in e)]
         root = tmp_path / "ev"
@@ -219,6 +225,8 @@ class TestAShapeLog:
             with log.tool_call("tools-1", name="pay", call_id="c1", arguments=secret):
                 pass
             run_delegated(log)  # run/start and run/end of a delegated call
+            extraction_turn(log, extraction_llm(data={}))  # miss and out_of_scope (5a)
+            handler_turn(log, handler_ok())  # a handler event (5b)
             with capped.event_scope(
                 capped_id
             ):  # an approval ask (plan 3f4530d3 step 4)

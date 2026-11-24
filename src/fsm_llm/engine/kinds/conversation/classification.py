@@ -9,6 +9,7 @@ are unchanged except that a service of the pipeline is read as ``self._services.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from fsm_llm.aio import acall, run_sync
@@ -22,6 +23,13 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.logging import logger
+from fsm_llm.runtime import (
+    EventType,
+    current_scope,
+    emit,
+    visible_entries,
+    warn_on_failure,
+)
 
 from ..records import (
     _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS,
@@ -30,6 +38,30 @@ from ..records import (
     _record_classification_result,
 )
 from .surface import _ConversationSurface
+
+
+def _record_out_of_scope(
+    state: State,
+    config: ClassificationExtractionConfig,
+    result: ClassificationResult,
+    *,
+    low_confidence: bool,
+) -> None:
+    """Append ``intent/out_of_scope`` (a fallback or a discarded low-confidence intent)."""
+    if current_scope() is None or not visible_entries({config.field_name: None}):
+        return
+    confidence = (
+        {"confidence": result.confidence} if math.isfinite(result.confidence) else {}
+    )
+    with warn_on_failure(EventType.INTENT_OUT_OF_SCOPE):
+        emit(
+            EventType.INTENT_OUT_OF_SCOPE,
+            state=state.id,
+            field=config.field_name,
+            intent=result.intent,
+            low_confidence=low_confidence,
+            **confidence,
+        )
 
 
 class ConversationClassificationMixin(_ConversationSurface):
@@ -154,6 +186,9 @@ class ConversationClassificationMixin(_ConversationSurface):
                 # for downstream JsonLogic conditions
                 if result.intent == config.fallback_intent:
                     extracted[config.field_name] = result.intent
+                    _record_out_of_scope(
+                        current_state, config, result, low_confidence=False
+                    )
                     log.debug(
                         f"Classification extraction '{config.field_name}': "
                         f"fallback intent '{result.intent}' stored"
@@ -162,6 +197,9 @@ class ConversationClassificationMixin(_ConversationSurface):
 
                 # Skip low confidence
                 if "low_confidence" in full_result:
+                    _record_out_of_scope(
+                        current_state, config, result, low_confidence=True
+                    )
                     # LV2-05 (D-037): an accepted stall (D-016), now visible: a
                     # gated key left unset here holds the state with no other trace.
                     log.warning(

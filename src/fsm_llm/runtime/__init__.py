@@ -35,7 +35,7 @@ from .events import (
     encode_event,
     to_jsonable,
 )
-from .filtering import filter_context
+from .filtering import filter_context, visible_entries
 from .log import EventLog, warn_on_failure
 from .privacy import PrivacyLevel, RedactionKind
 from .retention import PruneReport
@@ -85,5 +85,6 @@ __all__ = [
     "scoped_iter",
     "to_jsonable",
     "unresolved_tool_calls",
+    "visible_entries",
     "warn_on_failure",
 ]

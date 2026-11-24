@@ -61,8 +61,9 @@ class EventType(str, Enum):
     TURN_END = "turn/end"
     # The run vocabulary of E2.1 (plan ace7a8c8 D-059). ``run/start`` and ``run/end`` are written
     # by ``settle`` for a delegated ``call`` (plan baa37f40 K7.4, D-052); ``executable/resolve`` is
-    # still declared with no producer. Unknown types are refused on write and tolerated on read,
-    # so adding members changes no old log and needs no ``LOG_FORMAT_VERSION`` bump. A ``run/*``
+    # written by the ``call`` executor when a target resolves (plan 3f4530d3 step 5c). Unknown
+    # types are refused on write and tolerated on read, so adding members changes no old log and
+    # needs no ``LOG_FORMAT_VERSION`` bump. A ``run/*``
     # event is written at the TOP frame of its owner. ``run/start`` (an fsynced checkpoint, before
     # the thread exists) carries ``handle``, ``target``, the template and instance identity, the
     # ``source`` of the request (a ``MessageSource`` value), the ``parent`` frame id and the
@@ -115,8 +116,10 @@ DECLARED_TYPES: frozenset[EventType] = frozenset(EventType)
 #: The types product code writes today: ``tool/call`` and ``tool/result`` come from
 #: ``ToolRegistry.execute`` through ``core.tool_observer`` (``tool/result`` also as the ``unknown``
 #: record of ``API.resume``), the approval pair from ``HumanInTheLoop.request_approval`` through the
-#: same seam. The set test builds the table of scenarios from product paths only, never from
-#: ``EventLog.tool_call`` or ``EventLog.append``.
+#: same seam, the extraction family from the Pass-1 seam and the classifier, ``handler`` from
+#: ``HandlerSystem.execute_handlers``, ``executable/resolve`` from the ``call`` executor. The set
+#: test builds the table of scenarios from product paths only, never from ``EventLog.tool_call``
+#: or ``EventLog.append``.
 PRODUCED_TYPES: frozenset[EventType] = frozenset(
     {
         EventType.TURN_START,
@@ -128,6 +131,11 @@ PRODUCED_TYPES: frozenset[EventType] = frozenset(
         EventType.TOOL_RESULT,
         EventType.APPROVAL_REQUEST,
         EventType.APPROVAL_OUTCOME,
+        EventType.EXTRACTION,
+        EventType.EXTRACTION_MISS,
+        EventType.INTENT_OUT_OF_SCOPE,
+        EventType.HANDLER,
+        EventType.EXECUTABLE_RESOLVE,
         EventType.CONTEXT_RECORD,
         EventType.STACK_PUSH,
         EventType.STACK_POP,

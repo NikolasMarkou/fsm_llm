@@ -15,7 +15,12 @@ from fsm_llm.engine.kinds.records import _is_agent_managed, _record_provenance
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
-from .events import record_executor_result, record_executor_start
+from .events import (
+    record_executor_result,
+    record_executor_start,
+    record_extraction,
+    record_extraction_miss,
+)
 from .records import _TurnRecord
 from .surface import _PipelineSurface
 
@@ -93,6 +98,7 @@ class Pass1Mixin(_PipelineSurface):
 
             if extraction_response.extracted_data:
                 committed = extraction_response.extracted_data
+                record_extraction(source_state, committed)
 
                 # DECISION plan-2026-07-19T191147-4b664252/D-005 [STALE]
                 # SHAPE (c) of three DIFFERENT partial-commit contracts in the turn pipeline.
@@ -132,6 +138,8 @@ class Pass1Mixin(_PipelineSurface):
                 # after the handlers succeeded, so a rollback leaves no stale
                 # provenance; a handler edit of a key fails the digest compare.
                 _record_provenance(instance, committed)
+
+        record_extraction_miss(source_state, instance, self.fsm_resolver)
 
         # Step 3: Transition Evaluation and Execution
         transition_occurred, previous_state = await acall(

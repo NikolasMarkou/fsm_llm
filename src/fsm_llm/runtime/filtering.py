@@ -13,7 +13,7 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.runtime.events import to_jsonable
 
@@ -103,3 +103,19 @@ def filter_context(
     _scrub_in_place(list(top.values()))
     safe: dict[str, Any] = to_jsonable(top)
     return safe
+
+
+def visible_entries(mapping: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the entries of *mapping* an event may name or carry (plan 3f4530d3 D-008).
+
+    Drops an entry whose key is not a string, is internal-prefixed or is secret-looking
+    (``is_forbidden_context_entry``), so one rule decides the ``keys`` and the delta blob of the
+    extraction, miss and handler events. Names only: pass ``dict.fromkeys(names)``. A new dict.
+    """
+    return {
+        key: value
+        for key, value in mapping.items()
+        if isinstance(key, str)
+        and not has_internal_prefix(key)
+        and not is_forbidden_context_entry(key, value)
+    }

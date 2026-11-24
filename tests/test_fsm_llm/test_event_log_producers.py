@@ -8,8 +8,7 @@ Two model paths: ``ScriptedLLM`` (an engine-path double that never reaches
 seam writes them). Bytes, counts and sequences, never timing. Unverified until the Windows run:
 nothing here opens a file itself (the files are ``stores.jsonl``'s and ``blobs``').
 
-Not produced yet (``NOT_YET_PRODUCED``, declared in ``DECLARED_TYPES``): ``extraction``, ``extraction/miss``,
-``intent/out_of_scope``, ``handler``, ``executable/resolve`` and ``compaction/epoch``. ``TestTheProductPathMatrix`` runs one product
+Not produced yet (``NOT_YET_PRODUCED``, declared in ``DECLARED_TYPES``): ``compaction/epoch``. ``TestTheProductPathMatrix`` runs one product
 scenario per produced type and bans a direct log write in this module. ``decision`` (the budget
 stop, plan 5a6a1f80 step 7) is produced; its tests are in ``test_turn_budgets.py``.
 """
@@ -61,6 +60,18 @@ from tests.test_fsm_llm.event_log_support import (
 )
 from tests.test_fsm_llm.support import _state
 from tests.test_fsm_llm.test_call_delegated_settle import run_delegated
+from tests.test_fsm_llm.test_event_log_extraction import (
+    _llm as _extraction_llm,
+)
+from tests.test_fsm_llm.test_event_log_extraction import (
+    _turn as _extraction_turn,
+)
+from tests.test_fsm_llm.test_event_log_handlers import (
+    _ok as _handler_ok,
+)
+from tests.test_fsm_llm.test_event_log_handlers import (
+    _turn as _handler_turn,
+)
 from tests.test_fsm_llm.test_event_log_tools import (
     _add as _tools_add,
 )
@@ -179,6 +190,7 @@ _TABLE: dict[str, list[tuple[int, str]]] = {
         (0, "llm/request"),
         (0, "llm/response"),
         (0, "executor/result"),
+        (0, "extraction"),
         (0, "llm/request"),
         (0, "llm/response"),
         (0, "transition"),
@@ -207,6 +219,7 @@ _TABLE: dict[str, list[tuple[int, str]]] = {
         (0, "llm/request"),
         (0, "llm/response"),
         (0, "executor/result"),
+        (0, "extraction"),
         (0, "transition"),
         (0, "llm/request"),
         (0, "llm/response"),
@@ -317,7 +330,7 @@ class TestTheExpectedTable:
     def test_seq_is_strictly_increasing_and_contiguous(self, log: EventLog):
         _, cid, _ = _run(log)
         seqs = [e["seq"] for e in log.read(cid)]
-        assert seqs == list(range(1, len(seqs) + 1)) and len(seqs) == 44
+        assert seqs == list(range(1, len(seqs) + 1)) and len(seqs) == 46
 
     def test_every_logged_request_has_one_outcome_and_the_counts_match(
         self, log: EventLog
@@ -610,6 +623,18 @@ def _scenario_registry_tool(log: EventLog) -> set[str]:
     return _types_of(log, cid)
 
 
+def _scenario_extraction_family(log: EventLog) -> set[str]:
+    """A turn whose declared key stays unset and whose classifier answers the fallback intent:
+    ``extraction/miss`` and ``intent/out_of_scope`` (and the ``extraction`` of the intent)."""
+    return _types_of(log, _extraction_turn(log, _extraction_llm(data={})))
+
+
+def _scenario_handler(log: EventLog) -> set[str]:
+    """A handler registered on the API and run inside a logged turn."""
+    _, cid = _handler_turn(log, _handler_ok())
+    return _types_of(log, cid)
+
+
 def _scenario_approval(log: EventLog) -> set[str]:
     """``HumanInTheLoop.request_approval`` asked inside ``API.event_scope`` (the agent driver's
     path): ``approval/request`` before the callback, ``approval/outcome`` after."""
@@ -647,17 +672,16 @@ _PRODUCT_SCENARIOS: dict[EventType, Callable[[EventLog], set[str]]] = {
     EventType.TOOL_RESULT: _scenario_resume_of_a_tool_in_flight,
     EventType.APPROVAL_REQUEST: _scenario_approval,
     EventType.APPROVAL_OUTCOME: _scenario_approval,
+    EventType.HANDLER: _scenario_handler,
+    EventType.EXECUTABLE_RESOLVE: _scenario_delegated_call,
+    EventType.EXTRACTION: _scenario_turns,
+    EventType.EXTRACTION_MISS: _scenario_extraction_family,
+    EventType.INTENT_OUT_OF_SCOPE: _scenario_extraction_family,
 }
 
-#: Declared and with no product producer yet: the extraction family, handler, executable/resolve; and
-#: compaction/epoch, which needs roadmap row 2.5 and is out of plan 3f4530d3.
+#: Declared and with no product producer yet: compaction/epoch, which needs roadmap row 2.5 and is out of plan 3f4530d3.
 NOT_YET_PRODUCED = frozenset(
     {
-        EventType.EXTRACTION,
-        EventType.EXTRACTION_MISS,
-        EventType.INTENT_OUT_OF_SCOPE,
-        EventType.HANDLER,
-        EventType.EXECUTABLE_RESOLVE,
         EventType.COMPACTION_EPOCH,
     }
 )

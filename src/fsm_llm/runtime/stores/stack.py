@@ -62,13 +62,18 @@ _TOOL_TYPES = (EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value)
 #: Types that never move the stack: they are neither a push, a pop nor a state, and one that
 #: arrives late (a ``tool/result`` of frame 0 after a ``stack/push`` to frame 1) must not drop
 #: the child by the "an event at a lower frame infers a lost pop" rule (D-006 of plan 3f4530d3);
-#: so are the approval events (D-007).
+#: so are the approval events (D-007) and the extraction family and ``handler`` (D-008).
 NON_MOVING_TYPES = frozenset(
     kind.value
     for kind in (
         EventType.TOOL_RESULT,
         EventType.APPROVAL_REQUEST,
         EventType.APPROVAL_OUTCOME,
+        EventType.EXTRACTION,
+        EventType.EXTRACTION_MISS,
+        EventType.INTENT_OUT_OF_SCOPE,
+        EventType.HANDLER,
+        EventType.EXECUTABLE_RESOLVE,
     )
 )
 
