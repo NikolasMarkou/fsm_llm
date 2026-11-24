@@ -954,6 +954,11 @@
       "delta": 1,
       "reason": "plan a555dcfe D-019 step 11: gained a555dcfe/D-019 (the generator seam in executable_instance.py); D-038 of plan 06a5ec0a moved with the gate body from agents/prompt_chain.py to agents/handlers/chain.py",
       "token": "plan-2026-11-24T043150-a555dcfe/D-019"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe D-021: new anchor token in fsm_definitions/native_fc.py (the removal variants of native_fc.json)",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-021"
     }
   ]
 }

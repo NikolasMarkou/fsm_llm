@@ -7,7 +7,7 @@ caller's OPTIONS (a boolean option of the same name as a variant selects it) and
 inputs, which are the agent's own and which a caller may not give.
 
 Interface contract: ``pattern_fsm(envelope, *, tools, task_description="", approval=False,
-options=None, output_schema=None, context_keys=()) -> dict``: the instantiated FSM as a fresh
+options=None, output_schema=None, context_keys=(), variables=None) -> dict``: the instantiated FSM as a fresh
 dict (key order is the template's). ``tools`` is the run's ``ToolRegistry`` (``None`` for a
 pattern with no tools), ``task_description`` is only the retrieval query of a semantic registry,
 ``approval`` selects the ``approval`` variant, ``options`` are the caller's options,
@@ -15,7 +15,8 @@ pattern with no tools), ``task_description`` is only the retrieval query of a se
 only, ``caller_prompt_keys``). Derived, filled for the names the envelope declares: options
 ``context_keys`` (the default of that option is the file's lead keys, the caller's follow), ``schema_field_names``, ``tool_intents`` (with the ``classification`` variant)
 and the text variables ``think_instructions`` and ``context_names`` (the key names, quoted, as the
-field prompts print them). Raises ``AgentError`` for an option named
+field prompts print them); ``variables`` are the agent's own extra text variables (a pattern's system
+message, D-021), merged after those. Raises ``AgentError`` for an option named
 ``approval`` or like a derived input; ``ValueError`` for a context key that is ``agent_trace`` or
 internal-prefixed (as the builder always did); ``InstantiationError`` for what the envelope
 refuses. A generator body (``prompt_chain``, D-019) is written by ``GENERATORS`` from the options.
@@ -78,6 +79,7 @@ def pattern_fsm(
     options: Mapping[str, Any] | None = None,
     output_schema: type | None = None,
     context_keys: Sequence[str] = (),
+    variables: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The instantiated FSM of *envelope* for one run (see the module docstring)."""
     given = dict(options or {})
@@ -90,10 +92,10 @@ def pattern_fsm(
         for name in body.variants
         if name != APPROVAL_VARIANT and name in declared and given.get(name) is True
     ]
-    variables: dict[str, str] = {}
+    texts: dict[str, str] = {}
     if _THINK_TEXT in envelope.variables:
         # first, as the builder did: an unusable registry fails before a bad key does
-        variables[_THINK_TEXT] = build_think_extraction_instructions(
+        texts[_THINK_TEXT] = build_think_extraction_instructions(
             tools,  # type: ignore[arg-type]
             task_description=task_description,
         )
@@ -110,7 +112,7 @@ def pattern_fsm(
         if (
             _KEYS_TEXT in envelope.variables
         ):  # the field prompts name the keys they read
-            variables[_KEYS_TEXT] = ", ".join(repr(key) for key in keys)
+            texts[_KEYS_TEXT] = ", ".join(repr(key) for key in keys)
     if "schema_field_names" in declared:
         values["schema_field_names"] = _schema_field_names(output_schema)
     if "tool_intents" in declared and "classification" in variants:
@@ -121,6 +123,6 @@ def pattern_fsm(
         envelope,
         values,
         variants=variants,
-        variables=variables,
+        variables={**texts, **(variables or {})},
         generators=GENERATORS.get,
     )

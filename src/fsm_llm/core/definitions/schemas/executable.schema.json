@@ -332,7 +332,7 @@
     },
     "ItemSpec": {
       "additionalProperties": false,
-      "description": "The entries of an ``array`` option: one scalar type and its bounds, or a flat object.\n\n``type = \"object\"`` declares ``properties`` (at most ``MAX_ITEM_PROPERTIES``, scalar only, no\nnesting): an entry is an object with exactly those keys, each required (D-016).",
+      "description": "The entries of an ``array`` option: one scalar type and its bounds, a flat object or JSON.\n\n``type = \"object\"`` declares ``properties`` (at most ``MAX_ITEM_PROPERTIES``, scalar only, no\nnesting): an entry is an object with exactly those keys, each required (D-016). ``type =\n\"json\"`` declares nothing: an entry is any bounded nested JSON value (D-021).",
       "properties": {
         "enum": {
           "anyOf": [
@@ -424,7 +424,8 @@
             "integer",
             "number",
             "boolean",
-            "object"
+            "object",
+            "json"
           ],
           "title": "Type",
           "type": "string"
@@ -644,69 +645,7 @@
           "description": "The default value of each option that has one",
           "maxProperties": 64,
           "patternProperties": {
-            "^[a-z][a-z0-9_]*$": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "items": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "integer"
-                            },
-                            {
-                              "type": "number"
-                            },
-                            {
-                              "type": "boolean"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
+            "^[a-z][a-z0-9_]*$": {}
           },
           "propertyNames": {
             "maxLength": 64

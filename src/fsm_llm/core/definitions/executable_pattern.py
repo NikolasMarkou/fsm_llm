@@ -17,7 +17,9 @@ The model of a template:
   never rescanned for ``{{name}}`` text (a text variable is a different channel).
 - ``options_schema`` is a closed subset (``OptionSpec``: ``string``, ``integer``, ``number``,
   ``boolean`` and ``array`` of those or of FLAT objects (D-016: ``items.type = object`` with scalar
-  ``properties``, every property required, no extra key); ``minimum``, ``maximum``, ``maxLength``,
+  ``properties``, every property required, no extra key) or of ``json`` entries (D-021: any NESTED
+  JSON value, at most ``MAX_JSON_DEPTH`` levels and ``MAX_JSON_NODES`` nodes, the shape of a tool
+  schema); ``minimum``, ``maximum``, ``maxLength``,
   ``maxItems``, ``enum``; no ``$ref``, no top-level ``object``), each value checked by a pydantic
   ``TypeAdapter`` (strict: a bool is no integer); an option with no entry in ``options`` has no
   default and is required.
@@ -37,6 +39,7 @@ goes through ``render_text``). The functions raise ``PatternBodyError`` (an ``FS
 from __future__ import annotations
 
 import copy
+import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from typing import Annotated, Any, Literal, Self
@@ -99,6 +102,8 @@ MAX_OPTION_ITEMS = 256  # most entries of a list option, and the cap of ``maxIte
 MAX_ITEM_PROPERTIES = (
     16  # most properties of the object entries of a list option (D-016)
 )
+MAX_JSON_DEPTH = 24  # levels of one ``json`` entry (D-021)
+MAX_JSON_NODES = 20_000  # values of one ``json`` entry, containers included
 MAX_VARIANT_OPS = 64
 MAX_VARIANT_CHARS = 200_000
 _MAX_PROBLEMS = 10  # lines one scan reports
@@ -111,7 +116,6 @@ _Name = Annotated[str, Field(min_length=1, max_length=EXECUTABLE_NAME_MAX_LENGTH
 _Names = Annotated[list[_Name], Field(max_length=EXECUTABLE_MAX_ITEMS)]
 _OptionName = Annotated[str, Field(pattern=_NAME_PATTERN, max_length=64)]
 _Scalar = str | int | float | bool | None
-_Entry = dict[str, _Scalar]  # one flat object of a list option (D-016)
 
 
 class PatternBodyError(FSMError, ValueError):
@@ -185,23 +189,55 @@ class PropertySpec(_ScalarSpec):
         return self
 
 
+def _json_entry(value: Any) -> Any:
+    """*value* as a deep copy when it is bounded JSON (D-021), else ``ValueError``.
+
+    Object keys are text, numbers are finite, nothing but dict, list, text, number, boolean and
+    null; at most ``MAX_JSON_DEPTH`` levels and ``MAX_JSON_NODES`` values. One iterative walk.
+    """
+    stack = [(value, 1)]
+    nodes = 0
+    while stack:
+        node, level = stack.pop()
+        nodes += 1
+        if nodes > MAX_JSON_NODES:
+            raise ValueError("a json entry has too many values")
+        if isinstance(node, (dict, list)):
+            if level > MAX_JSON_DEPTH:
+                raise ValueError("a json entry nests too deep")
+            if isinstance(node, dict):
+                if any(type(key) is not str for key in node):
+                    raise ValueError("a json object has text keys")
+                node = list(node.values())
+            stack.extend((child, level + 1) for child in node)
+        elif isinstance(node, float):
+            if not math.isfinite(node):
+                raise ValueError("a json number is finite")
+        elif not (node is None or isinstance(node, (str, int))):
+            raise ValueError("not a json value")
+    return copy.deepcopy(value)
+
+
 class ItemSpec(_ScalarSpec):
-    """The entries of an ``array`` option: one scalar type and its bounds, or a flat object.
+    """The entries of an ``array`` option: one scalar type and its bounds, a flat object or JSON.
 
     ``type = "object"`` declares ``properties`` (at most ``MAX_ITEM_PROPERTIES``, scalar only, no
-    nesting): an entry is an object with exactly those keys, each required (D-016).
+    nesting): an entry is an object with exactly those keys, each required (D-016). ``type =
+    "json"`` declares nothing: an entry is any bounded nested JSON value (D-021).
     """
 
-    type: Literal["string", "integer", "number", "boolean", "object"]
+    type: Literal["string", "integer", "number", "boolean", "object", "json"]
     properties: dict[_OptionName, PropertySpec] = Field(
         default_factory=dict, max_length=MAX_ITEM_PROPERTIES
     )
 
     @model_validator(mode="after")
     def _bounds(self) -> Self:
-        if self.type == "object":
-            if not self.properties:
+        if self.type in ("object", "json"):
+            if self.type == "object" and not self.properties:
                 raise ValueError("an object entry declares its properties")
+            if self.type == "json" and self.properties:
+                raise ValueError("properties belong to an object entry")
             if (
                 self.minimum is not None
                 or self.maximum is not None
@@ -216,7 +252,9 @@ class ItemSpec(_ScalarSpec):
         return self
 
     def entry_annotation(self) -> Any:
-        """The annotation that checks one entry: a scalar, or a dict with exactly the properties."""
+        """The annotation that checks one entry: a scalar, a dict with exactly the properties, or JSON."""
+        if self.type == "json":
+            return Annotated[Any, AfterValidator(_json_entry)]
         if self.type != "object":
             return self.scalar_annotation(self.type)
         checks = {
@@ -356,7 +394,7 @@ class PatternBody(_Model):
         default_factory=list, max_length=EXECUTABLE_MAX_ITEMS
     )
     options_schema: OptionsSchema = Field(default_factory=OptionsSchema)
-    options: dict[_OptionName, _Scalar | list[_Scalar | _Entry]] = Field(
+    options: dict[_OptionName, Any] = Field(
         default_factory=dict,
         description="The default value of each option that has one",
         max_length=MAX_OPTIONS,

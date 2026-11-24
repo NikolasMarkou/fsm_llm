@@ -1,0 +1,396 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "native_fc",
+  "name": "native_fc",
+  "description": "Native function calling: model turns with the tools declared to the provider, an optional forced final tool turn and repair turn",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "outputs": []
+  },
+  "requires": {
+    "tools": "some",
+    "handlers": [
+      "agents.native_fc"
+    ],
+    "callables": [
+      "tools"
+    ]
+  },
+  "capabilities": [
+    "tools"
+  ],
+  "lifecycle": "builtin",
+  "variables": [
+    "system_message"
+  ],
+  "body": {
+    "fsm": {
+      "name": "native_fc",
+      "description": "Native function calling: model turns with tools, tool turns, an optional forced final tool turn and repair turn",
+      "initial_state": "call_model",
+      "persona": "A capable AI agent that uses the provided tools",
+      "states": {
+        "call_model": {
+          "id": "call_model",
+          "description": "One model turn with the tools declared",
+          "purpose": "Let the model call tools or give its final answer",
+          "completion": {
+            "tools": {
+              "$hole": "tool_schemas"
+            },
+            "instructions": "{{system_message}}",
+            "messages_key": "_native_messages",
+            "result_key": "model_reply"
+          },
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "run_tools",
+              "description": "The model asked for tools",
+              "priority": 10,
+              "conditions": [
+                {
+                  "description": "The model turn was calls",
+                  "requires_context_keys": [
+                    "model_reply"
+                  ],
+                  "logic": {
+                    "===": [
+                      {
+                        "var": "model_reply.kind"
+                      },
+                      "calls"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "force_final",
+              "description": "Force one call of the final tool",
+              "priority": 20,
+              "conditions": [
+                {
+                  "description": "The run must still call its forced final tool",
+                  "requires_context_keys": [
+                    "force_final_pending"
+                  ],
+                  "logic": {
+                    "===": [
+                      {
+                        "var": "force_final_pending"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "repair",
+              "description": "Repair the answer into the output schema",
+              "priority": 30,
+              "conditions": [
+                {
+                  "description": "The answer did not parse against the output schema",
+                  "requires_context_keys": [
+                    "repair_pending"
+                  ],
+                  "logic": {
+                    "===": [
+                      {
+                        "var": "repair_pending"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "conclude",
+              "description": "The model answered or garbled its turn",
+              "priority": 900
+            }
+          ]
+        },
+        "run_tools": {
+          "id": "run_tools",
+          "description": "Run the model's tool calls",
+          "purpose": "Run each call through the tool registry and record the results",
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "force_final",
+              "description": "Force one call of the final tool",
+              "priority": 20,
+              "conditions": [
+                {
+                  "description": "The run must still call its forced final tool",
+                  "requires_context_keys": [
+                    "force_final_pending"
+                  ],
+                  "logic": {
+                    "===": [
+                      {
+                        "var": "force_final_pending"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "repair",
+              "description": "Repair the answer into the output schema",
+              "priority": 30,
+              "conditions": [
+                {
+                  "description": "The answer did not parse against the output schema",
+                  "requires_context_keys": [
+                    "repair_pending"
+                  ],
+                  "logic": {
+                    "===": [
+                      {
+                        "var": "repair_pending"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "conclude",
+              "description": "The model loop has ended",
+              "priority": 40,
+              "conditions": [
+                {
+                  "description": "The loop ended",
+                  "requires_context_keys": [
+                    "loop_end"
+                  ],
+                  "logic": {
+                    "in": [
+                      {
+                        "var": "loop_end"
+                      },
+                      [
+                        "final",
+                        "malformed",
+                        "exhausted"
+                      ]
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "call_model",
+              "description": "Give the model the tool results",
+              "priority": 900
+            }
+          ]
+        },
+        "force_final": {
+          "id": "force_final",
+          "description": "One model turn that must call the final tool",
+          "purpose": "Make the model record its findings with the forced tool",
+          "completion": {
+            "tools": {
+              "$hole": "forced_tools"
+            },
+            "tool_choice": {
+              "$hole": "force_final_tool"
+            },
+            "instructions": "{{system_message}}",
+            "messages_key": "_native_force_messages",
+            "result_key": "forced_reply"
+          },
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "repair",
+              "description": "Repair the answer into the output schema",
+              "priority": 30,
+              "conditions": [
+                {
+                  "description": "The answer did not parse against the output schema",
+                  "requires_context_keys": [
+                    "repair_pending"
+                  ],
+                  "logic": {
+                    "===": [
+                      {
+                        "var": "repair_pending"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "conclude",
+              "description": "The forced turn is done",
+              "priority": 900
+            }
+          ]
+        },
+        "repair": {
+          "id": "repair",
+          "description": "One structured model turn with no tools",
+          "purpose": "Get the final answer as JSON matching the output schema",
+          "completion": {
+            "response_format_key": "_output_response_format",
+            "instructions": "{{system_message}}",
+            "messages_key": "_native_repair_messages",
+            "result_key": "repair_reply"
+          },
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "conclude",
+              "description": "The repair turn is done",
+              "priority": 900
+            }
+          ]
+        },
+        "conclude": {
+          "id": "conclude",
+          "description": "The run is over",
+          "purpose": "Hold the answer, the trace and the run's outcome",
+          "response_instructions": "",
+          "transitions": []
+        }
+      },
+      "handler_only_keys": [
+        "max_iterations_reached",
+        "forced_stop_reason",
+        "iteration_count",
+        "observation_count",
+        "refused_actions",
+        "model_reply",
+        "forced_reply",
+        "repair_reply",
+        "native_answer",
+        "loop_end",
+        "force_final_pending",
+        "repair_pending"
+      ]
+    },
+    "handlers": [
+      {
+        "handler": "agents.native_fc",
+        "on": "state"
+      }
+    ],
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "tool_schemas": {
+          "type": "array",
+          "items": {
+            "type": "json"
+          },
+          "description": "The tools declared to the provider (the registry's JSON schemas, filled by the agent)"
+        },
+        "forced_tools": {
+          "type": "array",
+          "items": {
+            "type": "json"
+          },
+          "description": "The schemas of the forced final tool (filled by the agent)"
+        },
+        "force_final_tool": {
+          "type": "string",
+          "description": "The tool the forced turn must call (filled by the agent)"
+        },
+        "without_force_final": {
+          "type": "boolean",
+          "description": "Drop the forced final tool turn (selects the variant of that name)"
+        },
+        "without_repair": {
+          "type": "boolean",
+          "description": "Drop the output schema repair turn (selects the variant of that name)"
+        }
+      }
+    },
+    "options": {
+      "tool_schemas": [
+        {
+          "type": "function",
+          "function": {
+            "name": "sample",
+            "description": "A sample tool",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      ],
+      "forced_tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "sample",
+            "description": "A sample tool",
+            "parameters": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        }
+      ],
+      "force_final_tool": "sample",
+      "without_force_final": false,
+      "without_repair": false
+    },
+    "variants": {
+      "without_repair": [
+        {
+          "op": "remove",
+          "path": "/states/call_model/transitions/2"
+        },
+        {
+          "op": "remove",
+          "path": "/states/run_tools/transitions/1"
+        },
+        {
+          "op": "remove",
+          "path": "/states/force_final/transitions/0"
+        },
+        {
+          "op": "remove",
+          "path": "/states/repair"
+        }
+      ],
+      "without_force_final": [
+        {
+          "op": "remove",
+          "path": "/states/call_model/transitions/1"
+        },
+        {
+          "op": "remove",
+          "path": "/states/run_tools/transitions/0"
+        },
+        {
+          "op": "remove",
+          "path": "/states/force_final"
+        }
+      ]
+    },
+    "run": {
+      "agent_type": "native_fc",
+      "success_keys": [
+        "native_answer"
+      ]
+    }
+  }
+}

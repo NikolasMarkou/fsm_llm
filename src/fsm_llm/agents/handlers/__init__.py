@@ -21,6 +21,8 @@ became this package at the same dotted path; the import surface is unchanged):
   (wrapped by the library factories ``agents.reflexion_*``; not in ``__all__``)
 - ``chain`` -- the prompt-chain gate body ``make_gate_checker`` (wrapped by the library factory
   ``agents.chain_gate_checker``; not in ``__all__``)
+- ``native_fc`` -- ``NativeFCHandlers`` (the eight handlers of a native function-calling run, built by the library
+  group ``agents.native_fc``; not in ``__all__``)
 - ``context`` -- ``HandlerContext``, the per-run value the library factories read (import it from
   ``fsm_llm.agents.handlers.context``; it is not in ``__all__``)
 - ``library`` -- the named factories a pattern file binds (``agents.tool_executor``, ...),

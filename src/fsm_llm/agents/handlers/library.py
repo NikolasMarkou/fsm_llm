@@ -6,7 +6,8 @@ family: ``agents.tool_executor``, ``agents.think_turn_limiter``, ``agents.iterat
 ``agents.think_fresh_keys``, ``agents.feedback_consumed``, ``agents.approval_fresh_keys`` and
 ``agents.approval_gate``, and the Reflexion three (``agents.reflexion_evaluator``,
 ``agents.reflexion_fresh_keys``, ``agents.reflexion_reflector``; bodies in ``reflection.py``) and the
-prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``). Each is its own function (a ``NameRegistry`` refuses one function under two
+prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``) and the native function-calling
+GROUP ``agents.native_fc`` (eight handlers; bodies in ``native_fc.py``). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
 state filter and priority the live registration of ``base/registration.py`` and ``base/hitl_gate.py``
@@ -51,6 +52,7 @@ from .context import HandlerContext
 from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
+from .native_fc import NativeFCHandlers
 from .reflection import (
     EVALUATION_KEYS,
     make_evaluation_handler,
@@ -350,6 +352,32 @@ def chain_gate_checker(
     return built
 
 
+def native_fc(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.native_fc``: the GROUP of eight handlers of a native function-calling run (D-021).
+
+    One name for a fixed set that shares one ``NativeFCHandlers`` (the run's tools, the turn cap, the
+    forced tool, the parser): a binding changes nothing in it (states, keys and priority are fixed by
+    the pattern). Reads ``ctx.tools`` and ``ctx.config`` (``max_iterations``, ``force_final_tool``,
+    ``output_schema``) and the internal callable ``parse_structured`` the agent supplies; with no
+    output schema no repair is ever flagged. ``AgentError`` for a context with no tools or config.
+    """
+    if ctx.tools is None or ctx.config is None:
+        raise AgentError("agents.native_fc needs the run's tools and config")
+    config = ctx.config
+    return NativeFCHandlers(
+        ctx.tools,
+        max_tool_turns=config.max_iterations,
+        force_final_tool=config.force_final_tool,
+        parse_structured=(
+            ctx.callables.get("parse_structured")
+            if config.output_schema is not None
+            else None
+        ),
+    ).handlers()
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -384,6 +412,7 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.reflexion_fresh_keys", reflexion_fresh_keys),
     ("agents.reflexion_reflector", reflexion_reflector),
     ("agents.chain_gate_checker", chain_gate_checker),
+    ("agents.native_fc", native_fc),
     ("agents.approval_gate", approval_gate),
 )
 

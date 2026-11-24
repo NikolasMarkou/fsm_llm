@@ -22,8 +22,8 @@ Interface contract:
   ignored.
 - HITL, fail closed (census D1): a file that binds ``agents.approval_gate`` runs
   ``_refuse_unapprovable_flagged_tools`` at construction and at the start of every run and selects the
-  ``approval`` variant exactly under ``_hitl_active``; a file that binds ``agents.tool_executor`` and
-  no gate runs ``_refuse_flagged_tools`` at both places; a ``HumanInTheLoop`` given to a file with no
+  ``approval`` variant exactly under ``_hitl_active``; a file whose ``requires.tools`` is ``some`` and
+  that binds no gate runs ``_refuse_flagged_tools`` at both places (D-021); a ``HumanInTheLoop`` given to a file with no
   gate is refused at construction (a file whose ``requires.tools`` is ``none`` refuses ``tools=`` and ``hitl=``
   with the base ``TypeError`` of ``reject_misplaced_kwargs``). The grant check stays in ``AgentHandlers.approval_refusal``.
 - ``run(task, initial_context=None) -> AgentResult`` and ``run_stream(...)``: one call-local
@@ -79,7 +79,10 @@ class PatternAgent(BaseAgent):
             )
         bound = {binding.handler for binding in body.handlers}
         self._gate = APPROVAL_GATE_HANDLER in bound
-        self._executes_tools = _TOOL_EXECUTOR in bound
+        # a file that says it needs tools runs them (react, reflexion, native_fc: D-021); only the
+        # ReAct loop (`agents.tool_executor`) takes the react context seed
+        self._executes_tools = envelope.requires.tools == "some"
+        self._react_loop = _TOOL_EXECUTOR in bound
         if "tools" in envelope.requires.callables:
             self._require_tools(tools)
         refuse_reserved_options(envelope, options or {})
@@ -164,7 +167,7 @@ class PatternAgent(BaseAgent):
         handlers = self._handler_context()
         fsm_def = self._fsm_for_run(task, initial_context)
         seed = copy.deepcopy(dict(self.envelope.body.run.context_seed)) or None
-        if self._executes_tools:
+        if self._react_loop:
             context = self._react_context(task, initial_context, extra=seed)
         else:
             context = self._init_context(task, initial_context, extra=seed)

@@ -1018,6 +1018,7 @@
     "fsm_llm.agents.handlers.chain",
     "fsm_llm.agents.handlers.context",
     "fsm_llm.agents.handlers.library",
+    "fsm_llm.agents.handlers.native_fc",
     "fsm_llm.agents.handlers.reflection",
     "fsm_llm.agents.maker_checker",
     "fsm_llm.agents.mcp",

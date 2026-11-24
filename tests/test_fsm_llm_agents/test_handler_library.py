@@ -172,6 +172,7 @@ class TestTheNamespaces:
             "agents.reflexion_fresh_keys",
             "agents.reflexion_reflector",
             "agents.chain_gate_checker",
+            "agents.native_fc",
             "agents.approval_gate",
         ]
         for name, factory in LIBRARY:

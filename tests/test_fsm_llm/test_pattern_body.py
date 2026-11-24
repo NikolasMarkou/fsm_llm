@@ -967,3 +967,138 @@ class TestAListOfFlatObjects:
 
         assert record["options"]["intents"] == given
         assert definition_digest(rebuilt) == definition_digest(definition)
+
+
+_JSON_LIST = {"type": "array", "items": {"type": "json"}, "maxItems": 3}
+_NESTED = {
+    "type": "function",
+    "function": {
+        "name": "lookup",
+        "description": "find {{tone}}",
+        "parameters": {
+            "type": "object",
+            "properties": {"q": {"type": "array", "items": {"type": "integer"}}},
+            "required": [],
+            "default": None,
+            "weight": 1.5,
+        },
+    },
+}
+
+
+def _json_body(default: Any = None) -> dict[str, Any]:
+    body = _intents_body(default, _JSON_LIST)
+    body["options_schema"] = {"properties": {"intents": _JSON_LIST}}
+    return body
+
+
+def _json_envelope(default: Any = None) -> ex.PatternEnvelope:
+    return _envelope(body=_json_body(default))
+
+
+def _nest(levels: int) -> Any:
+    """A list nested *levels* deep (built by a loop: no recursion)."""
+    value: Any = 1
+    for _ in range(levels):
+        value = [value]
+    return value
+
+
+class TestAListOfJsonValues:
+    """Plan a555dcfe D-021: ``items.type = json``, a nested value bounded in depth and nodes."""
+
+    def test_a_nested_value_fills_a_hole_whole_with_the_callers_key_order(self):
+        reordered = {"function": _NESTED["function"], "type": "function"}
+
+        out = ei.instantiate_body(
+            _json_envelope([_NESTED]), {"intents": [reordered, _NESTED]}, variables=TONE
+        )
+        keys = out["states"]["start"]["required_context_keys"]
+
+        assert [list(k) for k in keys] == [["function", "type"], ["type", "function"]]
+        assert keys[1] == _NESTED and keys[1] is not _NESTED
+        # a hole value is never rescanned for text variables
+        assert keys[1]["function"]["description"] == "find {{tone}}"
+
+    def test_the_default_may_be_nested_and_is_checked(self):
+        out = ei.instantiate_body(_json_envelope([_NESTED]), variables=TONE)
+
+        assert out["states"]["start"]["required_context_keys"] == [_NESTED]
+        assert "option 'intents' is not valid" in _only_problem(
+            _doc(body=_json_body([{1: 2}]))
+        )
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {1: "a"},
+            {"a": {2: "b"}},
+            {"a": float("nan")},
+            [float("inf")],
+            {"a": {"b"}},
+            {"a": (1, 2)},
+            {"a": b"x"},
+            {"a": object()},
+        ],
+    )
+    def test_only_json_is_accepted(self, entry):
+        with pytest.raises(
+            ei.InstantiationError, match="option 'intents' is not valid"
+        ):
+            ei.instantiate_body(
+                _json_envelope([_NESTED]), {"intents": [entry]}, variables=TONE
+            )
+
+    def test_the_depth_limit_is_exact_and_a_huge_depth_is_refused_without_recursion(
+        self,
+    ):
+        envelope = _json_envelope([_NESTED])
+        deepest = ep.MAX_JSON_DEPTH
+
+        ei.instantiate_body(envelope, {"intents": [_nest(deepest)]}, variables=TONE)
+        for levels in (deepest + 1, 200_000):
+            with pytest.raises(ei.InstantiationError, match="is not valid"):
+                ei.instantiate_body(
+                    envelope, {"intents": [_nest(levels)]}, variables=TONE
+                )
+
+    def test_the_node_limit_is_exact(self):
+        envelope = _json_envelope([_NESTED])
+        limit = ep.MAX_JSON_NODES
+
+        ei.instantiate_body(envelope, {"intents": [[0] * (limit - 1)]}, variables=TONE)
+        with pytest.raises(ei.InstantiationError, match="is not valid"):
+            ei.instantiate_body(envelope, {"intents": [[0] * limit]}, variables=TONE)
+
+    def test_the_given_value_is_never_mutated_or_shared_with_the_instance(self):
+        given = {"intents": [copy.deepcopy(_NESTED)]}
+        before = copy.deepcopy(given)
+
+        out = ei.instantiate_body(_json_envelope([_NESTED]), given, variables=TONE)
+        out["states"]["start"]["required_context_keys"][0]["function"]["name"] = "x"
+
+        assert given == before
+        resolved = ep.resolve_options(_json_envelope([_NESTED]).body, given)["intents"]
+        assert resolved == before["intents"] and resolved[0] is not given["intents"][0]
+        assert resolved[0]["function"] is not given["intents"][0]["function"]
+
+    @pytest.mark.parametrize(
+        "items",
+        [
+            {"type": "json", "properties": {"a": {"type": "string"}}},
+            {"type": "json", "minimum": 1},
+            {"type": "json", "maxLength": 3},
+            {"type": "json", "enum": ["a"]},
+        ],
+    )
+    def test_a_json_entry_declares_nothing(self, items):
+        spec = {"type": "array", "items": items}
+        doc = _doc(body=_intents_body(None, spec))
+
+        assert _refused(doc).problems
+
+    def test_the_array_is_bounded(self):
+        with pytest.raises(ei.InstantiationError, match="is not valid"):
+            ei.instantiate_body(
+                _json_envelope([_NESTED]), {"intents": [_NESTED] * 4}, variables=TONE
+            )
