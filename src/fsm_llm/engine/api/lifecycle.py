@@ -10,6 +10,7 @@ drop under one ``_stack_lock`` hold) is the contract of the anchors below.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from typing import Any
 
 from fsm_llm.core.definitions import ConversationBusyError, FSMError
@@ -24,23 +25,26 @@ from .surface import _ApiSurface
 MAX_ENDED_CONVERSATIONS_CACHE = 10_000
 
 
-def _cancel_delegated_runs(targets: object, conversation_id: str) -> None:
+def _cancel_delegated_runs(
+    targets: object, conversation_id: str, frame_ids: Iterable[str] = ()
+) -> None:
     """Tell a ``RunLauncher`` resolver to stop the runs of an ended conversation (K7.2, D-050).
 
     Contract: a ``targets`` that is no ``RunLauncher`` is left alone; ``cancel_for`` is called
-    once, never under ``_stack_lock``; a launcher that raises costs one WARNING naming only the
-    exception type (the conversation is already gone, and no text of a worker or launcher error
-    may reach the log).
+    once for the root id and once for each OTHER frame id of the conversation (a call state in a
+    pushed frame is run under that frame's manager id, D-051 (9)), never under ``_stack_lock``;
+    a launcher that raises costs one WARNING naming only the exception type (the conversation is
+    already gone, and no text of a worker or launcher error may reach the log).
     """
     if not isinstance(targets, RunLauncher):
         return
-    try:
-        targets.cancel_for(conversation_id)
-    except Exception as error:
-        logger.warning(
-            f"Cancelling the delegated runs of {conversation_id} failed: "
-            f"{type(error).__name__}"
-        )
+    for owner in dict.fromkeys([conversation_id, *frame_ids]):
+        try:
+            targets.cancel_for(owner)
+        except Exception as error:
+            logger.warning(
+                f"Cancelling the delegated runs of {owner} failed: {type(error).__name__}"
+            )
 
 
 class LifecycleMixin(_ApiSurface):
@@ -225,7 +229,7 @@ class LifecycleMixin(_ApiSurface):
         # reach it. Do NOT join the run threads here (a daemon thread is cancelled by its token,
         # never waited for), do NOT call the launcher under `_stack_lock`, and do NOT let a
         # launcher error fail an end that already tore the conversation down.
-        _cancel_delegated_runs(self._targets, conversation_id)
+        _cancel_delegated_runs(self._targets, conversation_id, frame_ids)
         if unstacked_error is not None:
             raise unstacked_error
 

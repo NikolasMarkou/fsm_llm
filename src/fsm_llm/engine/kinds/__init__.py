@@ -31,7 +31,7 @@ this package; the old dotted path is gone. Modules:
 - ``services.py``: ``_PipelineServices``, the protocol of what an executor may ask of the pipeline.
 - ``registry.py``: the module table, ``register_executor``, ``check_executors``, ``executor_for``.
 - ``completion.py``: ``CompletionExecutor``.
-- ``call.py``: ``CallExecutor`` and the shared body ``write_call_request`` / ``refuse``.
+- ``call.py``: ``CallExecutor`` (frame and delegated mode) and the shared body ``write_call_request`` / ``refuse`` / ``final_record``.
 - ``conversation/``: ``ConversationExecutor`` and the conversation Pass-1 machinery.
 - ``records.py``: the records and digests both the executors and the turn pipeline use.
 - ``requests.py``: ``PushContext``, ``PushPlan``, ``ChildView``, ``PopContext``, the plain values ``settle``

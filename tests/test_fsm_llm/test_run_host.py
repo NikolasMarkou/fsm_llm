@@ -718,6 +718,21 @@ class TestEndConversationCancelsItsRuns:
             (cid, False)
         ]  # gone from the live table when it was called
 
+    def test_the_hook_also_reaches_the_runs_of_a_pushed_frame(self) -> None:
+        """A call state in a pushed frame is claimed under that frame's manager id, so the end
+        tells ``cancel_for`` for the root id AND for the frame id, each once (D-051 (9)).
+        Kills: a hook that names the root id only (the frame's run is never told to stop)."""
+        ref: list = []
+        spy = _Spy(ref)
+        api = _api_with(spy)
+        ref.append(api)
+        cid, _ = api.start_conversation()
+        api.push_fsm(cid, _CHAT())
+        child = api.conversation_stacks[cid][1].conversation_id
+        assert child != cid
+        api.end_conversation(cid)
+        assert [c for c, _ in spy.calls] == [cid, child]
+
     def test_a_refused_end_does_not_cancel(self, monkeypatch) -> None:
         ref: list = []
         spy = _Spy(ref)

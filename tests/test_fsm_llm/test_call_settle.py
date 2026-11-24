@@ -633,11 +633,12 @@ class TestTheRecordIsNotTrusted:
         await flow.api.aadvance(flow.cid)
         assert flow.depth() == 2 and flow.resolver.asked == [_OTHER]
 
-    @pytest.mark.parametrize("mode", ["delegated", None, 5])
+    @pytest.mark.parametrize("mode", ["weird", None, 5])
     async def test_a_running_record_of_an_unknown_mode_fails_the_call(self, mode):
-        """Only ``frame`` is applied in this phase (a delegated mode would own its own value):
-        a ``running`` record with another mode is written ``failed/unknown_target`` instead of
-        leaving the parent waiting forever, and nothing is pushed or resolved."""
+        """Only ``frame`` is pushed and ``delegated`` is started by the run host (K7.4,
+        ``test_call_delegated_settle.py``): a ``running`` record with any other mode is written
+        ``failed/unknown_target`` instead of leaving the parent waiting forever, and nothing is
+        pushed or resolved."""
         flow = await _flow()
         self._forge(flow, mode=mode, target=_TARGET)
         step = await flow.api.aadvance(flow.cid)

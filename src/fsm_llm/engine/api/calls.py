@@ -72,14 +72,18 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.kinds import executor_for
-from fsm_llm.engine.kinds.call import chosen_target, record_belongs
+from fsm_llm.engine.kinds.call import chosen_target, final_record, record_belongs
 from fsm_llm.engine.kinds.requests import (
     ChildView,
     PopContext,
     PushContext,
     PushPlan,
 )
-from fsm_llm.engine.kinds.targets import TARGET_MODE_FRAME, ResolvedTarget
+from fsm_llm.engine.kinds.targets import (
+    TARGET_MODE_DELEGATED,
+    TARGET_MODE_FRAME,
+    ResolvedTarget,
+)
 from fsm_llm.logging import logger
 from fsm_llm.runtime.usage import watch_provider_errors
 
@@ -198,12 +202,13 @@ def _is_request(record: Any, state_id: str) -> TypeGuard[dict[str, Any]]:
 
 
 def _is_unknown_mode(record: Any, state_id: str) -> bool:
-    """A ``running`` record of this state whose ``mode`` is not ``frame`` (a handler, an older
-    snapshot, a host of a mode this phase does not build)."""
+    """A ``running`` record of this state whose ``mode`` is neither ``frame`` nor ``delegated``
+    (a handler, an older snapshot): a delegated record is never an unknown mode, it is the
+    run host's (K7.4)."""
     return (
         record_belongs(record, state_id)
         and record.get("status") == Status.RUNNING.value
-        and record.get("mode") != TARGET_MODE_FRAME
+        and record.get("mode") not in (TARGET_MODE_FRAME, TARGET_MODE_DELEGATED)
     )
 
 
@@ -224,25 +229,6 @@ def _pushed_target(
     if again is not None and fsm_id_of(again.definition) == child.fsm_id:
         return again
     return None
-
-
-def _final(
-    state_id: str,
-    status: Status,
-    reason: Reason | None,
-    target: str | None,
-    template_identity: str | None,
-    instance_identity: str | None,
-) -> dict[str, Any]:
-    """The final record: the projection the loader's sample results pin (``CALL_SAMPLES``)."""
-    return {
-        "status": status.value,
-        "state": state_id,
-        "reason": None if reason is None else reason.value,
-        "target": target,
-        "template_identity": template_identity,
-        "instance_identity": instance_identity,
-    }
 
 
 async def _round(api: _ApiSurface, root_id: str, greetings: list[str]) -> bool:
@@ -416,7 +402,7 @@ def _outcome(
 
     def settled(status: Status, reason: Reason | None) -> dict[str, Any]:
         return {
-            config.result_key: _final(
+            config.result_key: final_record(
                 state_id, status, reason, target, template, instance
             )
         }
@@ -685,7 +671,7 @@ async def _refuse(
 ) -> None:
     """Write the FINAL ``failed`` record of a call settle cannot run (through ``update_context``,
     so the log holds it like any context write); the failure edge fires on the next turn."""
-    final = _final(
+    final = final_record(
         state_id,
         Status.FAILED,
         reason,

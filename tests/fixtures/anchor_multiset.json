@@ -879,6 +879,11 @@
       "delta": 2,
       "reason": "plan baa37f40 D-050 (K7.2): two new anchors, the run host (runs.py) and the cancel_for hook of end_conversation (lifecycle.py)",
       "token": "plan-2026-11-23T122249-baa37f40/D-050"
+    },
+    {
+      "delta": 1,
+      "reason": "plan baa37f40 D-051 (K7.3): the poll rule anchor of the call executor",
+      "token": "plan-2026-11-23T122249-baa37f40/D-051"
     }
   ]
 }

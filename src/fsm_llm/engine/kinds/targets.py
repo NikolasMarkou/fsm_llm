@@ -53,6 +53,11 @@ Delegated mode (plan baa37f40 phase K7, D-049, roadmap E3.2 second half): a code
   unknown handle, never nests a manager lock and never calls back into the ``API`` it serves.
 - ``RunPoll(finished, result)``: frozen; ``result`` is the ``RunResult`` of a finished run, else
   ``None``.
+- ``DEFAULT_DELEGATED_MAX_SECONDS`` (600.0), ``MAX_DELEGATED_MAX_SECONDS`` (3600.0) and
+  ``delegated_seconds(max_seconds)``: the wall-clock bound of a delegated call (the default when the
+  call declares none, cut to the cap), the one rule of the executor's ``deadline`` and of the limit
+  settle hands the launcher. ``MAX_DELEGATED_RETURN_CHARS`` (8000): the most characters of one value a
+  finished run merges into the parent (D-051).
 """
 
 from __future__ import annotations
@@ -68,6 +73,9 @@ if TYPE_CHECKING:  # the result envelope loads on request, never with `import fs
     from fsm_llm.core.results import RunResult
 
 __all__ = [
+    "DEFAULT_DELEGATED_MAX_SECONDS",
+    "MAX_DELEGATED_MAX_SECONDS",
+    "MAX_DELEGATED_RETURN_CHARS",
     "TARGET_MODE_DELEGATED",
     "TARGET_MODE_FRAME",
     "DelegatedTarget",
@@ -76,12 +84,34 @@ __all__ = [
     "RunPoll",
     "TargetResolver",
     "check_targets",
+    "delegated_seconds",
 ]
 
 #: The one mode of a resolved target: a child FSM pushed as a frame of the parent's stack.
 TARGET_MODE_FRAME = "frame"
 #: The mode of a delegated target: a code-backed run on a host thread, polled by the parent.
 TARGET_MODE_DELEGATED = "delegated"
+
+#: The wall-clock bound of a delegated call that declares no ``max_seconds`` (owner-visible; plan
+#: baa37f40 D-051): a delegated call is always bounded, because the parent polls a run it cannot
+#: interrupt.
+DEFAULT_DELEGATED_MAX_SECONDS = 600.0
+#: The cap of ANY delegated ``max_seconds``: a longer one is cut to this (owner-visible, D-051).
+MAX_DELEGATED_MAX_SECONDS = 3600.0
+#: The most characters of one value a finished delegated run merges into the parent: a text is
+#: cut at it (and ends with a marker), a container over it becomes a one-line marker (D-051).
+MAX_DELEGATED_RETURN_CHARS = 8_000
+
+
+def delegated_seconds(max_seconds: float | None) -> float:
+    """The wall-clock bound of a delegated call: ``max_seconds`` or the default, cut to the cap.
+
+    Contract: ``None`` gives ``DEFAULT_DELEGATED_MAX_SECONDS``; a number above
+    ``MAX_DELEGATED_MAX_SECONDS`` gives the cap. The one rule of the executor (the ``deadline``
+    of the record) and of settle (the limit handed to the launcher). Never raises for a number.
+    """
+    seconds = DEFAULT_DELEGATED_MAX_SECONDS if max_seconds is None else max_seconds
+    return min(float(seconds), MAX_DELEGATED_MAX_SECONDS)
 
 
 @dataclass(frozen=True)
