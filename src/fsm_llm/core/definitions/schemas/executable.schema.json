@@ -177,6 +177,251 @@
       "title": "FsmEnvelope",
       "type": "object"
     },
+    "HandlerBinding": {
+      "additionalProperties": false,
+      "description": "One handler a pattern binds: its library name, where it fires and what it is told.",
+      "properties": {
+        "handler": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Handler",
+          "type": "string"
+        },
+        "keys": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 256,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keys"
+        },
+        "on": {
+          "enum": [
+            "entry",
+            "exit",
+            "state",
+            "context_update"
+          ],
+          "title": "On",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maxProperties": 64,
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priority"
+        },
+        "states": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "States",
+          "type": "array"
+        }
+      },
+      "required": [
+        "handler",
+        "on"
+      ],
+      "title": "HandlerBinding",
+      "type": "object"
+    },
+    "HookBinding": {
+      "additionalProperties": false,
+      "description": "One run hook of a pattern, bound by name (the seam is built later; a field here).",
+      "properties": {
+        "at": {
+          "enum": [
+            "before_run",
+            "on_iteration",
+            "after_run"
+          ],
+          "title": "At",
+          "type": "string"
+        },
+        "hook": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Hook",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maxProperties": 64,
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "hook",
+        "at"
+      ],
+      "title": "HookBinding",
+      "type": "object"
+    },
+    "ItemSpec": {
+      "additionalProperties": false,
+      "description": "The entries of an ``array`` option: one scalar type and its bounds.",
+      "properties": {
+        "enum": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "maxItems": 256,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum"
+        },
+        "maxLength": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxlength"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "ItemSpec",
+      "type": "object"
+    },
     "Lifecycle": {
       "description": "The lifecycle claim of an executable or a library procedure.\n\nThe first four members equal ``fsm_llm.synthesis.constants.LIFECYCLES`` in\norder (``draft`` to ``deprecated``); ``BUILTIN`` is the fifth: a built-in\nexecutable that ships in code. It is a claim of its source, never an\nauthorization.",
       "enum": [
@@ -188,6 +433,372 @@
       ],
       "title": "Lifecycle",
       "type": "string"
+    },
+    "OptionSpec": {
+      "additionalProperties": false,
+      "description": "One option: a scalar, or an ``array`` of scalars (``items``).",
+      "properties": {
+        "description": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Description",
+          "type": "string"
+        },
+        "enum": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "maxItems": 256,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum"
+        },
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "maxItems": {
+          "anyOf": [
+            {
+              "maximum": 256,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxitems"
+        },
+        "maxLength": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxlength"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean",
+            "array"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "OptionSpec",
+      "type": "object"
+    },
+    "OptionsSchema": {
+      "additionalProperties": false,
+      "description": "``{type: \"object\", properties: {name: OptionSpec}}``: the closed subset.",
+      "properties": {
+        "properties": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/OptionSpec"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Properties",
+          "type": "object"
+        },
+        "type": {
+          "const": "object",
+          "default": "object",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "OptionsSchema",
+      "type": "object"
+    },
+    "PatternBody": {
+      "additionalProperties": false,
+      "description": "``{fsm | generator, handlers, options_schema, options, variants, run}`` (D-011).",
+      "properties": {
+        "fsm": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The FSM template; holes and variants are applied to it",
+          "title": "Fsm"
+        },
+        "generator": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A generator name, instead of fsm (not instantiable yet)",
+          "title": "Generator"
+        },
+        "handlers": {
+          "items": {
+            "$ref": "#/$defs/HandlerBinding"
+          },
+          "maxItems": 256,
+          "title": "Handlers",
+          "type": "array"
+        },
+        "options": {
+          "description": "The default value of each option that has one",
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Options",
+          "type": "object"
+        },
+        "options_schema": {
+          "$ref": "#/$defs/OptionsSchema"
+        },
+        "run": {
+          "$ref": "#/$defs/RunBlock"
+        },
+        "variants": {
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Variants",
+          "type": "object"
+        }
+      },
+      "title": "PatternBody",
+      "type": "object"
+    },
+    "PatternEnvelope": {
+      "additionalProperties": false,
+      "description": "An agent pattern: its body is a template (``executable_pattern``), not a bare FSM.",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/PatternBody"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "maxItems": 256,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract": {
+          "$ref": "#/$defs/Contract"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "pattern",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "draft"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Name",
+          "type": "string"
+        },
+        "requires": {
+          "$ref": "#/$defs/Requires"
+        },
+        "schema": {
+          "const": "fsm-llm/executable",
+          "description": "The envelope format id",
+          "title": "Schema",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "description": "The envelope format version (not the FSM definition version)",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "variables": {
+          "description": "Operator-filled {{name}} placeholders; never a caller's input",
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Variables",
+          "type": "array"
+        },
+        "version": {
+          "default": "1",
+          "description": "Author's label",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "body"
+      ],
+      "title": "PatternEnvelope",
+      "type": "object"
     },
     "ProcedureBody": {
       "additionalProperties": false,
@@ -378,6 +989,155 @@
       "title": "Requires",
       "type": "object"
     },
+    "RunBlock": {
+      "additionalProperties": false,
+      "description": "How an agent runs the FSM: which keys carry the answer, the proof and the outputs.",
+      "properties": {
+        "agent_type": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Type"
+        },
+        "answer_keys": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Answer Keys",
+          "type": "array"
+        },
+        "context_seed": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maxProperties": 256,
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Context Seed",
+          "type": "object"
+        },
+        "evidence_keys": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Evidence Keys",
+          "type": "array"
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/HookBinding"
+          },
+          "maxItems": 16,
+          "title": "Hooks",
+          "type": "array"
+        },
+        "judged": {
+          "default": false,
+          "title": "Judged",
+          "type": "boolean"
+        },
+        "run_output_keys": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Run Output Keys",
+          "type": "array"
+        },
+        "seconds_exempt": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Seconds Exempt",
+          "type": "array"
+        },
+        "step_budget": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step Budget"
+        },
+        "success_keys": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Success Keys",
+          "type": "array"
+        }
+      },
+      "title": "RunBlock",
+      "type": "object"
+    },
     "StrategyBody": {
       "additionalProperties": false,
       "properties": {
@@ -537,6 +1297,7 @@
   "discriminator": {
     "mapping": {
       "fsm": "#/$defs/FsmEnvelope",
+      "pattern": "#/$defs/PatternEnvelope",
       "procedure": "#/$defs/ProcedureEnvelope",
       "strategy": "#/$defs/StrategyEnvelope"
     },
@@ -551,6 +1312,9 @@
     },
     {
       "$ref": "#/$defs/ProcedureEnvelope"
+    },
+    {
+      "$ref": "#/$defs/PatternEnvelope"
     }
   ]
 }

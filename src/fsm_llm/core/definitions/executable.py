@@ -3,8 +3,9 @@
 An executable is a header (``schema``, ``schema_version``, ``kind``, ``id``, ``version``,
 ``name``, ``description``, ``contract``, ``requires``, ``capabilities``, ``lifecycle``,
 ``variables``, ``metadata``) and a ``body`` that the ``kind`` discriminates: ``fsm`` (``{fsm}``),
-``strategy`` (``{fsm, strategy}``) and ``procedure`` (``{fsm, provenance}``). ``pattern`` and
-``workflow`` are refused by name until their adapters exist. ``FSMDefinition`` and ``State`` gain
+``strategy`` (``{fsm, strategy}``), ``procedure`` (``{fsm, provenance}``) and ``pattern`` (the
+template body of ``executable_pattern``: holes, variants, options, a run block). ``workflow`` is
+refused by name until its adapter exists. ``FSMDefinition`` and ``State`` gain
 no field: ``body.fsm`` is the FSM dict, checked by the body loader (V2, ``core.verify.executable``)
 and loaded exactly as ``API`` loads it by ``instantiate_envelope``.
 
@@ -65,9 +66,12 @@ from fsm_llm.core.codes import Lifecycle
 from fsm_llm.text import capped_line
 
 from .errors import FSMError
+from .executable_pattern import PATTERN_FIELD_VERSIONS, PatternBody
 from .limits import (
     EXECUTABLE_ID_MAX_LENGTH,
     EXECUTABLE_ID_PATTERN,
+    EXECUTABLE_MAX_ITEMS,
+    EXECUTABLE_NAME_MAX_LENGTH,
     nests_deeper_than,
 )
 from .schema import SchemaFinding, parse_version
@@ -88,6 +92,8 @@ __all__ = [
     "FsmEnvelope",
     "InstanceIdentityMismatchError",
     "InstantiationError",
+    "PatternBody",
+    "PatternEnvelope",
     "ProcedureBody",
     "ProcedureEnvelope",
     "Requires",
@@ -119,10 +125,10 @@ _PROBLEM_PART_CHARS = 60
 #: The shipped JSON Schema, generated from the models (package data).
 SCHEMA_PATH = Path(__file__).with_name("schemas") / "executable.schema.json"
 
-_KINDS = ("fsm", "strategy", "procedure")
+_KINDS = ("fsm", "strategy", "procedure", "pattern")
 _PLACEHOLDER = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
-_MAX_ITEMS = 256
-_Name = Annotated[str, Field(min_length=1, max_length=128)]
+_MAX_ITEMS = EXECUTABLE_MAX_ITEMS
+_Name = Annotated[str, Field(min_length=1, max_length=EXECUTABLE_NAME_MAX_LENGTH)]
 _Names = Annotated[list[_Name], Field(max_length=_MAX_ITEMS)]
 _VariableName = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=64)]
 
@@ -297,10 +303,15 @@ class ExecutableEnvelope(_Model):
         if stray := sorted(set(templates) - inputs):
             raise ValueError(f"input_templates name undeclared inputs: {stray}")
         arguments = scan_placeholders(list(templates.values()))[0]
-        if clash := sorted(set(self.variables) & (inputs | arguments)):
+        options: set[str] = (
+            set(self.body.options_schema.properties)
+            if isinstance(self.body, PatternBody)
+            else set()
+        )
+        if clash := sorted((set(self.variables) | options) & (inputs | arguments)):
             raise ValueError(
-                f"variables {clash} are named like a contract input or an input "
-                "template placeholder; a caller's input is never a variable"
+                f"variables and options {clash} are named like a contract input or an "
+                "input template placeholder; a caller's input is never a variable"
             )
         return self
 
@@ -320,9 +331,17 @@ class ProcedureEnvelope(ExecutableEnvelope):
     body: ProcedureBody
 
 
+class PatternEnvelope(ExecutableEnvelope):
+    """An agent pattern: its body is a template (``executable_pattern``), not a bare FSM."""
+
+    kind: Literal["pattern"]
+    body: PatternBody  # type: ignore[assignment]
+
+
 #: The union V1 parses: one class per kind, discriminated on the header field ``kind``.
 ExecutableDocument = Annotated[
-    FsmEnvelope | StrategyEnvelope | ProcedureEnvelope, Field(discriminator="kind")
+    FsmEnvelope | StrategyEnvelope | ProcedureEnvelope | PatternEnvelope,
+    Field(discriminator="kind"),
 ]
 _ADAPTER: TypeAdapter[ExecutableEnvelope] = TypeAdapter(ExecutableDocument)
 
@@ -357,7 +376,7 @@ def parse_executable(data: object) -> ExecutableEnvelope:
             problems=("document: must be a JSON object",),
         )
     kind = data.get("kind")
-    if isinstance(kind, str) and kind in ("pattern", "workflow"):
+    if kind == "workflow":
         line = (
             f"kind: {kind!r} is not supported by this version "
             f"(known kinds: {', '.join(_KINDS)})"
@@ -393,6 +412,7 @@ _ENVELOPE_TABLE: dict[str, dict[str, str]] = {
     "StrategyBody": {"1.0": "strategy"},
     "StrategyDecl": {"1.0": "aliases results solution_key"},
     "ProcedureBody": {"1.0": "provenance"},
+    **PATTERN_FIELD_VERSIONS,
 }
 
 #: "Model.field" -> the envelope version that introduced it. A kind class inherits the entries

@@ -57,7 +57,7 @@ The header fields:
 |---|---|
 | `schema` | The constant `fsm-llm/executable`. It is how a tool tells an executable from a plain FSM file. |
 | `schema_version` | The version of this envelope format, `N.M`, default `1.0`. It is not the FSM definition version and not the author's `version`. This release reads `1.0` up to any `1.x`; another major or a lower number is refused. |
-| `kind` | `fsm`, `strategy` or `procedure`. It decides the shape of `body`. A document of kind `pattern` or `workflow` is refused by name: the built-in patterns are code, not documents (see [Built-in executables](#built-in-executables)). |
+| `kind` | `fsm`, `strategy`, `procedure` or `pattern`. It decides the shape of `body`. A document of kind `workflow` is refused by name. A `pattern` is a template (see [The pattern body](#the-pattern-body)); the built-in agent patterns are still code (see [Built-in executables](#built-in-executables)). |
 | `id` | A name of letters, digits and `_ . : / -`, at most 128 characters, starting with a letter or digit. |
 | `version`, `name`, `description` | The author's own label and texts, all optional. |
 | `contract` | `inputs` (keys the caller supplies), `outputs` (keys the run returns), `handler_only_keys`, and `input_templates` (see below). |
@@ -66,7 +66,7 @@ The header fields:
 | `lifecycle` | `draft` (the default), `verified`, `trusted`, `deprecated` or `builtin`. |
 | `variables` | The operator-filled `{{name}}` placeholders (lower case letters, digits and `_`, starting with a letter). |
 | `metadata` | Free-form author data. |
-| `body` | By kind: `{fsm}`, `{fsm, strategy}` (a strategy declares `aliases`, `results` and a `solution_key`) or `{fsm, provenance}`. |
+| `body` | By kind: `{fsm}`, `{fsm, strategy}` (a strategy declares `aliases`, `results` and a `solution_key`), `{fsm, provenance}` or the pattern body below. |
 
 Every model forbids a key it does not know, so a misspelt field is an error and not silently dropped.
 
@@ -75,6 +75,17 @@ Every model forbids a key it does not know, so a misspelt field is an error and 
 `body.fsm` is a plain JSON object here. It is checked by the same validator as an FSM file and loaded exactly as `API` loads a definition, so an FSM written for `API.from_file` can be wrapped without changes.
 
 The generated JSON Schema of the format ships with the package as `fsm_llm/core/definitions/schemas/executable.schema.json` (package data). `fsm_llm.core.definitions.executable.executable_json_schema()` builds the same schema from the models, and a test holds the file equal to it. The schema describes the header; for `body.fsm` it says only "an object" because the FSM is judged by the validator, not by the schema. The bytes of the file depend on the pydantic version that generated it, which is pinned in `constraints.txt`.
+
+## The pattern body
+
+A document of kind `pattern` carries a template instead of a bare FSM. Its `body` is `{fsm | generator, handlers, options_schema, options, variants, run}`, and exactly one of `fsm` (an object) and `generator` (a name; a generator body parses and validates, and instantiating it raises `GeneratorUnavailableError` until the generator namespace exists). The pattern fields are part of envelope format `1.0`. In this release `load_executable` refuses a `pattern` document with one `[schema]` line (its load sequence is built in a later step), so a file of this kind is parsed by `parse_executable` and no registry or CLI route loads it yet.
+
+- **Holes.** A hole is the leaf `{"$hole": "<option name>"}`. It stands for one whole JSON value of any option type (an integer, a list) and replaces the leaf in place, with the key order of its parents kept. A hole is never a key, never beside other keys, never inside another hole and never the root of `fsm`; each is refused with one message at parse. Its value is inserted as given and is never rescanned for `{{name}}` text. `{{name}}` stays text-only and takes the declared `variables`.
+- **Options.** `options_schema` is `{"properties": {name: spec}}`, a closed subset: `type` is `string`, `integer`, `number`, `boolean` or `array` (of one scalar type, in `items`), with `minimum`, `maximum`, `maxLength`, `maxItems` and `enum`; no `$ref`, no object. A value is checked strictly (a boolean is not an integer). `options` holds the default of each option that has one: an option with no default is required. An option may not be named like a contract input or an input template placeholder, as for a variable.
+- **Variants.** `variants` maps a name to a list of RFC 6902 operations (`add`, `remove`, `replace`, `test`) applied to the template. The caller of `instantiate_body` selects them by name (an option never does), they apply in the order they are declared, and a refused patch names the variant and the patch code.
+- **Instantiation.** `instantiate_body(envelope, options=None, *, variants=(), variables=None)` in `fsm_llm.core.definitions.executable_instance` returns the FSM as a fresh dict (two calls give equal dicts that share nothing), so key order is observable and a pattern file can reproduce an existing builder byte for byte: variants first, then one pass that fills holes and text. `instantiate_envelope(envelope, options=, variants=, variables=)` loads that dict as an `FSMDefinition` and returns the record `{"options": {resolved options}, "variables": {...}, "variants": [selected, in declaration order]}`, which `rebuild_instance` replays.
+- **Identities.** The template identity is the digest of the document and never changes with the options or variants a caller picks; the instance identity is the digest of the instantiated FSM, so it varies with the options and variants that change the body and with nothing else.
+- **Bindings and the run block.** `handlers` is a list of `{handler, on: entry|exit|state|context_update, states, keys, priority, params}`; `run` is `{agent_type, answer_keys, success_keys, evidence_keys, judged, run_output_keys, context_seed, step_budget, seconds_exempt, hooks}`. Core only checks their shape: the names resolve later. `context_seed` may not name an internal-prefixed or secret-looking key, so a file cannot seed a driver key or an approval grant.
 
 ## Two identities
 
@@ -93,7 +104,7 @@ identity = identity_of(envelope, definition)           # template_identity, inst
 # record == {"options": {}, "variables": {"company": "Acme"}}
 ```
 
-`instantiate_envelope(envelope, *, options=None, variables=None)` replaces `{{name}}` in the string values of `body.fsm` for the declared variables. It never touches a key, never rescans a replacement, and leaves an unknown `{{name}}` as text. It raises `InstantiationError` for a declared variable with no value, a value for a name that is not declared, a value that is not text, a non-empty `options` (no kind has an option schema yet), or a body that is not a valid FSM definition. The returned `record` is what you log. `rebuild_instance(envelope, record, expected_instance_identity)` re-instantiates from a record and raises `InstanceIdentityMismatchError` unless the digest equals the one that was logged, so a replay can prove it ran the same body.
+`instantiate_envelope(envelope, *, options=None, variables=None)` replaces `{{name}}` in the string values of `body.fsm` for the declared variables. It never touches a key, never rescans a replacement, and leaves an unknown `{{name}}` as text. It raises `InstantiationError` for a declared variable with no value, a value for a name that is not declared, a value that is not text, a non-empty `options` or `variants` for a kind other than `pattern` (only a pattern has an option schema), or a body that is not a valid FSM definition. The returned `record` is what you log. `rebuild_instance(envelope, record, expected_instance_identity)` re-instantiates from a record and raises `InstanceIdentityMismatchError` unless the digest equals the one that was logged, so a replay can prove it ran the same body.
 
 `identity_of(template, instance=None)` returns an `Identity` with `instance_identity` left `None` when no instance is given. The instance may be an `FSMDefinition` or a dict: a dict that loads as an FSM definition gives the same instance identity as the definition (one instance, one identity), and only a dict that is not an FSM is hashed as written. Parse and instantiation functions raise `ExecutableDocumentError` and `InstantiationError`, both `ValueError`s and `FSMError`s.
 
@@ -137,7 +148,7 @@ It returns `(envelope or None, FSMValidationResult)`. The envelope is returned o
 | V3 | `[names]` | Completion tool names in the raw states must be listed in `requires.tools` (when it is a list). With a `resolver`, every name of `requires.tools`, `handlers`, `callables` and `executables` must resolve. With none, one info line says names were not resolved. |
 | V7 | `[model]` | Only when `origin="model"`. See below. |
 
-The numbering follows the roadmap: V6 (a strict mode) and the V4 variants for the pattern kind are not built.
+The numbering follows the roadmap: V6 (a strict mode) and the load sequence of the pattern kind (V2 on the default instance, V3, V4 and V7 for a pattern) are not built.
 
 The `resolver` is a function called with `(category, name)`, the category being `tools`, `handlers`, `callables` or `executables`. The loader reads no registry itself; build the function from your [name registries](results_and_names.md#name-registries): `lambda category, name: name in namespaces[category]`. The `fsm-llm-validate` command passes no resolver, so it checks that the names are declared and not that they resolve; `ExecutableRegistry.add_document` takes a `resolver` of its own.
 

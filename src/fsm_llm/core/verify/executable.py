@@ -242,6 +242,12 @@ def load_executable(
             note("schema", "error", line)
         return finish(None)
 
+    if envelope.kind == "pattern":
+        # the V2 to V7 branches of a pattern are step 6 of plan a555dcfe: until then no pattern
+        # document loads by any route (fail closed)
+        note("schema", "error", "kind 'pattern': its load sequence is not built yet")
+        return finish(None)
+
     # V4, the values: fill the declared variables before the body is checked
     declared = set(envelope.variables)
     fsm = envelope.body.fsm

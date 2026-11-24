@@ -6,6 +6,15 @@ an envelope into an ``FSMDefinition`` (``instantiate_envelope``, ``rebuild_insta
 models, the errors, ``parse_executable`` and ``scan_placeholders`` (the envelope validator reads
 it) stay in ``executable.py``, which this module imports; the reverse import never happens.
 
+A ``pattern`` envelope (plan a555dcfe D-011) instantiates through ``instantiate_body(envelope,
+options=None, *, variants=(), variables=None) -> dict``: a fresh FSM DICT (so key order is
+observable), built from the variants the caller selected (declaration order), the options (given,
+else default, validated) and the text variables, with the record ``{"options": resolved,
+"variables": {...}, "variants": [selected]}`` that ``instantiate_envelope`` returns beside the
+loaded ``FSMDefinition`` and ``rebuild_instance`` replays. A generator body raises
+``GeneratorUnavailableError`` until the generator namespace exists. Template identity never reads
+options or variants chosen; instance identity is the digest of the instantiated FSM.
+
 Interface contract: as the ``executable`` module docstring states it for ``identity_of``,
 ``instantiate_envelope`` and ``rebuild_instance``. ``canonical_digest(payload) -> str`` is the
 64-hex sha256 of the sorted-key JSON; ``substitute_variables(node, values)`` is a pure copy;
@@ -18,6 +27,7 @@ neither ``fsm_llm/__init__.py`` nor ``core/definitions/__init__.py`` imports it.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
@@ -37,17 +47,30 @@ from .executable import (
     InstantiationError,
     _error_where,
 )
+from .executable_pattern import (
+    PatternBody,
+    PatternBodyError,
+    apply_variants,
+    fill_holes,
+    resolve_options,
+)
 from .fsm import FSMDefinition, definition_digest
 from .limits import nests_deeper_than
 
 __all__ = [
+    "GeneratorUnavailableError",
     "canonical_digest",
     "identity_of",
+    "instantiate_body",
     "instantiate_envelope",
     "rebuild_instance",
     "substitute_variables",
     "variable_problems",
 ]
+
+
+class GeneratorUnavailableError(InstantiationError):
+    """A pattern declares a generator and the generator namespace does not exist yet."""
 
 
 def canonical_digest(payload: Mapping[str, Any]) -> str:
@@ -129,9 +152,13 @@ def identity_of(
         mode="json",
         by_alias=True,
         exclude_defaults=True,
-        exclude={"metadata": True, "body": {"fsm": True}},
+        exclude={"metadata": True, "body": {"fsm": True, "variants": True}},
     )
-    dump.setdefault("body", {})["fsm"] = _json_tree(template.body.fsm)
+    body = dump.setdefault("body", {})
+    if template.body.fsm is not None:  # a pattern with a generator has none
+        body["fsm"] = _json_tree(template.body.fsm)
+    if isinstance(template.body, PatternBody) and template.body.variants:
+        body["variants"] = _json_tree(template.body.variants)
     if template.metadata:
         dump["metadata"] = _json_tree(template.metadata)
     digest = None if instance is None else _instance_digest(instance)
@@ -175,27 +202,10 @@ def variable_problems(
     return problems
 
 
-def instantiate_envelope(
-    envelope: ExecutableEnvelope,
-    *,
-    options: Mapping[str, Any] | None = None,
-    variables: Mapping[str, str] | None = None,
-) -> tuple[FSMDefinition, dict[str, Any]]:
-    """The FSM body of *envelope* with its variables filled, and the instantiation record."""
-    values = dict(variables or {})
-    if options:
-        raise InstantiationError(
-            "options are not accepted: no executable kind has an option schema yet"
-        )
-    if problems := variable_problems(envelope, values):
-        raise InstantiationError("; ".join(problems))
-    if nests_deeper_than(envelope.body.fsm, MAX_DOCUMENT_DEPTH):
-        raise InstantiationError(
-            f"the body nests deeper than {MAX_DOCUMENT_DEPTH} levels"
-        )
-    body = substitute_variables(envelope.body.fsm, values)
+def _load_definition(body: Mapping[str, Any]) -> FSMDefinition:
+    """The ``FSMDefinition`` of an instantiated body, or ``InstantiationError`` (no value shown)."""
     try:
-        definition = FSMDefinition(**body)
+        return FSMDefinition(**body)
     except ValidationError as error:
         # locations and error types only: a message or an input value can carry a variable VALUE
         items = error.errors(
@@ -212,6 +222,91 @@ def instantiate_envelope(
             "the instantiated body is not a valid FSM definition "
             f"({type(error).__name__})"
         ) from None
+
+
+def _pattern_instance(
+    envelope: ExecutableEnvelope,
+    options: Mapping[str, Any] | None,
+    variables: Mapping[str, str] | None,
+    variants: Sequence[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The instantiated FSM dict of a pattern and its record (the work of ``instantiate_body``)."""
+    body = envelope.body
+    if not isinstance(body, PatternBody):
+        raise InstantiationError(
+            "options and variants belong to a pattern: this envelope has none"
+        )
+    if body.fsm is None:
+        raise GeneratorUnavailableError(
+            f"the generator {body.generator!r} cannot run: no generator namespace exists yet"
+        )
+    values = dict(variables or {})
+    if problems := variable_problems(envelope, values):
+        raise InstantiationError("; ".join(problems))
+    try:
+        resolved = resolve_options(body, options)
+        # the record is taken BEFORE the fill pass, from values the pass only copies
+        record = {
+            "options": copy.deepcopy(resolved),
+            "variables": dict(sorted(values.items())),
+            "variants": [name for name in body.variants if name in set(variants)],
+        }
+        patched = apply_variants(body, variants)
+        if nests_deeper_than(patched, MAX_DOCUMENT_DEPTH):
+            raise InstantiationError(
+                f"the body nests deeper than {MAX_DOCUMENT_DEPTH} levels"
+            )
+        filled = fill_holes(
+            patched, resolved, lambda text: substitute_variables(text, values)
+        )
+    except PatternBodyError as error:
+        raise InstantiationError(str(error)) from None
+    return filled, record
+
+
+def instantiate_body(
+    envelope: ExecutableEnvelope,
+    options: Mapping[str, Any] | None = None,
+    *,
+    variants: Sequence[str] = (),
+    variables: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """The FSM of a pattern *envelope* as a fresh dict: variants, then holes and text.
+
+    *variants* are names the caller (the adapter) selects, applied in declaration order; an
+    option can never select one. *options* are checked against the options schema and fall back
+    to the defaults of the body. A generator body raises ``GeneratorUnavailableError``. Two calls
+    return equal dicts that share nothing with each other or with the envelope.
+    """
+    return _pattern_instance(envelope, options, variables, variants)[0]
+
+
+def instantiate_envelope(
+    envelope: ExecutableEnvelope,
+    *,
+    options: Mapping[str, Any] | None = None,
+    variables: Mapping[str, str] | None = None,
+    variants: Sequence[str] = (),
+) -> tuple[FSMDefinition, dict[str, Any]]:
+    """The FSM body of *envelope* with its variables filled, and the instantiation record.
+
+    A pattern also takes *options* and *variants* (see ``instantiate_body``) and records both.
+    """
+    if isinstance(envelope.body, PatternBody):
+        filled, record = _pattern_instance(envelope, options, variables, variants)
+        return _load_definition(filled), record
+    values = dict(variables or {})
+    if options or variants:
+        raise InstantiationError(
+            "options and variants are not accepted: only a pattern has an option schema"
+        )
+    if problems := variable_problems(envelope, values):
+        raise InstantiationError("; ".join(problems))
+    if nests_deeper_than(envelope.body.fsm, MAX_DOCUMENT_DEPTH):
+        raise InstantiationError(
+            f"the body nests deeper than {MAX_DOCUMENT_DEPTH} levels"
+        )
+    definition = _load_definition(substitute_variables(envelope.body.fsm, values))
     return definition, {"options": {}, "variables": dict(sorted(values.items()))}
 
 
@@ -223,15 +318,20 @@ def rebuild_instance(
     """Re-instantiate from a logged *record*; the digest must equal the logged identity."""
     if (
         not isinstance(record, Mapping)
-        or set(record) - {"options", "variables"}
+        or set(record) - {"options", "variables", "variants"}
         or not isinstance(record.get("options") or {}, Mapping)
         or not isinstance(record.get("variables") or {}, Mapping)
+        or not isinstance(record.get("variants") or [], list)
     ):
         raise InstantiationError(
-            "an instantiation record is {options: {...}, variables: {...}}"
+            "an instantiation record is {options: {...}, variables: {...}} "
+            "(a pattern adds variants: [...])"
         )
     definition, _ = instantiate_envelope(
-        envelope, options=record.get("options"), variables=record.get("variables")
+        envelope,
+        options=record.get("options"),
+        variables=record.get("variables"),
+        variants=record.get("variants") or (),
     )
     actual = definition_digest(definition)
     if actual != expected_instance_identity:

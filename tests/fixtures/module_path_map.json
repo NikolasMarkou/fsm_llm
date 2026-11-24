@@ -1057,6 +1057,7 @@
     "fsm_llm.core.definitions",
     "fsm_llm.core.definitions.executable",
     "fsm_llm.core.definitions.executable_instance",
+    "fsm_llm.core.definitions.executable_pattern",
     "fsm_llm.core.definitions.patch",
     "fsm_llm.core.expressions",
     "fsm_llm.core.kind_call",

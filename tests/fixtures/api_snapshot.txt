@@ -902,7 +902,7 @@ fsm_llm.core.definitions.executable.Contract class(BaseModel)
 fsm_llm.core.definitions.executable.ENVELOPE_FIELD_VERSIONS dict
 fsm_llm.core.definitions.executable.ENVELOPE_SCHEMA_VERSION_DEFAULT = '1.0'
 fsm_llm.core.definitions.executable.ENVELOPE_SCHEMA_VERSION_OLDEST = '1.0'
-fsm_llm.core.definitions.executable.ExecutableDocument alias Annotated[FsmEnvelope | StrategyEnvelope | ProcedureEnvelope, FieldInfo(annotation=NoneType, required=True, discriminator='kind')]
+fsm_llm.core.definitions.executable.ExecutableDocument alias Annotated[FsmEnvelope | StrategyEnvelope | ProcedureEnvelope | PatternEnvelope, FieldInfo(annotation=NoneType, required=True, discriminator='kind')]
 fsm_llm.core.definitions.executable.ExecutableDocumentError class(ExecutableError, ValueError)
   def __init__(self, message: str, *, problems: Sequence[str] = (), details: dict[str, Any] | None = None)
 fsm_llm.core.definitions.executable.ExecutableEnvelope class(BaseModel)
@@ -943,6 +943,29 @@ fsm_llm.core.definitions.executable.InstanceIdentityMismatchError class(Instanti
 fsm_llm.core.definitions.executable.InstantiationError class(ExecutableError, ValueError)
 fsm_llm.core.definitions.executable.MAX_DOCUMENT_DEPTH = 200
 fsm_llm.core.definitions.executable.PROBLEM_LINE_CHARS = 300
+fsm_llm.core.definitions.executable.PatternBody class(BaseModel)
+  field fsm: dict[str, Any] | None = None
+  field generator: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
+  field handlers: list[HandlerBinding] = factory
+  field options_schema: OptionsSchema = factory
+  field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], str | int | float | bool | None | list[str | int | float | bool | None]] = factory
+  field variants: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], list[dict[str, Any]]] = factory
+  field run: RunBlock = factory
+fsm_llm.core.definitions.executable.PatternEnvelope class(ExecutableEnvelope)
+  field schema_: Literal['fsm-llm/executable'] required
+  field schema_version: str = '1.0'
+  field kind: Literal['pattern'] required
+  field id: str required
+  field version: str = '1'
+  field name: str = ''
+  field description: str = ''
+  field contract: Contract = factory
+  field requires: Requires = factory
+  field capabilities: list[Capability] = factory
+  field lifecycle: Lifecycle = Lifecycle.DRAFT
+  field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
+  field body: PatternBody required
+  field metadata: dict[str, Any] = factory
 fsm_llm.core.definitions.executable.ProcedureBody class(FsmBody)
   field fsm: dict[str, Any] required
   field provenance: dict[str, str | list[str] | None] = factory
@@ -994,12 +1017,73 @@ fsm_llm.core.definitions.executable.parse_executable def(data: object) -> Execut
 fsm_llm.core.definitions.executable.scan_placeholders def(node: Any) -> tuple[set[str], set[str]]
 fsm_llm.core.definitions.executable.schema_text def() -> str
 # fsm_llm.core.definitions.executable_instance
+fsm_llm.core.definitions.executable_instance.GeneratorUnavailableError class(InstantiationError)
 fsm_llm.core.definitions.executable_instance.canonical_digest def(payload: Mapping[str, Any]) -> str
 fsm_llm.core.definitions.executable_instance.identity_of def(template: ExecutableEnvelope, instance: FSMDefinition | Mapping[str, Any] | None = None) -> Identity
-fsm_llm.core.definitions.executable_instance.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> tuple[FSMDefinition, dict[str, Any]]
+fsm_llm.core.definitions.executable_instance.instantiate_body def(envelope: ExecutableEnvelope, options: Mapping[str, Any] | None = None, *, variants: Sequence[str] = (), variables: Mapping[str, str] | None = None) -> dict[str, Any]
+fsm_llm.core.definitions.executable_instance.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None, variants: Sequence[str] = ()) -> tuple[FSMDefinition, dict[str, Any]]
 fsm_llm.core.definitions.executable_instance.rebuild_instance def(envelope: ExecutableEnvelope, record: Mapping[str, Any], expected_instance_identity: str) -> FSMDefinition
 fsm_llm.core.definitions.executable_instance.substitute_variables def(node: Any, values: Mapping[str, str]) -> Any
 fsm_llm.core.definitions.executable_instance.variable_problems def(envelope: ExecutableEnvelope, values: Mapping[str, Any]) -> list[str]
+# fsm_llm.core.definitions.executable_pattern
+fsm_llm.core.definitions.executable_pattern.HOLE_KEY = '$hole'
+fsm_llm.core.definitions.executable_pattern.HandlerBinding class(BaseModel)
+  field handler: str required
+  field on: Literal['entry', 'exit', 'state', 'context_update'] required
+  field states: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field keys: Annotated[list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]], FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=256)])] | None = None
+  field priority: int | None = None
+  field params: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])], str | int | float | bool | None] = factory
+fsm_llm.core.definitions.executable_pattern.HookBinding class(BaseModel)
+  field hook: str required
+  field at: Literal['before_run', 'on_iteration', 'after_run'] required
+  field params: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])], str | int | float | bool | None] = factory
+fsm_llm.core.definitions.executable_pattern.ItemSpec class(BaseModel)
+  field minimum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
+  field maximum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
+  field maxLength: int | None = None
+  field enum: list[Annotated[str, Strict(strict=True)] | Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)]] | None = None
+  field type: Literal['string', 'integer', 'number', 'boolean'] required
+  def scalar_annotation(self, kind: str) -> Any
+fsm_llm.core.definitions.executable_pattern.OptionSpec class(BaseModel)
+  field minimum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
+  field maximum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
+  field maxLength: int | None = None
+  field enum: list[Annotated[str, Strict(strict=True)] | Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)]] | None = None
+  field type: Literal['string', 'integer', 'number', 'boolean', 'array'] required
+  field items: ItemSpec | None = None
+  field maxItems: int | None = None
+  field description: str = ''
+  def adapter(self) -> TypeAdapter[Any]
+  def scalar_annotation(self, kind: str) -> Any
+fsm_llm.core.definitions.executable_pattern.OptionsSchema class(BaseModel)
+  field type: Literal['object'] = 'object'
+  field properties: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], OptionSpec] = factory
+fsm_llm.core.definitions.executable_pattern.PATTERN_FIELD_VERSIONS dict
+fsm_llm.core.definitions.executable_pattern.PatternBody class(BaseModel)
+  field fsm: dict[str, Any] | None = None
+  field generator: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
+  field handlers: list[HandlerBinding] = factory
+  field options_schema: OptionsSchema = factory
+  field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], str | int | float | bool | None | list[str | int | float | bool | None]] = factory
+  field variants: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], list[dict[str, Any]]] = factory
+  field run: RunBlock = factory
+fsm_llm.core.definitions.executable_pattern.PatternBodyError class(FSMError, ValueError)
+fsm_llm.core.definitions.executable_pattern.RunBlock class(BaseModel)
+  field agent_type: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
+  field answer_keys: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field success_keys: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field evidence_keys: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field judged: bool = False
+  field run_output_keys: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field context_seed: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])], str | int | float | bool | None | list[str | int | float | bool | None]] = factory
+  field step_budget: int | None = None
+  field seconds_exempt: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
+  field hooks: list[HookBinding] = factory
+fsm_llm.core.definitions.executable_pattern.apply_variants def(body: PatternBody, selected: Sequence[str]) -> dict[str, Any]
+fsm_llm.core.definitions.executable_pattern.fill_holes def(node: Any, values: Mapping[str, Any], render_text: Callable[[str], str]) -> Any
+fsm_llm.core.definitions.executable_pattern.resolve_options def(body: PatternBody, given: Mapping[str, Any] | None) -> dict[str, Any]
+fsm_llm.core.definitions.executable_pattern.scan_holes def(node: Any, where: str) -> tuple[set[str], list[str]]
 # fsm_llm.core.definitions.schema
 fsm_llm.core.definitions.schema.EXECUTABLE_SCHEMA_ID = 'fsm-llm/executable'
 fsm_llm.core.definitions.schema.FIELD_VERSIONS dict

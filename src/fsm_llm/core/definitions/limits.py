@@ -49,6 +49,11 @@ DEFAULT_CALL_RESULT_KEY = "call_result"
 EXECUTABLE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:/-]*$"
 EXECUTABLE_ID_MAX_LENGTH = 128
 
+#: The caps of the executable envelope models (``executable`` and ``executable_pattern`` read
+#: them): most entries in a list of names, longest single name.
+EXECUTABLE_MAX_ITEMS = 256
+EXECUTABLE_NAME_MAX_LENGTH = 128
+
 
 def nests_deeper_than(value: Any, limit: int) -> bool:
     """True when a container of `value` sits deeper than `limit` (the root is 1).

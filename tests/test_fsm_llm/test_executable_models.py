@@ -219,13 +219,12 @@ class TestPerKindRefusals:
         data["body"]["strategy"] = {"solution_key": "answer"}
         _refused(data)
 
-    @pytest.mark.parametrize("kind", ["pattern", "workflow"])
-    def test_a_kind_not_built_yet_is_refused_by_name(self, kind):
-        problems = _refused(_doc(kind=kind)).problems
+    def test_a_kind_not_built_yet_is_refused_by_name(self):
+        problems = _refused(_doc(kind="workflow")).problems
 
         assert problems == (
-            f"kind: {kind!r} is not supported by this version "
-            "(known kinds: fsm, strategy, procedure)",
+            "kind: 'workflow' is not supported by this version "
+            "(known kinds: fsm, strategy, procedure, pattern)",
         )
 
     def test_an_unknown_kind_an_unknown_key_and_a_wrong_schema_are_refused(self):
@@ -598,6 +597,7 @@ class TestSchemaVersion:
             ex.FsmEnvelope,
             ex.StrategyEnvelope,
             ex.ProcedureEnvelope,
+            ex.PatternEnvelope,
         ):
             walk(cls)
 
@@ -674,7 +674,7 @@ class TestInstantiation:
                 self._templated(), variables={"tone": "a", "topic": "b", "color": "c"}
             )
 
-    def test_options_are_refused_until_a_kind_has_an_option_schema(self):
+    def test_options_are_refused_for_a_kind_with_no_option_schema(self):
         with pytest.raises(ex.InstantiationError, match="options"):
             ei.instantiate_envelope(
                 ex.parse_executable(_doc()), options={"approval": True}
@@ -801,15 +801,21 @@ class TestTheShippedSchema:
     def test_it_has_the_discriminated_union_and_no_identity(self):
         schema = ex.executable_json_schema()
 
-        assert len(schema["oneOf"]) == 3
+        assert len(schema["oneOf"]) == 4
         assert schema["discriminator"]["propertyName"] == "kind"
         assert set(schema["discriminator"]["mapping"]) == {
             "fsm",
             "strategy",
             "procedure",
+            "pattern",
         }
         defs = schema["$defs"]
-        for branch in ("FsmEnvelope", "StrategyEnvelope", "ProcedureEnvelope"):
+        for branch in (
+            "FsmEnvelope",
+            "StrategyEnvelope",
+            "ProcedureEnvelope",
+            "PatternEnvelope",
+        ):
             assert "schema" in defs[branch]["properties"]
             assert "schema_" not in defs[branch]["properties"]
             assert "identity" not in defs[branch]["properties"]

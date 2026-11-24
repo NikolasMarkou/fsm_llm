@@ -904,6 +904,11 @@
       "delta": 1,
       "reason": "plan a555dcfe D-010: the frame guard anchor of ExecutableRegistry.resolve_target (a pattern or a handler-requiring executable is never a frame)",
       "token": "plan-2026-11-24T043150-a555dcfe/D-010"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe D-011: the one-pass fill rule of fill_holes (key order, no rescan, no hole in a key position) anchor in executable_pattern.py",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-011"
     }
   ]
 }

@@ -97,6 +97,10 @@ MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
         "the identities and the instantiation of an envelope (split from `executable`, a lazy "
         "module) load when a loader imports them; `core/definitions/__init__.py` does not re-export it"
     ),
+    "fsm_llm.core.definitions.executable_pattern": (
+        "the body of a pattern executable (holes, options, variants; the envelope module imports "
+        "it) loads when a loader imports it; `core/definitions/__init__.py` does not re-export it"
+    ),
     "fsm_llm.core.verify.executable": (
         "the load sequence loads when a caller imports it; `core/verify/cli.py` imports it "
         "inside the function, `core/verify/__init__.py` not at all"
