@@ -840,6 +840,7 @@ fsm_llm.engine.executables.ExecutableTargets class
   def resolve_run(self, target_id: str, *, input_keys: Sequence[str] = (), max_steps: int | None = None, conversation_id: str | None = None) -> DelegatedTarget | None
   def resolve_target(self, target_id: str, *, conversation_id: str | None = None) -> ResolvedTarget | None
   def start(self, handle: str, target: DelegatedTarget, inputs: Mapping[str, Any], *, conversation_id: str, max_seconds: float | None = None, announce: Callable[[], None] | None = None) -> bool
+  def wait(self, handle: str, timeout_seconds: float) -> bool
 fsm_llm.engine.executables.FsmBodyExecutable class
   def __init__(self, envelope: ExecutableEnvelope, *, setup: Callable[[API], None] | None = None, pins: PinSink | None = None) -> None
   def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult

@@ -1,7 +1,8 @@
-"""The run event vocabulary (plan ace7a8c8 step 22.3, roadmap E2.1, D-059): vocabulary only.
+"""The run event vocabulary (plan ace7a8c8 step 22.3, roadmap E2.1, D-059).
 
-``run/start``, ``run/end`` and ``executable/resolve`` are declared event types with no producer
-yet (phase S writes them). Adding members is additive: no ``LOG_FORMAT_VERSION`` bump, an
+``run/start``, ``run/end`` and ``executable/resolve`` are declared event types. ``run/start`` and
+``run/end`` have a producer since plan baa37f40 K7.4 (a delegated ``call``, proven in
+``test_call_delegated_settle.py``); ``executable/resolve`` has none yet. Adding members is additive: no ``LOG_FORMAT_VERSION`` bump, an
 unknown type is still refused on write, and a log that holds the new types reads and folds like
 one that does not.
 """
@@ -29,15 +30,17 @@ from tests.test_fsm_llm import kind_corpus as kc
 RUN_TYPES = [EventType.EXECUTABLE_RESOLVE, EventType.RUN_START, EventType.RUN_END]
 
 
-def test_the_three_types_are_declared_and_not_produced() -> None:
+def test_the_three_types_are_declared_and_only_the_run_pair_is_produced() -> None:
     assert [t.value for t in RUN_TYPES] == [
         "executable/resolve",
         "run/start",
         "run/end",
     ]
     for member in RUN_TYPES:
-        assert member in DECLARED_TYPES and member not in PRODUCED_TYPES
+        assert member in DECLARED_TYPES
         assert EventType.from_string(member.value) is member
+    assert EventType.EXECUTABLE_RESOLVE not in PRODUCED_TYPES
+    assert {EventType.RUN_START, EventType.RUN_END} <= PRODUCED_TYPES
     assert LOG_FORMAT_VERSION == 1  # additive: the format version did not move
 
 

@@ -72,7 +72,12 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.kinds import executor_for
-from fsm_llm.engine.kinds.call import chosen_target, final_record, record_belongs
+from fsm_llm.engine.kinds.call import (
+    chosen_target,
+    final_record,
+    is_delegated_running,
+    record_belongs,
+)
 from fsm_llm.engine.kinds.requests import (
     ChildView,
     PopContext,
@@ -82,10 +87,13 @@ from fsm_llm.engine.kinds.requests import (
 from fsm_llm.engine.kinds.targets import (
     TARGET_MODE_DELEGATED,
     TARGET_MODE_FRAME,
+    DelegatedTarget,
     ResolvedTarget,
 )
 from fsm_llm.logging import logger
 from fsm_llm.runtime.usage import watch_provider_errors
+
+from .delegated import RunMark, flush_run_ends, settle_delegated
 
 if TYPE_CHECKING:
     from .stack import FSMStackFrame
@@ -119,20 +127,26 @@ class CallMarks:
     with no second merge. ``pushed``: child frame id to the ``ResolvedTarget`` settle pushed,
     the source of the identities of the final record (D-027; never the public record).
     ``errors``: child frame id to the reader of the provider errors made since its push, taken
-    only for an executor with ``watches_outage`` (D-038).
+    only for an executor with ``watches_outage`` (D-038). ``runs``: handle to the ``RunMark`` of a
+    delegated run whose ``run/start`` is written and whose ``run/end`` is owed (``delegated.py``,
+    D-052).
     """
 
     settling: set[str] = field(default_factory=set)
     ending: set[str] = field(default_factory=set)
     pushed: dict[str, ResolvedTarget] = field(default_factory=dict)
     errors: dict[str, Callable[[], int]] = field(default_factory=dict)
+    runs: dict[str, RunMark] = field(default_factory=dict)
 
     def forget(self, frame_ids: Iterable[str]) -> None:
-        """Drop what is kept for these child frames (the caller holds ``_stack_lock``)."""
-        for frame_id in frame_ids:
+        """Drop what is kept for these frames (the caller holds ``_stack_lock``)."""
+        gone = set(frame_ids)
+        for frame_id in gone:
             self.ending.discard(frame_id)
             self.pushed.pop(frame_id, None)
             self.errors.pop(frame_id, None)
+        for handle in [h for h, mark in self.runs.items() if mark.frame_id in gone]:
+            del self.runs[handle]
 
 
 # DECISION plan-2026-11-23T122249-baa37f40/D-023
@@ -165,10 +179,14 @@ async def settle(api: _ApiSurface, root_id: str) -> Settled:
             )
         marks.settling.add(root_id)
     try:
+        flush_run_ends(
+            api, root_id
+        )  # the end of a delegated run the last turn committed
         for _ in range(_MAX_ROUNDS):
             if not await _round(api, root_id, settled):
                 break
             settled.changed = True
+        flush_run_ends(api, root_id)
         return settled
     finally:
         with api._stack_lock:
@@ -507,6 +525,11 @@ async def _try_push(
     data = api.fsm_manager.copy_raw_context_data(top.conversation_id) or {}
     record = data.get(config.result_key)
     if not _is_request(record, state_id):
+        if is_delegated_running(record, state_id):
+            # a code-backed run: started once from its reservation, polled by the executor
+            return await settle_delegated(
+                api, root_id, frames, state, config, data, _refuse
+            )
         if _is_unknown_mode(record, state_id):
             # no host of another mode exists in this phase: fail, never wait forever (D-028 (2))
             target = chosen_target(config, data)
@@ -667,7 +690,7 @@ async def _refuse(
     config: CallStateConfig,
     reason: Reason,
     target: str | None,
-    resolved: ResolvedTarget | None,
+    resolved: ResolvedTarget | DelegatedTarget | None,
 ) -> None:
     """Write the FINAL ``failed`` record of a call settle cannot run (through ``update_context``,
     so the log holds it like any context write); the failure edge fires on the next turn."""

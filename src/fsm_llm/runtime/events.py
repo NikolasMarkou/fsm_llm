@@ -59,14 +59,16 @@ class EventType(str, Enum):
     CONTEXT_RECORD = "context/record"
     COMPACTION_EPOCH = "compaction/epoch"
     TURN_END = "turn/end"
-    # The run vocabulary of E2.1 (plan ace7a8c8 D-059): declared, no producer yet (phase S writes
-    # them). Unknown types are refused on write and tolerated on read, so adding members changes
-    # no old log and needs no ``LOG_FORMAT_VERSION`` bump. A ``run/*`` event is written at the
-    # TOP frame of its owner: the FSM-body adapter owns its own API conversation tree, so its log
-    # is its own root. The intended ``run/start`` payload: the template and instance identity,
-    # the instantiation record and the inputs by reference, and the ``source`` of the request (a
-    # ``MessageSource`` value); ``run/end`` carries the ``RunResult`` (status, reason, identity,
-    # handle); ``executable/resolve`` the id, the version label and the template identity.
+    # The run vocabulary of E2.1 (plan ace7a8c8 D-059). ``run/start`` and ``run/end`` are written
+    # by ``settle`` for a delegated ``call`` (plan baa37f40 K7.4, D-052); ``executable/resolve`` is
+    # still declared with no producer. Unknown types are refused on write and tolerated on read,
+    # so adding members changes no old log and needs no ``LOG_FORMAT_VERSION`` bump. A ``run/*``
+    # event is written at the TOP frame of its owner. ``run/start`` (an fsynced checkpoint, before
+    # the thread exists) carries ``handle``, ``target``, the template and instance identity, the
+    # ``source`` of the request (a ``MessageSource`` value), the ``parent`` frame id and the
+    # inputs by reference (``inputs_ref``, level ``values`` only); ``run/end`` carries ``handle``,
+    # ``target``, ``status``, ``reason`` and the identities of the final record, written by the
+    # engine thread only (never by a worker).
     EXECUTABLE_RESOLVE = "executable/resolve"
     RUN_START = "run/start"
     RUN_END = "run/end"
@@ -110,8 +112,8 @@ class TurnOutcome(str, Enum):
 #: Every type the format declares (the 21 of roadmap row 1.1 and the three run types).
 DECLARED_TYPES: frozenset[EventType] = frozenset(EventType)
 
-#: The types something writes today (14: ``decision`` joined at plan 5a6a1f80 step 7, the budget
-#: stop); the rest are declared for later rows.
+#: The types something writes today (16: ``decision`` joined at plan 5a6a1f80 step 7, the budget
+#: stop; ``run/start`` and ``run/end`` at plan baa37f40 K7.4); the rest are declared for later rows.
 PRODUCED_TYPES: frozenset[EventType] = frozenset(
     {
         EventType.TURN_START,
@@ -128,6 +130,8 @@ PRODUCED_TYPES: frozenset[EventType] = frozenset(
         EventType.EXECUTOR_RESULT,
         EventType.TRANSITION,
         EventType.DECISION,
+        EventType.RUN_START,
+        EventType.RUN_END,
     }
 )
 

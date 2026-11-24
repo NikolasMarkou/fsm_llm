@@ -25,6 +25,7 @@ from fsm_llm.logging import logger
 
 from .budget import budget_kwargs
 from .calls import Settled, settle
+from .delegated import wait_for_run
 from .events import event_scope, event_stream, record_started
 from .helpers import _unexpected_error
 from .stack import FSMStackFrame
@@ -368,6 +369,9 @@ class TurnEntriesMixin(_ApiSurface):
                 )
             _auto_save_session(self, conversation_id)
             after = await _settle_after(self, conversation_id)
+            # the ONE bounded wait, after every lock is released: a run loop over a delegated
+            # parent would otherwise spin (D-052; see the anchor of `delegated.py`)
+            await wait_for_run(self, conversation_id)
             if before or after:
                 result = result.model_copy(
                     update={"response": _with_greetings(result.response, before, after)}

@@ -47,6 +47,8 @@ Interface contract:
   host's>, cancel=<the run's own token>)``. The caller passes ``inputs`` as a private copy (the
   worker never shares a mutable value with the parent's context). A host context that sets
   ``max_steps`` makes every pattern fail with the mapped type of its ``ValueError``.
+  ``wait(handle, timeout_seconds) -> bool`` is the host's bounded wait, offered so ``aadvance``
+  can pace a run loop over a delegated parent (K7.4); it is not part of the ``RunLauncher`` Protocol.
 
 Concurrency: the host lock is a LEAF. It guards dict and counter operations only: no log write, no
 ``announce``, no ``Thread.start``, no ``Event.set``, no manager lock and no model call run under
@@ -386,6 +388,11 @@ class ExecutableTargets:
 
     def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None:
         return self._host.poll(handle, conversation_id=conversation_id)
+
+    def wait(self, handle: str, timeout_seconds: float) -> bool:
+        """One bounded wait for a run to finish (``RunHost.wait``): the optional method of a
+        launcher that ``aadvance`` waits through once per step (``engine/api/delegated.py``)."""
+        return self._host.wait(handle, timeout_seconds)
 
     def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool:
         return self._host.cancel(handle, conversation_id=conversation_id)

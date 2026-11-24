@@ -57,6 +57,7 @@ from tests.test_fsm_llm.event_log_support import (
     tree_files,
 )
 from tests.test_fsm_llm.support import _state
+from tests.test_fsm_llm.test_call_delegated_settle import run_delegated
 
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
 _ADD: dict[str, Any] = {
@@ -533,6 +534,7 @@ class TestTheProducers:
         with pytest.raises(FSMError):
             capped.converse("two", cid3)
         seen |= {e["type"] for e in log.read(cid3)}
+        seen |= {e["type"] for e in log.read(run_delegated(log))}
         assert seen == {t.value for t in PRODUCED_TYPES}
         assert seen <= {t.value for t in DECLARED_TYPES}
         assert {

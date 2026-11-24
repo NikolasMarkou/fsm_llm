@@ -1070,6 +1070,7 @@
     "fsm_llm.engine.api",
     "fsm_llm.engine.api.budget",
     "fsm_llm.engine.api.calls",
+    "fsm_llm.engine.api.delegated",
     "fsm_llm.engine.api.events",
     "fsm_llm.engine.api.forks",
     "fsm_llm.engine.api.registration",

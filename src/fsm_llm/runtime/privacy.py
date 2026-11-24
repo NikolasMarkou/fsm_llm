@@ -183,6 +183,26 @@ SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
             }
         ),
         EventType.DECISION: frozenset({"kind", "budget", "limit", "steps_done"}),
+        EventType.RUN_START: frozenset(
+            {
+                "handle",
+                "target",
+                "template_identity",
+                "instance_identity",
+                "source",
+                "parent",
+            }
+        ),
+        EventType.RUN_END: frozenset(
+            {
+                "handle",
+                "target",
+                "status",
+                "reason",
+                "template_identity",
+                "instance_identity",
+            }
+        ),
     }
 )
 

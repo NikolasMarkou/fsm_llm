@@ -24,6 +24,7 @@ from fsm_llm import API, create_handler
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions import FSMDefinition, FSMError, RunBudgetExceededError
 from fsm_llm.core.results import Identity, RunResult
+from fsm_llm.engine.api.delegated import RunMark
 from fsm_llm.engine.kinds.call import final_record
 from fsm_llm.engine.kinds.targets import (
     DEFAULT_DELEGATED_MAX_SECONDS,
@@ -113,8 +114,12 @@ class _Launcher:
         return True
 
     def start(self, handle, target, inputs, **kwargs):
+        """Accepts only a handle it reserved (as the host does); no thread, no announce."""
+        if handle not in self.claimed:
+            self.events.append(("start_refused", handle))
+            return False
         self.events.append(("start", handle, dict(inputs)))
-        return False
+        return True
 
     def poll(self, handle, *, conversation_id):
         self.events.append(("poll", handle, conversation_id))
@@ -260,7 +265,8 @@ class TestTheRequest:
             None,
             frame,
         )
-        assert launcher.of("start") == []
+        # the end settle of the same turn started it, with the declared inputs only
+        assert launcher.of("start") == [("start", record["handle"], {"topic": "why"})]
 
     @pytest.mark.parametrize(
         ("given", "want"),
@@ -401,6 +407,9 @@ async def _polling(handle="run-" + "a" * 32, **kw):
     """A parent in the call state with a ``running`` delegated record of ``handle`` seeded."""
     api, cid, frame, launcher, _llm = await _at_the_call(**kw)
     _seed(api, frame, _record_of(handle))
+    # the run counts as STARTED (settle leaves it to the executor's poll): these rows are about
+    # the executor; what settle does with a record is ``test_call_delegated_settle.py``
+    api._call_marks.runs[handle] = RunMark(cid, frame, "work", "call_result", _TARGET)
     return api, cid, frame, launcher, handle
 
 
@@ -618,7 +627,7 @@ class TestThePoll:
         api, cid, frame, launcher, handle = await _polling()
         launcher.polls[handle] = RunPoll(False, None)
         await api.aadvance(cid)
-        assert [e[2] for e in launcher.of("poll")] == [frame]
+        assert {e[2] for e in launcher.of("poll")} == {frame}
 
     async def test_the_finished_identities_come_from_the_parents_own_state(self):
         """Kills (D3): identities (or a target) copied from a forged record."""
@@ -666,9 +675,9 @@ class TestThePoll:
         await api.aadvance(cid)
         assert launcher.of("poll") == []
 
-    async def test_settle_leaves_a_delegated_record_alone_in_this_step(self):
+    async def test_settle_leaves_a_started_delegated_record_alone(self):
         """The delegated record is not an unknown mode: settle neither refuses it nor pushes
-        it (K7.4 starts it). Kills: ``failed/unknown_target`` over a delegated request."""
+        it. Kills: ``failed/unknown_target`` over a delegated request."""
         api, cid, frame, launcher, handle = await _polling()
         launcher.polls[handle] = RunPoll(False, None)
         with patch(

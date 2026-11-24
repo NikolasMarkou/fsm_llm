@@ -80,8 +80,9 @@ ROADMAP_TYPES = [
     "run/end",
 ]
 
-#: The run vocabulary: declared and never produced until phase S.
-RUN_TYPES = {"executable/resolve", "run/start", "run/end"}
+#: The run vocabulary: declared; ``run/start`` and ``run/end`` are produced for a delegated call
+#: (plan baa37f40 K7.4), ``executable/resolve`` is declared only.
+RUN_TYPES = {"executable/resolve"}
 
 
 def _envelope(**fields: Any) -> dict[str, Any]:
@@ -129,8 +130,8 @@ class TestVocabulary:
     def test_the_declared_set_is_the_whole_enum(self) -> None:
         assert DECLARED_TYPES == frozenset(EventType)
 
-    def test_the_produced_set_is_14_and_a_subset_of_the_declared_set(self) -> None:
-        assert len(PRODUCED_TYPES) == 14
+    def test_the_produced_set_is_16_and_a_subset_of_the_declared_set(self) -> None:
+        assert len(PRODUCED_TYPES) == 16
         assert PRODUCED_TYPES < DECLARED_TYPES
         assert {t.value for t in PRODUCED_TYPES} == {
             "turn/start",
@@ -147,6 +148,8 @@ class TestVocabulary:
             "executor/result",
             "transition",
             "decision",
+            "run/start",
+            "run/end",
         }
 
     def test_the_declared_but_not_produced_types(self) -> None:

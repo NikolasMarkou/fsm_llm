@@ -40,6 +40,7 @@ from fsm_llm.runtime.stores import fold_session, fold_stack
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm.event_log_support import _reply, tree_bytes, tree_files
 from tests.test_fsm_llm.support import _c_log_capture
+from tests.test_fsm_llm.test_call_delegated_settle import run_delegated
 from tests.test_fsm_llm.test_event_log_engine import _FSM_PARTIAL
 from tests.test_fsm_llm.test_event_log_producers import (
     _CHAT,
@@ -211,6 +212,7 @@ class TestAShapeLog:
             secret = {"card": "4111 1111 1111 1111", "b": 1, "a": 2}
             with log.tool_call("tools-1", name="pay", call_id="c1", arguments=secret):
                 pass
+            run_delegated(log)  # run/start and run/end of a delegated call
             events = _all_events(log)
         assert {e["type"] for e in events} == {t.value for t in PRODUCED_TYPES}
         for event in events:
