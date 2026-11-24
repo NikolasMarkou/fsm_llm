@@ -112,7 +112,6 @@ class MakerCheckerAgent(BaseAgent):
         fsm_def = build_maker_checker_fsm(
             maker_instructions=self.maker_instructions,
             checker_instructions=self.checker_instructions,
-            task_description=task,
             max_revisions=self.max_revisions,
         )
 

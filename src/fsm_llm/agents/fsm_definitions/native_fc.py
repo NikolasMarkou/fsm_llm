@@ -203,8 +203,7 @@ def build_native_fc_fsm(
     )
     fsm = _finalize_fsm(
         name="native_fc",
-        task_description="",
-        default_description=(
+        description=(
             "Native function calling: model turns with tools, tool turns, "
             "an optional forced final tool turn and repair turn"
         ),

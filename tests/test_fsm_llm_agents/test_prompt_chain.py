@@ -260,10 +260,14 @@ class TestBuildPromptChainFsm:
         assert fsm_def.name == "prompt_chain_agent"
         assert len(fsm_def.states) == 5
 
-    def test_custom_task_description(self):
-        chain = _make_chain(2)
-        fsm = build_prompt_chain_fsm(chain, task_description="Write an essay")
-        assert fsm["description"] == "Write an essay"
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert (
+            "task_description"
+            not in inspect.signature(build_prompt_chain_fsm).parameters
+        )
 
     def test_default_description(self):
         chain = _make_chain(2)

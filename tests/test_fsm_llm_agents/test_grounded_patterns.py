@@ -2591,7 +2591,7 @@ class TestCoveredStatesMakeNoBulkCall:
     def test_orchestrator_states_carry_no_bulk_instructions(self):
         from fsm_llm.agents.fsm_definitions import build_orchestrator_fsm
 
-        states = build_orchestrator_fsm("t")["states"]
+        states = build_orchestrator_fsm()["states"]
 
         for name, field in (("orchestrate", "subtasks"), ("collect", "all_collected")):
             assert states[name]["extraction_instructions"] == ""
@@ -2645,10 +2645,10 @@ class TestNarrowedPlannerFields:
         from fsm_llm.agents import fsm_definitions as defs
 
         fsm = {
-            "orchestrator": lambda: defs.build_orchestrator_fsm("t"),
-            "adapt": lambda: defs.build_adapt_fsm(task_description="t"),
+            "orchestrator": lambda: defs.build_orchestrator_fsm(),
+            "adapt": lambda: defs.build_adapt_fsm(),
             "rewoo": lambda: defs.build_rewoo_fsm(_rewoo_registry([]), "t"),
-            "debate": lambda: defs.build_debate_fsm("t"),
+            "debate": lambda: defs.build_debate_fsm(),
         }[builder]()
         configs = {
             c["field_name"]: c for c in fsm["states"][state]["field_extractions"]
@@ -3328,15 +3328,15 @@ class TestSuccessReflectsWhoConcluded:
 
         registry = _lookup_registry([])
         defs = [
-            fd.build_orchestrator_fsm("t"),
-            fd.build_adapt_fsm(task_description="t"),
+            fd.build_orchestrator_fsm(),
+            fd.build_adapt_fsm(),
             fd.build_reflexion_fsm(registry, "t"),
             fd.build_plan_execute_fsm(registry, "t"),
             fd.build_react_fsm(registry, "t"),
-            fd.build_self_consistency_fsm("t"),
-            fd.build_debate_fsm("t"),
+            fd.build_self_consistency_fsm(),
+            fd.build_debate_fsm(),
             fd.build_rewoo_fsm(registry, "t"),
-            fd.build_evalopt_fsm("t"),
+            fd.build_evalopt_fsm(),
             fd.build_prompt_chain_fsm(
                 [
                     ChainStep(
@@ -3346,9 +3346,8 @@ class TestSuccessReflectsWhoConcluded:
                         response_instructions="y",
                     )
                 ],
-                "t",
             ),
-            fd.build_maker_checker_fsm("make", "check", "t"),
+            fd.build_maker_checker_fsm("make", "check"),
             build_parallel_react_fsm(ToolRegistry(), "t"),
         ]
         for fsm in defs:

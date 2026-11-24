@@ -394,8 +394,8 @@ def _builder_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
         ),
     ]
     built: dict[str, dict[str, Any]] = {
-        "agents/orchestrator": fd.build_orchestrator_fsm("Plan a trip", ["city"]),
-        "agents/adapt": fd.build_adapt_fsm("Solve it", 3, ["city"]),
+        "agents/orchestrator": fd.build_orchestrator_fsm(["city"]),
+        "agents/adapt": fd.build_adapt_fsm(3, ["city"]),
         "agents/reflexion": fd.build_reflexion_fsm(registry, "Fix the bug"),
         "agents/reflexion-approval": fd.build_reflexion_fsm(
             registry, "Fix the bug", include_approval_state=True
@@ -414,13 +414,13 @@ def _builder_cases() -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
         "agents/parallel-react": fd.build_parallel_react_fsm(
             registry, "Compare cities"
         ),
-        "agents/prompt-chain": fd.build_prompt_chain_fsm(chain, "Write it"),
-        "agents/self-consistency": fd.build_self_consistency_fsm("Vote on it"),
-        "agents/debate": fd.build_debate_fsm("Is it true?", "Pro", "Con", "Judge", 2),
+        "agents/prompt-chain": fd.build_prompt_chain_fsm(chain),
+        "agents/self-consistency": fd.build_self_consistency_fsm(),
+        "agents/debate": fd.build_debate_fsm("Pro", "Con", "Judge", 2),
         "agents/rewoo": fd.build_rewoo_fsm(registry, "Plan then solve", ["city"]),
-        "agents/evalopt": fd.build_evalopt_fsm("Improve it"),
+        "agents/evalopt": fd.build_evalopt_fsm(),
         "agents/maker-checker": fd.build_maker_checker_fsm(
-            "Write the text.", "Check the text.", "Produce a text", 2
+            "Write the text.", "Check the text.", 2
         ),
         "agents/meta-builder": fd.build_meta_builder_fsm(),
         "agents/native-fc": fd.build_native_fc_fsm(

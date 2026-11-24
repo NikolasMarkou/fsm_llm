@@ -1,6 +1,6 @@
 {
   "name": "reflexion_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Reflexion agent with self-evaluation",
   "initial_state": "think",
   "persona": "You are a reflective AI agent that solves tasks by using tools, then evaluating and critiquing your own work. After each tool action, you evaluate whether you have a good answer. If not, you reflect on what went wrong and try a different approach. Use your episodic memory to avoid repeating past mistakes.",
   "states": {

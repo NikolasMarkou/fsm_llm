@@ -89,7 +89,7 @@ def _chain(*gated: bool) -> list[ChainStep]:
 CASES: dict[str, tuple[Callable[[], Any], bool]] = {
     # orchestrator and ADaPT
     "orchestrator": (lambda: fd.build_orchestrator_fsm(), True),
-    "orchestrator_keys": (lambda: fd.build_orchestrator_fsm(_TASK, _KEYS), True),
+    "orchestrator_keys": (lambda: fd.build_orchestrator_fsm(_KEYS), True),
     "adapt": (lambda: fd.build_adapt_fsm(), True),
     "adapt_depth": (lambda: fd.build_adapt_fsm(max_depth=5), True),
     # reflexion
@@ -135,16 +135,16 @@ CASES: dict[str, tuple[Callable[[], Any], bool]] = {
     # prompt chain
     "prompt_chain_one": (lambda: fd.build_prompt_chain_fsm(_chain(False)), True),
     "prompt_chain_gates": (
-        lambda: fd.build_prompt_chain_fsm(_chain(True, False, True, False), _TASK),
+        lambda: fd.build_prompt_chain_fsm(_chain(True, False, True, False)),
         True,
     ),
     # self-consistency
     "self_consistency": (lambda: fd.build_self_consistency_fsm(), True),
-    "self_consistency_task": (lambda: fd.build_self_consistency_fsm(_TASK), True),
+    "self_consistency_task": (lambda: fd.build_self_consistency_fsm(), True),
     # debate
     "debate": (lambda: fd.build_debate_fsm(), True),
     "debate_personas": (
-        lambda: fd.build_debate_fsm(_TASK, "a proposer", "a critic", "a judge", 5),
+        lambda: fd.build_debate_fsm("a proposer", "a critic", "a judge", 5),
         True,
     ),
     # rewoo
@@ -155,11 +155,11 @@ CASES: dict[str, tuple[Callable[[], Any], bool]] = {
     ),
     # evaluator-optimizer
     "evalopt": (lambda: fd.build_evalopt_fsm(), True),
-    "evalopt_task": (lambda: fd.build_evalopt_fsm(_TASK), True),
+    "evalopt_task": (lambda: fd.build_evalopt_fsm(), True),
     # maker-checker
     "maker_checker": (lambda: fd.build_maker_checker_fsm("make it", "check it"), True),
     "maker_checker_cap": (
-        lambda: fd.build_maker_checker_fsm("make it", "check it", _TASK, 2),
+        lambda: fd.build_maker_checker_fsm("make it", "check it", 2),
         True,
     ),
     # meta builder and native function calling
@@ -239,11 +239,7 @@ CASES: dict[str, tuple[Callable[[], Any], bool]] = {
     "flag_condition": (lambda: _common._flag_condition("flag", "A flag"), False),
     "reply_kind_condition": (lambda: native_fc._reply_kind_condition("calls"), False),
     "finalize": (
-        lambda: _common._finalize_fsm("n", "d" * 400, "dflt", "s", "p", {"s": {}}),
-        False,
-    ),
-    "finalize_default_description": (
-        lambda: _common._finalize_fsm("n", "", "dflt", "s", "p", {}),
+        lambda: _common._finalize_fsm("n", "dflt", "s", "p", {"s": {}}),
         False,
     ),
 }

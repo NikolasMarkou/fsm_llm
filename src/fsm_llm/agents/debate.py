@@ -139,7 +139,6 @@ class DebateAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_debate_fsm(
-            task_description=task,
             proposer_persona=self.proposer_persona,
             critic_persona=self.critic_persona,
             judge_persona=self.judge_persona,

@@ -99,7 +99,6 @@ class ADaPTAgent(BaseAgent):
         logger.debug(LogMessages.DECOMPOSITION.format(depth=_depth))
 
         fsm_def = build_adapt_fsm(
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             max_depth=self.max_depth,
             context_keys=caller_prompt_keys(initial_context, self._run_output_keys),
         )

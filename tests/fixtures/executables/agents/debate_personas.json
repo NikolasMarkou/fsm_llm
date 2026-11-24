@@ -1,6 +1,6 @@
 {
   "name": "debate_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Debate agent",
   "initial_state": "propose",
   "persona": "a proposer",
   "states": {

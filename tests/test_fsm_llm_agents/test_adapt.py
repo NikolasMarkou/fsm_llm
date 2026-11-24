@@ -129,9 +129,11 @@ class TestADaPTFSM:
         fsm = build_adapt_fsm()
         assert fsm["states"]["combine"]["transitions"] == []
 
-    def test_custom_task_description(self):
-        fsm = build_adapt_fsm(task_description="Explain quantum computing")
-        assert fsm["description"] == "Explain quantum computing"
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert "task_description" not in inspect.signature(build_adapt_fsm).parameters
 
     def test_default_task_description(self):
         fsm = build_adapt_fsm()
@@ -735,7 +737,6 @@ class TestADaPTRunsNoTool:
         with pytest.raises(TypeError):
             build_adapt_fsm(registry=_marker_registry([]))  # type: ignore[call-arg]
         assert list(inspect.signature(build_adapt_fsm).parameters) == [
-            "task_description",
             "max_depth",
             "context_keys",
         ]

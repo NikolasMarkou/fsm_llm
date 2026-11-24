@@ -42,6 +42,11 @@ def build_reflexion_fsm(
     With *include_approval_state*, a gated call goes
     think -> await_approval -> act, the same state and priorities as
     :func:`build_react_fsm`.
+
+    ``task_description`` is only the retrieval query of a semantic tool
+    registry (the tool section of the prompts); the definition's name and
+    description are static, so the task never enters definition text
+    (D-002 and D-008 of plan a555dcfe).
     """
     persona = (
         "You are a reflective AI agent that solves tasks by using tools, "
@@ -189,7 +194,6 @@ def build_reflexion_fsm(
 
     return _finalize_fsm(
         "reflexion_agent",
-        task_description,
         "Reflexion agent with self-evaluation",
         ReflexionStates.THINK,
         persona,

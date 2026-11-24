@@ -10,7 +10,7 @@ from fsm_llm.agents.prompts import build_generate_response_instructions
 from ._common import _by_id, _finalize_fsm, _state
 
 
-def build_self_consistency_fsm(task_description: str = "") -> dict[str, Any]:
+def build_self_consistency_fsm() -> dict[str, Any]:
     """
     Build a simple single-state FSM for self-consistency sampling.
 
@@ -36,7 +36,6 @@ def build_self_consistency_fsm(task_description: str = "") -> dict[str, Any]:
 
     return _finalize_fsm(
         "self_consistency_sample",
-        task_description,
         "Self-consistency single sample",
         SelfConsistencyStates.GENERATE,
         persona,

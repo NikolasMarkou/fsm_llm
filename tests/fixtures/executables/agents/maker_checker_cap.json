@@ -1,6 +1,6 @@
 {
   "name": "maker_checker_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Maker-Checker agent",
   "initial_state": "make",
   "persona": "You are an AI agent that produces high-quality outputs through a maker-checker process. You alternate between creating content and critically evaluating it to ensure the highest quality.",
   "states": {

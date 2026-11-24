@@ -1,6 +1,6 @@
 {
   "name": "self_consistency_sample",
-  "description": "Find the answer to the golden question",
+  "description": "Self-consistency single sample",
   "initial_state": "generate",
   "persona": "You are a precise AI assistant. Answer the given task directly and concisely.",
   "states": {

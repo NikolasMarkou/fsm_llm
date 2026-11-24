@@ -102,7 +102,6 @@ class OrchestratorAgent(BaseAgent):
         """
         # Build FSM
         fsm_def = build_orchestrator_fsm(
-            task_description=task,
             context_keys=caller_prompt_keys(initial_context, self._run_output_keys),
         )
 

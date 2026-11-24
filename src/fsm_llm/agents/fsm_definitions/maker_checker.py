@@ -17,7 +17,6 @@ from ._loop import _field
 def build_maker_checker_fsm(
     maker_instructions: str,
     checker_instructions: str,
-    task_description: str = "",
     max_revisions: int | None = None,
 ) -> dict[str, Any]:
     """
@@ -180,7 +179,6 @@ def build_maker_checker_fsm(
 
     return _finalize_fsm(
         "maker_checker_agent",
-        task_description,
         "Maker-Checker agent",
         MakerCheckerStates.MAKE,
         persona,

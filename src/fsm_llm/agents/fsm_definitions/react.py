@@ -49,6 +49,11 @@ def build_react_fsm(
     ``think`` extracts only typed per-field values (see
     :func:`_think_field_extractions`); ``context_keys`` adds caller keys to
     those prompts (``caller_prompt_keys``).
+
+    ``task_description`` is only the retrieval query of a semantic tool
+    registry (the tool section of the prompts); the definition's name and
+    description are static, so the task never enters definition text
+    (D-002 and D-008 of plan a555dcfe).
     """
     # Build persona with tool awareness
     persona = (
@@ -118,7 +123,6 @@ def build_react_fsm(
 
     return _finalize_fsm(
         "react_agent",
-        task_description,
         "ReAct agent with tool use",
         AgentStates.THINK,
         persona,

@@ -1,6 +1,6 @@
 {
   "name": "rewoo_agent",
-  "description": "Find the answer to the golden question",
+  "description": "REWOO agent with upfront planning",
   "initial_state": "plan_all",
   "persona": "You are a methodical AI agent that solves tasks by planning all tool calls upfront, then executing them, and finally synthesizing an answer from the collected evidence. You think before you act, and you plan completely.",
   "states": {

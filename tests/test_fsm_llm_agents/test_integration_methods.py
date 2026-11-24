@@ -106,7 +106,7 @@ class TestBuildReactFsmForWorkflow:
         """build_self_consistency_fsm() should produce a valid FSM definition."""
         from fsm_llm.agents.fsm_definitions import build_self_consistency_fsm
 
-        fsm_def = build_self_consistency_fsm(task_description="test task")
+        fsm_def = build_self_consistency_fsm()
 
         assert isinstance(fsm_def, dict)
         assert "name" in fsm_def

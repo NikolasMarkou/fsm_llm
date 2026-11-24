@@ -33,6 +33,11 @@ def build_rewoo_fsm(
     ``agent_trace`` (DECISION D-053 of plan 06a5ec0a, anchored in
     :func:`build_adapt_fsm`). Raises ``ValueError`` like
     :func:`loop_field_context_keys`.
+
+    ``task_description`` is only the retrieval query of a semantic tool
+    registry (the tool section of the prompts); the definition's name and
+    description are static, so the task never enters definition text
+    (D-002 and D-008 of plan a555dcfe).
     """
     persona = (
         "You are a methodical AI agent that solves tasks by planning all tool calls "
@@ -88,7 +93,6 @@ def build_rewoo_fsm(
 
     return _finalize_fsm(
         "rewoo_agent",
-        task_description,
         "REWOO agent with upfront planning",
         REWOOStates.PLAN_ALL,
         persona,

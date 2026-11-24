@@ -1,6 +1,6 @@
 {
   "name": "prompt_chain_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Prompt chain agent",
   "initial_state": "step_0",
   "persona": "You are a methodical AI assistant that processes tasks through a structured pipeline of steps. Execute each step carefully, building on the results of previous steps.",
   "states": {

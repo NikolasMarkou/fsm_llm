@@ -91,9 +91,14 @@ class TestSelfConsistencyFSM:
         assert len(fsm["states"]) == 1
         assert "generate" in fsm["states"]
 
-    def test_custom_task_description(self):
-        fsm = build_self_consistency_fsm(task_description="What is 2+2?")
-        assert fsm["description"] == "What is 2+2?"
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert (
+            "task_description"
+            not in inspect.signature(build_self_consistency_fsm).parameters
+        )
 
     def test_default_task_description(self):
         fsm = build_self_consistency_fsm()
@@ -265,11 +270,9 @@ class TestSampleIsOneTurn:
         assert not called & {"converse", "advance", "run_until_terminal"}
 
     def test_builder_keeps_its_signature_and_loads(self):
-        # examples/agents/workflow_agent/run.py builds the FSM by keyword.
-        assert list(inspect.signature(build_self_consistency_fsm).parameters) == [
-            "task_description"
-        ]
-        fsm = build_self_consistency_fsm(task_description="x")
+        # examples/agents/workflow_agent/run.py calls it with no argument.
+        assert list(inspect.signature(build_self_consistency_fsm).parameters) == []
+        fsm = build_self_consistency_fsm()
 
         definition = FSMDefinition(**fsm)
         assert definition.initial_state == SelfConsistencyStates.GENERATE

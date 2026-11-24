@@ -5,17 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from fsm_llm.agents.constants import FRAMEWORK_ONLY_KEYS, Defaults
-
-# Truncate task_description for FSM metadata (name/description fields),
-# while preserving the full text for prompt builders (semantic retrieval).
-_MAX_DESC = Defaults.MAX_TASK_PREVIEW_LENGTH
+from fsm_llm.agents.constants import FRAMEWORK_ONLY_KEYS
 
 
 def _finalize_fsm(
     name: str,
-    task_description: str,
-    default_description: str,
+    description: str,
     initial_state: str,
     persona: str,
     states: dict[str, Any],
@@ -23,15 +18,16 @@ def _finalize_fsm(
     """Assemble the top-level FSM definition dict shared by every builder here.
 
     Contract: returns ``{"name", "description", "initial_state", "persona",
-    "states", "handler_only_keys"}`` where ``description`` is
-    ``task_description[:_MAX_DESC]``, or ``default_description`` when that
-    slice is empty, and ``handler_only_keys`` is :data:`FRAMEWORK_ONLY_KEYS`
-    (D-051 of plan 06a5ec0a). ``states`` is stored by reference, not copied.
-    Never raises.
+    "states", "handler_only_keys"}`` where ``description`` is the builder's
+    STATIC text, exactly as given: caller text (the task) never enters
+    definition text, so one pattern has one ``fsm_id`` whatever the task
+    (D-002 and D-008 of plan a555dcfe), and ``handler_only_keys`` is
+    :data:`FRAMEWORK_ONLY_KEYS` (D-051 of plan 06a5ec0a). ``states`` is stored
+    by reference, not copied. Never raises.
     """
     return {
         "name": name,
-        "description": task_description[:_MAX_DESC] or default_description,
+        "description": description,
         "initial_state": initial_state,
         "persona": persona,
         "states": states,

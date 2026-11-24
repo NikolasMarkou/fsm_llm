@@ -208,7 +208,6 @@ def build_meta_builder_fsm() -> dict[str, Any]:
     )
     fsm = _finalize_fsm(
         "meta_builder",
-        "",
         (
             "Meta-builder: classify the artifact type, collect requirements, "
             "build the artifact with one structured completion"

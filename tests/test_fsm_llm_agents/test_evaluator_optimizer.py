@@ -161,9 +161,11 @@ class TestBuildEvalOptFsm:
         assert fsm_def.name == "evalopt_agent"
         assert fsm_def.initial_state == "generate"
 
-    def test_custom_task_description(self):
-        fsm = build_evalopt_fsm(task_description="Write clean code")
-        assert fsm["description"] == "Write clean code"
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert "task_description" not in inspect.signature(build_evalopt_fsm).parameters
 
     def test_default_description(self):
         fsm = build_evalopt_fsm()

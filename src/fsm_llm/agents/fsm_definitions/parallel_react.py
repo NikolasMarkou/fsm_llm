@@ -51,7 +51,7 @@ def build_parallel_react_fsm(
     their prompts list ``task``, ``observations``, ``agent_feedback`` and
     ``context_keys``, never ``agent_trace``. The FSM keeps its own name
     (``ParallelReactAgent``) and fixed description: ``task_description`` only
-    reaches the think prompt.
+    reaches the think prompt (D-002 of plan a555dcfe).
     """
     extra = (ContextKeys.AGENT_FEEDBACK, *context_keys)
 
@@ -101,7 +101,6 @@ def build_parallel_react_fsm(
 
     return _finalize_fsm(
         "ParallelReactAgent",
-        "",
         "ReAct agent with parallel tool dispatch",
         AgentStates.THINK,
         persona,

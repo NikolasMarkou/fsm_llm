@@ -108,9 +108,7 @@ class EvaluatorOptimizerAgent(BaseAgent):
         :return: AgentResult with answer, trace, and metadata
         """
         # Build FSM
-        fsm_def = build_evalopt_fsm(
-            task_description=task,
-        )
+        fsm_def = build_evalopt_fsm()
 
         # Build initial context
         context = self._init_context(

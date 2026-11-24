@@ -2518,7 +2518,7 @@ class TestAdaptOnTheCoreLoop:
         assert result.answer == "Answer for pick dates.\n\nAnswer for book hotel."
 
     def test_loop_states_declare_typed_fields_and_no_bulk_instructions(self):
-        states = build_adapt_fsm(task_description="t")["states"]
+        states = build_adapt_fsm()["states"]
 
         declared = {
             name: [field["field_name"] for field in states[name]["field_extractions"]]

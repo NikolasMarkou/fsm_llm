@@ -18,6 +18,11 @@ Re-pinned once for F-AR-05 (plan 0068b055 step 7, D-013): ``adapt``,
 six intermediate states (orchestrate, delegate, collect; attempt, assess,
 decompose) lost their ``response_instructions``. The dicts were diffed before
 the re-pin: only those six fields changed, nothing else.
+
+Re-pinned once for the static description (plan a555dcfe step 2, D-002 and
+D-008): ``finalize`` now takes the description as given (no task, no 200
+character slice), so its row is the new call and ``finalize_default_description``
+(the empty-slice fallback) is gone with the behaviour it pinned.
 """
 
 from __future__ import annotations
@@ -48,11 +53,7 @@ _GOLDEN: dict[str, tuple[str, str]] = {
         "",
     ),
     "finalize": (
-        "6f3a0eb19050a46126fcdc6ac6ec9959343609d92746a2fb26ada398b839e4d7",
-        "",
-    ),
-    "finalize_default_description": (
-        "af241c6abe316938a9f78e6908c0df0c343d93529f1c5adc53a2f7e821ef2c0e",
+        "9d033e00d6acae19a449f06be01023fbca418ad1c5e0f655eb6658501a6fd7dd",
         "",
     ),
     "flag_condition": (

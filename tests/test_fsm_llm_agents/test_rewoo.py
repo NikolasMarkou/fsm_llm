@@ -205,10 +205,13 @@ class TestREWOOFSM:
             spoken = len(state["response_instructions"]) > 0
             assert spoken is (state_name == "solve"), state_name
 
-    def test_custom_task_description(self):
+    def test_task_never_changes_the_definition(self):
+        # The task is only a semantic registry's retrieval query: a plain
+        # registry gives one definition, one description (D-002 and D-008
+        # of plan a555dcfe).
         registry = _make_registry()
-        fsm = build_rewoo_fsm(registry, task_description="Calculate compound interest")
-        assert fsm["description"] == "Calculate compound interest"
+        fsm = build_rewoo_fsm(registry, task_description="Some task")
+        assert fsm == build_rewoo_fsm(registry)
 
     def test_default_task_description(self):
         registry = _make_registry()

@@ -15,9 +15,7 @@ from ._common import _edge, _finalize_fsm, _is, _state, _when
 from ._loop import _field
 
 
-def build_prompt_chain_fsm(
-    chain: list[ChainStep], task_description: str = ""
-) -> dict[str, Any]:
+def build_prompt_chain_fsm(chain: list[ChainStep]) -> dict[str, Any]:
     """
     Build a Prompt Chain FSM definition from a list of ChainStep objects.
 
@@ -92,7 +90,6 @@ def build_prompt_chain_fsm(
 
     return _finalize_fsm(
         "prompt_chain_agent",
-        task_description,
         "Prompt chain agent",
         f"{PromptChainStates.STEP_PREFIX}0",
         persona,

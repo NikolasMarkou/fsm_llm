@@ -1,6 +1,6 @@
 {
   "name": "orchestrator_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Orchestrator-Workers agent",
   "initial_state": "orchestrate",
   "persona": "You are an orchestrator AI agent that solves tasks by decomposing them into subtasks and delegating to workers. You analyze results, determine if more work is needed, and synthesize a final answer from all results.",
   "states": {

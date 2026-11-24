@@ -130,9 +130,14 @@ class TestOrchestratorFSM:
         fsm = build_orchestrator_fsm()
         assert fsm["states"]["synthesize"]["transitions"] == []
 
-    def test_custom_task_description(self):
-        fsm = build_orchestrator_fsm(task_description="Plan a project")
-        assert fsm["description"] == "Plan a project"
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert (
+            "task_description"
+            not in inspect.signature(build_orchestrator_fsm).parameters
+        )
 
     def test_default_task_description(self):
         fsm = build_orchestrator_fsm()
@@ -337,7 +342,7 @@ class TestAllCollectedTypedExtraction:
         state = build_orchestrator_fsm()["states"][OrchestratorStates.COLLECT]
         fields = {f["field_name"]: f for f in state.get("field_extractions", [])}
         assert fields[ContextKeys.ALL_COLLECTED]["field_type"] == "bool"
-        FSMDefinition.model_validate(build_orchestrator_fsm("task"))
+        FSMDefinition.model_validate(build_orchestrator_fsm())
 
     def test_second_round_decision_is_extracted(self):
         # Round 1 says more work is needed, round 2 says done: the run must

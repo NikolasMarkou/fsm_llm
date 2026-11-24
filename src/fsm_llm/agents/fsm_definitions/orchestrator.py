@@ -15,9 +15,7 @@ from ._common import _by_id, _edge, _finalize_fsm, _is, _state, _when
 from ._loop import _field
 
 
-def build_orchestrator_fsm(
-    task_description: str = "", context_keys: Sequence[str] = ()
-) -> dict[str, Any]:
+def build_orchestrator_fsm(context_keys: Sequence[str] = ()) -> dict[str, Any]:
     """
     Build an Orchestrator-Workers FSM definition.
 
@@ -139,7 +137,6 @@ def build_orchestrator_fsm(
 
     return _finalize_fsm(
         "orchestrator_agent",
-        task_description,
         "Orchestrator-Workers agent",
         OrchestratorStates.ORCHESTRATE,
         persona,

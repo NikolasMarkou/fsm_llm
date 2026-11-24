@@ -1,6 +1,6 @@
 {
   "name": "evalopt_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Evaluator-Optimizer agent",
   "initial_state": "generate",
   "persona": "You are an AI agent that produces high-quality outputs through iterative refinement. You generate output, receive evaluation feedback, and improve your output until it meets the required quality standards.",
   "states": {

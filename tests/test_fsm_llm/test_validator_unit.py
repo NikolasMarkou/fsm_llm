@@ -2527,7 +2527,7 @@ class TestHandlerOnlyKeysValidatorWarnings:
         built = (
             build_react_fsm(ToolRegistry()),
             build_plan_execute_fsm(),
-            build_debate_fsm("a", "b", "c"),
+            build_debate_fsm("b", "c"),
         )
         for fsm in built:
             dumped = FSMDefinition(**fsm).model_dump()

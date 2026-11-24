@@ -26,6 +26,11 @@ def build_plan_execute_fsm(
     plan -> execute_step -> check_result -> synthesize (all done)
                                           -> replan (step failed) -> execute_step
                                           -> execute_step (next step)
+
+    ``task_description`` is only the retrieval query of a semantic tool
+    registry (the tool section of the prompts); the definition's name and
+    description are static, so the task never enters definition text
+    (D-002 and D-008 of plan a555dcfe).
     """
     persona = (
         "You are a strategic AI agent that solves tasks by first creating a plan, "
@@ -160,7 +165,6 @@ def build_plan_execute_fsm(
 
     return _finalize_fsm(
         "plan_execute_agent",
-        task_description,
         "Plan-and-Execute agent",
         PlanExecuteStates.PLAN,
         persona,

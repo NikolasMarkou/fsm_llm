@@ -1,6 +1,6 @@
 {
   "name": "plan_execute_agent",
-  "description": "Find the answer to the golden question",
+  "description": "Plan-and-Execute agent",
   "initial_state": "plan",
   "persona": "You are a strategic AI agent that solves tasks by first creating a plan, then executing each step methodically. If a step fails, you can revise the remaining plan. When all steps are complete, you synthesize results into a final answer.",
   "states": {

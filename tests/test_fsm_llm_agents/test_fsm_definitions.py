@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Tests for fsm_llm.agents.fsm_definitions module."""
 
+import json
+
 from fsm_llm.agents.fsm_definitions import (
     build_orchestrator_fsm,
     build_plan_execute_fsm,
@@ -112,10 +114,13 @@ class TestBuildReactFsm:
         fsm = build_react_fsm(registry, include_approval_state=False)
         assert "await_approval" not in fsm["states"]
 
-    def test_custom_task_description(self):
+    def test_task_never_changes_the_definition(self):
+        # The task is only a semantic registry's retrieval query: a plain
+        # registry gives one definition, one description (D-002 and D-008
+        # of plan a555dcfe).
         registry = _make_registry("search")
-        fsm = build_react_fsm(registry, task_description="Find weather")
-        assert fsm["description"] == "Find weather"
+        fsm = build_react_fsm(registry, task_description="Some task")
+        assert fsm == build_react_fsm(registry)
 
     def test_persona_mentions_tools(self):
         registry = _make_registry("search")
@@ -234,3 +239,41 @@ class TestThinkStateToolSelectionTypes:
             **build_react_fsm(_make_registry("search"), use_classification=True)
         )
         FSMDefinition(**build_reflexion_fsm(_make_registry("search")))
+
+
+class _QueryRegistry(ToolRegistry):
+    """A registry with the semantic retrieval surface (``retrieve`` and a query)."""
+
+    def retrieve(self, query: str, top_k: int = 3) -> list:
+        return self.list_tools()
+
+    def to_prompt_description(self, query: str | None = None) -> str:  # type: ignore[override]
+        return f"TOOLS FOR [{query}]"
+
+
+class TestTaskReachesOnlyTheToolRetrieval:
+    """D-002 and D-008 of plan a555dcfe: the task is never definition metadata.
+
+    The four builders that keep ``task_description`` hand it to a semantic
+    registry as its retrieval query (the tool section of the prompts) and to
+    nothing else, so the description and name stay static.
+    """
+
+    _BUILDERS = (
+        build_react_fsm,
+        build_reflexion_fsm,
+        build_rewoo_fsm,
+        build_plan_execute_fsm,
+    )
+
+    def test_the_query_reaches_the_tool_text_and_never_the_description(self):
+        registry = _QueryRegistry()
+        registry.register_function(_dummy_tool, name="search", description="Search")
+        for build in self._BUILDERS:
+            first = build(registry, task_description="first task")
+            second = build(registry, task_description="second task")
+            assert "TOOLS FOR [first task]" in json.dumps(first)
+            assert "TOOLS FOR [second task]" in json.dumps(second)
+            assert first["description"] == second["description"]
+            assert "first task" not in first["description"]
+            assert first["name"] == second["name"]

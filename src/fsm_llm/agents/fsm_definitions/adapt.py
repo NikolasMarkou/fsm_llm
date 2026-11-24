@@ -16,7 +16,6 @@ from ._loop import _field
 
 
 def build_adapt_fsm(
-    task_description: str = "",
     max_depth: int = 3,
     context_keys: Sequence[str] = (),
 ) -> dict[str, Any]:
@@ -204,7 +203,6 @@ def build_adapt_fsm(
 
     return _finalize_fsm(
         "adapt_agent",
-        task_description,
         "ADaPT agent with recursive decomposition",
         ADaPTStates.ATTEMPT,
         persona,

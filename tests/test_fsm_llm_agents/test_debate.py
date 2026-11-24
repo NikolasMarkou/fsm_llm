@@ -138,9 +138,11 @@ class TestDebateFSM:
         fsm = build_debate_fsm()
         assert fsm["states"]["conclude"]["transitions"] == []
 
-    def test_custom_task_description(self):
-        fsm = build_debate_fsm(task_description="Debate about AI safety")
-        assert fsm["description"] == "Debate about AI safety"
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert "task_description" not in inspect.signature(build_debate_fsm).parameters
 
     def test_default_task_description(self):
         fsm = build_debate_fsm()
@@ -303,7 +305,7 @@ class TestConsensusTypedExtraction:
         state = build_debate_fsm()["states"][DebateStates.JUDGE]
         fields = {f["field_name"]: f for f in state.get("field_extractions", [])}
         assert fields[ContextKeys.CONSENSUS_REACHED]["field_type"] == "bool"
-        FSMDefinition.model_validate(build_debate_fsm("topic", max_rounds=2))
+        FSMDefinition.model_validate(build_debate_fsm(max_rounds=2))
 
     def test_round_one_consensus_concludes(self):
         agent = DebateAgent(

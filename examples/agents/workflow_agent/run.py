@@ -81,7 +81,7 @@ def post_process(context: dict) -> dict:
 async def run_workflow(model: str, task: str) -> dict:
     """Build and run the workflow."""
     # Build a self-consistency FSM (no tool execution needed)
-    agent_fsm = build_self_consistency_fsm(task_description=task[:200])
+    agent_fsm = build_self_consistency_fsm()
 
     # Create workflow: setup -> agent conversation -> post-process
     wf_builder = create_workflow("agent_workflow", "Workflow with Agent FSM")

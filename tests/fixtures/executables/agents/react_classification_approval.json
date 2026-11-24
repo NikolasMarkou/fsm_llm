@@ -1,6 +1,6 @@
 {
   "name": "react_agent",
-  "description": "Find the answer to the golden question",
+  "description": "ReAct agent with tool use",
   "initial_state": "think",
   "persona": "You are a methodical AI agent that solves tasks by using tools step by step. Think carefully before each action. Review previous observations before deciding. Terminate when you have gathered enough information to answer the task.",
   "states": {

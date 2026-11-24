@@ -15,7 +15,6 @@ from ._loop import _field
 
 
 def build_debate_fsm(
-    task_description: str = "",
     proposer_persona: str = "",
     critic_persona: str = "",
     judge_persona: str = "",
@@ -149,7 +148,6 @@ def build_debate_fsm(
 
     return _finalize_fsm(
         "debate_agent",
-        task_description,
         "Debate agent",
         DebateStates.PROPOSE,
         persona,

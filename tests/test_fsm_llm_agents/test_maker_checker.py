@@ -227,13 +227,14 @@ class TestBuildMakerCheckerFsm:
         assert fsm_def.name == "maker_checker_agent"
         assert fsm_def.initial_state == "make"
 
-    def test_custom_task_description(self):
-        fsm = build_maker_checker_fsm(
-            maker_instructions="Write",
-            checker_instructions="Check",
-            task_description="Draft an apology email",
+    def test_builder_takes_no_task(self):
+        import inspect
+
+        # The task never enters definition text (D-002 of plan a555dcfe).
+        assert (
+            "task_description"
+            not in inspect.signature(build_maker_checker_fsm).parameters
         )
-        assert fsm["description"] == "Draft an apology email"
 
     def test_default_description(self):
         fsm = build_maker_checker_fsm(

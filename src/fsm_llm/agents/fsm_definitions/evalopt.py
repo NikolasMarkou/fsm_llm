@@ -14,7 +14,7 @@ from ._common import _by_id, _edge, _finalize_fsm, _is, _state, _when
 from ._loop import _field
 
 
-def build_evalopt_fsm(task_description: str = "") -> dict[str, Any]:
+def build_evalopt_fsm() -> dict[str, Any]:
     """
     Build an Evaluator-Optimizer FSM definition.
 
@@ -123,7 +123,6 @@ def build_evalopt_fsm(task_description: str = "") -> dict[str, Any]:
 
     return _finalize_fsm(
         "evalopt_agent",
-        task_description,
         "Evaluator-Optimizer agent",
         EvalOptStates.GENERATE,
         persona,
