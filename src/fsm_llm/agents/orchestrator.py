@@ -1,11 +1,16 @@
 """
-OrchestratorAgent — Dynamic multi-agent coordination.
+OrchestratorAgent: dynamic multi-agent coordination.
 
 Decomposes tasks into subtasks, delegates to worker agents (or internal LLM),
 collects results, and synthesizes a final answer.
 
 FSM flow: orchestrate -> delegate -> collect -> synthesize
                                              -> orchestrate (if more work needed)
+
+The machine is the pattern file ``patterns/orchestrator.json`` run by ``PatternAgent`` (plan
+a555dcfe step 13); the delegator and the decision reset are the library factories
+``agents.orchestrator_*`` and the error a worker ends the run with is re-raised by the
+``after_run`` hook ``agents.raise_run_ending_error``.
 """
 
 from __future__ import annotations
@@ -13,24 +18,18 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm import API
-from fsm_llm.agents.constants import (
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-    HandlerPriorities,
-    OrchestratorStates,
-)
-from fsm_llm.agents.fsm_definitions.orchestrator import build_orchestrator_fsm
+from fsm_llm.agents.constants import ContextKeys, Defaults
 from fsm_llm.logging import logger
 from fsm_llm.tools import ToolRegistry, require_int_limit
 
-from .base import BaseAgent, caller_prompt_keys
 from .definitions import AgentConfig, AgentResult
-from .handlers import RunEndingErrorHolder, make_iteration_limiter
+from .handlers import RunEndingErrorHolder
+from .handlers.library import iteration_check
+from .handlers.orchestrator import delegate_to_workers
+from .pattern_agent import PatternAgent
 
 
-class OrchestratorAgent(BaseAgent):
+class OrchestratorAgent(PatternAgent):
     """
     Orchestrator agent that decomposes tasks and delegates to workers.
 
@@ -48,6 +47,9 @@ class OrchestratorAgent(BaseAgent):
         result = agent.run("Analyze the pros and cons of remote work")
         print(result.answer)
     """
+
+    # Host objects an executable of this pattern reads when the run supplies them (D-018).
+    optional_callables = ("tools", "worker_factory")
 
     # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
     _run_output_keys = frozenset(
@@ -79,7 +81,17 @@ class OrchestratorAgent(BaseAgent):
         :param api_kwargs: Additional kwargs passed to fsm_llm.API
         """
         max_workers = require_int_limit("max_workers", max_workers, minimum=1)
-        super().__init__(config, **api_kwargs)
+        from .pattern_files import load_envelope  # lazy: reads the file
+
+        super().__init__(
+            load_envelope("orchestrator"),
+            config=config,
+            options={"max_workers": max_workers},
+            callables={}
+            if worker_factory is None
+            else {"worker_factory": worker_factory},
+            **api_kwargs,
+        )
         self.worker_factory = worker_factory
         self.tools = tools
         self.max_workers = max_workers
@@ -88,216 +100,31 @@ class OrchestratorAgent(BaseAgent):
             f"OrchestratorAgent started with max_workers={max_workers}, model={self.config.model}"
         )
 
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
-        """
-        Run the orchestrator agent on a task.
-
-        :param task: The task/question to solve via delegation
-        :param initial_context: Optional initial context data
-        :return: AgentResult with answer, trace, and metadata
-        """
-        # Build FSM
-        fsm_def = build_orchestrator_fsm(
-            context_keys=caller_prompt_keys(initial_context, self._run_output_keys),
-        )
-
-        # Build initial context
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.WORKER_RESULTS: [],
-                ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
-            },
-        )
-
-        # Call-local: a worker's budget/timeout error rides out of the
-        # delegator here (plan-2026-09-29T103145-06a5ec0a/D-014).
-        holder = RunEndingErrorHolder()
-
-        # DECISION plan_2026-05-31_cb91a9d5/D-001 [STALE]: require a successful worker
-        # result, not just a synthesis final_answer / delegate control action,
-        # before reporting success — the orchestrate->synthesize fallback else
-        # passes filler off as success on weak decomposition.
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-042: re-raise a worker's
-        # AgentTimeoutError/BudgetExhaustedError HERE, after the run. Do NOT
-        # re-raise inside the delegator (core's handler error mode swallows it)
-        # and do NOT keep the holder on self (shared across runs, D-014).
-        try:
-            result = self._standard_run(
-                task,
-                fsm_def,
-                context,
-                "orchestrator",
-                execution_evidence_keys=[ContextKeys.WORKER_RESULTS],
-                handlers=holder,
-            )
-        finally:
-            holder.raise_if_set()
-        return result
-
-    def _register_handlers(
-        self, api: API, holder: RunEndingErrorHolder | None = None
-    ) -> None:
-        """Register orchestrator handlers with the API.
-
-        ``holder`` is the calling ``run()``'s error holder (passed through
-        ``_standard_run(handlers=...)``); ``run()`` re-raises what the
-        delegator captures in it. Without one a captured error still stops
-        further workers but nothing re-raises it.
-        """
-        run_holder = holder if holder is not None else RunEndingErrorHolder()
-        # Worker delegator: runs on entry to 'delegate' state
-        api.register_handler(
-            api.create_handler(HandlerNames.ORCHESTRATOR_DELEGATOR)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(OrchestratorStates.DELEGATE)
-            .do(lambda context: self._delegate_to_workers(context, run_holder))
-        )
-
-        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
-        # Core extracts all_collected only while it is unset, so round 1's
-        # False would stick and collect could never extract a later True.
-        # Clear it on entry to orchestrate (the redo state), NOT on entry to
-        # collect: that would erase the limiter's forced True (PRE_TRANSITION
-        # runs before entry; plan-2026-09-24T045559-3e4eb3e5/D-013).
-        api.register_handler(
-            api.create_handler(HandlerNames.ORCHESTRATOR_DECISION_RESET)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(OrchestratorStates.ORCHESTRATE)
-            .do(lambda _context: {ContextKeys.ALL_COLLECTED: None})
-        )
-
-        # Iteration limiter: checks budget on every pre-transition
-        self._register_iteration_limiter(api, self._make_iteration_limiter())
+    def _context_seed(self) -> dict[str, Any]:
+        """The file's seed and the iteration budget the limiter reads (``limit_key``)."""
+        return {
+            **super()._context_seed(),
+            ContextKeys.ITERATION_BUDGET: self.config.max_iterations,
+        }
 
     def _delegate_to_workers(
         self,
         context: dict[str, Any],
         holder: RunEndingErrorHolder | None = None,
     ) -> dict[str, Any]:
-        """
-        Execute worker_factory for each subtask, one after another.
-
-        Called as a POST_TRANSITION handler when entering the 'delegate' state.
-        Subtasks beyond ``max_workers`` are not run: they go to
-        ``skipped_subtasks`` (never into ``worker_results``), with a WARNING
-        and a trace count. A worker's
-        ``AgentTimeoutError``/``BudgetExhaustedError`` goes into ``holder``
-        and no further worker starts; any other worker exception is recorded
-        as a failed result.
-        """
-        if holder is None:
-            holder = RunEndingErrorHolder()
-        subtasks = context.get(ContextKeys.SUBTASKS, [])
-        if not isinstance(subtasks, list):
-            subtasks = [str(subtasks)]
-
-        skipped = [str(subtask) for subtask in subtasks[self.max_workers :]]
-        subtasks = subtasks[: self.max_workers]
-        if skipped:
-            logger.warning(
-                f"Orchestrator got {len(subtasks) + len(skipped)} subtasks, "
-                f"max_workers={self.max_workers}; skipping {len(skipped)}"
-            )
-
-        existing_results = context.get(ContextKeys.WORKER_RESULTS, [])
-        if not isinstance(existing_results, list):
-            existing_results = []
-
-        new_results: list[dict[str, Any]] = []
-
-        for i, subtask in enumerate(subtasks):
-            if holder.is_set:
-                break
-            subtask_str = str(subtask)
-            logger.debug(
-                f"Delegating subtask {i + 1}/{len(subtasks)}: {subtask_str[:100]}"
-            )
-
-            if self.worker_factory is not None:
-                try:
-                    worker_result = self.worker_factory(subtask_str)
-                    new_results.append(
-                        {
-                            "subtask": subtask_str,
-                            "answer": worker_result.answer,
-                            "success": worker_result.success,
-                        }
-                    )
-                except Exception as e:
-                    if holder.capture(e):
-                        logger.warning(f"Worker ended the run: {e}")
-                        break
-                    logger.opt(exception=True).warning(
-                        "Worker failed for subtask: {}", e
-                    )
-                    new_results.append(
-                        {
-                            "subtask": subtask_str,
-                            "answer": f"Worker error: {e}",
-                            "success": False,
-                        }
-                    )
-            else:
-                # No worker_factory: store subtask for LLM inline processing
-                new_results.append(
-                    {
-                        "subtask": subtask_str,
-                        "answer": f"[Pending LLM processing: {subtask_str}]",
-                        "success": False,
-                    }
-                )
-
-        all_results = existing_results + new_results
-
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-049: skipped subtasks go
-        # to their own key, never into worker_results. Do NOT record them as
-        # failed worker entries: the collect judge reads worker_results, took
-        # them for unfinished work and re-delegated (hierarchical_orchestrator
-        # 23 -> 66 calls). Do NOT drop them silently either (PAT-10, D-042).
-        ran = {str(entry.get("subtask")) for entry in all_results}
-        previous = context.get(ContextKeys.SKIPPED_SUBTASKS)
-        skipped_all = [
-            subtask_str
-            for subtask_str in dict.fromkeys(
-                [*(previous if isinstance(previous, list) else []), *skipped]
-            )
-            if subtask_str not in ran
-        ]
-
-        # Track in agent trace
-        trace = context.get(ContextKeys.AGENT_TRACE, [])
-        if not isinstance(trace, list):
-            trace = []
-        trace.append(
-            {
-                "action": "delegate",
-                "subtasks_delegated": len(subtasks),
-                "subtasks_skipped": len(skipped),
-                "results_count": len(new_results),
-            }
+        """The delegator body for this agent's factory and cap (the handler of a run binds its own)."""
+        return delegate_to_workers(
+            context,
+            self.worker_factory,
+            self.max_workers,
+            holder or RunEndingErrorHolder(),
         )
-
-        return {
-            ContextKeys.WORKER_RESULTS: all_results,
-            ContextKeys.SKIPPED_SUBTASKS: skipped_all,
-            ContextKeys.AGENT_TRACE: trace,
-            # Clear subtasks so orchestrate can set new ones if needed
-            ContextKeys.SUBTASKS: None,
-        }
 
     def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the iteration limiter handler (shared rule, see handlers)."""
-        return make_iteration_limiter(
-            Defaults.MAX_ITERATIONS,
-            {
-                ContextKeys.ALL_COLLECTED: True,
-                ContextKeys.SHOULD_TERMINATE: True,
-            },
-            context_max_key=ContextKeys.ITERATION_BUDGET,
+        """The closure ``agents.iteration_limiter`` registers for this agent (the file's binding)."""
+        binding = next(
+            b
+            for b in self.envelope.body.handlers
+            if b.handler == "agents.iteration_limiter"
         )
+        return iteration_check(self._handler_context(), binding)

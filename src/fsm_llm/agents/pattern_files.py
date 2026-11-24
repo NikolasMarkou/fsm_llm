@@ -37,7 +37,13 @@ from fsm_llm.engine.executables.namespaces import GENERATORS, namespace_resolver
 
 __all__ = ["PATTERN_ORDER", "load_document", "load_envelope"]
 
-PATTERN_ORDER: tuple[str, ...] = ("react", "reflexion", "prompt_chain", "native_fc")
+PATTERN_ORDER: tuple[str, ...] = (
+    "react",
+    "reflexion",
+    "prompt_chain",
+    "native_fc",
+    "orchestrator",
+)
 
 
 # DECISION plan-2026-11-24T043150-a555dcfe/D-015

@@ -17,9 +17,10 @@ Interface contract:
   a variant selects it; an option named ``approval`` or like an input the agent derives is refused
   (``AgentError``). ``callables`` are named host objects a factory may read (``HandlerContext``).
   The run block honours ``agent_type``, ``answer_keys``, ``success_keys``, ``evidence_keys``,
-  ``judged`` and ``context_seed``; ``step_budget``, ``hooks``, ``run_output_keys`` and
-  ``seconds_exempt`` have no seam yet and are REFUSED at construction (``AgentError``), never
-  ignored.
+  ``judged``, ``context_seed`` and the hooks ``at: after_run`` (D-022: library entries called, in
+  declared order, when the loop ends, also when it raised; an error of a hook propagates);
+  ``step_budget``, ``run_output_keys``, ``seconds_exempt`` and the hooks ``before_run`` and
+  ``on_iteration`` have no seam yet and are REFUSED at construction (``AgentError``), never ignored.
 - HITL, fail closed (census D1): a file that binds ``agents.approval_gate`` runs
   ``_refuse_unapprovable_flagged_tools`` at construction and at the start of every run and selects the
   ``approval`` variant exactly under ``_hitl_active``; a file whose ``requires.tools`` is ``some`` and
@@ -49,13 +50,19 @@ from fsm_llm.logging import logger
 from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.tools import ToolRegistry
 
-from .base import BaseAgent, caller_prompt_keys, reject_misplaced_kwargs
+from .base import (
+    BaseAgent,
+    caller_prompt_keys,
+    pattern_run_output_keys,
+    reject_misplaced_kwargs,
+)
 from .definitions import AgentConfig, AgentResult
 
 __all__ = ["PatternAgent"]
 
 _TOOL_EXECUTOR = "agents.tool_executor"
-_NO_SEAM = ("step_budget", "hooks", "run_output_keys", "seconds_exempt")
+_NO_SEAM = ("step_budget", "run_output_keys", "seconds_exempt")
+_AFTER_RUN = "after_run"
 
 
 class PatternAgent(BaseAgent):
@@ -76,6 +83,11 @@ class PatternAgent(BaseAgent):
             raise AgentError(
                 f"pattern {envelope.id!r} sets run fields {unsupported} that have no "
                 "seam in this version; they are refused, not ignored"
+            )
+        if early := [hook.at for hook in body.run.hooks if hook.at != _AFTER_RUN]:
+            raise AgentError(
+                f"pattern {envelope.id!r} binds hooks at {early} that have no seam in "
+                f"this version (only {_AFTER_RUN!r}); they are refused, not ignored"
             )
         bound = {binding.handler for binding in body.handlers}
         self._gate = APPROVAL_GATE_HANDLER in bound
@@ -138,7 +150,11 @@ class PatternAgent(BaseAgent):
             approval=self._gate and self._hitl_active,
             options=self._options,
             output_schema=self.config.output_schema,
-            context_keys=caller_prompt_keys(initial_context),
+            # the ReAct loop lists every caller key; the other patterns leave out their own outputs
+            context_keys=caller_prompt_keys(
+                initial_context,
+                () if self._react_loop else pattern_run_output_keys(self),
+            ),
         )
 
     def _handler_context(self) -> HandlerContext:
@@ -166,12 +182,16 @@ class PatternAgent(BaseAgent):
         self._refuse_run_start()
         handlers = self._handler_context()
         fsm_def = self._fsm_for_run(task, initial_context)
-        seed = copy.deepcopy(dict(self.envelope.body.run.context_seed)) or None
+        seed = self._context_seed() or None
         if self._react_loop:
             context = self._react_context(task, initial_context, extra=seed)
         else:
             context = self._init_context(task, initial_context, extra=seed)
         return fsm_def, context, handlers
+
+    def _context_seed(self) -> dict[str, Any]:
+        """The seed of one run: the file's, a deep copy (a pattern with a config-bound key adds it)."""
+        return copy.deepcopy(dict(self.envelope.body.run.context_seed))
 
     def _budget_kwargs(self) -> dict[str, Any]:
         """The ``max_iterations`` of a run when the pattern has its own (default: none, the
@@ -193,29 +213,54 @@ class PatternAgent(BaseAgent):
     ) -> AgentResult:
         """Run the pattern on *task* (one call-local ``HandlerContext``; see the module docstring)."""
         fsm_def, context, handlers = self._run_inputs(task, initial_context)
-        return self._standard_run(
-            task,
-            fsm_def,
-            context,
-            self._agent_type,
-            handlers=handlers,
-            **self._run_kwargs(),
-            **self._budget_kwargs(),
-        )
+        try:
+            return self._standard_run(
+                task,
+                fsm_def,
+                context,
+                self._agent_type,
+                handlers=handlers,
+                **self._run_kwargs(),
+                **self._budget_kwargs(),
+            )
+        finally:
+            self._after_run(handlers)
 
     def run_stream(
         self, task: str, initial_context: dict[str, Any] | None = None
     ) -> Iterator[str]:
         """Run the pattern, streaming the reply of each speaking state (lazy, like ``run``)."""
         fsm_def, context, handlers = self._run_inputs(task, initial_context)
-        yield from self._standard_run_stream(
-            task,
-            fsm_def,
-            context,
-            self._agent_type,
-            handlers=handlers,
-            **self._budget_kwargs(),
-        )
+        try:
+            yield from self._standard_run_stream(
+                task,
+                fsm_def,
+                context,
+                self._agent_type,
+                handlers=handlers,
+                **self._budget_kwargs(),
+            )
+        finally:
+            self._after_run(handlers)
+
+    # DECISION plan-2026-11-24T043150-a555dcfe/D-022
+    # The `after_run` hooks run in a `finally`, in declared order: a worker's budget or timeout error
+    # left in the run's holder must re-raise even when the loop itself raised (the `finally` the
+    # orchestrator had). Do NOT run them only on success, do NOT swallow a hook error, do NOT accept a
+    # handler factory as a hook (or the reverse), and do NOT honour `before_run` or `on_iteration`
+    # until a seam and a client exist (refused at construction). A model-origin document never binds
+    # a hook (V7).
+    def _after_run(self, handlers: HandlerContext) -> None:
+        """Call the file's ``after_run`` hooks, in declared order, each built from this run's context.
+
+        A hook is a library entry (``HOOKS``) whose factory returns a zero-argument callable; an
+        error of one propagates (the hooks after it do not run), as the ``finally`` it replaced did.
+        """
+        for hook in self.envelope.body.run.hooks:
+            call = HANDLERS.resolve(hook.hook)(handlers, hook)
+            if not callable(call):
+                raise AgentError(f"hook {hook.hook!r} is a handler, not a hook")
+            call()
 
     # DECISION plan-2026-09-12T065608-089d0ec7/D-014
     # `handlers` is REQUIRED in practice: `run()`/`run_stream()` always pass their own call-local
@@ -233,6 +278,10 @@ class PatternAgent(BaseAgent):
         for binding in self.envelope.body.handlers:
             if binding.handler not in HANDLERS:
                 raise AgentError(f"handler {binding.handler!r} is not in the library")
-            factory = HANDLERS.resolve(binding.handler)
-            for handler in factory(context, binding):
+            built = HANDLERS.resolve(binding.handler)(context, binding)
+            if not isinstance(built, list):
+                raise AgentError(
+                    f"handler {binding.handler!r} is a hook, not a handler"
+                )
+            for handler in built:
                 api.register_handler(handler)

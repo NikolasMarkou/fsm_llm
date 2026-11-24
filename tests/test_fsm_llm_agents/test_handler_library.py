@@ -160,7 +160,7 @@ class TestTheNamespaces:
 
     def test_the_library_is_registered_one_function_per_name(self):
         names = [name for name, _ in LIBRARY]
-        assert sorted(names) == HANDLERS.list()
+        assert sorted([*names, *(name for name, _ in lib.HOOKS)]) == HANDLERS.list()
         assert names == [
             "agents.tool_executor",
             "agents.think_turn_limiter",
@@ -173,12 +173,17 @@ class TestTheNamespaces:
             "agents.reflexion_reflector",
             "agents.chain_gate_checker",
             "agents.native_fc",
+            "agents.orchestrator_delegator",
+            "agents.orchestrator_decision_reset",
             "agents.approval_gate",
         ]
-        for name, factory in LIBRARY:
+        assert [name for name, _ in lib.HOOKS] == ["agents.raise_run_ending_error"]
+        for name, factory in (*LIBRARY, *lib.HOOKS):
             assert HANDLERS.resolve(name) is factory
             assert HANDLERS.name_of(factory) == name
-        assert len({id(factory) for _, factory in LIBRARY}) == len(LIBRARY)
+        assert len({id(factory) for _, factory in (*LIBRARY, *lib.HOOKS)}) == len(
+            LIBRARY
+        ) + len(lib.HOOKS)
 
     def test_the_gate_name_is_the_one_the_verifier_holds_equal_to_the_hitl_claim(self):
         # D-012 of plan a555dcfe: core names the gate by a constant, the library registers it

@@ -6,8 +6,10 @@ family: ``agents.tool_executor``, ``agents.think_turn_limiter``, ``agents.iterat
 ``agents.think_fresh_keys``, ``agents.feedback_consumed``, ``agents.approval_fresh_keys`` and
 ``agents.approval_gate``, and the Reflexion three (``agents.reflexion_evaluator``,
 ``agents.reflexion_fresh_keys``, ``agents.reflexion_reflector``; bodies in ``reflection.py``) and the
-prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``) and the native function-calling
-GROUP ``agents.native_fc`` (eight handlers; bodies in ``native_fc.py``). Each is its own function (a ``NameRegistry`` refuses one function under two
+prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``), the native function-calling
+GROUP ``agents.native_fc`` (eight handlers; bodies in ``native_fc.py``) and the orchestrator pair
+(``agents.orchestrator_delegator``, body in ``orchestrator.py``, and ``agents.orchestrator_decision_reset``),
+plus one HOOK, ``agents.raise_run_ending_error`` (below). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
 state filter and priority the live registration of ``base/registration.py`` and ``base/hitl_gate.py``
@@ -22,6 +24,10 @@ Interface contract:
 - Returns a list of built handlers (empty when the handler does not apply to this run: the two
   approval handlers of a run with no HITL). A factory is called once per run and builds new handler
   objects every call.
+- A HOOK is a library entry in the same namespace (D-004) bound under ``run.hooks``: ``factory(ctx,
+  binding) -> Callable[[], None]``, called once per run, whose result the agent calls when the loop
+  ends (``at: after_run``, in the declared order, also when the run raised). It reads the same
+  per-run ``ctx`` (the holder a handler fills lives in ``ctx.scope``).
 - Failure: ``AgentError`` for a missing ``tools`` registry (the executor and the limiter that shares
   it), a key that is internal-prefixed or secret-looking (D2), or a bad ``limit``.
 """
@@ -38,6 +44,7 @@ from fsm_llm.agents.constants import (
     Defaults,
     HandlerNames,
     HandlerPriorities,
+    OrchestratorStates,
     PromptChainStates,
     ReflexionStates,
 )
@@ -53,22 +60,25 @@ from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
 from .native_fc import NativeFCHandlers
+from .orchestrator import delegate_to_workers
 from .reflection import (
     EVALUATION_KEYS,
     make_evaluation_handler,
     make_reflection_handler,
 )
+from .run_guards import RunEndingErrorHolder
 
 if TYPE_CHECKING:
     from fsm_llm.core.definitions.executable_pattern import HandlerBinding
     from fsm_llm.handlers import BaseHandler
 
-__all__ = ["LIBRARY", "register_library"]
+__all__ = ["HOOKS", "LIBRARY", "iteration_check", "register_library"]
 
 #: The ``scope`` keys of a run: the ``AgentHandlers`` shared by the executor and the limiter, and the
 #: plain ``ThinkTurnLimiter`` of a limiter bound ``alone``.
 _SHARED = "agent_handlers"
 _ALONE = "think_limiter"
+_HOLDER = "run_ending_error_holder"
 
 
 # DECISION plan-2026-11-24T043150-a555dcfe/D-013
@@ -160,15 +170,15 @@ def think_turn_limiter(
     ]
 
 
-def iteration_limiter(
+def iteration_check(
     ctx: HandlerContext, binding: HandlerBinding | None = None
-) -> list[BaseHandler]:
-    """``agents.iteration_limiter``: the limiter that counts in context (the non-ReAct patterns).
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """The closure ``agents.iteration_limiter`` registers (shared with ``OrchestratorAgent``'s test seam).
 
     Params: ``limit`` (int; default ``ctx.options["max_iterations"]``, else the config's
     ``max_iterations``), ``limit_key`` (a context key that overrides the limit at call time),
     ``early`` (default true: trigger at ``limit - 1``). ``binding.keys`` are the keys forced True when
-    the limit is hit.
+    the limit is hit. ``AgentError`` for a limit that is not a positive integer.
     """
     params = _params(binding)
     limit = params.get("limit", ctx.options.get("max_iterations"))
@@ -179,18 +189,23 @@ def iteration_limiter(
             f"agents.iteration_limiter needs a positive integer limit, got {limit!r}"
         )
     limit_key = params.get("limit_key")
-    forced = dict.fromkeys(_keys(binding, ()), True)
-    check = make_iteration_limiter(
+    return make_iteration_limiter(
         limit,
-        forced,
+        dict.fromkeys(_keys(binding, ()), True),
         context_max_key=limit_key if isinstance(limit_key, str) else None,
         early=params.get("early") is not False,
     )
+
+
+def iteration_limiter(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.iteration_limiter``: the limiter that counts in context (the non-ReAct patterns); see ``iteration_check``."""
     return [
         create_handler(HandlerNames.ITERATION_LIMITER)
         .with_priority(_priority(binding, HandlerPriorities.ITERATION_LIMITER))
         .at(HandlerTiming.PRE_TRANSITION)
-        .do(check)
+        .do(iteration_check(ctx, binding))
     ]
 
 
@@ -378,6 +393,72 @@ def native_fc(
     ).handlers()
 
 
+def _run_holder(ctx: HandlerContext) -> RunEndingErrorHolder:
+    """The run's one error holder (in ``ctx.scope``, so the delegator and the hook share it)."""
+    holder = ctx.scope.get(_HOLDER)
+    if holder is None:
+        holder = ctx.scope[_HOLDER] = RunEndingErrorHolder()
+    result: RunEndingErrorHolder = holder
+    return result
+
+
+def orchestrator_delegator(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.orchestrator_delegator``: runs the callable ``worker_factory`` per subtask on entry to ``delegate``.
+
+    Reads the option ``max_workers`` (an int of at least 1) and the optional callable ``worker_factory``
+    (none: the model fills each subtask). A worker's run-ending error goes into the run's holder, which
+    ``agents.raise_run_ending_error`` re-raises after the run.
+    """
+    max_workers = ctx.options.get("max_workers", Defaults.MAX_WORKERS)
+    if (
+        isinstance(max_workers, bool)
+        or not isinstance(max_workers, int)
+        or max_workers < 1
+    ):
+        raise AgentError(
+            f"agents.orchestrator_delegator needs max_workers >= 1, got {max_workers!r}"
+        )
+    delegate = ctx.callables.get("worker_factory")
+    holder = _run_holder(ctx)
+    return [
+        create_handler(HandlerNames.ORCHESTRATOR_DELEGATOR)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_entry(*_states(binding, (OrchestratorStates.DELEGATE,)))
+        .do(lambda context: delegate_to_workers(context, delegate, max_workers, holder))
+    ]
+
+
+def orchestrator_decision_reset(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.orchestrator_decision_reset``: clears ``all_collected`` on entry to ``orchestrate``."""
+    # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
+    # Core extracts all_collected only while it is unset, so round 1's
+    # False would stick and collect could never extract a later True.
+    # Clear it on entry to orchestrate (the redo state), NOT on entry to
+    # collect: that would erase the limiter's forced True (PRE_TRANSITION
+    # runs before entry; plan-2026-09-24T045559-3e4eb3e5/D-013).
+    return [
+        create_handler(HandlerNames.ORCHESTRATOR_DECISION_RESET)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_entry(*_states(binding, (OrchestratorStates.ORCHESTRATE,)))
+        .do(lambda _context: {ContextKeys.ALL_COLLECTED: None})
+    ]
+
+
+def raise_run_ending_error(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> Callable[[], None]:
+    """``agents.raise_run_ending_error`` (a HOOK, ``at: after_run``): re-raise what a worker left in the holder."""
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-042: re-raise a worker's
+    # AgentTimeoutError/BudgetExhaustedError HERE, after the run. Do NOT
+    # re-raise inside the delegator (core's handler error mode swallows it)
+    # and do NOT keep the holder on self (shared across runs, D-014).
+    return _run_holder(ctx).raise_if_set
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -413,7 +494,14 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.reflexion_reflector", reflexion_reflector),
     ("agents.chain_gate_checker", chain_gate_checker),
     ("agents.native_fc", native_fc),
+    ("agents.orchestrator_delegator", orchestrator_delegator),
+    ("agents.orchestrator_decision_reset", orchestrator_decision_reset),
     ("agents.approval_gate", approval_gate),
+)
+
+#: The hooks of the same namespace (``run.hooks``): ``factory(ctx, binding) -> Callable[[], None]``.
+HOOKS: tuple[tuple[str, Callable[..., Callable[[], None]]], ...] = (
+    ("agents.raise_run_ending_error", raise_run_ending_error),
 )
 
 
@@ -423,7 +511,7 @@ def register_library() -> None:
     # imported here: the generator module imports `agents.prompts` and the sibling builders
     from fsm_llm.agents.fsm_definitions.prompt_chain import prompt_chain_fsm
 
-    for name, factory in LIBRARY:
+    for name, factory in (*LIBRARY, *HOOKS):
         HANDLERS.register(name, factory, override=True)
     GENERATORS.register("agents.prompt_chain", prompt_chain_fsm, override=True)
 

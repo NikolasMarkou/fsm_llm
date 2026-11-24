@@ -1387,9 +1387,8 @@ fsm_llm.agents.OKFMemoryBackend class
   property incomplete
   def reindex(self) -> int
   def search(self, query: str, k: int = 5) -> list[tuple[str, float, dict[str, Any]]]
-fsm_llm.agents.OrchestratorAgent class(BaseAgent)
+fsm_llm.agents.OrchestratorAgent class(PatternAgent)
   def __init__(self, worker_factory: Callable[[str], AgentResult] | None = None, tools: ToolRegistry | None = None, config: AgentConfig | None = None, max_workers: int = 5, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.OutputError class(MetaBuilderError)
   def __init__(self, message: str, path: str | None = None, **kwargs: Any)
 fsm_llm.agents.ParallelReactAgent class(BaseAgent)
