@@ -798,6 +798,7 @@ fsm_llm.engine.executables.CodeBackedInstance class
   def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
   def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
 fsm_llm.engine.executables.DEFAULT_EXECUTABLE_MAX_STEPS = 100
+fsm_llm.engine.executables.DEFAULT_MAX_RUNS = 32
 fsm_llm.engine.executables.EXECUTABLE_KINDS NameRegistry
 fsm_llm.engine.executables.EXECUTABLE_SOURCES NameRegistry
 fsm_llm.engine.executables.Executable class(Protocol)
@@ -827,6 +828,18 @@ fsm_llm.engine.executables.ExecutableRegistry class
   def resolve_target(self, target_id: str, *, conversation_id: str | None = None) -> ResolvedTarget | None
   def set_alias(self, name: str, routes: Mapping[str, float], *, target: str | None = None) -> None
   def unpin(self, executable: Executable) -> None
+fsm_llm.engine.executables.ExecutableTargets class
+  def __init__(self, registry: ExecutableRegistry, context: RunContext | None = None, *, host: RunHost | None = None) -> None
+  def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool
+  def cancel_for(self, conversation_id: str) -> int
+  def claim(self, handle: str, *, conversation_id: str) -> bool
+  property context
+  property host
+  def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None
+  property registry
+  def resolve_run(self, target_id: str, *, input_keys: Sequence[str] = (), max_steps: int | None = None, conversation_id: str | None = None) -> DelegatedTarget | None
+  def resolve_target(self, target_id: str, *, conversation_id: str | None = None) -> ResolvedTarget | None
+  def start(self, handle: str, target: DelegatedTarget, inputs: Mapping[str, Any], *, conversation_id: str, max_seconds: float | None = None, announce: Callable[[], None] | None = None) -> bool
 fsm_llm.engine.executables.FsmBodyExecutable class
   def __init__(self, envelope: ExecutableEnvelope, *, setup: Callable[[API], None] | None = None, pins: PinSink | None = None) -> None
   def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
@@ -849,10 +862,21 @@ fsm_llm.engine.executables.Instance class(Protocol)
   def arun(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
   def run(self, inputs: Mapping[str, Any], *, context: RunContext | None = None) -> RunResult
 fsm_llm.engine.executables.MAX_DOCUMENT_BYTES = 2097152
+fsm_llm.engine.executables.MAX_FINISHED_RUNS = 256
+fsm_llm.engine.executables.MAX_HANDLE_LENGTH = 128
+fsm_llm.engine.executables.MAX_RESERVED_RUNS = 1024
 fsm_llm.engine.executables.MAX_RETAINED_TEMPLATES = 256
 fsm_llm.engine.executables.ReloadReport class
   def __init__(self, ids: tuple[tuple[str, str], ...], failed: Mapping[str, tuple[str, ...]], collisions: tuple[str, ...]) -> None
 fsm_llm.engine.executables.Resolution class(tuple)
+fsm_llm.engine.executables.RunHost class
+  def __init__(self, *, max_runs: int = 32) -> None
+  def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool
+  def cancel_for(self, conversation_id: str) -> int
+  def claim(self, handle: str, *, conversation_id: str) -> bool
+  def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None
+  def start(self, handle: str, body: _Body, *, conversation_id: str, announce: Callable[[], None] | None = None) -> bool
+  def wait(self, handle: str, timeout_seconds: float) -> bool
 fsm_llm.engine.executables.adapter_for def(kind: str, kinds: NameRegistry[Callable[..., Any]] | None = None) -> Callable[..., Any]
 fsm_llm.engine.executables.is_template_identity def(key: str) -> bool
 fsm_llm.engine.executables.make_alias def(name: str, routes: Mapping[str, float], target: str | None = None) -> AliasSpec

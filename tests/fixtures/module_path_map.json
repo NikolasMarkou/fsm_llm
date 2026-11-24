@@ -1084,6 +1084,7 @@
     "fsm_llm.engine.executables.namespaces",
     "fsm_llm.engine.executables.protocol",
     "fsm_llm.engine.executables.registry",
+    "fsm_llm.engine.executables.runs",
     "fsm_llm.engine.fsm",
     "fsm_llm.engine.fsm.gate",
     "fsm_llm.engine.intent_router",

@@ -874,6 +874,11 @@
       "delta": 1,
       "reason": "plan baa37f40 D-049 (K7.1): new anchor on DelegatedTarget, the delegated target is a separate value type",
       "token": "plan-2026-11-23T122249-baa37f40/D-049"
+    },
+    {
+      "delta": 2,
+      "reason": "plan baa37f40 D-050 (K7.2): two new anchors, the run host (runs.py) and the cancel_for hook of end_conversation (lifecycle.py)",
+      "token": "plan-2026-11-23T122249-baa37f40/D-050"
     }
   ]
 }

@@ -84,7 +84,7 @@ Behaviors pinned, grouped by area (the assertion, not the history):
 ## Invariants and constraints
 
 - No test may hit a real LLM or network. Patch `fsm_llm.llm.providers.litellm.completion` and `fsm_llm.llm.providers.litellm.get_supported_openai_params` when driving `_make_llm_call`.
-- Hand-built `API.__new__(API)` objects must mirror `__init__` attributes the method reads: `_stack_lock` (a `threading.Lock`), `conversation_stacks`, `fsm_manager`, `_last_accessed`, `_temp_fsm_definitions`, `_pending_push_ids`, `_ended_conversations`, `_MAX_ENDED_CACHE`. `end_conversation` is called through `.__wrapped__` to skip its decorator.
+- Hand-built `API.__new__(API)` objects must mirror `__init__` attributes the method reads: `_stack_lock` (a `threading.Lock`), `conversation_stacks`, `fsm_manager`, `_last_accessed`, `_temp_fsm_definitions`, `_pending_push_ids`, `_ended_conversations`, `_MAX_ENDED_CACHE`, `_call_marks`, `_targets`. `end_conversation` is called through `.__wrapped__` to skip its decorator.
 - Tests that change global state restore it: cwd (`os.chdir` in `finally`), `OPENAI_API_KEY`, `fsm_llm.logging._file_handler_initialized`.
 - Code comments cite decision ids (`D-003`, `D-010`, `D-013`, `D-019`, `D-039`, `D-041`, `D-050`); they explain why a test was re-baselined. Do not revert those re-baselines.
 

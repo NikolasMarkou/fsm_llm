@@ -28,12 +28,24 @@ from .registry import (
     ReloadReport,
     Resolution,
 )
+from .runs import (
+    DEFAULT_MAX_RUNS,
+    MAX_FINISHED_RUNS,
+    MAX_HANDLE_LENGTH,
+    MAX_RESERVED_RUNS,
+    ExecutableTargets,
+    RunHost,
+)
 
 __all__ = [
     "DEFAULT_EXECUTABLE_MAX_STEPS",
+    "DEFAULT_MAX_RUNS",
     "EXECUTABLE_KINDS",
     "EXECUTABLE_SOURCES",
     "MAX_DOCUMENT_BYTES",
+    "MAX_FINISHED_RUNS",
+    "MAX_HANDLE_LENGTH",
+    "MAX_RESERVED_RUNS",
     "MAX_RETAINED_TEMPLATES",
     "AliasSpec",
     "CodeBackedExecutable",
@@ -45,11 +57,13 @@ __all__ = [
     "ExecutableKindError",
     "ExecutableNotFoundError",
     "ExecutableRegistry",
+    "ExecutableTargets",
     "FsmBodyExecutable",
     "FsmInstance",
     "Instance",
     "ReloadReport",
     "Resolution",
+    "RunHost",
     "adapter_for",
     "is_template_identity",
     "make_alias",

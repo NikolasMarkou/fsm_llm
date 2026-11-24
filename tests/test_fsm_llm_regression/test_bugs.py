@@ -516,6 +516,9 @@ class TestConversationMemoryLeak:
         from fsm_llm.engine.api.calls import CallMarks
 
         api._call_marks = CallMarks()
+        # ... and tells a run launcher to stop the runs of the ended conversation (the
+        # delegated mode of the call kind, plan baa37f40 D-050): no resolver, none to tell.
+        api._targets = None
 
         # Bypass the decorator by calling the underlying logic
         api.end_conversation.__wrapped__(api, "conv1")
