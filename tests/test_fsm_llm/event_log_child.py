@@ -23,6 +23,11 @@ Interface contract:
     - ``leave_a_tool_in_flight(log, cid)``: a side-effecting ``tool/call`` with no result, the log a
       kill inside a tool leaves (no product path writes ``tool/call`` yet, plan 3f4530d3 step 3):
       the SETUP of a scenario whose product event is the ``unknown`` ``tool/result`` of ``API.resume``.
+    - ``registry_main(argv)`` (``main`` with ``registry`` as its third argument): a tool of a
+      ``ToolRegistry`` run by a handler of the ``run_tools`` state, so the product path
+      (``ToolRegistry.execute`` -> ``core.tool_observer`` -> the log scope) writes ``tool/call``;
+      the tool BODY announces itself by writing *ready_file* and blocks, and the parent kills it
+      there (plan 3f4530d3 step 3, the done-when of roadmap row 1.3).
     - ``main(argv)``: the child. Drives the exchange, takes ``view`` as the expected restore,
       then calls ``api.advance`` inside a second ``tool_call`` named ``in-flight``; the model
       double announces itself by writing *ready_file* (``conversation_id`` and ``expected``,
@@ -49,7 +54,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fsm_llm import API, tool_exchange
+from fsm_llm import API, HandlerTiming, create_handler, tool_exchange
 from fsm_llm.constants import (
     DEFAULT_COMPLETION_MESSAGES_KEY,
     DEFAULT_COMPLETION_RESULT_KEY,
@@ -57,6 +62,7 @@ from fsm_llm.constants import (
 from fsm_llm.core.definitions import CompletionResponse
 from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.testing import ScriptedLLM, final_reply, tool_call_reply
+from fsm_llm.tools import ToolCall, ToolRegistry
 
 MESSAGES = DEFAULT_COMPLETION_MESSAGES_KEY
 RESULT = DEFAULT_COMPLETION_RESULT_KEY
@@ -333,6 +339,42 @@ def stacked_main(argv: list[str]) -> None:
             api.advance(cid)
 
 
+def registry_main(argv: list[str]) -> None:
+    directory, ready = Path(argv[1]), Path(argv[2])
+    where: dict[str, str] = {}
+
+    def charge(n: int) -> str:
+        """Charge n units (blocks forever: the parent kills the process here)."""
+        _announce(ready, conversation_id=where["cid"])
+        for _ in range(BLOCK_SECONDS):
+            time.sleep(1)
+        raise SystemExit("nobody killed the blocked child")
+
+    registry = ToolRegistry().register_function(charge, name="charge")
+    run_it = (
+        create_handler("run-registry-tool")
+        .at(HandlerTiming.PRE_PROCESSING)
+        .on_state("run_tools")
+        .do(
+            lambda ctx: (
+                registry.execute(ToolCall(tool_name="charge", parameters={"n": 5}))
+                and {}
+            )
+        )
+    )
+    with EventLog(directory) as log:
+        api = API.from_definition(
+            tool_fsm(),
+            llm_interface=ChildLLM(scripted_replies()),
+            event_log=log,
+            handlers=[run_it],
+        )
+        where["cid"] = cid = start(api)
+        api.advance(cid)  # intake -> call_model, silent
+        api.advance(cid)  # the model asks for a tool: call_model -> run_tools
+        api.advance(cid)  # the handler of run_tools runs the registry tool and blocks
+
+
 def _announce(ready: Path, **payload: Any) -> None:
     pending = ready.with_name(ready.name + ".tmp")
     pending.write_text(
@@ -346,6 +388,8 @@ def _announce(ready: Path, **payload: Any) -> None:
 def main(argv: list[str]) -> None:
     if argv[3:4] == ["stacked"]:
         return stacked_main(argv)
+    if argv[3:4] == ["registry"]:
+        return registry_main(argv)
     directory, ready = Path(argv[1]), Path(argv[2])
     log = EventLog(directory)
     llm = ChildLLM(scripted_replies(), block_at=1)

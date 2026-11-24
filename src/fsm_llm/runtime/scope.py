@@ -68,13 +68,15 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable, Iterable, Iterator
+import uuid
+from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 from fsm_llm.core.redaction import redact_context
+from fsm_llm.core.tool_observer import install_tool_observer, reset_tool_observer
 from fsm_llm.llm.interface import interface_model
 from fsm_llm.llm.observer import install_observer, is_observed, reset_observer
 from fsm_llm.llm.parsing import _finish_reason
@@ -108,9 +110,11 @@ class TurnScope:
     root_id: str
     frame: int = 0
     observer: _ScopeObserver = field(init=False, repr=False, compare=False)
+    tool_observer: _ToolObserver = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "observer", _ScopeObserver(self))
+        object.__setattr__(self, "tool_observer", _ToolObserver(self))
 
 
 def current_scope() -> TurnScope | None:
@@ -123,9 +127,11 @@ def activate(scope: TurnScope) -> Iterator[TurnScope]:
     """Bind *scope* and its request observer for the ``with`` body, then reset both."""
     scope_token = _SCOPE.set(scope)
     observer_token = install_observer(scope.observer)
+    tool_token = install_tool_observer(scope.tool_observer)
     try:
         yield scope
     finally:
+        reset_tool_observer(tool_token)
         reset_observer(observer_token)
         _SCOPE.reset(scope_token)
 
@@ -333,6 +339,72 @@ class _ScopeObserver:
             call_type=token.call_type,
             **_error_fields(error),
         )
+
+
+class _OpenTool(NamedTuple):
+    """What the tool observer remembers between ``begin_tool`` and ``end_tool``."""
+
+    call_id: str
+    name: str
+
+
+class _ToolObserver:
+    """The ``ToolObserver`` of one scope (``core.tool_observer``): ``tool/call`` and ``tool/result``.
+
+    ``begin_tool`` writes ``tool/call`` before the body (fsynced when side-effecting) and
+    RAISES when it cannot (the registry then runs no body); ``end_tool`` writes ``tool/result``
+    and a failure is a WARNING, so the call stays ``unknown``. It never changes the arguments.
+    """
+
+    def __init__(self, scope: TurnScope) -> None:
+        self._scope = scope
+
+    def begin_tool(
+        self,
+        *,
+        name: str,
+        arguments: Mapping[str, Any],
+        side_effecting: bool,
+        gated: bool,
+    ) -> object | None:
+        call_id = uuid.uuid4().hex
+        scope = self._scope
+        scope.log.tool_begin(
+            scope.root_id,
+            name=name,
+            call_id=call_id,
+            arguments=arguments,
+            side_effecting=side_effecting,
+            gated=gated,
+            frame=scope.frame,
+        )
+        return _OpenTool(call_id, name)
+
+    def end_tool(
+        self,
+        token: object | None,
+        *,
+        status: str,
+        error_type: str | None,
+        error_code: str | None,
+        truncated: bool,
+        elapsed_ms: float,
+    ) -> None:
+        if not isinstance(token, _OpenTool):
+            return
+        scope = self._scope
+        with warn_on_failure(EventType.TOOL_RESULT):
+            scope.log.tool_end(
+                scope.root_id,
+                name=token.name,
+                call_id=token.call_id,
+                status=status,
+                frame=scope.frame,
+                error_type=error_type,
+                error_code=error_code,
+                truncated=truncated,
+                elapsed_ms=elapsed_ms,
+            )
 
 
 class LlmCall:

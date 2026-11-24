@@ -23,6 +23,7 @@ from fsm_llm.core.codes import (
     MessageSource,
     Reason,
     Status,
+    ToolErrorCode,
     approval_code,
     status_of_stop_reason,
     status_of_tool_status,
@@ -32,7 +33,7 @@ from fsm_llm.core.definitions import fsm as definitions
 from fsm_llm.synthesis import constants as synth_constants
 from fsm_llm.synthesis import tools as synth_tools
 
-_ENUMS = [Status, Reason, CompletionKind, Lifecycle, MessageSource]
+_ENUMS = [Status, Reason, CompletionKind, Lifecycle, MessageSource, ToolErrorCode]
 
 
 def _public_values(cls: type) -> dict[str, str]:
@@ -136,6 +137,19 @@ class TestMembers:
             "remote_client",
             "simulator",
         ]
+
+    def test_tool_error_code_members_and_values(self):
+        assert [m.value for m in ToolErrorCode] == [
+            "unknown_tool",
+            "invalid_args",
+            "execution_failed",
+            "timeout",
+            "denied",
+            "sandbox_violation",
+        ]
+        assert ToolErrorCode.from_string("timeout") is ToolErrorCode.TIMEOUT
+        with pytest.raises(ValueError, match="tool error code"):
+            ToolErrorCode.from_string("http_500")
 
     @pytest.mark.parametrize("enum", _ENUMS)
     def test_members_are_snake_case_with_upper_names(self, enum):
@@ -355,6 +369,7 @@ class TestSource:
             "CompletionKind",
             "Lifecycle",
             "MessageSource",
+            "ToolErrorCode",
         }
 
         def _names_a_member(node: ast.AST) -> bool:
@@ -384,6 +399,7 @@ class TestSource:
                 "MessageSource",
                 "Reason",
                 "Status",
+                "ToolErrorCode",
                 "approval_code",
                 "status_of_stop_reason",
                 "status_of_tool_status",

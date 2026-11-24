@@ -1079,6 +1079,7 @@
     "fsm_llm.core.kind_completion",
     "fsm_llm.core.names",
     "fsm_llm.core.results",
+    "fsm_llm.core.tool_observer",
     "fsm_llm.core.verify",
     "fsm_llm.core.verify.executable",
     "fsm_llm.core.verify.executable_pattern",

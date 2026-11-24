@@ -10,12 +10,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from fsm_llm.core.codes import Status, ToolErrorCode
 from fsm_llm.core.names import NameRegistry
+from fsm_llm.core.tool_observer import ToolHandle, begin_tool, end_tool
 from fsm_llm.logging import logger
 
 from .arguments import _bind_by_name, _fallback_arguments, _unwrap_nested_tool_input
-from .constants import ContextKeys, Defaults, ErrorMessages
-from .errors import ToolExecutionError, ToolNotFoundError
+from .constants import ContextKeys, Defaults, ErrorMessages, ToolRunStatus
+from .errors import ToolArgumentError, ToolExecutionError, ToolNotFoundError
 from .hints import (
     _accepts_extra_keywords,
     _introspection_target,
@@ -30,6 +32,22 @@ from .schema import (
     tool_parameters_schema,
 )
 from .timeouts import ToolTimedOut, call_with_timeout
+
+
+def _error_code(error: Exception) -> ToolErrorCode:
+    """The code of a failed call, from the class of the error (never its text)."""
+    if isinstance(error, ToolTimedOut):
+        return ToolErrorCode.TIMEOUT
+    if isinstance(error, ToolArgumentError):
+        return ToolErrorCode.INVALID_ARGS
+    return ToolErrorCode.EXECUTION_FAILED
+
+
+def _logged_status(outcome: ToolResult) -> str:
+    """The ``status`` of a ``tool/result`` event: ``ok``, ``failed`` or ``unknown``."""
+    if outcome.success:
+        return Status.OK.value
+    return ToolRunStatus.UNKNOWN if outcome.timed_out else Status.FAILED.value
 
 
 class ToolRegistry:
@@ -285,9 +303,15 @@ class ToolRegistry:
         try:
             bound = _bind_by_name(sig, params)
         except TypeError as bind_error:
-            bound = _bind_by_name(
-                sig, _fallback_arguments(sig, sent, schema_props, bind_error)
-            )
+            try:
+                bound = _bind_by_name(
+                    sig, _fallback_arguments(sig, sent, schema_props, bind_error)
+                )
+            except TypeError as unbound:
+                # the tool never ran: the one cause that is `invalid_args` (D-006)
+                raise ToolArgumentError(
+                    str(unbound), tool_name=callable_name(original_fn)
+                ) from unbound
         return fn(*bound.args, **bound.kwargs)
 
     def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult:
@@ -308,13 +332,17 @@ class ToolRegistry:
         # dict entry between the check and the read.
         tool = self._registry.get(tool_call.tool_name)
         if tool is None:
+            # nothing ran, so nothing is logged (D-006, C-6); the code says why
             return ToolResult(
                 tool_name=tool_call.tool_name,
                 success=False,
                 error=ErrorMessages.TOOL_NOT_FOUND.format(name=tool_call.tool_name),
+                error_code=ToolErrorCode.UNKNOWN_TOOL,
             )
 
         start_time = time.monotonic()
+        handle: ToolHandle | None = None
+        error: Exception | None = None
 
         try:
             fn = tool.execute_fn
@@ -324,6 +352,20 @@ class ToolRegistry:
                 )
 
             schema_props = self._validate_tool_params(tool, tool_call.parameters)
+            # DECISION plan-2026-11-24T193347-3f4530d3/D-006
+            # The event log hook: `tool/call` is written (and fsynced for a side-effecting
+            # call) HERE, after the arguments are validated and BEFORE the body, and a write
+            # that fails raises into the `except` below: a failed result, the body never ran.
+            # `tool/result` is written by THIS caller after the body returned, raised or timed
+            # out (a timeout is `unknown`, never `failed`); the worker thread never writes.
+            # An unregistered name and a cache hit log nothing, a retry is its own call. Do NOT
+            # import the log here (D-005), move the hook after the body, or let it raise out.
+            handle = begin_tool(
+                tool.name,
+                tool_call.parameters,
+                side_effecting=tool.annotations.read_only is not True,
+                gated=gated,
+            )
             if tool.timeout_seconds is None:
                 result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
             else:
@@ -336,7 +378,7 @@ class ToolRegistry:
                 )
             elapsed_ms = (time.monotonic() - start_time) * 1000
 
-            return ToolResult(
+            outcome = ToolResult(
                 tool_name=tool_call.tool_name,
                 success=True,
                 result=result,
@@ -344,19 +386,44 @@ class ToolRegistry:
             )
 
         except Exception as e:
+            error = e
             elapsed_ms = (time.monotonic() - start_time) * 1000
             logger.error(
                 ErrorMessages.TOOL_EXECUTION_FAILED.format(
                     name=tool_call.tool_name, error=str(e)
                 )
             )
-            return ToolResult(
+            outcome = ToolResult(
                 tool_name=tool_call.tool_name,
                 success=False,
                 error=str(e),
                 execution_time_ms=elapsed_ms,
                 timed_out=isinstance(e, ToolTimedOut),
+                error_code=_error_code(e),
             )
+        self._log_outcome(handle, outcome, error)
+        return outcome
+
+    @staticmethod
+    def _log_outcome(
+        handle: ToolHandle | None, outcome: ToolResult, error: Exception | None
+    ) -> None:
+        """Write the ``tool/result`` of a call that has a ``tool/call``; never raises."""
+        if handle is None:
+            return
+        try:
+            end_tool(
+                handle,
+                status=_logged_status(outcome),
+                error_type=None if error is None else type(error).__name__,
+                error_code=None
+                if outcome.error_code is None
+                else outcome.error_code.value,
+                truncated=outcome.truncated,
+                elapsed_ms=round(outcome.execution_time_ms, 3),
+            )
+        except Exception as e:  # `truncated` reads a result's text: never let it escape
+            logger.warning(f"tool result not logged ({type(e).__name__})")
 
     def to_prompt_description(self) -> str:
         """Generate a prompt-friendly description of all available tools."""

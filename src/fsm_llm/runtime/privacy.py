@@ -132,10 +132,19 @@ SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
             {*_PROVIDER_CALL, "request_seq", "error_type", "status_code"}
         ),
         EventType.TOOL_CALL: frozenset(
-            {"name", "call_id", "side_effecting", "argument_keys"}
+            {"name", "call_id", "side_effecting", "gated", "argument_keys"}
         ),
         EventType.TOOL_RESULT: frozenset(
-            {"name", "call_id", "status", "error_type", "call_frame"}
+            {
+                "name",
+                "call_id",
+                "status",
+                "error_type",
+                "error_code",
+                "truncated",
+                "elapsed_ms",
+                "call_frame",
+            }
         ),
         EventType.CONTEXT_RECORD: frozenset(
             {

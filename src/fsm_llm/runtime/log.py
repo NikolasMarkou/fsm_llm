@@ -150,9 +150,11 @@ class EventLog:
           arguments of a tool call, after the built-in filters; ``put_blob`` is refused while it
           is set; any failure is ``EventPayloadError`` and the checkpoint it guards fails.
           ``digest_json(value) -> ref`` is the reference ``put_json`` would give, storing nothing.
-        - ``tool_call(conversation_id, *, name, call_id, arguments, ...)``: the checkpoint API
-          of a tool call, see its docstring. ``unknown_tool_calls(conversation_id)`` reports the
-          unresolved ones.
+        - ``tool_begin(...)`` and ``tool_end(...)``: the two emitters of ``tool/call`` and
+          ``tool/result`` (what ``runtime.scope`` writes for ``ToolRegistry.execute``);
+          ``tool_call(conversation_id, *, name, call_id, arguments, ...)``: the same pair as one
+          context manager, see its docstring. ``unknown_tool_calls(conversation_id)`` reports
+          the unresolved ones.
         - ``conversation_ids() -> list[str]``, ``release(conversation_id)``.
         - Long-running hosts: every conversation id that is appended to keeps one writer open,
           two file descriptors and the file's advisory lock, until ``release(conversation_id)``
@@ -459,8 +461,7 @@ class EventLog:
         """Return the tool calls of one tree that have no result, as ``unknown`` (never retried)."""
         return unresolved_tool_calls(self.read(conversation_id))
 
-    @contextmanager
-    def tool_call(
+    def tool_begin(
         self,
         conversation_id: str,
         *,
@@ -468,24 +469,19 @@ class EventLog:
         call_id: str,
         arguments: Mapping[str, Any],
         side_effecting: bool = True,
+        gated: bool | None = None,
         frame: int = 0,
-    ) -> Iterator[None]:
-        """Checkpoint a tool call: ``with log.tool_call(...): run_the_tool()``.
+    ) -> None:
+        """Append ``tool/call`` BEFORE a tool body runs (the one emitter of that event).
 
-        Appends ``tool/call`` (``name``, ``call_id``, ``side_effecting``, and the *arguments*
-        after ``redact_context``: inline when small, else ``arguments_ref`` to a blob) BEFORE the
-        body runs; a side-effecting call is fsynced first, so if ``LogWriteError`` is raised the
-        body never runs. On a normal exit it appends ``tool/result`` with ``status: "ok"``; when
-        the body raises an ``Exception`` it appends ``status: "failed"`` with the exception's
-        type name (never its message) and re-raises (a failing result append is logged, not
-        raised, so the tool's own error is not masked). When the process dies inside, or the
-        body is interrupted by a ``BaseException`` that is not an ``Exception`` (an interrupt,
-        ``SystemExit``), no result is written: the call stays unresolved and a reader reports it
-        as ``unknown``, because the log cannot tell whether the tool ran. Nothing retries it.
-        *side_effecting* defaults to True: a tool is side-effecting unless it says it only reads.
-        With a redaction hook the arguments pass through it (kind ``arguments``) after
-        ``redact_context``, and a failing hook raises before the event and the body. At level
-        ``shape`` the event carries ``argument_keys`` (the sorted names) and no value.
+        Fields: ``name``, ``call_id``, ``side_effecting``, ``gated`` when given, and the
+        *arguments* after ``redact_context``: inline when small, else ``arguments_ref`` to a
+        blob. A side-effecting call is fsynced first (``is_checkpoint``), so if
+        ``LogWriteError`` is raised the body must not run. With a redaction hook the arguments
+        pass through it (kind ``arguments``) after ``redact_context``, and a failing hook raises
+        before the event. At level ``shape`` the event carries ``argument_keys`` (the sorted
+        names) and no value. *side_effecting* defaults to True: a tool is side-effecting unless
+        it says it only reads.
         """
         if (
             not isinstance(name, str)
@@ -512,6 +508,8 @@ class EventLog:
                 where = {"arguments": safe}
             else:  # the hook already ran: store the blob as it is
                 where = {"arguments_ref": self._blobs.put_json(safe)}
+        if gated is not None:
+            where["gated"] = bool(gated)
         self.append(
             conversation_id,
             EventType.TOOL_CALL,
@@ -521,17 +519,87 @@ class EventLog:
             side_effecting=bool(side_effecting),
             **where,
         )
+
+    def tool_end(
+        self,
+        conversation_id: str,
+        *,
+        name: str,
+        call_id: str,
+        status: str,
+        frame: int = 0,
+        error_type: str | None = None,
+        error_code: str | None = None,
+        truncated: bool | None = None,
+        elapsed_ms: float | None = None,
+    ) -> None:
+        """Append ``tool/result`` for a ``tool_begin`` (the one emitter of that event).
+
+        ``status`` is ``ok``, ``failed`` or ``unknown``; ``error_type`` is a class name, never
+        message text; ``error_code`` a ``ToolErrorCode`` value; a field left ``None`` is
+        omitted. No result value is ever written.
+        """
+        extra: dict[str, Any] = {
+            key: value
+            for key, value in (
+                ("error_type", error_type),
+                ("error_code", error_code),
+                ("truncated", truncated),
+                ("elapsed_ms", elapsed_ms),
+            )
+            if value is not None
+        }
+        self.append(
+            conversation_id,
+            EventType.TOOL_RESULT,
+            frame=frame,
+            name=name,
+            call_id=call_id,
+            status=status,
+            **extra,
+        )
+
+    @contextmanager
+    def tool_call(
+        self,
+        conversation_id: str,
+        *,
+        name: str,
+        call_id: str,
+        arguments: Mapping[str, Any],
+        side_effecting: bool = True,
+        frame: int = 0,
+    ) -> Iterator[None]:
+        """Checkpoint a tool call: ``with log.tool_call(...): run_the_tool()``.
+
+        ``tool_begin`` BEFORE the body (see it), then on a normal exit ``tool/result`` with
+        ``status: "ok"``; when the body raises an ``Exception`` it appends ``status: "failed"``
+        with the exception's type name (never its message) and re-raises (a failing result
+        append is logged, not raised, so the tool's own error is not masked). When the process
+        dies inside, or the body is interrupted by a ``BaseException`` that is not an
+        ``Exception`` (an interrupt, ``SystemExit``), no result is written: the call stays
+        unresolved and a reader reports it as ``unknown``, because the log cannot tell whether
+        the tool ran. Nothing retries it. ``ToolRegistry.execute`` does not use this manager:
+        it reaches the log through ``core.tool_observer``.
+        """
+        self.tool_begin(
+            conversation_id,
+            name=name,
+            call_id=call_id,
+            arguments=arguments,
+            side_effecting=side_effecting,
+            frame=frame,
+        )
         try:
             yield
         except Exception as exc:
             try:
-                self.append(
+                self.tool_end(
                     conversation_id,
-                    EventType.TOOL_RESULT,
-                    frame=frame,
                     name=name,
                     call_id=call_id,
                     status="failed",
+                    frame=frame,
                     error_type=type(exc).__name__,
                 )
             except Exception as log_exc:
@@ -540,13 +608,8 @@ class EventLog:
                     "the call stays unknown"
                 )
             raise
-        self.append(
-            conversation_id,
-            EventType.TOOL_RESULT,
-            frame=frame,
-            name=name,
-            call_id=call_id,
-            status="ok",
+        self.tool_end(
+            conversation_id, name=name, call_id=call_id, status="ok", frame=frame
         )
 
     def prune(

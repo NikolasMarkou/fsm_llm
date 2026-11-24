@@ -59,6 +59,11 @@ from fsm_llm.runtime.stores.session import (
 
 _TOOL_TYPES = (EventType.TOOL_CALL.value, EventType.TOOL_RESULT.value)
 
+#: Types that never move the stack: they are neither a push, a pop nor a state, and one that
+#: arrives late (a ``tool/result`` of frame 0 after a ``stack/push`` to frame 1) must not drop
+#: the child by the "an event at a lower frame infers a lost pop" rule (D-006 of plan 3f4530d3).
+NON_MOVING_TYPES = frozenset({EventType.TOOL_RESULT.value})
+
 
 class FrameProjection(BaseModel):
     """One frame above the root, as the log says it stood (see the module docstring)."""
@@ -330,7 +335,7 @@ def fold_stack(
             _push(frames, event)
         elif kind == EventType.STACK_POP.value:
             _pop(frames, event)
-        else:
+        elif kind not in NON_MOVING_TYPES:
             target = _at_frame(frames, _int_field(event, "frame"), event)
             if target is not None and _carries_state(event):
                 _apply_state(target, event)

@@ -1,6 +1,6 @@
 """The shared vocabulary of run statuses, reason codes and completion kinds.
 
-Five closed vocabularies, each a ``str`` enum whose values are the strings
+Six closed vocabularies, each a ``str`` enum whose values are the strings
 already on the wire (or, for ``Lifecycle`` and ``MessageSource``, the strings of
 the envelope and the event log), so a member and its string are interchangeable
 for ``==``, hashing, ``in``, ``json.dumps`` and pydantic:
@@ -42,6 +42,7 @@ __all__ = [
     "MessageSource",
     "Reason",
     "Status",
+    "ToolErrorCode",
     "approval_code",
     "status_of_stop_reason",
     "status_of_tool_status",
@@ -162,8 +163,8 @@ class Lifecycle(str, Enum):
 class MessageSource(str, Enum):
     """Who sent a message or an input to a run (roadmap C4 and 1.17).
 
-    Vocabulary only: no event or run input records it yet. ``RUN`` is a parent
-    run (a delegated task), ``REMOTE_CLIENT`` a caller over a protocol,
+    ``run/start`` records it (``run``); no other event does yet. ``RUN`` is a
+    parent run (a delegated task), ``REMOTE_CLIENT`` a caller over a protocol,
     ``SIMULATOR`` the user simulator.
     """
 
@@ -176,6 +177,30 @@ class MessageSource(str, Enum):
     def from_string(cls, value: MessageSource | str) -> MessageSource:
         """The member for a member or an exact value; ``ValueError`` otherwise."""
         return _parse(cls, value, "message source")
+
+
+class ToolErrorCode(str, Enum):
+    """Why a tool call did not return a value (roadmap row 1.16).
+
+    Set where the cause is known, never by matching message text:
+    ``UNKNOWN_TOOL`` (the name is not registered), ``INVALID_ARGS`` (the arguments
+    did not bind to the function), ``EXECUTION_FAILED`` (the body raised, or the
+    call could not be logged), ``TIMEOUT`` (the call stopped waiting; the outcome
+    is unknown, never failed). ``DENIED`` and ``SANDBOX_VIOLATION`` are members
+    with no producer yet.
+    """
+
+    UNKNOWN_TOOL = "unknown_tool"
+    INVALID_ARGS = "invalid_args"
+    EXECUTION_FAILED = "execution_failed"
+    TIMEOUT = "timeout"
+    DENIED = "denied"
+    SANDBOX_VIOLATION = "sandbox_violation"
+
+    @classmethod
+    def from_string(cls, value: ToolErrorCode | str) -> ToolErrorCode:
+        """The member for a member or an exact value; ``ValueError`` otherwise."""
+        return _parse(cls, value, "tool error code")
 
 
 _STOP_REASON_CODES: dict[str, tuple[Status, Reason | None]] = {

@@ -753,7 +753,7 @@ class TestEveryProducerGoesThroughPutJson:
             "__init__",
             "put_blob",
             "put_json",
-            "tool_call",
+            "tool_begin",
             "get_blob",
             "get_json",
         }

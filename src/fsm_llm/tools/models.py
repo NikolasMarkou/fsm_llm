@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from fsm_llm.core.codes import ToolErrorCode
 from fsm_llm.logging import logger
 
 from .constants import Defaults, ToolObservationPrefix, ToolRunStatus
@@ -130,7 +131,9 @@ class ToolResult(BaseModel):
 
     ``timed_out`` marks a call stopped waiting for at its ``timeout_seconds``
     (``success`` is False): its outcome is unknown, since the tool may still
-    be running and its side effects may still happen.
+    be running and its side effects may still happen. ``error_code`` says why a failed
+    call failed (``ToolErrorCode``, set where the cause is known; ``None`` on success and on a
+    result another producer built).
     """
 
     tool_name: str
@@ -139,6 +142,12 @@ class ToolResult(BaseModel):
     error: str | None = None
     execution_time_ms: float = 0.0
     timed_out: bool = False
+    error_code: ToolErrorCode | None = None
+
+    @property
+    def truncated(self) -> bool:
+        """True when a successful result is longer than ``summary`` shows (the model sees a cut)."""
+        return self.success and len(str(self.result)) > Defaults.MAX_OBSERVATION_LENGTH
 
     @property
     def summary(self) -> str:

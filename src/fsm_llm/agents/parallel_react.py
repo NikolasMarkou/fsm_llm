@@ -24,6 +24,7 @@ Example::
 
 from __future__ import annotations
 
+import contextvars
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, ClassVar
 
@@ -171,7 +172,13 @@ class ParallelReactAgent(BaseAgent):
         # Submit in order; gather results in order for deterministic observations.
         workers = min(self.max_parallel, len(calls))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [(c, pool.submit(self.tools.execute, c)) for c in calls]
+            # a plain pool starts its threads with an empty context, so the event log scope
+            # would be lost: run each call in a FRESH copy (one Context cannot be entered by
+            # two threads), plan 3f4530d3 D-006
+            futures = [
+                (c, pool.submit(contextvars.copy_context().run, self.tools.execute, c))
+                for c in calls
+            ]
             results = [(c, f.result()) for c, f in futures]
 
         reasoning = str(context.get(ContextKeys.REASONING) or "")

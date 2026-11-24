@@ -60,6 +60,18 @@ from tests.test_fsm_llm.event_log_support import (
 )
 from tests.test_fsm_llm.support import _state
 from tests.test_fsm_llm.test_call_delegated_settle import run_delegated
+from tests.test_fsm_llm.test_event_log_tools import (
+    _add as _tools_add,
+)
+from tests.test_fsm_llm.test_event_log_tools import (
+    _call as _tool_call,
+)
+from tests.test_fsm_llm.test_event_log_tools import (
+    _registry as _tools_registry,
+)
+from tests.test_fsm_llm.test_event_log_tools import (
+    _run as _run_registry_tool,
+)
 
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
 _ADD: dict[str, Any] = {
@@ -588,6 +600,15 @@ def _scenario_resume_of_a_tool_in_flight(log: EventLog) -> set[str]:
     return _types_of(log, cid, after=last)
 
 
+def _scenario_registry_tool(log: EventLog) -> set[str]:
+    """A ``ToolRegistry`` tool run by a handler inside a logged turn: ``tool/call`` and its
+    ``tool/result`` come from ``ToolRegistry.execute`` through ``core.tool_observer``."""
+    cid, _, _ = _run_registry_tool(
+        _tools_registry(add=_tools_add), [_tool_call("add", a=2, b=3)], log=log
+    )
+    return _types_of(log, cid)
+
+
 #: Per type, the product scenario that writes it: through ``API``, ``API.resume`` or a delegated
 #: run, never through ``EventLog.tool_call`` or ``EventLog.append`` (an AST row below bans both
 #: in this module). Later steps move a type from ``NOT_YET_PRODUCED`` to this table.
@@ -606,15 +627,14 @@ _PRODUCT_SCENARIOS: dict[EventType, Callable[[EventLog], set[str]]] = {
     EventType.DECISION: _scenario_spent_budget,
     EventType.RUN_START: _scenario_delegated_call,
     EventType.RUN_END: _scenario_delegated_call,
+    EventType.TOOL_CALL: _scenario_registry_tool,
     EventType.TOOL_RESULT: _scenario_resume_of_a_tool_in_flight,
 }
 
-#: Declared and with no product producer yet: tool/call (and every tool/result but the resume
-#: record), the approval pair, the extraction family, handler, executable/resolve; and
+#: Declared and with no product producer yet: the approval pair, the extraction family, handler, executable/resolve; and
 #: compaction/epoch, which needs roadmap row 2.5 and is out of plan 3f4530d3.
 NOT_YET_PRODUCED = frozenset(
     {
-        EventType.TOOL_CALL,
         EventType.APPROVAL_REQUEST,
         EventType.APPROVAL_OUTCOME,
         EventType.EXTRACTION,

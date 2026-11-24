@@ -1079,6 +1079,16 @@
       "delta": 1,
       "reason": "step 28.1 of plan a555dcfe adds the D-035 anchor in agents/pattern_agent.py (a file runs tools by its bindings, not its claim)",
       "token": "plan-2026-11-24T043150-a555dcfe/D-035"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 3f4530d3 step 3: two new anchors, D-005 at core/tool_observer.py (the tool seam) and D-006 at tools/registry.py (the execute hook)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-005"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 3f4530d3 step 3: two new anchors, D-005 at core/tool_observer.py (the tool seam) and D-006 at tools/registry.py (the execute hook)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-006"
     }
   ]
 }
