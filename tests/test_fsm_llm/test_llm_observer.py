@@ -28,6 +28,7 @@ from tests.test_fsm_llm.event_log_support import _chunk, _reply
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
 _LITELLM = _SRC / "llm" / "providers" / "litellm.py"
+_SEND = _SRC / "llm" / "providers" / "send.py"
 _SECRETS = {
     "api_key": "sk-SECRET",
     "api_base": "http://secret-host:1",
@@ -376,10 +377,14 @@ class TestTheSharedSendPathStaysIntact:
         # meter and the observer are fed by the send family (`_begin_send`, `_failed_send`,
         # `_finished_send`), in the same order as before. The property is unchanged: one
         # place feeds them, in this order, and no public method counts.
-        source = _LITELLM.read_text(encoding="utf-8")
+        # Plan 3f4530d3, step 1a: the three helpers live in `providers/send.py` (`SendMixin`),
+        # `_send` and `_asend` stay in `litellm.py` beside the `completion` lookups.
+        send_source = _SEND.read_text(encoding="utf-8")
+        source = _LITELLM.read_text(encoding="utf-8") + "\n" + send_source
         defs = {
             n.name: n
-            for n in ast.walk(ast.parse(source))
+            for text in (_LITELLM.read_text(encoding="utf-8"), send_source)
+            for n in ast.walk(ast.parse(text))
             if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
         }
 
@@ -433,6 +438,6 @@ class TestTheSharedSendPathStaysIntact:
         assert source.count("meter.record(") == 1
         # D-002 of plan 21e6f00d: a reference at the hook, so an editor of the family sees it
         assert "plan-2026-11-17T100529-21e6f00d/D-002" in (
-            ast.get_source_segment(source, defs["_begin_send"]) or ""
+            ast.get_source_segment(send_source, defs["_begin_send"]) or ""
         )
         assert "observes_requests = True" in source

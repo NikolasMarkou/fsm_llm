@@ -822,13 +822,16 @@ class TestOneBodyPerMethod:
         )  # first read, retry
 
     def test_the_meter_and_the_observer_are_fed_only_in_the_send_family(self) -> None:
-        defs = _defs("litellm.py")
+        # Plan 3f4530d3, step 1a: the family is in `send.py`, its callers in `litellm.py`.
+        defs = {**_defs("litellm.py"), **_defs("send.py")}
         family = {"_begin_send", "_failed_send", "_finished_send"}
         fed = {"record", "record_error", "begin_send", "end_send", "fail_send"}
         for name, node in defs.items():
             if name not in family:
                 assert not fed & set(_calls(node)), name
-        source = (_PROVIDERS_DIR / "litellm.py").read_text(encoding="utf-8")
+        source = (_PROVIDERS_DIR / "litellm.py").read_text(encoding="utf-8") + (
+            _PROVIDERS_DIR / "send.py"
+        ).read_text(encoding="utf-8")
         assert all(source.count(f"def {name}(") == 1 for name in family)
         assert source.count("meter.record(") == 1
         for sender in ("_send", "_asend"):

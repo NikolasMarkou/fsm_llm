@@ -649,8 +649,9 @@ class TestTheSupersededAnchor:
         finally:
             sys.modules.pop(spec.name, None)
 
+        # plan 3f4530d3, step 1a: the anchor moved with `_begin_send` to `providers/send.py`
         old = (
-            "src/fsm_llm/llm/providers/litellm.py",
+            "src/fsm_llm/llm/providers/send.py",
             "plan-2026-10-01T093600-944e2692",
             4,
         )
