@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import Any
 
+from fsm_llm.core.codes import Purpose
 from fsm_llm.core.definitions import (
     ASCII_IDENTIFIER_PATTERN,
     CompletionRequest,
@@ -34,6 +35,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.eval.stats import pass_rate
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.llm.purpose import purpose_scope
 
 from .constants import (
     ABORT_STATE_ID,
@@ -108,7 +110,8 @@ def propose_patch(
         messages=patch_messages(lines, shown, policy), max_tokens=PATCH_MAX_TOKENS
     )
     try:
-        reply = llm.complete(request)
+        with purpose_scope(Purpose.COMPILE):
+            reply = llm.complete(request)
     except LLMResponseError as e:
         raise SynthesisError("the strong model call failed") from e
     data = None

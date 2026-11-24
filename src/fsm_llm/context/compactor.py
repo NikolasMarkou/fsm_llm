@@ -17,6 +17,7 @@ from fsm_llm.constants import (
     has_internal_prefix,
     is_forbidden_context_entry,
 )
+from fsm_llm.core.codes import Purpose
 from fsm_llm.core.definitions import (
     CONVERSATION_SUMMARY_MAX_CHARS,
     ResponseGenerationRequest,
@@ -24,6 +25,7 @@ from fsm_llm.core.definitions import (
     exchange_preview_lines,
 )
 from fsm_llm.llm import LLMInterface
+from fsm_llm.llm.purpose import purpose_scope
 from fsm_llm.logging import logger
 
 from .commit import clear_keys_delta
@@ -156,7 +158,8 @@ class ContextCompactor:
                     system_prompt="You are a conversation summarizer.",
                     user_message=prompt,
                 )
-                response = llm_interface.generate_response(request)
+                with purpose_scope(Purpose.SUMMARIZE):
+                    response = llm_interface.generate_response(request)
                 summary = response.message
                 conversation.summary = summary[:CONVERSATION_SUMMARY_MAX_CHARS]
                 logger.debug("Context compactor: LLM-powered summary generated")

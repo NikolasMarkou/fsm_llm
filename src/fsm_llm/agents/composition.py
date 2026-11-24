@@ -23,10 +23,12 @@ import contextlib
 from collections.abc import Callable
 from typing import Any
 
+from fsm_llm.core.codes import Purpose
 from fsm_llm.core.coerce import coerce_confidence
 from fsm_llm.core.definitions import CompletionRequest
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.llm.purpose import purpose_scope
 from fsm_llm.logging import logger
 from fsm_llm.tools import ToolRegistry
 
@@ -108,7 +110,8 @@ def _default_complete(model: str, prompt: str) -> str:
     # feedback string, and the chain (EvaluationError <- LLMResponseError <-
     # provider error) keeps the provider's own message. See decisions.md D-006.
     try:
-        response = LiteLLMInterface(model, temperature=0.0).complete(request)
+        with purpose_scope(Purpose.JUDGE):
+            response = LiteLLMInterface(model, temperature=0.0).complete(request)
     except Exception as e:
         raise EvaluationError(f"LLM judge completion failed: {e!s}") from e
     return response.text or ""

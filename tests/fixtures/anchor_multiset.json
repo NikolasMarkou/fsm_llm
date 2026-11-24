@@ -1099,6 +1099,16 @@
       "delta": 1,
       "reason": "plan 3f4530d3 step 5: new anchor token D-008 at handlers/system.py (the handler event is written by the caller thread)",
       "token": "plan-2026-11-24T193347-3f4530d3/D-008"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 3f4530d3 step 6: new anchors D-010 (llm/failures.py, the failure code mapper order) and D-011 (llm/purpose.py, the purpose is a ContextVar read where events are written)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-010"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 3f4530d3 step 6: new anchors D-010 (llm/failures.py, the failure code mapper order) and D-011 (llm/purpose.py, the purpose is a ContextVar read where events are written)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-011"
     }
   ]
 }

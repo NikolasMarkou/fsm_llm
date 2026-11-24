@@ -106,7 +106,7 @@ class RedactionKind(str, Enum):
 #: The hook of ``EventLog(redact=)``: ``(kind, value) -> value``.
 RedactionHook = Callable[[RedactionKind, Any], Any]
 
-_PROVIDER_CALL = ("source", "call_type", "stream")
+_PROVIDER_CALL = ("source", "call_type", "stream", "purpose")
 
 #: The fields a ``shape`` event may carry (see the module docstring). Names, ids, counts,
 #: codes and flags: no reference, no text, no value. The produced types are listed; a type
@@ -129,7 +129,13 @@ SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
             }
         ),
         EventType.PROVIDER_ERROR: frozenset(
-            {*_PROVIDER_CALL, "request_seq", "error_type", "status_code"}
+            {
+                *_PROVIDER_CALL,
+                "request_seq",
+                "error_type",
+                "failure_code",
+                "status_code",
+            }
         ),
         EventType.TOOL_CALL: frozenset(
             {"name", "call_id", "side_effecting", "gated", "argument_keys"}

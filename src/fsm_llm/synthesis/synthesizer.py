@@ -33,6 +33,7 @@ from typing import Any
 from fsm_llm.agents.semantic_tools import EmbedTextsFn
 from fsm_llm.aio import acall, aoffload, run_sync
 from fsm_llm.constants import SKILL_DEFANG
+from fsm_llm.core.codes import Purpose
 from fsm_llm.core.definitions import (
     ASCII_IDENTIFIER_PATTERN,
     CompletionRequest,
@@ -51,6 +52,7 @@ from fsm_llm.llm import (
     interface_model,
 )
 from fsm_llm.llm.providers.call import warn_bypassed_twins
+from fsm_llm.llm.purpose import purpose_scope
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
 from fsm_llm.policy import HumanInTheLoop
@@ -385,7 +387,8 @@ class FSMSynthesizer:
                 messages=messages, max_tokens=policy.max_compile_tokens
             )
             try:
-                reply = await acall(self.llm, "complete", request)
+                with purpose_scope(Purpose.COMPILE):
+                    reply = await acall(self.llm, "complete", request)
             except LLMResponseError as e:
                 raise SynthesisError(
                     "the strong model call failed", {"rounds": failed}

@@ -16,6 +16,11 @@ Interface contract (callers: ``engine.api.calls`` (settle) for the outage reader
       blob and never raises on an event it can read. One documented difference from the meter:
       a stream that raises while it is read is one error here, where the meter (which counts at
       the send) saw an answered call.
+    - ``usage_by_purpose(events) -> dict[str, LLMCallCounts]``: the same fold of the same events
+      keyed by ``purpose`` (a ``Purpose`` value) instead of by kind, tokens only (cost is row
+      2.1). An event written before the field existed, or with a value outside ``Purpose``,
+      takes the purpose its ``call_type`` implies. One source per reader, as above: the sums
+      equal ``usage_from_events`` of the same events.
     - ``log_position(log, root_id) -> int``: the last ``seq`` of the tree (0 for none).
     - ``provider_errors_since(log, root_id, frame, after_seq) -> int``: the ``provider/error``
       events of that frame with ``seq > after_seq``. ``seq`` is the order, never a time.
@@ -35,7 +40,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
 
-from fsm_llm.core.definitions import LLMUsage
+from fsm_llm.core.codes import Purpose
+from fsm_llm.core.definitions import LLMCallCounts, LLMUsage
+from fsm_llm.llm.purpose import purpose_of
 from fsm_llm.llm.usage import (
     UsageRecord,
     fold,
@@ -59,17 +66,27 @@ def _tokens_of(event: Mapping[str, Any]) -> tuple[int, int, int] | None:
     return None
 
 
-def _records(events: Iterable[Mapping[str, Any]]) -> Iterator[UsageRecord]:
+def _purpose_key(event: Mapping[str, Any], call_type: str) -> str:
+    """The ``purpose`` of an event, or the one its call type implies (old log, foreign value)."""
+    try:
+        return Purpose.from_string(event.get("purpose")).value  # type: ignore[arg-type]
+    except ValueError:
+        return purpose_of(call_type).value
+
+
+def _records(
+    events: Iterable[Mapping[str, Any]], *, by_purpose: bool = False
+) -> Iterator[UsageRecord]:
     for event in events:
         kind = event.get("type")
         if kind != _RESPONSE and kind != _ERROR:
             continue
         call_type = event.get("call_type")
+        call_type = call_type if isinstance(call_type, str) else ""
         yield UsageRecord(
-            usage_kind(
-                call_type if isinstance(call_type, str) else "",
-                event.get("stream") is True,
-            ),
+            _purpose_key(event, call_type)
+            if by_purpose
+            else usage_kind(call_type, event.get("stream") is True),
             kind == _RESPONSE,
             _tokens_of(event) if kind == _RESPONSE else None,
         )
@@ -78,6 +95,11 @@ def _records(events: Iterable[Mapping[str, Any]]) -> Iterator[UsageRecord]:
 def usage_from_events(events: Iterable[Mapping[str, Any]]) -> LLMUsage:
     """The usage the ``llm/response`` and ``provider/error`` events of *events* describe."""
     return fold(_records(events))
+
+
+def usage_by_purpose(events: Iterable[Mapping[str, Any]]) -> dict[str, LLMCallCounts]:
+    """The calls, errors and tokens of *events* per purpose (see the module docstring)."""
+    return dict(fold(_records(events, by_purpose=True)).by_kind)
 
 
 def log_position(log: EventLog, root_id: str) -> int:

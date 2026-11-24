@@ -27,6 +27,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from fsm_llm.core.codes import Purpose
 from fsm_llm.core.definitions import (
     CompletionRequest,
     FSMDefinition,
@@ -46,6 +47,7 @@ from fsm_llm.eval.config import EvalConfig
 from fsm_llm.eval.stats import pass_rate
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.llm.json_extraction import extract_json_from_text
+from fsm_llm.llm.purpose import purpose_scope
 
 from .constants import (
     ABORT_CONTEXT_KEY,
@@ -532,7 +534,8 @@ class Simulator:
             max_tokens=_WRITER_TOKENS,
         )
         try:
-            reply = self.writer.complete(request)
+            with purpose_scope(Purpose.SIMULATE):
+                reply = self.writer.complete(request)
         except LLMResponseError:
             return []
         data = (

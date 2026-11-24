@@ -44,7 +44,8 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
       not made (fail closed, invariant 4); a failing ``llm/response`` or ``provider/error``
       write is a WARNING, never an error that hides the model's own outcome.
     - Event fields: ``llm/request`` ``source`` (``"provider"`` or ``"engine"``), ``call_type``,
-      ``model``, ``stream``, ``prompt_ref`` (a blob: the allow-listed provider input, or
+      ``purpose`` (a ``Purpose`` value, also on ``llm/response`` and ``provider/error``: the
+      ``llm.purpose`` scope, else the one the call type implies), ``model``, ``stream``, ``prompt_ref`` (a blob: the allow-listed provider input, or
       ``{source, request_type, request}``); ``llm/response`` ``request_seq``, ``source``,
       ``call_type``, ``response_ref``, ``finish_reason``, or ``unrecorded: true`` when the reply
       cannot be written (the call still succeeds), plus ``stream`` and ``abandoned`` for a
@@ -53,7 +54,8 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
       ``runtime.usage`` folds them, no blob is read; an engine-logged reply and a stream carry
       none, which the fold counts as ``usage_missing`` as the meter does);
       ``provider/error`` ``request_seq``, ``source``, ``call_type``, ``error_type`` (a
-      class name) and an integer ``status_code`` when the error has one, never message text,
+      class name), a ``failure_code`` (an ``LlmFailureCode`` value) and an integer
+      ``status_code`` when the error has one, never message text,
       plus ``stream: true`` when the call was a stream.
 
 At level ``shape`` (``EventLog(privacy="shape")``, ``runtime.privacy``) a request and a reply
@@ -77,9 +79,11 @@ from typing import Any, NamedTuple
 
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.core.tool_observer import install_tool_observer, reset_tool_observer
+from fsm_llm.llm.failures import classify_failure
 from fsm_llm.llm.interface import interface_model
 from fsm_llm.llm.observer import install_observer, is_observed, reset_observer
 from fsm_llm.llm.parsing import _finish_reason
+from fsm_llm.llm.purpose import resolve_purpose
 from fsm_llm.llm.usage import usage_counts
 from fsm_llm.logging import logger
 from fsm_llm.runtime.constants import MAX_PAYLOAD_DEPTH, USAGE_TOKEN_FIELDS
@@ -100,6 +104,8 @@ class _Pending(NamedTuple):
     call_type: str
     stream: bool
     model: str | None = None
+    purpose: str = ""
+    tools_sent: bool = False
 
 
 @dataclass(frozen=True)
@@ -256,9 +262,12 @@ def _usage_fields(response: Any, model: str | None) -> dict[str, Any]:
     return fields
 
 
-def _error_fields(error: BaseException) -> dict[str, Any]:
-    """``error_type`` (a class name) and an integer ``status_code``; never message text."""
-    fields: dict[str, Any] = {"error_type": type(error).__name__}
+def _error_fields(error: BaseException, *, tools_sent: bool) -> dict[str, Any]:
+    """``error_type`` (a class name), ``failure_code`` and an integer ``status_code``; never text."""
+    fields: dict[str, Any] = {
+        "error_type": type(error).__name__,
+        "failure_code": classify_failure(error, tools_sent=tools_sent).value,
+    }
     status = getattr(error, "status_code", None)
     if type(status) is int:
         fields["status_code"] = status
@@ -297,18 +306,25 @@ class _ScopeObserver:
 
     def begin_send(self, call: dict[str, Any], *, call_type: str) -> object | None:
         stream = bool(call.get("stream"))
+        purpose = resolve_purpose(call_type).value
         seq = _log_request(
             self._scope,
             lambda: call,
             source=SOURCE_PROVIDER,
             call_type=call_type,
+            purpose=purpose,
             model=call.get("model"),
             stream=stream,
         )
         self.last_request_seq = seq
         model = call.get("model")
         return _Pending(
-            seq, call_type, stream, model if isinstance(model, str) else None
+            seq,
+            call_type,
+            stream,
+            model if isinstance(model, str) else None,
+            purpose,
+            call.get("tools") is not None,
         )
 
     def end_send(self, token: object | None, response: Any) -> None:
@@ -322,6 +338,7 @@ class _ScopeObserver:
             request_seq=token.request_seq,
             source=SOURCE_PROVIDER,
             call_type=token.call_type,
+            purpose=token.purpose,
             **_response_fields(scope.log, response, wrap=None),
             **_usage_fields(response, token.model),
         )
@@ -337,7 +354,8 @@ class _ScopeObserver:
             request_seq=token.request_seq,
             source=SOURCE_PROVIDER,
             call_type=token.call_type,
-            **_error_fields(error),
+            purpose=token.purpose,
+            **_error_fields(error, tools_sent=token.tools_sent),
         )
 
 
@@ -449,10 +467,12 @@ class LlmCall:
         "_errored",
         "_exhausted",
         "_logs_reply",
+        "_purpose",
         "_request_seq",
         "_scope",
         "_source",
         "_stream",
+        "_tools_sent",
     )
 
     def __init__(
@@ -464,7 +484,11 @@ class LlmCall:
         *,
         logs_reply: bool,
         stream: bool = False,
+        purpose: str = "",
+        tools_sent: bool = False,
     ) -> None:
+        self._purpose = purpose
+        self._tools_sent = tools_sent
         self._scope = scope
         self._request_seq = request_seq
         self._call_type = call_type
@@ -491,6 +515,7 @@ class LlmCall:
             request_seq=self._request_seq,
             source=self._source,
             call_type=self._call_type,
+            purpose=self._purpose,
             **_response_fields(self._scope.log, reply, wrap=type(reply).__name__),
         )
 
@@ -585,6 +610,7 @@ class LlmCall:
             request_seq=self._link(),
             source=self._source,
             call_type=self._call_type,
+            purpose=self._purpose,
             stream=True,
             abandoned=bool(abandoned),
             **fields,
@@ -600,7 +626,8 @@ class LlmCall:
             request_seq=self._link(),
             source=self._source,
             call_type=self._call_type,
-            **_error_fields(error),
+            purpose=self._purpose,
+            **_error_fields(error, tools_sent=self._tools_sent),
             **({"stream": True} if self._stream else {}),
         )
 
@@ -617,11 +644,20 @@ def llm_call(
     if scope is None:
         yield _NO_CALL
         return
+    purpose = resolve_purpose(call_type).value
+    tools_sent = getattr(request, "tools", None) is not None
     if is_observed(interface):
         # an earlier call of this scope must not be the link of a stream that never sends
         scope.observer.last_request_seq = None
         observed = LlmCall(
-            scope, None, call_type, SOURCE_PROVIDER, logs_reply=False, stream=stream
+            scope,
+            None,
+            call_type,
+            SOURCE_PROVIDER,
+            logs_reply=False,
+            stream=stream,
+            purpose=purpose,
+            tools_sent=tools_sent,
         )
         try:
             yield observed
@@ -640,11 +676,19 @@ def llm_call(
         },
         source=SOURCE_ENGINE,
         call_type=call_type,
+        purpose=purpose,
         model=interface_model(interface),
         stream=bool(stream),
     )
     call = LlmCall(
-        scope, seq, call_type, SOURCE_ENGINE, logs_reply=True, stream=bool(stream)
+        scope,
+        seq,
+        call_type,
+        SOURCE_ENGINE,
+        logs_reply=True,
+        stream=bool(stream),
+        purpose=purpose,
+        tools_sent=tools_sent,
     )
     # An inner LiteLLMInterface (a wrapper) must not log the call a second time. A stream
     # is read after this block yields, so `LlmCall.stream` switches the observer off per chunk.

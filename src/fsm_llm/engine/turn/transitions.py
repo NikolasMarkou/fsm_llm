@@ -23,6 +23,7 @@ from fsm_llm.constants import (
     TRANSITION_CLASSIFICATION_FALLBACK_INTENT,
     TRANSITION_CLASSIFICATION_THRESHOLD_KEY,
 )
+from fsm_llm.core.codes import Purpose
 from fsm_llm.core.definitions import (
     ClassificationError,
     ClassificationPromptConfig,
@@ -43,6 +44,7 @@ from fsm_llm.engine.kinds.records import (
 )
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.llm import implements_complete
+from fsm_llm.llm.purpose import purpose_scope
 from fsm_llm.logging import logger
 
 from .events import record_transition
@@ -314,17 +316,20 @@ class TransitionsMixin(_PipelineSurface):
                 evaluation.available_options,
             )
             classifier = self._get_classifier(schema, None)
-            result: ClassificationResult = await acall(
-                classifier,
-                "classify",
-                user_message,
-                context=self._build_classifier_context(
-                    instance,
-                    current_state,
-                    conversation_id,
-                    user_message=user_message,
-                ),
-            )
+            # the tie-break shares the `classification` call type with the classifier of
+            # `classification_extractions`: only this scope tells them apart in the log
+            with purpose_scope(Purpose.TIE_BREAK):
+                result: ClassificationResult = await acall(
+                    classifier,
+                    "classify",
+                    user_message,
+                    context=self._build_classifier_context(
+                        instance,
+                        current_state,
+                        conversation_id,
+                        user_message=user_message,
+                    ),
+                )
         except _CLASSIFICATION_SOFT_FAIL_EXCEPTIONS as e:
             # DECISION plan-2026-09-20T165703-0d9c218e/D-001: "stay" is the
             # degrade ONLY for the classes the shared tuple names (the D-004
