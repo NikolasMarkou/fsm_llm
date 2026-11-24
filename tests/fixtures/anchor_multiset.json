@@ -1029,6 +1029,11 @@
       "delta": -1,
       "reason": "step 17 of plan a555dcfe (debate as a pattern file, D-028, owner D-029): the builder of debate is replaced by patterns/debate.json; the judge-edge round disjunct rule (c1d5bfbc D-009: the cap reads current_round, never an extracted value) and the consensus_reached prompt keys (06a5ec0a D-054: debate_rounds stays in the list, agent_trace stays out) live in the file and are held by test_pattern_debate and test_debate; the other debate anchors moved with their handler bodies to handlers/debate.py and handlers/library_stepwise.py",
       "token": "plan-2026-09-29T103145-06a5ec0a/D-054"
+    },
+    {
+      "delta": -1,
+      "reason": "step 18 of plan a555dcfe (evaluator_optimizer as a pattern file, D-029, owner D-029 of plan ace7a8c8): the builder of evalopt is replaced by patterns/evaluator_optimizer.json; the rule that generate keeps an unconditional lowest-priority fallback edge to evaluate (core runs no PRE_TRANSITION limiter on a BLOCKED turn) lives in the file and is held by test_pattern_shapes (the loop-state fallback rows) and the generate fallback row of test_evaluator_optimizer; the other evaluator_optimizer anchors moved with their handler bodies to handlers/evaluator_optimizer.py and library_stepwise.py or stay in the class",
+      "token": "plan-2026-09-24T045559-3e4eb3e5/D-002"
     }
   ]
 }

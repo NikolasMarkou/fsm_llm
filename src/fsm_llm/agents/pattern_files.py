@@ -47,6 +47,7 @@ PATTERN_ORDER: tuple[str, ...] = (
     "plan_execute",
     "maker_checker",
     "debate",
+    "evaluator_optimizer",
 )
 
 

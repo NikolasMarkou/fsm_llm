@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, cast
 from fsm_llm.agents.constants import (
     ContextKeys,
     Defaults,
-    EvalOptStates,
     MakerCheckerStates,
 )
 from fsm_llm.tools import ToolRegistry, schema_types, tool_parameters_schema
@@ -417,37 +416,6 @@ def build_rewoo_solve_response_instructions() -> str:
         "Present your final answer clearly, referencing the evidence gathered "
         "from the planned tool executions."
     )
-
-
-# ---------------------------------------------------------------------------
-# Evaluator-Optimizer prompts
-# ---------------------------------------------------------------------------
-
-
-def build_evalopt_field_instructions() -> dict[str, str]:
-    """Per-field instructions for EvalOpt's typed ``generated_output``.
-
-    Returns ``{state: instructions}`` for ``generate`` and ``refine``. The
-    refine prompt shows ``previous_output`` and ``refinement_feedback``.
-    """
-    return {
-        EvalOptStates.GENERATE: (
-            f"{_COMPOSE}Your complete output for the task: the full "
-            "deliverable itself, exactly as it should be delivered, with no "
-            "commentary before or after it."
-        ),
-        EvalOptStates.REFINE: (
-            f"{_COMPOSE}Your complete refined output for the task: rewrite "
-            "previous_output so that it fixes every point of "
-            "refinement_feedback. Give the full deliverable, not only the "
-            "changes, with no commentary before or after it."
-        ),
-    }
-
-
-def build_evalopt_output_response_instructions() -> str:
-    """Build response instructions for the EvalOpt output state."""
-    return "Present the final, evaluated output as your answer."
 
 
 # ---------------------------------------------------------------------------

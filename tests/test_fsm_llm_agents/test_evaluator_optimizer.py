@@ -89,7 +89,7 @@ class TestEvaluatorOptimizerCreation:
     def test_no_tool_registry_needed(self):
         """EvaluatorOptimizerAgent does not require a ToolRegistry."""
         agent = EvaluatorOptimizerAgent(evaluation_fn=_always_pass)
-        assert not hasattr(agent, "tools")
+        assert agent.tools is None
 
     def test_stores_api_kwargs(self):
         agent = EvaluatorOptimizerAgent(

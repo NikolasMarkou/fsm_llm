@@ -3,8 +3,10 @@
 The Plan-and-Execute four (``agents.plan_step_executor``, ``plan_step_fresh_keys``, ``plan_step_checker`` and
 ``plan_replan_counter``; bodies in ``plan_execute.py``), the Maker-Checker five (``agents.revision_count``,
 ``maker_checker_checker``, ``revise_entry``, ``revise_exit`` and ``force_pass``; bodies in
-``maker_checker.py``) and the Debate three (``agents.debate_judge``, ``debate_consensus_reset`` and
-``debate_limiter``; bodies in ``debate.py``). The interface contract of a factory is in ``library.py``.
+``maker_checker.py``), the Debate three (``agents.debate_judge``, ``debate_consensus_reset`` and
+``debate_limiter``; bodies in ``debate.py``) and the Evaluator-Optimizer three (``agents.evalopt_evaluator``,
+``refine_entry`` and ``refine_exit``; body in ``evaluator_optimizer.py``). The interface contract of a factory
+is in ``library.py``.
 """
 
 from __future__ import annotations
@@ -16,11 +18,13 @@ from fsm_llm.agents.constants import (
     ContextKeys,
     DebateStates,
     Defaults,
+    EvalOptStates,
     HandlerNames,
     HandlerPriorities,
     MakerCheckerStates,
     PlanExecuteStates,
 )
+from fsm_llm.core.definitions import AgentError
 from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.tools import require_int_limit
 
@@ -31,7 +35,8 @@ from .debate import (
     make_propose_entry_handler,
     record_forced_consensus,
 )
-from .freshness import make_fresh_keys_handler
+from .evaluator_optimizer import evaluate_output
+from .freshness import make_fresh_keys_handler, make_redraft_handlers
 from .library_react import iteration_check
 from .library_support import _keys, _on_entry, _priority, _states
 from .maker_checker import (
@@ -256,4 +261,69 @@ def debate_limiter(
         .with_priority(_priority(binding, HandlerPriorities.ITERATION_LIMITER))
         .at(HandlerTiming.PRE_TRANSITION)
         .do(debate_iteration_check(ctx, binding))
+    ]
+
+
+def evalopt_evaluator(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.evalopt_evaluator``: runs the host's ``evaluation_fn`` on entry to ``evaluate`` and records the verdict.
+
+    Reads the required callable ``evaluation_fn`` (``ctx.callables``) and the option ``max_refinements`` (at
+    least 0), the default for a context that carries no ``_max_refinements``. ``AgentError`` without the callable.
+    """
+    limit = require_int_limit(
+        "max_refinements",
+        ctx.options.get("max_refinements", Defaults.MAX_REFINEMENTS),
+        minimum=0,
+    )
+    evaluation_fn = ctx.callables.get("evaluation_fn")
+    if not callable(evaluation_fn):
+        raise AgentError("agents.evalopt_evaluator needs the callable 'evaluation_fn'")
+    return _on_entry(
+        HandlerNames.EVAL_OPT_EVALUATOR,
+        binding,
+        EvalOptStates.EVALUATE,
+        HandlerPriorities.TOOL_EXECUTOR,
+        lambda context: evaluate_output(context, evaluation_fn, limit),
+    )
+
+
+def _redraft() -> tuple[
+    Callable[[dict[str, Any]], dict[str, Any]],
+    Callable[[dict[str, Any]], dict[str, Any]],
+]:
+    """The ``refine`` (entry, exit) pair over ``generated_output`` and ``previous_output``."""
+    # DECISION plan-2026-09-24T045559-3e4eb3e5/D-013: refine must re-extract
+    # generated_output (core skips a set key), so entering refine moves
+    # the draft to previous_output and leaving it restores the draft if
+    # none was produced. Do NOT drop the stash: refine's prompt reads it.
+    # The evaluation keys need no clearing: the evaluator rewrites them.
+    return make_redraft_handlers(
+        ContextKeys.GENERATED_OUTPUT, ContextKeys.PREVIOUS_OUTPUT
+    )
+
+
+def refine_entry(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.refine_entry``: on entry to ``refine`` the draft moves to ``previous_output`` so it is extracted again."""
+    return _on_entry(
+        HandlerNames.EVAL_OPT_REFINE_ENTRY,
+        binding,
+        EvalOptStates.REFINE,
+        HandlerPriorities.TOOL_EXECUTOR,
+        _redraft()[0],
+    )
+
+
+def refine_exit(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.refine_exit``: on exit from ``refine`` the stashed draft is restored when none was produced."""
+    return [
+        create_handler(HandlerNames.EVAL_OPT_REFINE_EXIT)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_exit(*_states(binding, (EvalOptStates.REFINE,)))
+        .do(_redraft()[1])
     ]

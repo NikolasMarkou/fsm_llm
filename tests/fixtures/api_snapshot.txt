@@ -1279,9 +1279,8 @@ fsm_llm.agents.EvaluationResult class(BaseModel)
   field score: float = 0.0
   field feedback: str = ''
   field criteria_met: list[str] = factory
-fsm_llm.agents.EvaluatorOptimizerAgent class(BaseAgent)
+fsm_llm.agents.EvaluatorOptimizerAgent class(PatternAgent)
   def __init__(self, evaluation_fn: Callable[[str, dict[str, Any]], EvaluationResult], config: AgentConfig | None = None, max_refinements: int = 3, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.FSMArtifactBuilder class(ArtifactBuilder)
   def __init__(self) -> None
   def add_state(self, state_id: str, description: str, purpose: str, extraction_instructions: str | None = None, response_instructions: str | None = None) -> FSMArtifactBuilder

@@ -188,6 +188,9 @@ class TestTheNamespaces:
             "agents.debate_judge",
             "agents.debate_consensus_reset",
             "agents.debate_limiter",
+            "agents.evalopt_evaluator",
+            "agents.refine_entry",
+            "agents.refine_exit",
             "agents.approval_gate",
         ]
         assert [name for name, _ in library.HOOKS] == [
@@ -428,6 +431,8 @@ class TestPerRunState:
                 continue  # needs a limit; its twin row is in TestTheContextCountingLimiter
             if name == "agents.chain_gate_checker":
                 continue  # builds nothing without the chain options; test_pattern_prompt_chain has its row
+            if name == "agents.evalopt_evaluator":
+                continue  # needs the host's evaluation_fn; test_pattern_evaluator_optimizer has its row
             first = factory(_context_of(agent))
             second = factory(_context_of(agent))
             assert first and second, name

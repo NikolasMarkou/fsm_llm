@@ -1017,6 +1017,7 @@
     "fsm_llm.agents.handlers.chain",
     "fsm_llm.agents.handlers.context",
     "fsm_llm.agents.handlers.debate",
+    "fsm_llm.agents.handlers.evaluator_optimizer",
     "fsm_llm.agents.handlers.library",
     "fsm_llm.agents.handlers.library_react",
     "fsm_llm.agents.handlers.library_stepwise",

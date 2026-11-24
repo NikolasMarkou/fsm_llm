@@ -1,40 +1,30 @@
 """
-EvaluatorOptimizerAgent — Generate-Evaluate-Refine agent implementation.
+EvaluatorOptimizerAgent: Generate-Evaluate-Refine agent implementation.
 
 Uses an external evaluation function (NOT LLM self-evaluation) to
 iteratively improve LLM-generated output until it passes or
 maximum refinements are reached.
+
+The machine is the pattern file ``patterns/evaluator_optimizer.json`` run by ``PatternAgent`` (plan
+a555dcfe step 18); its handlers are the library factories ``agents.evalopt_evaluator``,
+``agents.refine_entry``, ``agents.refine_exit`` and ``agents.iteration_limiter``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
-from fsm_llm import API
-from fsm_llm.agents.constants import (
-    ContextKeys,
-    Defaults,
-    EvalOptStates,
-    HandlerNames,
-    HandlerPriorities,
-    LogMessages,
-    StopReason,
-)
-from fsm_llm.agents.fsm_definitions.evalopt import build_evalopt_fsm
-from fsm_llm.logging import logger
+from fsm_llm.agents.constants import ContextKeys, Defaults
 from fsm_llm.tools import require_int_limit
 
-from .base import BaseAgent, artifact_text
-from .definitions import AgentConfig, AgentResult, EvaluationResult
-from .handlers import (
-    make_iteration_limiter,
-    make_redraft_handlers,
-    run_evaluation_fn,
-)
+from .definitions import AgentConfig, EvaluationResult
+from .handlers.evaluator_optimizer import evaluate_output
+from .handlers.library_react import iteration_check
+from .pattern_agent import PatternAgent
 
 
-class EvaluatorOptimizerAgent(BaseAgent):
+class EvaluatorOptimizerAgent(PatternAgent):
     """
     Agent that iteratively refines output using external evaluation.
 
@@ -58,6 +48,9 @@ class EvaluatorOptimizerAgent(BaseAgent):
         result = agent.run("Write a Python function that adds two numbers")
         print(result.answer)
     """
+
+    # No `tools` argument: `create_agent` raises for tools given to this pattern (`accepts_tools`).
+    takes_tools: ClassVar[bool] = False
 
     # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
     _run_output_keys = frozenset(
@@ -91,174 +84,45 @@ class EvaluatorOptimizerAgent(BaseAgent):
         max_refinements = require_int_limit(
             "max_refinements", max_refinements, minimum=0
         )
-        super().__init__(config, **api_kwargs)
+        from .pattern_files import load_envelope  # lazy: reads the file
+
+        super().__init__(
+            load_envelope("evaluator_optimizer"),
+            config=config,
+            options={"max_refinements": max_refinements},
+            callables={"evaluation_fn": evaluation_fn},
+            **api_kwargs,
+        )
         self.evaluation_fn = evaluation_fn
         self.max_refinements = max_refinements
 
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
-        """
-        Run the agent on a task.
-
-        :param task: The task/question for the agent to solve
-        :param initial_context: Optional initial context data
-        :return: AgentResult with answer, trace, and metadata
-        """
-        # Build FSM
-        fsm_def = build_evalopt_fsm()
-
-        # Build initial context
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.REFINEMENT_COUNT: 0,
-                ContextKeys.MAX_REFINEMENTS: self.max_refinements,
-            },
-        )
-
-        # D-036: `generated_output` is this pattern's answer key (precedent
-        # maker_checker.py DRAFT_OUTPUT); without it a
-        # correct evaluator-passed run reads as prose-fallback, success=False.
-        # DECISION plan-2026-11-05T134105-5ed71cf2/D-010: no `_extract_answer`
-        # override and no minimum answer length here. The base chain ships the
-        # judged artifact when it is non-empty ("Paris", "42", "Yes" are
-        # answers); a `len(x) > 5` floor replaced it with the failure sentence
-        # under success=True. Do NOT re-add a length test. See decisions.md.
-        return self._standard_run(
-            task,
-            fsm_def,
-            context,
-            "evaluator_optimizer",
-            extra_answer_keys=[ContextKeys.GENERATED_OUTPUT],
-            # Forced only on _run_evaluation's recorded override (D-051).
-            judged=True,
-        )
-
-    def _register_handlers(self, api: API) -> None:
-        """Register agent handlers with the API."""
-        # Evaluation handler: runs external evaluation on entry to evaluate state
-        api.register_handler(
-            api.create_handler(HandlerNames.EVAL_OPT_EVALUATOR)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(EvalOptStates.EVALUATE)
-            .do(self._run_evaluation)
-        )
-
-        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-013: refine must re-extract
-        # generated_output (core skips a set key), so entering refine moves
-        # the draft to previous_output and leaving it restores the draft if
-        # none was produced. Do NOT drop the stash: refine's prompt reads it.
-        # The evaluation keys need no clearing: _run_evaluation rewrites them.
-        on_entry, on_exit = make_redraft_handlers(
-            ContextKeys.GENERATED_OUTPUT, ContextKeys.PREVIOUS_OUTPUT
-        )
-        api.register_handler(
-            api.create_handler(HandlerNames.EVAL_OPT_REFINE_ENTRY)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(EvalOptStates.REFINE)
-            .do(on_entry)
-        )
-        api.register_handler(
-            api.create_handler(HandlerNames.EVAL_OPT_REFINE_EXIT)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_exit(EvalOptStates.REFINE)
-            .do(on_exit)
-        )
-
-        # Iteration limiter
-        self._register_iteration_limiter(api, self._make_iteration_limiter())
-
-    def _run_evaluation(self, context: dict[str, Any]) -> dict[str, Any]:
-        """
-        Run the external evaluation function on the generated output.
-
-        If the evaluation passes, sets evaluation_passed=True.
-        If it fails and refinement_count < max, sets evaluation_passed=False
-        with feedback. If max refinements reached, forces evaluation_passed=True.
-        """
-        generated_output = context.get(ContextKeys.GENERATED_OUTPUT, "")
-        refinement_count = context.get(ContextKeys.REFINEMENT_COUNT, 0)
-        max_refinements = context.get(ContextKeys.MAX_REFINEMENTS, self.max_refinements)
-
-        # Run the external evaluation (a raise or a wrong-typed return is a
-        # failed evaluation, never a swallowed handler error).
-        eval_result = run_evaluation_fn(
-            self.evaluation_fn, artifact_text(generated_output), context
-        )
-
-        logger.info(
-            LogMessages.EVALUATION.format(
-                result="PASSED" if eval_result.passed else "FAILED",
-                score=eval_result.score,
-            )
-        )
-
-        # Store the evaluation result
-        trace = list(context.get(ContextKeys.AGENT_TRACE, []))
-        trace.append(
-            {
-                "type": "evaluation",
-                "refinement_count": refinement_count,
-                "passed": eval_result.passed,
-                "score": eval_result.score,
-                "feedback": eval_result.feedback,
-            }
-        )
-
-        if eval_result.passed:
-            return {
-                ContextKeys.EVALUATION_PASSED: True,
-                ContextKeys.EVALUATION_RESULT: eval_result.model_dump(mode="json"),
-                ContextKeys.AGENT_TRACE: trace,
-            }
-
-        # Check if max refinements reached — force pass with best effort.
-        # refinement_count is 0-indexed: allows exactly max_refinements attempts
-        # before forcing pass on the (max_refinements + 1)th evaluation.
-        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-022: also honour the
-        # limiter's max_iterations_reached here. Do NOT rely on the limiter's
-        # forced evaluation_passed alone: this entry handler overwrites it with
-        # False every round, so the run never stopped and hit the 3x ceiling.
-        # Forcing here ships the output just evaluated, never an unjudged one.
-        at_budget = context.get(ContextKeys.MAX_ITERATIONS_REACHED) is True
-        if refinement_count >= max_refinements or at_budget:
-            logger.info(
-                f"Max refinements ({max_refinements}) reached, "
-                "forcing output with best effort"
-            )
-            return {
-                ContextKeys.EVALUATION_PASSED: True,
-                ContextKeys.EVALUATION_RESULT: eval_result.model_dump(mode="json"),
-                ContextKeys.REFINEMENT_FEEDBACK: eval_result.feedback,
-                ContextKeys.AGENT_TRACE: trace,
-                # The output ships, but the run reports success=False (D-011).
-                ContextKeys.FORCED_STOP_REASON: StopReason.FORCED_PASS.value,
-            }
-
-        # Evaluation failed, provide feedback for refinement
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-010: no `_extract_answer`
+    # override and no minimum answer length here. The base chain ships the
+    # judged artifact when it is non-empty ("Paris", "42", "Yes" are
+    # answers); a `len(x) > 5` floor replaced it with the failure sentence
+    # under success=True. Do NOT re-add a length test. See decisions.md.
+    def _context_seed(self) -> dict[str, Any]:
+        """The file's seed (``refinement_count``) and the cap the evaluator reads."""
         return {
-            ContextKeys.EVALUATION_PASSED: False,
-            ContextKeys.EVALUATION_RESULT: eval_result.model_dump(mode="json"),
-            ContextKeys.REFINEMENT_FEEDBACK: eval_result.feedback,
-            ContextKeys.REFINEMENT_COUNT: refinement_count + 1,
-            ContextKeys.AGENT_TRACE: trace,
+            **super()._context_seed(),
+            ContextKeys.MAX_REFINEMENTS: self.max_refinements,
         }
 
+    def _run_evaluation(self, context: dict[str, Any]) -> dict[str, Any]:
+        """The ``agents.evalopt_evaluator`` body for this agent's function and cap."""
+        return evaluate_output(context, self.evaluation_fn, self.max_refinements)
+
     def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the iteration limiter handler (shared rule, see handlers)."""
+        """The closure ``agents.iteration_limiter`` registers for this agent (the file's binding)."""
         # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: no forced reason
-        # here. Do NOT add FORCED_STOP_REASON back to this dict: the limiter
-        # fires on every transition past the limit, including the one after a
-        # genuine pass, so a real pass read as forced_pass. _run_evaluation
-        # records it only when it overrides a failing verdict.
-        return make_iteration_limiter(
-            self.config.max_iterations,
-            {
-                ContextKeys.MAX_ITERATIONS_REACHED: True,
-                ContextKeys.EVALUATION_PASSED: True,
-            },
+        # in the limiter's keys. Do NOT add FORCED_STOP_REASON back to the
+        # binding of patterns/evaluator_optimizer.json: the limiter fires on
+        # every transition past the limit, including the one after a genuine
+        # pass, so a real pass read as forced_pass. The evaluator records it
+        # only when it overrides a failing verdict.
+        binding = next(
+            b
+            for b in self.envelope.body.handlers
+            if b.handler == "agents.iteration_limiter"
         )
+        return iteration_check(self._handler_context(), binding)

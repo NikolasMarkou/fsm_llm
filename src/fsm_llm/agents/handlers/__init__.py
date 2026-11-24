@@ -25,6 +25,7 @@ became this package at the same dotted path; the import surface is unchanged):
   group ``agents.native_fc``; not in ``__all__``)
 - ``orchestrator`` -- ``delegate_to_workers``, the body of ``agents.orchestrator_delegator`` (not in ``__all__``)
 - ``debate`` -- the bodies of ``agents.debate_judge``, ``agents.debate_consensus_reset`` and ``agents.debate_limiter`` (not in ``__all__``)
+- ``evaluator_optimizer`` -- ``evaluate_output``, the body of ``agents.evalopt_evaluator`` (not in ``__all__``)
 - ``rewoo`` -- ``execute_plans`` and the ``#E<n>`` substitution, the body of ``agents.rewoo_executor`` (not in ``__all__``)
 - ``plan_execute`` -- ``bounded_plan`` and the bodies of ``agents.plan_step_executor``, ``agents.plan_step_checker`` and
   ``agents.plan_replan_counter`` (not in ``__all__``)
