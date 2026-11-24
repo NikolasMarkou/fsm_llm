@@ -17,11 +17,12 @@ Interface contract:
   a variant selects it; an option named ``approval`` or like an input the agent derives is refused
   (``AgentError``). ``callables`` are named host objects a factory may read (``HandlerContext``).
   The run block honours ``agent_type``, ``answer_keys``, ``success_keys``, ``evidence_keys``,
-  ``judged``, ``context_seed`` and the hooks ``at: after_run`` (D-022: library entries called, in
-  declared order, when the loop ends, also when it raised; an error of a hook propagates; a hook may replace
-  the run's result in ``handlers.scope[RUN_RESULT]``, which ``run`` then returns);
-  ``step_budget``, ``run_output_keys``, ``seconds_exempt`` and the hooks ``before_run`` and
-  ``on_iteration`` have no seam yet and are REFUSED at construction (``AgentError``), never ignored.
+  ``judged``, ``context_seed`` and the hooks (D-022, D-032): ``before_run`` rewrites the task once,
+  ``after_run`` hooks run in declared order when each attempt's loop ends, also when it raised, and may
+  replace the result in ``handlers.scope[RUN_RESULT]`` or return a ``Retry`` (the loop runs again on the
+  task plus its note), ``on_iteration`` hooks run at every step AFTER the HITL driver and write only
+  through a writer that refuses an internal-prefixed key; ``step_budget``, ``run_output_keys`` and
+  ``seconds_exempt`` have no seam yet and are REFUSED at construction (``AgentError``), never ignored.
 - HITL, fail closed (census D1): a file that binds ``agents.approval_gate`` runs
   ``_refuse_unapprovable_flagged_tools`` at construction and at the start of every run and selects the
   ``approval`` variant exactly under ``_hitl_active``; a file whose ``requires.tools`` is ``some`` (or that binds ``agents.tool_executor``) and
@@ -36,13 +37,21 @@ Interface contract:
 from __future__ import annotations
 
 import copy
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from functools import partial
 from typing import Any
 
 from fsm_llm import API
 from fsm_llm.agents.constants import Defaults, LogMessages
-from fsm_llm.agents.handlers.context import RUN_RESULT, HandlerContext
+from fsm_llm.agents.handlers.context import (
+    RUN_ATTEMPT,
+    RUN_RESULT,
+    RUN_TASK,
+    HandlerContext,
+    Retry,
+)
 from fsm_llm.agents.pattern_inputs import pattern_fsm, refuse_reserved_options
+from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
 from fsm_llm.core.definitions.executable_pattern import APPROVAL_GATE_HANDLER
@@ -64,7 +73,7 @@ __all__ = ["PatternAgent"]
 _TOOL_EXECUTOR = "agents.tool_executor"
 _THINK_LIMITER = "agents.think_turn_limiter"
 _NO_SEAM = ("step_budget", "run_output_keys", "seconds_exempt")
-_AFTER_RUN = "after_run"
+_BEFORE_RUN, _AFTER_RUN, _ON_ITERATION = "before_run", "after_run", "on_iteration"
 
 
 class PatternAgent(BaseAgent):
@@ -85,11 +94,6 @@ class PatternAgent(BaseAgent):
             raise AgentError(
                 f"pattern {envelope.id!r} sets run fields {unsupported} that have no "
                 "seam in this version; they are refused, not ignored"
-            )
-        if early := [hook.at for hook in body.run.hooks if hook.at != _AFTER_RUN]:
-            raise AgentError(
-                f"pattern {envelope.id!r} binds hooks at {early} that have no seam in "
-                f"this version (only {_AFTER_RUN!r}); they are refused, not ignored"
             )
         bound = {binding.handler for binding in body.handlers}
         self._gate = APPROVAL_GATE_HANDLER in bound
@@ -180,7 +184,10 @@ class PatternAgent(BaseAgent):
         )
 
     def _run_inputs(
-        self, task: str, initial_context: dict[str, Any] | None
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None,
+        handlers: HandlerContext | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any], HandlerContext]:
         """The FSM, initial context and call-local handler context of one run, shared by ``run``
         and ``run_stream`` so the two cannot drift.
@@ -190,7 +197,7 @@ class PatternAgent(BaseAgent):
         gate (``BaseAgent._hitl_active``, D-001 of plan c1d5bfbc).
         """
         self._refuse_run_start()
-        handlers = self._handler_context()
+        handlers = handlers or self._handler_context()
         fsm_def = self._fsm_for_run(task, initial_context)
         seed = self._context_seed() or None
         if self._react_loop:
@@ -218,31 +225,68 @@ class PatternAgent(BaseAgent):
             "success_keys": list(run.success_keys) or None,
         }
 
+    def _run_loop(
+        self,
+        task: str,
+        initial_context: dict[str, Any] | None,
+        handlers: HandlerContext,
+    ) -> AgentResult:
+        """One attempt: the FSM of the file run on *task* with this attempt's call-local context
+        (the seam a ``before_run`` or retry chain wraps, D-032)."""
+        fsm_def, context, _ = self._run_inputs(task, initial_context, handlers)
+        return self._standard_run(
+            task,
+            fsm_def,
+            context,
+            self._agent_type,
+            handlers=handlers,
+            **self._run_kwargs(),
+            **self._budget_kwargs(),
+        )
+
+    # DECISION plan-2026-11-24T043150-a555dcfe/D-032
+    # `run` is the ONE seam of the run hooks: `before_run` once, then attempts, each with its own
+    # context (`RUN_TASK`, `RUN_ATTEMPT`, `RUN_RESULT` in its scope) and its `after_run` hooks in a
+    # `finally`; a `Retry` runs another attempt on the base task plus its note. Do NOT add a second
+    # wrapper around `run` (a class override that loops or persists is the pattern the file
+    # replaced), do NOT cap the attempts here (the retry hook owns its bound), do NOT hand an
+    # `on_iteration` hook the `api` (its writer refuses internal-prefixed keys: no grant path) and do
+    # NOT run an `on_iteration` hook before `super()._on_loop_iteration`, the HITL driver.
     def run(
         self, task: str, initial_context: dict[str, Any] | None = None
     ) -> AgentResult:
-        """Run the pattern on *task* (one call-local ``HandlerContext``; see the module docstring)."""
-        fsm_def, context, handlers = self._run_inputs(task, initial_context)
-        try:
-            handlers.scope[RUN_RESULT] = self._standard_run(
-                task,
-                fsm_def,
-                context,
-                self._agent_type,
-                handlers=handlers,
-                **self._run_kwargs(),
-                **self._budget_kwargs(),
-            )
-        finally:
-            self._after_run(handlers)
-        result: AgentResult = handlers.scope[RUN_RESULT]  # a hook may have replaced it
-        return result
+        """Run the pattern on *task* (one call-local ``HandlerContext`` per attempt; see the module docstring)."""
+        base = self._before_run(task)
+        note: str | None = None
+        attempt = 0
+        while True:
+            handlers = self._handler_context()
+            handlers.scope.update({RUN_TASK: task, RUN_ATTEMPT: attempt})
+            try:
+                handlers.scope[RUN_RESULT] = self._run_loop(
+                    base if note is None else f"{base}\n\n{note}",
+                    initial_context,
+                    handlers,
+                )
+            finally:
+                retry = self._after_run(handlers)
+            if retry is None:
+                result: AgentResult = handlers.scope[
+                    RUN_RESULT
+                ]  # a hook may have replaced it
+                return result
+            note, attempt = retry.note, attempt + 1
 
     def run_stream(
         self, task: str, initial_context: dict[str, Any] | None = None
     ) -> Iterator[str]:
-        """Run the pattern, streaming the reply of each speaking state (lazy, like ``run``)."""
+        """Run the pattern, streaming the reply of each speaking state (lazy, like ``run``).
+
+        ``before_run`` applies; the ``after_run`` hooks run with an empty result slot (D-025, D-032).
+        """
+        task = self._before_run(task)
         fsm_def, context, handlers = self._run_inputs(task, initial_context)
+        handlers.scope[RUN_TASK] = task
         try:
             yield from self._standard_run_stream(
                 task,
@@ -255,25 +299,64 @@ class PatternAgent(BaseAgent):
         finally:
             self._after_run(handlers)
 
+    def _hook_calls(
+        self, at: str, handlers: HandlerContext | None = None
+    ) -> Iterator[Callable[..., Any]]:
+        """The hooks of the file at position *at*, each built when reached from the library entry
+        (a context is made only when some hook is bound there); a handler factory is no hook."""
+        bound = [hook for hook in self.envelope.body.run.hooks if hook.at == at]
+        context = (handlers or self._handler_context()) if bound else None
+        for hook in bound:
+            call = HANDLERS.resolve(hook.hook)(context, hook)
+            if not callable(call):
+                raise AgentError(f"hook {hook.hook!r} is a handler, not a hook")
+            yield call
+
+    def _before_run(self, task: str) -> str:
+        """The task the attempts run on: the ``before_run`` hooks applied in declared order."""
+        for call in self._hook_calls(_BEFORE_RUN):
+            task = call(task)
+        return task
+
     # DECISION plan-2026-11-24T043150-a555dcfe/D-022
     # The `after_run` hooks run in a `finally`, in declared order: a worker's budget or timeout error
     # left in the run's holder must re-raise even when the loop itself raised (the `finally` the
     # orchestrator had). Do NOT run them only on success, do NOT swallow a hook error, do NOT accept a
-    # handler factory as a hook (or the reverse), and do NOT honour `before_run` or `on_iteration`
-    # until a seam and a client exist (refused at construction). A model-origin document never binds
-    # a hook (V7). A hook may replace the result of a finished run through `handlers.scope[RUN_RESULT]`
-    # (D-025 of this plan: REWOO's cut-off answer); on a raising loop or a stream the slot is empty.
-    def _after_run(self, handlers: HandlerContext) -> None:
-        """Call the file's ``after_run`` hooks, in declared order, each built from this run's context.
+    # handler factory as a hook (or the reverse). A model-origin document never binds a hook (V7). A
+    # hook may replace the result of a finished run through `handlers.scope[RUN_RESULT]` (D-025 of
+    # this plan: REWOO's cut-off answer); on a raising loop or a stream the slot is empty. D-032 adds
+    # the other two positions and the `Retry` verdict on top of this one seam.
+    def _after_run(self, handlers: HandlerContext) -> Retry | None:
+        """Call the file's ``after_run`` hooks, in declared order, each built from this attempt's
+        context; the first ``Retry`` ends the chain (the attempt is discarded), an error of a hook
+        propagates (the hooks after it do not run), as the ``finally`` it replaced did."""
+        for call in self._hook_calls(_AFTER_RUN, handlers):
+            verdict = call()
+            if isinstance(verdict, Retry):
+                return verdict
+            if verdict is not None:
+                raise AgentError(f"an after_run hook returned {verdict!r}, not a Retry")
+        return None
 
-        A hook is a library entry (``HOOKS``) whose factory returns a zero-argument callable; an
-        error of one propagates (the hooks after it do not run), as the ``finally`` it replaced did.
-        """
-        for hook in self.envelope.body.run.hooks:
-            call = HANDLERS.resolve(hook.hook)(handlers, hook)
-            if not callable(call):
-                raise AgentError(f"hook {hook.hook!r} is a handler, not a hook")
-            call()
+    def _on_loop_iteration(
+        self, api: API, conversation_id: str, iteration: int
+    ) -> None:
+        """The HITL driver first and always, then the ``on_iteration`` hooks with the step number, a
+        reader of the conversation data and a writer that refuses an internal-prefixed key."""
+        super()._on_loop_iteration(api, conversation_id, iteration)
+        for call in self._hook_calls(_ON_ITERATION):
+            call(
+                iteration,
+                partial(api.get_data, conversation_id),
+                partial(self._hook_write, api, conversation_id),
+            )
+
+    @staticmethod
+    def _hook_write(api: API, conversation_id: str, update: Mapping[str, Any]) -> None:
+        """The one writer of an ``on_iteration`` hook: no internal-prefixed key (the grant is one)."""
+        if internal := sorted(k for k in update if has_internal_prefix(k)):
+            raise AgentError(f"a hook may not write the internal keys {internal}")
+        api.update_context(conversation_id, dict(update))
 
     # DECISION plan-2026-09-12T065608-089d0ec7/D-014
     # `handlers` is REQUIRED in practice: `run()`/`run_stream()` always pass their own call-local

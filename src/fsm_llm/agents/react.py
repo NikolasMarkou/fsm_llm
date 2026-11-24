@@ -11,7 +11,7 @@ patch, and the call of ``build_react_fsm`` that builds the FSM of a run.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from fsm_llm.agents.constants import Defaults
@@ -45,6 +45,11 @@ class ReactAgent(PatternAgent):
     """
 
     tools: ToolRegistry  # a ReAct agent always has tools (``PatternAgent.tools`` may be None)
+    #: The file of the loop (a preset of it for the two subclasses) and the options and host
+    #: objects of the preset, set by a subclass BEFORE ``super().__init__`` (D-032).
+    _pattern = "react"
+    _preset_options: Mapping[str, Any] = {}
+    _preset_callables: Mapping[str, Any] = {}
 
     def __init__(
         self,
@@ -57,11 +62,15 @@ class ReactAgent(PatternAgent):
         from fsm_llm.agents.pattern_files import load_envelope  # lazy: reads the file
 
         super().__init__(
-            load_envelope("react"),
+            load_envelope(self._pattern),
             tools=tools,
             config=config,
             hitl=hitl,
-            options={"classification": bool(use_classification)},
+            options={
+                "classification": bool(use_classification),
+                **self._preset_options,
+            },
+            callables=self._preset_callables,
             **api_kwargs,
         )
         self.use_classification = use_classification

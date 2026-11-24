@@ -87,7 +87,7 @@ class TestAutoMemoryReactAgent:
         )
         captured = {}
 
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             captured["task"] = task
             return AgentResult(
                 answer="Python",
@@ -95,8 +95,10 @@ class TestAutoMemoryReactAgent:
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
-        # Patch the ReactAgent.run that super().run() resolves to.
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        # Patch the inner attempt the hook chain wraps (D-032).
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         return agent, captured
 
     def test_recall_injected_into_task(self, monkeypatch):
@@ -125,14 +127,16 @@ class TestAutoMemoryReactAgent:
         assert isinstance(agent.memory, SemanticMemoryStore)
 
     def _patch_fail(self, monkeypatch):
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             return AgentResult(
                 answer="garbage",
                 status=Status.FAILED,
                 trace=AgentTrace(tool_calls=[], total_iterations=1),
             )
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
 
     def test_default_persists_unsuccessful_run(self, monkeypatch):
         # New default (remember_only_on_success=False): conversational turns
@@ -165,10 +169,10 @@ class TestAutoMemoryReactAgent:
             tools=_registry(), config=AgentConfig(model="mock/model"), memory=store
         )
 
-        def boom(self, task, initial_context=None):
+        def boom(self, task, initial_context=None, handlers=None):
             raise RuntimeError("budget exhausted")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", boom)
+        monkeypatch.setattr("fsm_llm.agents.pattern_agent.PatternAgent._run_loop", boom)
         with pytest.raises(RuntimeError):
             agent.run("remember: my name is Nikolas")
         assert len(store) == 1  # fact preserved despite the raise
@@ -182,10 +186,10 @@ class TestAutoMemoryReactAgent:
             auto_remember=False,
         )
 
-        def boom(self, task, initial_context=None):
+        def boom(self, task, initial_context=None, handlers=None):
             raise RuntimeError("x")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", boom)
+        monkeypatch.setattr("fsm_llm.agents.pattern_agent.PatternAgent._run_loop", boom)
         with pytest.raises(RuntimeError):
             agent.run("q")
         assert len(store) == 0

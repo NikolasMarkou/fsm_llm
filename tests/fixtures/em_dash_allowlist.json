@@ -52,7 +52,7 @@
  "scripts/decision_index.py": 1,
  "src/fsm_llm/agents/adapt.py": 5,
  "src/fsm_llm/agents/agent_graph.py": 1,
- "src/fsm_llm/agents/auto_memory.py": 5,
+ "src/fsm_llm/agents/auto_memory.py": 4,
  "src/fsm_llm/agents/base/__init__.py": 8,
  "src/fsm_llm/agents/base/agent.py": 4,
  "src/fsm_llm/agents/base/helpers.py": 1,

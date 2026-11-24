@@ -48,6 +48,8 @@ PATTERN_ORDER: tuple[str, ...] = (
     "maker_checker",
     "debate",
     "evaluator_optimizer",
+    "verified_react",
+    "auto_memory",
 )
 
 

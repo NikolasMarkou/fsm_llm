@@ -14,10 +14,13 @@ Injection happens at the agent's ``run()`` boundary rather than via mid-FSM
 handlers: the task string is *guaranteed* to reach the LLM prompt, whereas an
 arbitrary injected context key is not surfaced unless the (auto-generated) FSM
 prompt references it. This makes auto-memory robust across every agent pattern.
+The two ends are the hooks ``agents.memory_recall`` (before) and
+``agents.memory_remember`` (after, in a ``finally``) of ``patterns/auto_memory.json``
+(``handlers/hooks.py``).
 
 Fully additive — :class:`AutoMemoryReactAgent` is a thin :class:`ReactAgent`
-subclass; the standalone helpers work with any store exposing ``add(text)`` and
-``search(query, k)`` (e.g. :class:`SemanticMemoryStore`).
+subclass over that preset; the standalone helpers work with any store exposing
+``add(text)`` and ``search(query, k)`` (e.g. :class:`SemanticMemoryStore`).
 
 Example::
 
@@ -32,14 +35,24 @@ Example::
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, Protocol
+from typing import Any
 
-from fsm_llm.logging import logger
 from fsm_llm.tools import tool
 
-from .definitions import AgentResult
+from .handlers.memory import (
+    MemoryBackend,
+    augment_task_with_memories,
+    remember_interaction,
+)
 from .react import ReactAgent
 from .semantic_memory import SemanticMemoryStore
+
+__all__ = [
+    "AutoMemoryReactAgent",
+    "MemoryBackend",
+    "augment_task_with_memories",
+    "remember_interaction",
+]
 
 
 # DECISION plan_2026-05-30_5598b755/D-005 [STALE]
@@ -69,67 +82,6 @@ def _respond(answer: str) -> str:
 _RESPOND_TOOL = _respond._tool_definition
 
 
-class MemoryBackend(Protocol):
-    """Structural type for an auto-memory backend."""
-
-    def add(self, text: str, *args: Any, **kwargs: Any) -> Any: ...
-
-    def search(
-        self, query: str, k: int = ...
-    ) -> list[tuple[str, float, dict[str, Any]]]: ...
-
-
-def augment_task_with_memories(
-    task: str,
-    memory: MemoryBackend,
-    recall_k: int = 3,
-    header: str = "[Relevant things you remember]",
-    min_score: float = 0.0,
-) -> str:
-    """Return ``task`` with a block of recalled memories prepended-as-context.
-
-    Returns the task unchanged when nothing relevant is found or recall fails.
-
-    ``min_score`` drops recalled memories whose similarity is below the cutoff
-    BEFORE injection. ``search`` returns the top-k by score regardless of how low
-    it is, so without a cutoff an unrelated stored fact (e.g. an old calculation)
-    leaks into every later turn and the agent repeats it. Substring-fallback
-    matches score 1.0 and always pass. (DECISION plan_2026-05-30_5598b755/D-006 [STALE])
-    """
-    try:
-        results = memory.search(task, k=recall_k)
-    except Exception as e:
-        logger.warning(f"Auto-recall failed: {e}")
-        return task
-    if min_score > 0.0:
-        results = [r for r in results if r[1] >= min_score]
-    if not results:
-        return task
-    block = "\n".join([header, *(f"- {text}" for text, _score, _meta in results)])
-    return f"{block}\n\n{task}"
-
-
-def remember_interaction(
-    memory: MemoryBackend,
-    task: str,
-    answer: str,
-    metadata: dict[str, Any] | None = None,
-) -> None:
-    """Persist a task/answer interaction to the memory backend (best-effort)."""
-    if not answer or not answer.strip():
-        return
-    try:
-        memory.add(f"Q: {task}\nA: {answer}", metadata=metadata)
-    except TypeError:
-        # Backend's add() may not accept metadata kwarg.
-        try:
-            memory.add(f"Q: {task}\nA: {answer}")
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning(f"Auto-remember failed: {e}")
-    except Exception as e:
-        logger.warning(f"Auto-remember failed: {e}")
-
-
 class AutoMemoryReactAgent(ReactAgent):
     """A :class:`ReactAgent` with automatic recall + persistence.
 
@@ -147,6 +99,10 @@ class AutoMemoryReactAgent(ReactAgent):
         **kwargs: Forwarded to :class:`ReactAgent` (``tools``, ``config``, ...).
     """
 
+    _pattern = "auto_memory"
+    # the host object the file's hooks read (D-018: a class names the objects it supplies)
+    optional_callables = ("memory",)
+
     def __init__(
         self,
         *args: Any,
@@ -158,13 +114,20 @@ class AutoMemoryReactAgent(ReactAgent):
         enable_respond: bool = True,
         **kwargs: Any,
     ) -> None:
-        super().__init__(*args, **kwargs)
         # NB: use `is not None`, not `or` — an empty SemanticMemoryStore has
         # __len__ == 0 and is therefore falsy, which `or` would silently
         # discard in favor of a fresh (empty) store.
         self.memory: MemoryBackend = (
             memory if memory is not None else SemanticMemoryStore()
         )
+        self._preset_callables = {"memory": self.memory}
+        self._preset_options = {
+            "recall_k": recall_k,
+            "recall_min_score": recall_min_score,
+            "auto_remember": auto_remember,
+            "remember_only_on_success": remember_only_on_success,
+        }
+        super().__init__(*args, **kwargs)
         self.recall_k = recall_k
         self.recall_min_score = recall_min_score
         self.auto_remember = auto_remember
@@ -178,28 +141,6 @@ class AutoMemoryReactAgent(ReactAgent):
         if enable_respond and "respond" not in self.tools:
             self.tools.register(_RESPOND_TOOL)
 
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
-        augmented = augment_task_with_memories(
-            task, self.memory, self.recall_k, min_score=self.recall_min_score
-        )
-        result: AgentResult | None = None
-        try:
-            result = super().run(augmented, initial_context)
-            return result
-        finally:
-            # Persist in `finally` so a run that RAISES (budget/timeout — common
-            # on slow/over-eager models) still preserves a user-stated fact
-            # instead of silently dropping it.
-            if self.auto_remember:
-                if result is None:
-                    self._remember_raw(task)
-                elif result.success or not self.remember_only_on_success:
-                    remember_interaction(self.memory, task, result.answer)
-
     def run_stream(
         self,
         task: str,
@@ -208,12 +149,3 @@ class AutoMemoryReactAgent(ReactAgent):
         """Run :meth:`run` (memory recall and persistence included) and yield
         its final answer once; streaming the bare loop would skip both."""
         return self._stream_via_run(task, initial_context)
-
-    def _remember_raw(self, text: str) -> None:
-        """Persist the raw input when no result is available (run raised)."""
-        if not text or not text.strip():
-            return
-        try:
-            self.memory.add(text)
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning(f"Auto-remember (on failure) failed: {e}")

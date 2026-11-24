@@ -48,11 +48,13 @@ class TestVerification:
     def test_no_verification_fn_delegates_once(self, monkeypatch):
         calls = {"n": 0}
 
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             calls["n"] += 1
             return _result("ans")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         agent = _agent(AgentConfig(model="mock/model"))
         r = agent.run("q")
         assert r.answer == "ans"
@@ -61,11 +63,13 @@ class TestVerification:
     def test_passes_first_try(self, monkeypatch):
         calls = {"n": 0}
 
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             calls["n"] += 1
             return _result("good")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         cfg = AgentConfig(
             model="mock/model",
             verification_fn=lambda a, c: {"ok": a == "good", "feedback": "x"},
@@ -78,11 +82,13 @@ class TestVerification:
         tasks = []
         answers = iter(["bad", "good"])
 
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             tasks.append(task)
             return _result(next(answers))
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         cfg = AgentConfig(
             model="mock/model",
             verification_fn=lambda a, c: {
@@ -100,11 +106,13 @@ class TestVerification:
     def test_exhausts_retries_returns_last(self, monkeypatch):
         calls = {"n": 0}
 
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             calls["n"] += 1
             return _result("never-good")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         cfg = AgentConfig(
             model="mock/model", verification_fn=lambda a, c: {"ok": False}
         )
@@ -117,19 +125,23 @@ class TestVerification:
         assert r.stop_reason == StopReason.VERIFICATION_FAILED
 
     def test_passing_answer_keeps_its_outcome(self, monkeypatch):
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             return _result("good")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         cfg = AgentConfig(model="mock/model", verification_fn=lambda a, c: True)
         r = _agent(cfg).run("q")
         assert r.success is True
 
     def test_bool_verdict_supported(self, monkeypatch):
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             return _result("ok")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         cfg = AgentConfig(model="mock/model", verification_fn=lambda a, c: True)
         agent = _agent(cfg)
         assert agent.run("q").answer == "ok"
@@ -138,14 +150,16 @@ class TestVerification:
         """REACT-04: a raising verifier fails closed, it never passes."""
         tasks: list[str] = []
 
-        def fake_run(self, task, initial_context=None):
+        def fake_run(self, task, initial_context=None, handlers=None):
             tasks.append(task)
             return _result("x")
 
         def boom(a, c):
             raise RuntimeError("verifier crashed")
 
-        monkeypatch.setattr("fsm_llm.agents.react.ReactAgent.run", fake_run)
+        monkeypatch.setattr(
+            "fsm_llm.agents.pattern_agent.PatternAgent._run_loop", fake_run
+        )
         agent = _agent(AgentConfig(model="mock/model", verification_fn=boom))
         r = agent.run("q")
         assert len(tasks) == 2  # retried like any rejection

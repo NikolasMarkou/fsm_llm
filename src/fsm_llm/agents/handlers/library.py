@@ -6,6 +6,7 @@
 ``library_react`` (the react family, ``agents.approval_gate``, the Reflexion three, the prompt-chain gate and
 the native function-calling group ``agents.native_fc``), ``library_workers`` (the orchestrator pair, the REWOO
 executor and the two HOOKS ``agents.raise_run_ending_error`` and ``agents.rewoo_cut_off_answer``),
+``hooks`` (the four hooks of the react presets, D-032),
 ``library_stepwise`` (the Plan-and-Execute four, the Maker-Checker five, the Debate three and the Evaluator-Optimizer three) and ``library_support`` (the
 binding helpers they share). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
@@ -23,10 +24,11 @@ Interface contract:
   approval handlers of a run with no HITL). A factory is called once per run and builds new handler
   objects every call.
 - A HOOK is a library entry in the same namespace (D-004) bound under ``run.hooks``: ``factory(ctx,
-  binding) -> Callable[[], None]``, called once per run, whose result the agent calls when the loop
-  ends (``at: after_run``, in the declared order, also when the run raised). It reads the same
-  per-run ``ctx`` (the holder a handler fills lives in ``ctx.scope``); a hook that rewrites the answer
-  replaces ``ctx.scope[RUN_RESULT]``.
+  binding) -> Callable``, whose result the agent calls at the position ``at`` names (``before_run``,
+  ``after_run``, ``on_iteration``; the three shapes are in ``hooks.py``). An ``after_run`` hook is called
+  when the loop ends, in the declared order, also when the run raised. It reads the same per-run
+  ``ctx`` (the holder a handler fills lives in ``ctx.scope``); a hook that rewrites the answer replaces
+  ``ctx.scope[RUN_RESULT]``, one that rejects it returns a ``Retry``.
 - Failure: ``AgentError`` for a missing ``tools`` registry (the executor and the limiter that shares
   it), a key that is internal-prefixed or secret-looking (D2), or a bad ``limit``.
 """
@@ -34,10 +36,11 @@ Interface contract:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fsm_llm.engine.executables.namespaces import GENERATORS, HANDLERS
 
+from .hooks import memory_recall, memory_remember, periodic_reflection, verify_retry
 from .library_react import (
     approval_fresh_keys,
     approval_gate,
@@ -117,10 +120,14 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.approval_gate", approval_gate),
 )
 
-#: The hooks of the same namespace (``run.hooks``): ``factory(ctx, binding) -> Callable[[], None]``.
-HOOKS: tuple[tuple[str, Callable[..., Callable[[], None]]], ...] = (
+#: The hooks of the same namespace (``run.hooks``): ``factory(ctx, binding) -> Callable``.
+HOOKS: tuple[tuple[str, Callable[..., Callable[..., Any]]], ...] = (
     ("agents.raise_run_ending_error", raise_run_ending_error),
     ("agents.rewoo_cut_off_answer", rewoo_cut_off_answer),
+    ("agents.verify_retry", verify_retry),
+    ("agents.periodic_reflection", periodic_reflection),
+    ("agents.memory_recall", memory_recall),
+    ("agents.memory_remember", memory_remember),
 )
 
 

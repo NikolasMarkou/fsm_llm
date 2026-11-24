@@ -41,6 +41,7 @@ from fsm_llm.agents.okf import (
     OKF_TOOL_PARAMETERS,
     OKF_UNTRUSTED_LABEL,
 )
+from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.constants import (
     OKF_LIST_MAX_ITEMS,
     OKF_READ_PAGE_CHARS,
@@ -507,11 +508,13 @@ class TestMemoryBackend:
         bundle = load_bundle(root)
         seen: dict[str, Any] = {}
 
-        def fake_run(self: Any, task: str, initial_context: Any = None) -> AgentResult:
+        def fake_run(
+            self: Any, task: str, initial_context: Any = None, handlers: Any = None
+        ) -> AgentResult:
             seen["task"] = task
             return AgentResult(answer="It is 7341 KB.", status=Status.OK)
 
-        monkeypatch.setattr(ReactAgent, "run", fake_run)
+        monkeypatch.setattr(PatternAgent, "_run_loop", fake_run)
         warnings: list[str] = []
         logger.enable("fsm_llm")
         sink = logger.add(warnings.append, level="WARNING", format="{message}")
@@ -548,10 +551,12 @@ class TestMemoryBackend:
         write_bundle(_zephyr_bundle(), root)
         before = sorted(p.name for p in root.rglob("*"))
 
-        def boom(self: Any, task: str, initial_context: Any = None) -> AgentResult:
+        def boom(
+            self: Any, task: str, initial_context: Any = None, handlers: Any = None
+        ) -> AgentResult:
             raise RuntimeError("provider down")
 
-        monkeypatch.setattr(ReactAgent, "run", boom)
+        monkeypatch.setattr(PatternAgent, "_run_loop", boom)
         agent = AutoMemoryReactAgent(
             tools=create_okf_tools(load_bundle(root)),
             config=AgentConfig(model="mock/model"),
@@ -1136,11 +1141,13 @@ class TestBackendLabelAndClaimedTrust:
     ):
         seen: dict[str, Any] = {}
 
-        def fake_run(self: Any, task: str, initial_context: Any = None) -> AgentResult:
+        def fake_run(
+            self: Any, task: str, initial_context: Any = None, handlers: Any = None
+        ) -> AgentResult:
             seen["task"] = task
             return AgentResult(answer="ok", status=Status.OK)
 
-        monkeypatch.setattr(ReactAgent, "run", fake_run)
+        monkeypatch.setattr(PatternAgent, "_run_loop", fake_run)
         bundle = _zephyr_bundle()
         AutoMemoryReactAgent(
             tools=create_okf_tools(bundle),

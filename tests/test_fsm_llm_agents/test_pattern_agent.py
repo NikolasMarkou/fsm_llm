@@ -270,7 +270,6 @@ class TestFailClosed:
         "field, value",
         [
             ("step_budget", 5),
-            ("hooks", [{"hook": "agents.x", "at": "before_run"}]),
             ("run_output_keys", ["answer"]),
             ("seconds_exempt", ["conclude"]),
         ],

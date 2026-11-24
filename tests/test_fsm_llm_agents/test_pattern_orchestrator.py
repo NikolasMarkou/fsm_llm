@@ -427,17 +427,6 @@ class TestAfterRunHooks:
         assert agent.run("go").answer == "ok"
         assert events == ["loop"]
 
-    @pytest.mark.parametrize("at", ["before_run", "on_iteration"])
-    def test_a_hook_with_no_seam_is_refused_at_construction(self, at):
-        doc = _user_doc([{"hook": "agents.raise_run_ending_error", "at": at}])
-
-        with pytest.raises(AgentError, match="no seam"):
-            PatternAgent(
-                _envelope(doc),
-                config=runs._config(),
-                llm_interface=runs.ScriptedModel(),
-            )
-
     def test_a_handler_bound_as_a_hook_and_a_hook_bound_as_a_handler_are_refused(self):
         as_hook = PatternAgent(
             _envelope(

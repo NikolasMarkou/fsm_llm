@@ -196,6 +196,10 @@ class TestTheNamespaces:
         assert [name for name, _ in library.HOOKS] == [
             "agents.raise_run_ending_error",
             "agents.rewoo_cut_off_answer",
+            "agents.verify_retry",
+            "agents.periodic_reflection",
+            "agents.memory_recall",
+            "agents.memory_remember",
         ]
         for name, factory in (*LIBRARY, *library.HOOKS):
             assert HANDLERS.resolve(name) is factory

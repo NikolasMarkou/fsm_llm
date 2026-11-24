@@ -1044,6 +1044,11 @@
       "delta": 1,
       "reason": "plan a555dcfe step 20: new anchor D-031 in ExecutableRegistry._assemble (memory entries first)",
       "token": "plan-2026-11-24T043150-a555dcfe/D-031"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe step 21 (D-032): adds one D-032 anchor in pattern_agent.py (the run hook seam); the D-011 and D-046 anchors of plan 06a5ec0a move from verified_react.py to handlers/hooks.py unchanged",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-032"
     }
   ]
 }

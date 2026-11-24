@@ -16,8 +16,10 @@ fields (defaults reproduce stock ReactAgent behavior):
   think prompt surfaces for one turn), nudging it to re-assess progress and
   avoid repeating failed actions.
 
-Fully additive: a thin :class:`ReactAgent` subclass. With neither config field
-set it behaves exactly like :class:`ReactAgent`.
+Fully additive: a thin :class:`ReactAgent` subclass bound to the preset file
+``patterns/verified_react.json``, whose hooks (``agents.verify_retry``,
+``agents.periodic_reflection``, ``handlers/hooks.py``) do the work. With neither
+config field set it behaves exactly like :class:`ReactAgent`.
 
 Example::
 
@@ -37,20 +39,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from fsm_llm import API
-from fsm_llm.agents.constants import ContextKeys, StopReason
-from fsm_llm.core.codes import status_of_stop_reason
-from fsm_llm.logging import logger
 from fsm_llm.tools import require_int_limit
 
-from .definitions import AgentResult
 from .react import ReactAgent
-
-_REFLECTION_NOTE = (
-    "[Reflection] Pause and assess: are recent actions making progress toward "
-    "the task? If you are repeating a failed action or looping, try a different "
-    "tool or conclude with your best answer."
-)
 
 
 class VerifiedReactAgent(ReactAgent):
@@ -63,69 +54,15 @@ class VerifiedReactAgent(ReactAgent):
         **kwargs: Forwarded to :class:`ReactAgent`.
     """
 
+    _pattern = "verified_react"
+
     def __init__(self, *args: Any, max_verify_retries: int = 1, **kwargs: Any) -> None:
         max_verify_retries = require_int_limit(
             "max_verify_retries", max_verify_retries, minimum=0
         )
+        self._preset_options = {"max_verify_retries": max_verify_retries}
         super().__init__(*args, **kwargs)
         self.max_verify_retries = max_verify_retries
-
-    # --- verification ---------------------------------------------------
-    def _verify(self, result: AgentResult) -> tuple[bool, str]:
-        """Run config.verification_fn against a result → (ok, feedback)."""
-        fn = self.config.verification_fn
-        if fn is None:
-            return True, ""
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-011: a raising verifier
-        # is a rejection (fail closed). Do NOT treat it as a pass: a verifier
-        # that crashes on a malformed answer would ship exactly that answer as
-        # verified.
-        try:
-            verdict = fn(result.answer, result.final_context)
-        except Exception as e:
-            logger.warning(f"verification_fn raised, treating as rejection: {e}")
-            return False, f"the verifier raised an error: {e}"
-        if isinstance(verdict, dict):
-            ok = bool(verdict.get("ok", verdict.get("passed", False)))
-            return ok, str(verdict.get("feedback", ""))
-        return bool(verdict), ""
-
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
-        if self.config.verification_fn is None:
-            return super().run(task, initial_context)
-
-        feedback: str | None = None
-        result: AgentResult | None = None
-        for attempt in range(self.max_verify_retries + 1):
-            framed = task
-            if feedback is not None:
-                framed = (
-                    f"{task}\n\n[A previous answer was rejected by verification: "
-                    f"{feedback}\nProduce a corrected answer that addresses this.]"
-                )
-            result = super().run(framed, initial_context)
-            ok, feedback = self._verify(result)
-            if ok:
-                return result
-            logger.info(
-                f"Verification rejected attempt {attempt + 1}/"
-                f"{self.max_verify_retries + 1}: {feedback}"
-            )
-        assert result is not None
-        # REACT-04: the last answer still ships, but it is not verified.
-        # ``model_copy`` does not validate, so the derived pair is set here.
-        status, reason = status_of_stop_reason(StopReason.VERIFICATION_FAILED)
-        return result.model_copy(
-            update={
-                "status": status,
-                "reason": reason,
-                "stop_reason": StopReason.VERIFICATION_FAILED,
-            }
-        )
 
     def run_stream(
         self,
@@ -142,34 +79,3 @@ class VerifiedReactAgent(ReactAgent):
         if self.config.verification_fn is None:
             return super().run_stream(task, initial_context)
         return self._stream_via_run(task, initial_context)
-
-    # --- periodic reflection -------------------------------------------
-    def _on_loop_iteration(
-        self, api: API, conversation_id: str, iteration: int
-    ) -> None:
-        super()._on_loop_iteration(api, conversation_id, iteration)
-        n = self.config.reflect_every_n
-        if n and iteration > 0 and iteration % n == 0:
-            self._inject_reflection(api, conversation_id)
-
-    def _inject_reflection(self, api: API, conversation_id: str) -> None:
-        """Add a reflection note to ``agent_feedback`` for the next think turn.
-
-        Not ``observations``: a note there is not a tool result, yet it would
-        count toward ``observation_count`` (the conclude evidence guard) and
-        read to the model as a step it took (REACT-04). Any pending executor
-        feedback is kept ahead of the note.
-        """
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-046: the note goes to
-        # `agent_feedback`. Do NOT append it to `observations`: the executor
-        # sets `observation_count` from that list, and the conclude edge's
-        # evidence guard (c1d5bfbc D-008) must count real tool results only.
-        try:
-            data = api.get_data(conversation_id)
-            pending = data.get(ContextKeys.AGENT_FEEDBACK)
-            note = _REFLECTION_NOTE
-            if isinstance(pending, str) and pending.strip():
-                note = f"{pending}\n{_REFLECTION_NOTE}"
-            api.update_context(conversation_id, {ContextKeys.AGENT_FEEDBACK: note})
-        except Exception as e:  # pragma: no cover - defensive
-            logger.debug(f"Reflection injection skipped: {e}")

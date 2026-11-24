@@ -29,6 +29,9 @@ became this package at the same dotted path; the import surface is unchanged):
 - ``rewoo`` -- ``execute_plans`` and the ``#E<n>`` substitution, the body of ``agents.rewoo_executor`` (not in ``__all__``)
 - ``plan_execute`` -- ``bounded_plan`` and the bodies of ``agents.plan_step_executor``, ``agents.plan_step_checker`` and
   ``agents.plan_replan_counter`` (not in ``__all__``)
+- ``hooks`` -- the four run hooks of the react presets (``agents.verify_retry``, ``agents.periodic_reflection``,
+  ``agents.memory_recall``, ``agents.memory_remember``; not in ``__all__``) and ``memory`` -- the memory helpers their
+  bodies call (``MemoryBackend``, ``augment_task_with_memories``, ``remember_interaction``; re-exported by ``auto_memory``)
 - ``context`` -- ``HandlerContext``, the per-run value the library factories read (import it from
   ``fsm_llm.agents.handlers.context``; it is not in ``__all__``)
 - ``library`` -- the named factories a pattern file binds (``agents.tool_executor``, ...),

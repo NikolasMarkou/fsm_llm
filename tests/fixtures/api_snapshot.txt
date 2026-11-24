@@ -1215,7 +1215,6 @@ fsm_llm.agents.ArtifactType class(str, Enum)
   ArtifactType.AGENT = 'agent'
 fsm_llm.agents.AutoMemoryReactAgent class(ReactAgent)
   def __init__(self, *args: Any, memory: MemoryBackend | None = None, recall_k: int = 3, recall_min_score: float = 0.25, auto_remember: bool = True, remember_only_on_success: bool = False, enable_respond: bool = True, **kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
   def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
 fsm_llm.agents.BaseAgent class(ABC)
   def __init__(self, config: AgentConfig | None = None, **api_kwargs: Any) -> None
@@ -1546,7 +1545,6 @@ fsm_llm.agents.ToolResult class(BaseModel)
   property summary
 fsm_llm.agents.VerifiedReactAgent class(ReactAgent)
   def __init__(self, *args: Any, max_verify_retries: int = 1, **kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
   def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
 fsm_llm.agents.WorkflowArtifactBuilder class(ArtifactBuilder)
   def __init__(self) -> None
