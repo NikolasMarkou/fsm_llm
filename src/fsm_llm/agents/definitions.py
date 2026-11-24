@@ -334,10 +334,17 @@ def config_with(base: AgentConfig, **updates: Any) -> AgentConfig:
     Interface contract (callers: ``create_agent``'s ``system_prompt=``,
     ``ConfiguredAgentBuilder``): *updates* are ``base``'s own field names and
     are validated again, unlike ``model_copy(update=)``; a bad value raises
-    ``ValidationError``. *base* is not modified.
+    ``ValidationError``. *base* is not modified. The copy's ``model_fields_set``
+    is *base*'s plus the updated names: only what the host set counts as set
+    (D-035), so a preset default is not mistaken for a host choice.
     """
     fields = {name: getattr(base, name) for name in type(base).model_fields}
-    return type(base)(**{**fields, **updates})
+    config = type(base)(**{**fields, **updates})
+    # the rebuild passes every field to the constructor, which marks all of them set
+    object.__setattr__(
+        config, "__pydantic_fields_set__", {*base.model_fields_set, *updates}
+    )
+    return config
 
 
 def _no_status() -> Status:
@@ -618,9 +625,8 @@ class MetaBuilderConfig(AgentConfig):
         # reads only model, temperature, max_tokens, timeout_seconds and
         # max_turns, so a non-default value for these fields would be accepted
         # and ignored. Refuse it (D-038, never drop). Do NOT consult
-        # ``model_fields_set``: ConfiguredAgentBuilder._config_for_build marks
-        # all of them "set" at their defaults, so the signal is the value
-        # against the field default. Do NOT silently accept or honour them
+        # ``model_fields_set``: a host may set any of them explicitly at its
+        # default, so the signal is the value against the field default. Do NOT silently accept or honour them
         # here (that would copy BaseAgent._create_api logic).
         for name in _UNREAD_AGENT_FIELDS:
             default = AgentConfig.model_fields[name].get_default(

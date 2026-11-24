@@ -691,8 +691,8 @@ class TestMetaBuilderThroughCreateAgent:
             )
 
     def test_configured_builder_default_meta_build_still_works(self):
-        """Guard: ``config_with`` marks every unread field set at its default;
-        the refusal compares values, so the builder still builds."""
+        """Guard: the meta-builder refusal compares values, never ``model_fields_set``
+        (a host may set an unread field at its default); the builder still builds."""
         from fsm_llm.agents import ConfiguredAgentBuilder
 
         agent = (

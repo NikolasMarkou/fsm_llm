@@ -134,11 +134,15 @@ class TestMetaConfigRefusesUnreadFields:
 
     def test_defaults_pass_and_model_fields_set_is_not_consulted(self):
         """Every unread field passed explicitly at its default is accepted (the
-        shape ``config_with`` gives), so ``model_fields_set`` is no signal."""
+        shape a host gives), so ``model_fields_set`` is no signal. ``config_with``
+        marks only the fields it is given (step 28.3 of plan a555dcfe)."""
         from fsm_llm.agents.definitions import AgentConfig, config_with
 
         base = MetaBuilderConfig()
-        again = config_with(base)
+        assert config_with(base).model_fields_set == base.model_fields_set
+        again = config_with(
+            base, enable_prompt_cache=False, force_final_tool=None, output_schema=None
+        )
         assert {"enable_prompt_cache", "force_final_tool", "output_schema"} <= (
             again.model_fields_set
         )

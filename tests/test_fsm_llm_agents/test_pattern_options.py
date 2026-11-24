@@ -13,11 +13,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from fsm_llm.agents import SemanticMemoryStore, create_agent
 from fsm_llm.agents import pattern_files as pf
 from fsm_llm.agents.constants import Defaults
-from fsm_llm.agents.definitions import AgentConfig
+from fsm_llm.agents.definitions import AgentConfig, config_with
 from fsm_llm.agents.handlers import hooks
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.core.definitions import AgentError
@@ -310,3 +311,62 @@ class TestTheResolvedMappingIsTheAgentsOwn:
         )
 
         assert agent._options["max_iterations"] == 18
+
+
+class TestSystemPromptKeepsThePresetDefaults:
+    """``system_prompt=`` rebuilt the config through ``config_with``, which passed every field, so every
+    field looked host-set and a preset's ``temperature`` and ``max_iterations`` defaults never applied
+    (the p3 probe of the review: 0.3 and 5 became 0.5 and 10)."""
+
+    @staticmethod
+    def _agent(**kw: Any) -> Any:
+        return create_agent(
+            "code-review",
+            [_lookup],
+            registry=_registry(),
+            llm_interface=runs.ScriptedModel("_lookup"),
+            **kw,
+        )
+
+    def test_the_probe_with_and_without_system_prompt_agree(self):
+        plain = self._agent(config=AgentConfig(model="m"))
+        prompted = self._agent(config=AgentConfig(model="m"), system_prompt="Be terse.")
+
+        assert (plain.config.temperature, plain.config.max_iterations) == (0.3, 5)
+        assert (prompted.config.temperature, prompted.config.max_iterations) == (0.3, 5)
+        assert prompted.config.instructions == "Be terse."
+
+    def test_no_config_at_all_and_a_system_prompt_still_gets_the_defaults(self):
+        agent = self._agent(system_prompt="Be terse.")
+
+        assert (agent.config.temperature, agent.config.max_iterations) == (0.3, 5)
+
+    def test_the_hosts_own_fields_still_beat_the_default_with_a_system_prompt(self):
+        agent = self._agent(
+            config=AgentConfig(model="m", max_iterations=7, temperature=0.9),
+            system_prompt="Be terse.",
+        )
+
+        assert (agent.config.temperature, agent.config.max_iterations) == (0.9, 7)
+
+    def test_a_field_the_host_set_to_the_library_default_is_still_the_hosts(self):
+        agent = self._agent(
+            config=AgentConfig(model="m", max_iterations=AgentConfig().max_iterations),
+            system_prompt="Be terse.",
+        )
+
+        assert agent.config.max_iterations == AgentConfig().max_iterations
+
+    def test_config_with_keeps_what_the_host_set_and_adds_what_it_updates(self):
+        base = AgentConfig(model="m", temperature=0.2)
+
+        updated = config_with(base, instructions="x")
+
+        assert updated.model_fields_set == {"model", "temperature", "instructions"}
+        assert base.model_fields_set == {"model", "temperature"}
+        assert updated.temperature == 0.2 and updated.instructions == "x"
+        assert updated.max_iterations == base.max_iterations
+
+    def test_config_with_still_validates_its_updates(self):
+        with pytest.raises(ValidationError):
+            config_with(AgentConfig(model="m"), max_iterations=0)
