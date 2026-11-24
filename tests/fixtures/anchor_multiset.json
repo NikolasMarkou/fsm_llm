@@ -919,6 +919,11 @@
       "delta": 1,
       "reason": "plan a555dcfe D-013: new anchor token in agents/handlers/library.py (the handler library)",
       "token": "plan-2026-11-24T043150-a555dcfe/D-013"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe D-014: the host-binding exemption clause of the frame guard in ExecutableRegistry.resolve_target (a built-in strategy with a setup stays a frame)",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-014"
     }
   ]
 }

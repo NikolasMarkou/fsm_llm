@@ -33,7 +33,8 @@ Interface contract:
   ``strategy``, ``procedure``) and, for a ``strategy``, its declared ``results`` as the target's own
   output map (``ResolvedTarget.returns``, D-030 of plan baa37f40); ``None`` for a miss, a body
   that does not instantiate, a code-backed kind (``pattern``) and, whatever its kind, an executable
-  whose ``requires.handlers`` is non-empty (a frame runs no handler; plan a555dcfe D-010). Never raises for a miss, never loads a module
+  whose ``requires.handlers`` is non-empty unless it is a built-in strategy with a host ``setup`` (a frame runs no
+  handler; plan a555dcfe D-010, D-014). Never raises for a miss, never loads a module
   by the id and keeps no instance.
 - ``resolve_delegated(target_id, *, launcher, context=None, input_keys=(), max_steps=None) ->
   DelegatedTarget | None`` (plan baa37f40 phase K7, D-049): the delegated twin, for the kinds
@@ -538,9 +539,20 @@ class ExecutableRegistry:
         # `requires.handlers` alone, do NOT move it into the loader (an operator document that
         # lists handlers still runs standalone), do NOT judge it from a record: the executable's
         # own claims decide.
+        # DECISION plan-2026-11-24T043150-a555dcfe/D-014
+        # D-010 stands except for a built-in strategy that CARRIES a host binding: kind
+        # `strategy` with a non-None `setup` (code only, a document cannot set it; the reasoning
+        # host registers those handlers on the API that pushes the frame, engine.py:283). Do NOT
+        # exempt the kind alone: an operator strategy file that requires handlers has no
+        # binding and stays refused. A host that is not ReasoningEngine and pushes such a
+        # strategy must register the handlers itself.
         requires = getattr(executable, "requires", None)
-        if getattr(executable, "kind", None) in _NEVER_A_FRAME_KINDS or getattr(
-            requires, "handlers", None
+        if getattr(executable, "kind", None) in _NEVER_A_FRAME_KINDS or (
+            getattr(requires, "handlers", None)
+            and not (
+                getattr(executable, "kind", None) == "strategy"
+                and getattr(executable, "setup", None) is not None
+            )
         ):
             return None
         try:

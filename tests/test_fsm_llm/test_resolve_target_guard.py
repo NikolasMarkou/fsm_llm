@@ -1,7 +1,7 @@
 """The frame guard of ``ExecutableRegistry.resolve_target`` (plan a555dcfe, step 4, D-010).
 
 A frame is a plain child conversation of a ``call`` state: the engine runs no handler of the
-child. So an executable of kind ``pattern`` and any executable whose ``requires.handlers`` is
+child (D-014: except a built-in strategy whose host binds its handlers). So an executable of kind ``pattern`` and any executable whose ``requires.handlers`` is
 non-empty is never pushed as a frame: ``resolve_target`` answers ``None`` and the call ends
 ``failed/unknown_target``. The loader accepts an ``fsm`` envelope that declares
 ``requires.handlers`` for an operator origin (V7 refuses it only for a model), so the document
@@ -86,9 +86,16 @@ class TestFrameModeRefuses:
         assert executable.requires.handlers == ["h1"]
         assert registry.resolve_target(_TARGET) is None
 
-    def test_a_strategy_that_requires_handlers_is_no_frame_target(self) -> None:
+    def test_an_operator_strategy_that_requires_handlers_is_no_frame_target(
+        self,
+    ) -> None:
+        """A strategy FILE has no host binding (`setup` is code only): D-014 keeps D-010 for it.
+        Kills (D3): an exemption of the whole kind `strategy`."""
         registry = ExecutableRegistry()
-        registry.add_document(_doc("strategy", _TARGET, requires={"handlers": ["h1"]}))
+        executable = registry.add_document(
+            _doc("strategy", _TARGET, requires={"handlers": ["h1"]})
+        )
+        assert executable.setup is None
         assert registry.resolve_target(_TARGET) is None
 
     def test_a_pattern_that_carries_a_body_is_no_frame_target(self) -> None:
@@ -120,6 +127,45 @@ class TestFrameModeRefuses:
             _doc("fsm", _TARGET, version="2", requires={"handlers": ["h1"]})
         )
         assert registry.resolve_target(_TARGET) is None
+
+
+class TestABuiltInStrategyWithAHostBindingIsAFrame:
+    """D-014: `reasoning.simple_calculator` and `reasoning.hybrid` require handlers that the
+    reasoning host registers on the API that pushes the frame (engine.py, `setup`)."""
+
+    def test_the_two_handler_bearing_strategies_resolve_in_frame_mode(self) -> None:
+        from fsm_llm.reasoning.executables import strategy_registry
+
+        registry = strategy_registry()
+        for name in ("simple_calculator", "hybrid"):
+            executable = registry.get(f"reasoning.{name}")
+            assert executable.requires.handlers
+            assert executable.setup is not None
+            target = registry.resolve_target(f"reasoning.{name}")
+            assert target is not None and target.mode == "frame", name
+
+    def test_a_built_in_strategy_without_handlers_still_resolves(self) -> None:
+        from fsm_llm.reasoning.executables import strategy_registry
+
+        assert strategy_registry().resolve_target("reasoning.analytical") is not None
+
+    def test_the_exemption_needs_both_the_kind_and_the_binding(self) -> None:
+        """A strategy document given a `setup` by code resolves; an fsm with one does not."""
+        from fsm_llm.core.verify.executable import load_executable
+        from fsm_llm.engine.executables import FsmBodyExecutable
+
+        def build(kind: str, setup: Any) -> ExecutableRegistry:
+            envelope, report = load_executable(
+                _doc(kind, _TARGET, requires={"handlers": ["h1"]})
+            )
+            assert envelope is not None, report.errors
+            registry = ExecutableRegistry()
+            registry.register(FsmBodyExecutable(envelope, setup=setup))
+            return registry
+
+        assert build("strategy", lambda api: None).resolve_target(_TARGET) is not None
+        assert build("strategy", None).resolve_target(_TARGET) is None
+        assert build("fsm", lambda api: None).resolve_target(_TARGET) is None
 
 
 class TestACallEndsFailed:
