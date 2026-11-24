@@ -58,6 +58,8 @@ from fsm_llm.core.definitions.executable import (
     ExecutableEnvelope,
     parse_executable,
     scan_placeholders,
+)
+from fsm_llm.core.definitions.executable_instance import (
     substitute_variables,
     variable_problems,
 )

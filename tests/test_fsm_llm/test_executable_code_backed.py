@@ -24,8 +24,8 @@ from fsm_llm.core.definitions.executable import (
     ExecutableError,
     InstantiationError,
     Requires,
-    canonical_digest,
 )
+from fsm_llm.core.definitions.executable_instance import canonical_digest
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunContext

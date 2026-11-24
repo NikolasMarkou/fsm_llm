@@ -58,6 +58,7 @@ MODULES = (
     "fsm_llm.engine.executables",
     "fsm_llm.engine.okf_bridge",
     "fsm_llm.core.definitions.executable",
+    "fsm_llm.core.definitions.executable_instance",
     "fsm_llm.core.definitions.schema",
     "fsm_llm.agents",
     "fsm_llm.eval",

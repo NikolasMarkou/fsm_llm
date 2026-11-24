@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.definitions import FSMDefinition, definition_digest, limits
 from fsm_llm.core.definitions import executable as ex
+from fsm_llm.core.definitions import executable_instance as ei
 from fsm_llm.core.definitions.schema import (
     EXECUTABLE_SCHEMA_ID,
     SchemaFinding,
@@ -83,10 +84,10 @@ class TestEveryBuiltInWrapped:
         assert dumped["schema"] == "fsm-llm/executable"
         assert "identity" not in dumped
 
-        definition, record = ex.instantiate_envelope(envelope)
+        definition, record = ei.instantiate_envelope(envelope)
         assert definition == FSMDefinition(**_CASES[case])
         assert record == {"options": {}, "variables": {}}
-        identity = ex.identity_of(envelope, definition)
+        identity = ei.identity_of(envelope, definition)
         assert identity.instance_identity == _INDEX[case]["digest64"]
         assert identity.template_identity not in (None, identity.instance_identity)
         assert len(identity.template_identity) == 64
@@ -98,8 +99,8 @@ class TestEveryBuiltInWrapped:
         shuffled["body"] = {k: document["body"][k] for k in reversed(document["body"])}
 
         assert (
-            ex.identity_of(ex.parse_executable(shuffled)).template_identity
-            == ex.identity_of(ex.parse_executable(document)).template_identity
+            ei.identity_of(ex.parse_executable(shuffled)).template_identity
+            == ei.identity_of(ex.parse_executable(document)).template_identity
         )
 
     def test_reasoning_strategies_are_strategy_documents(self):
@@ -120,28 +121,28 @@ class TestTheTemplateIdentity:
             _doc(schema_version="1.0", lifecycle="draft", version="1", variables=[])
         )
 
-        assert ex.identity_of(plain) == ex.identity_of(explicit)
+        assert ei.identity_of(plain) == ei.identity_of(explicit)
 
     def test_a_document_of_required_keys_only_hashes_as_itself(self):
         # exclude_defaults: a defaulted field (added later, say) is not in the canonical dump
         document = _doc()
 
-        assert ex.identity_of(
+        assert ei.identity_of(
             ex.parse_executable(document)
-        ).template_identity == ex.canonical_digest(document)
+        ).template_identity == ei.canonical_digest(document)
 
     def test_a_changed_field_moves_the_template_and_not_the_instance(self):
         base = ex.parse_executable(_doc())
         other = ex.parse_executable(_doc(description="another text"))
 
-        definition = ex.instantiate_envelope(base)[0]
+        definition = ei.instantiate_envelope(base)[0]
         assert (
-            ex.identity_of(base, definition).template_identity
-            != ex.identity_of(other, definition).template_identity
+            ei.identity_of(base, definition).template_identity
+            != ei.identity_of(other, definition).template_identity
         )
         assert (
-            ex.identity_of(base, definition).instance_identity
-            == ex.identity_of(other, definition).instance_identity
+            ei.identity_of(base, definition).instance_identity
+            == ei.identity_of(other, definition).instance_identity
             == definition_digest(definition)
         )
 
@@ -149,7 +150,7 @@ class TestTheTemplateIdentity:
         fsm = ex.parse_executable(_doc())
         procedure = ex.parse_executable(_doc(kind="procedure"))
 
-        assert ex.identity_of(fsm) != ex.identity_of(procedure)
+        assert ei.identity_of(fsm) != ei.identity_of(procedure)
 
     def test_a_mapping_instance_is_hashed_by_the_canonical_recipe(self):
         envelope = ex.parse_executable(_doc())
@@ -157,12 +158,12 @@ class TestTheTemplateIdentity:
 
         text = json.dumps(body, sort_keys=True)
         assert (
-            ex.identity_of(envelope, body).instance_identity
+            ei.identity_of(envelope, body).instance_identity
             == hashlib.sha256(text.encode()).hexdigest()
-            == ex.canonical_digest({"a": [1, 2], "b": 1})
+            == ei.canonical_digest({"a": [1, 2], "b": 1})
         )
-        assert ex.identity_of(envelope) == Identity(
-            template_identity=ex.identity_of(envelope).template_identity
+        assert ei.identity_of(envelope) == Identity(
+            template_identity=ei.identity_of(envelope).template_identity
         )
 
     def test_one_instance_has_one_identity_as_a_definition_or_as_a_dict(self):
@@ -172,26 +173,26 @@ class TestTheTemplateIdentity:
         spelled_out = definition.model_dump(mode="json")  # every default written
         as_written = _fsm()
 
-        by_definition = ex.identity_of(envelope, definition)
+        by_definition = ei.identity_of(envelope, definition)
         assert spelled_out != as_written
-        assert ex.identity_of(envelope, spelled_out) == by_definition
-        assert ex.identity_of(envelope, as_written) == by_definition
+        assert ei.identity_of(envelope, spelled_out) == by_definition
+        assert ei.identity_of(envelope, as_written) == by_definition
         assert by_definition.instance_identity == definition_digest(definition)
 
     def test_a_dict_that_is_no_fsm_is_hashed_as_written_and_never_raises(self):
         envelope = ex.parse_executable(_doc())
 
         for body in ({"steps": []}, {"name": "x"}, {1: "a"}, {}):
-            assert ex.identity_of(
+            assert ei.identity_of(
                 envelope, body
-            ).instance_identity == ex.canonical_digest(
+            ).instance_identity == ei.canonical_digest(
                 {str(k): v for k, v in body.items()}
             )
 
     def test_the_canonical_digest_of_an_fsm_dump_is_the_fsm_recipe(self):
         definition = FSMDefinition(**_fsm())
 
-        assert ex.canonical_digest(
+        assert ei.canonical_digest(
             definition.model_dump(exclude_defaults=True)
         ) == definition_digest(definition)
 
@@ -297,7 +298,7 @@ class TestPerKindRefusals:
             value = {"a": value}
         envelope = ex.parse_executable(_doc(metadata=value))
 
-        assert ex.identity_of(envelope).template_identity
+        assert ei.identity_of(envelope).template_identity
 
 
 # The identity of a document must not depend on the stack or the serializer depth guard of the
@@ -305,6 +306,7 @@ class TestPerKindRefusals:
 _SMALL_STACK_SCRIPT = """
 import json, sys, threading
 from fsm_llm.core.definitions import executable as ex
+from fsm_llm.core.definitions import executable_instance as ei
 depth = int(sys.argv[1])
 document = json.loads(sys.argv[2])
 nested = "x"
@@ -316,13 +318,13 @@ def run():
     try:
         deep_meta = dict(document, metadata=nested)
         envelope = ex.parse_executable(deep_meta)
-        assert len(ex.identity_of(envelope).template_identity) == 64
+        assert len(ei.identity_of(envelope).template_identity) == 64
         deep_body = dict(document, body={"fsm": nested})
-        assert len(ex.identity_of(ex.parse_executable(deep_body)).template_identity) == 64
+        assert len(ei.identity_of(ex.parse_executable(deep_body)).template_identity) == 64
         envelope = ex.parse_executable(dict(document, metadata=nested))
-        definition, record = ex.instantiate_envelope(envelope)
-        identity = ex.identity_of(envelope, definition)
-        ex.rebuild_instance(envelope, record, identity.instance_identity)
+        definition, record = ei.instantiate_envelope(envelope)
+        identity = ei.identity_of(envelope, definition)
+        ei.rebuild_instance(envelope, record, identity.instance_identity)
     except BaseException as error:
         failures.append(f"{type(error).__name__}: {str(error)[:100]}")
 
@@ -363,7 +365,7 @@ class TestTheIdentityIsPlatformIndependent:
     def test_a_built_in_keeps_its_template_identity_byte_for_byte(self, case):
         envelope = ex.parse_executable(corpus.wrap(case, _CASES[case]))
 
-        assert ex.identity_of(envelope).template_identity == ex.canonical_digest(
+        assert ei.identity_of(envelope).template_identity == ei.canonical_digest(
             _old_template_dump(envelope)
         )
 
@@ -378,11 +380,11 @@ class TestTheIdentityIsPlatformIndependent:
         }
         envelope = ex.parse_executable(_doc(metadata=metadata))
 
-        assert ex.identity_of(envelope).template_identity == ex.canonical_digest(
+        assert ei.identity_of(envelope).template_identity == ei.canonical_digest(
             _old_template_dump(envelope)
         )
         bare = ex.parse_executable(_doc())
-        assert ex.identity_of(bare).template_identity == ex.canonical_digest(
+        assert ei.identity_of(bare).template_identity == ei.canonical_digest(
             _old_template_dump(bare)
         )
         # a read-only mapping (which pydantic's own dump refuses) identifies as its dict form
@@ -391,8 +393,8 @@ class TestTheIdentityIsPlatformIndependent:
         )
         as_dict = ex.parse_executable(_doc(metadata={"k": [1]}))
         assert (
-            ex.identity_of(as_proxy).template_identity
-            == ex.identity_of(as_dict).template_identity
+            ei.identity_of(as_proxy).template_identity
+            == ei.identity_of(as_dict).template_identity
         )
 
     def test_a_cyclic_envelope_is_refused_and_never_walked_forever(self):
@@ -400,7 +402,7 @@ class TestTheIdentityIsPlatformIndependent:
         envelope.metadata["self"] = envelope.metadata
 
         with pytest.raises(ex.ExecutableDocumentError, match="nests deeper"):
-            ex.identity_of(envelope)
+            ei.identity_of(envelope)
 
     def test_every_free_form_field_of_the_envelope_is_kept_out_of_the_pydantic_dump(
         self,
@@ -574,7 +576,7 @@ class TestSchemaVersion:
         envelope = ex.parse_executable(_doc(fsm, version="2"))
 
         assert ex.newer_envelope_fields(envelope) == ()
-        findings = newer_fields(ex.instantiate_envelope(envelope)[0])
+        findings = newer_fields(ei.instantiate_envelope(envelope)[0])
         assert [(f.model, f.field) for f in findings] == [
             ("FSMDefinition", "handler_only_keys")
         ]
@@ -621,10 +623,10 @@ class TestInstantiation:
 
     def test_variables_change_the_instance_and_not_the_template(self):
         envelope = self._templated()
-        a, record_a = ex.instantiate_envelope(
+        a, record_a = ei.instantiate_envelope(
             envelope, variables={"tone": "calm", "topic": "x"}
         )
-        b, _ = ex.instantiate_envelope(
+        b, _ = ei.instantiate_envelope(
             envelope, variables={"tone": "loud", "topic": "x"}
         )
 
@@ -633,7 +635,7 @@ class TestInstantiation:
             "options": {},
             "variables": {"tone": "calm", "topic": "x"},
         }
-        ia, ib = ex.identity_of(envelope, a), ex.identity_of(envelope, b)
+        ia, ib = ei.identity_of(envelope, a), ei.identity_of(envelope, b)
         assert ia.instance_identity != ib.instance_identity
         assert ia.template_identity == ib.template_identity
 
@@ -649,7 +651,7 @@ class TestInstantiation:
         )
 
         with pytest.raises(ex.InstantiationError, match="deep"):
-            ex.instantiate_envelope(envelope)
+            ei.instantiate_envelope(envelope)
 
     def test_substitution_and_scan_read_tuples_and_mappings(self):
         node = {
@@ -657,24 +659,24 @@ class TestInstantiation:
             "b": ["{{v}}"],
         }
 
-        out = ex.substitute_variables(node, {"v": "X"})
+        out = ei.substitute_variables(node, {"v": "X"})
 
         assert out == {"a": ("Hi X", {"k": "X"}), "b": ["X"]}
         assert ex.scan_placeholders(node) == ({"v"}, set())
 
     def test_a_declared_variable_without_a_value_is_refused(self):
         with pytest.raises(ex.InstantiationError, match="tone"):
-            ex.instantiate_envelope(self._templated(), variables={"topic": "x"})
+            ei.instantiate_envelope(self._templated(), variables={"topic": "x"})
 
     def test_a_value_for_an_undeclared_name_is_refused(self):
         with pytest.raises(ex.InstantiationError, match="color"):
-            ex.instantiate_envelope(
+            ei.instantiate_envelope(
                 self._templated(), variables={"tone": "a", "topic": "b", "color": "c"}
             )
 
     def test_options_are_refused_until_a_kind_has_an_option_schema(self):
         with pytest.raises(ex.InstantiationError, match="options"):
-            ex.instantiate_envelope(
+            ei.instantiate_envelope(
                 ex.parse_executable(_doc()), options={"approval": True}
             )
 
@@ -686,7 +688,7 @@ class TestInstantiation:
             "deep": {"{{y}}": ["{{y}}"]},
         }
 
-        out = ex.substitute_variables(node, {"x": "{{y}}", "y": "Y"})
+        out = ei.substitute_variables(node, {"x": "{{y}}", "y": "Y"})
 
         assert out == {
             "{{x}}": "key stays",
@@ -711,13 +713,13 @@ class TestInstantiation:
 
         document = _doc(contract={"inputs": ["task"]}, variables=["tone"])
         envelope = ex.parse_executable(document)
-        definition, record = ex.instantiate_envelope(envelope, variables={"tone": "a"})
-        before = ex.identity_of(envelope, definition)
+        definition, record = ei.instantiate_envelope(envelope, variables={"tone": "a"})
+        before = ei.identity_of(envelope, definition)
 
         for i in range(10_000):
             task = f"caller input {i} sk-SECRET-{i}"
             with pytest.raises(ex.InstantiationError) as info:
-                ex.instantiate_envelope(envelope, variables={"tone": "a", "task": task})
+                ei.instantiate_envelope(envelope, variables={"tone": "a", "task": task})
             assert "task" in str(info.value) and task not in str(info.value)
             if i % 1_000 == 0:  # the loader is the heavier call
                 loaded, result = load_executable(
@@ -727,16 +729,16 @@ class TestInstantiation:
                 assert any("task" in m for m in result.errors)
                 assert not any(task in m for m in (*result.errors, *result.warnings))
                 with pytest.raises(ex.InstantiationError):
-                    ex.rebuild_instance(
+                    ei.rebuild_instance(
                         envelope,
                         {"options": {}, "variables": {"tone": "a", "task": task}},
                         before.instance_identity or "",
                     )
 
-        after_definition, after_record = ex.instantiate_envelope(
+        after_definition, after_record = ei.instantiate_envelope(
             envelope, variables={"tone": "a"}
         )
-        assert (ex.identity_of(envelope, after_definition), after_record) == (
+        assert (ei.identity_of(envelope, after_definition), after_record) == (
             before,
             record,
         )
@@ -749,7 +751,7 @@ class TestInstantiation:
         value = "sk-SECRET-123\x1b[31m\u202e"
 
         with pytest.raises(ex.InstantiationError) as info:
-            ex.instantiate_envelope(envelope, variables={"first": value})
+            ei.instantiate_envelope(envelope, variables={"first": value})
 
         text = str(info.value)
         assert "not a valid FSM definition" in text and "value_error" in text
@@ -758,18 +760,18 @@ class TestInstantiation:
 
     def test_rebuild_matches_and_a_tampered_record_fails(self):
         envelope = self._templated()
-        definition, record = ex.instantiate_envelope(
+        definition, record = ei.instantiate_envelope(
             envelope, variables={"tone": "calm", "topic": "x"}
         )
         expected = definition_digest(definition)
 
-        assert ex.rebuild_instance(envelope, record, expected) == definition
+        assert ei.rebuild_instance(envelope, record, expected) == definition
 
         tampered = {"options": {}, "variables": {"tone": "calm", "topic": "y"}}
         with pytest.raises(ex.InstanceIdentityMismatchError):
-            ex.rebuild_instance(envelope, tampered, expected)
+            ei.rebuild_instance(envelope, tampered, expected)
         with pytest.raises(ex.ExecutableError):
-            ex.rebuild_instance(envelope, {"variables": 3}, expected)
+            ei.rebuild_instance(envelope, {"variables": 3}, expected)
         assert issubclass(ex.InstanceIdentityMismatchError, ex.InstantiationError)
 
 
@@ -854,6 +856,6 @@ def test_a_parsed_envelope_does_not_share_the_callers_dict():
     envelope = ex.parse_executable(document)
     before = copy.deepcopy(document)
 
-    ex.instantiate_envelope(envelope)
+    ei.instantiate_envelope(envelope)
 
     assert document == before

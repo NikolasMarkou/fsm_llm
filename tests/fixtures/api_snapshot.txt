@@ -988,17 +988,18 @@ fsm_llm.core.definitions.executable.StrategyEnvelope class(ExecutableEnvelope)
   field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
   field body: StrategyBody required
   field metadata: dict[str, Any] = factory
-fsm_llm.core.definitions.executable.canonical_digest def(payload: Mapping[str, Any]) -> str
 fsm_llm.core.definitions.executable.executable_json_schema def() -> dict[str, Any]
-fsm_llm.core.definitions.executable.identity_of def(template: ExecutableEnvelope, instance: FSMDefinition | Mapping[str, Any] | None = None) -> Identity
-fsm_llm.core.definitions.executable.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> tuple[FSMDefinition, dict[str, Any]]
 fsm_llm.core.definitions.executable.newer_envelope_fields def(envelope: ExecutableEnvelope) -> tuple[SchemaFinding, ...]
 fsm_llm.core.definitions.executable.parse_executable def(data: object) -> ExecutableEnvelope
-fsm_llm.core.definitions.executable.rebuild_instance def(envelope: ExecutableEnvelope, record: Mapping[str, Any], expected_instance_identity: str) -> FSMDefinition
 fsm_llm.core.definitions.executable.scan_placeholders def(node: Any) -> tuple[set[str], set[str]]
 fsm_llm.core.definitions.executable.schema_text def() -> str
-fsm_llm.core.definitions.executable.substitute_variables def(node: Any, values: Mapping[str, str]) -> Any
-fsm_llm.core.definitions.executable.variable_problems def(envelope: ExecutableEnvelope, values: Mapping[str, Any]) -> list[str]
+# fsm_llm.core.definitions.executable_instance
+fsm_llm.core.definitions.executable_instance.canonical_digest def(payload: Mapping[str, Any]) -> str
+fsm_llm.core.definitions.executable_instance.identity_of def(template: ExecutableEnvelope, instance: FSMDefinition | Mapping[str, Any] | None = None) -> Identity
+fsm_llm.core.definitions.executable_instance.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None) -> tuple[FSMDefinition, dict[str, Any]]
+fsm_llm.core.definitions.executable_instance.rebuild_instance def(envelope: ExecutableEnvelope, record: Mapping[str, Any], expected_instance_identity: str) -> FSMDefinition
+fsm_llm.core.definitions.executable_instance.substitute_variables def(node: Any, values: Mapping[str, str]) -> Any
+fsm_llm.core.definitions.executable_instance.variable_problems def(envelope: ExecutableEnvelope, values: Mapping[str, Any]) -> list[str]
 # fsm_llm.core.definitions.schema
 fsm_llm.core.definitions.schema.EXECUTABLE_SCHEMA_ID = 'fsm-llm/executable'
 fsm_llm.core.definitions.schema.FIELD_VERSIONS dict

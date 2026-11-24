@@ -21,6 +21,7 @@ import pytest
 
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.definitions import executable as ex
+from fsm_llm.core.definitions import executable_instance as ei
 from fsm_llm.core.state_kinds import declared_tool_names
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.core.verify.flow import analyze_data_flow, analyze_liveness
@@ -160,9 +161,9 @@ class TestVariables:
         )
 
         assert result.is_valid
-        definition, _ = ex.instantiate_envelope(envelope)
+        definition, _ = ei.instantiate_envelope(envelope)
         assert (
-            ex.identity_of(envelope, definition).instance_identity
+            ei.identity_of(envelope, definition).instance_identity
             == json.loads(corpus.INDEX_PATH.read_text(encoding="utf-8"))[
                 "agents/react"
             ]["digest64"]
@@ -213,7 +214,7 @@ class TestVariables:
         )
 
         assert result.is_valid
-        definition, _ = ex.instantiate_envelope(
+        definition, _ = ei.instantiate_envelope(
             envelope, variables={"tone": "{{topic}}", "topic": "X"}
         )
         assert definition.states["a"].response_instructions == "Use {{topic}}."

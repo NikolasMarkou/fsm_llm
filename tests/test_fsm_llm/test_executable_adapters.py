@@ -26,9 +26,9 @@ from fsm_llm.core.definitions import FSMDefinition, FSMError, LLMResponseError
 from fsm_llm.core.definitions.executable import (
     InstanceIdentityMismatchError,
     InstantiationError,
-    identity_of,
     parse_executable,
 )
+from fsm_llm.core.definitions.executable_instance import identity_of
 from fsm_llm.core.definitions.fsm import definition_digest
 from fsm_llm.core.results import RunResult
 from fsm_llm.engine.context import CancelToken, RunContext

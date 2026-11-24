@@ -84,7 +84,8 @@ A document has two digests, and a run can report both (the `identity` field of a
 - The **instance identity** is the `definition_digest` of the FSM after the variables are filled: the full digest of which the engine's `fsm_id` keeps the first characters.
 
 ```python
-from fsm_llm.core.definitions.executable import identity_of, instantiate_envelope, parse_executable
+from fsm_llm.core.definitions.executable import parse_executable
+from fsm_llm.core.definitions.executable_instance import identity_of, instantiate_envelope
 
 envelope = parse_executable(document)                  # V1, see below
 definition, record = instantiate_envelope(envelope, variables={"company": "Acme"})

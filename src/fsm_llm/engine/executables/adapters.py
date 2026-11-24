@@ -56,6 +56,8 @@ from fsm_llm.core.definitions.executable import (
     ExecutableEnvelope,
     Requires,
     StrategyEnvelope,
+)
+from fsm_llm.core.definitions.executable_instance import (
     identity_of,
     instantiate_envelope,
     rebuild_instance,

@@ -645,8 +645,10 @@ The RFC 6902 subset `add`, `remove`, `replace`, `test` over a trusted `dict` wit
 
 ```python
 from fsm_llm.core.definitions.executable import (
-    ExecutableDocumentError, InstantiationError, canonical_digest, executable_json_schema,
-    identity_of, instantiate_envelope, parse_executable, rebuild_instance,
+    ExecutableDocumentError, InstantiationError, executable_json_schema, parse_executable,
+)
+from fsm_llm.core.definitions.executable_instance import (
+    canonical_digest, identity_of, instantiate_envelope, rebuild_instance,
 )
 from fsm_llm.core.verify.executable import load_executable
 
