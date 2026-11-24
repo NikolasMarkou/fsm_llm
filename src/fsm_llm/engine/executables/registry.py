@@ -30,7 +30,8 @@ Interface contract:
   ``FSMDefinition`` and both identities when the instance is an FSM body (kinds ``fsm``,
   ``strategy``, ``procedure``) and, for a ``strategy``, its declared ``results`` as the target's own
   output map (``ResolvedTarget.returns``, D-030 of plan baa37f40); ``None`` for a miss, a body
-  that does not instantiate and a code-backed kind (``pattern``). Never raises for a miss, never loads a module
+  that does not instantiate, a code-backed kind (``pattern``) and, whatever its kind, an executable
+  whose ``requires.handlers`` is non-empty (a frame runs no handler; plan a555dcfe D-010). Never raises for a miss, never loads a module
   by the id and keeps no instance.
 - ``resolve_delegated(target_id, *, launcher, context=None, input_keys=(), max_steps=None) ->
   DelegatedTarget | None`` (plan baa37f40 phase K7, D-049): the delegated twin, for the kinds
@@ -108,6 +109,8 @@ _MEMORY = "memory"
 #: The kinds that run as code on a host thread (delegated mode); a body kind is a frame and a
 #: ``workflow`` is no target until E5.2 and E5.3 (D-053, D-055).
 _DELEGATED_KINDS = ("pattern",)
+#: The kinds that are never a frame: their handlers, hooks and per-run objects would not run.
+_NEVER_A_FRAME_KINDS = ("pattern",)
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
 
@@ -513,6 +516,18 @@ class ExecutableRegistry:
             return None
         if getattr(executable, "lifecycle", None) is Lifecycle.DEPRECATED:
             return None  # selection refuses a deprecated strategy: so does a call (D-044 (2))
+        # DECISION plan-2026-11-24T043150-a555dcfe/D-010
+        # A frame is a plain child conversation: the engine runs no handler of it. A pattern and
+        # any executable whose `requires.handlers` is non-empty is never pushed as a frame (the
+        # call ends `failed/unknown_target`); a pattern runs delegated. Do NOT relax this for
+        # `requires.handlers` alone, do NOT move it into the loader (an operator document that
+        # lists handlers still runs standalone), do NOT judge it from a record: the executable's
+        # own claims decide.
+        requires = getattr(executable, "requires", None)
+        if getattr(executable, "kind", None) in _NEVER_A_FRAME_KINDS or getattr(
+            requires, "handlers", None
+        ):
+            return None
         try:
             instance = executable.instantiate()
         except InstantiationError as error:

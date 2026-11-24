@@ -899,6 +899,11 @@
       "delta": 1,
       "reason": "plan a555dcfe step 3: the agents async seam re-homes the stash anchor ace7a8c8/D-005 (never in ANCHORS.md) as a555dcfe/D-009 on RunsMixin._before_step_hook; one token added",
       "token": "plan-2026-11-24T043150-a555dcfe/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe D-010: the frame guard anchor of ExecutableRegistry.resolve_target (a pattern or a handler-requiring executable is never a frame)",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-010"
     }
   ]
 }
