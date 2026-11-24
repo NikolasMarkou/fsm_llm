@@ -35,7 +35,7 @@ class ReflexionStates:
     EVALUATE = "evaluate"
     REFLECT = "reflect"
     CONCLUDE = AgentStates.CONCLUDE
-    # With HITL, the shared approval state (`_await_approval_state`).
+    # With HITL, the approval state of the pattern file.
     AWAIT_APPROVAL = AgentStates.AWAIT_APPROVAL
 
 

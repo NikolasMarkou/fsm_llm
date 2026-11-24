@@ -79,7 +79,6 @@ from fsm_llm.agents.fsm_definitions import (
     build_rewoo_fsm,
     build_self_consistency_fsm,
 )
-from fsm_llm.agents.fsm_definitions._loop import _await_approval_state
 from fsm_llm.agents.handlers import AgentHandlers, approval_grant
 from fsm_llm.agents.handlers.hooks import _REFLECTION_NOTE
 from fsm_llm.core.codes import Status
@@ -1081,7 +1080,8 @@ class TestAwaitApprovalExtractsNothing:
     def test_state_declares_no_extraction_and_keeps_its_three_edges(
         self, build_fsm: Any
     ):
-        state = _await_approval_state()
+        fsm = build_fsm(_registry([]), include_approval_state=True)
+        state = fsm["states"]["await_approval"]
 
         for slot in (
             "extraction_instructions",
@@ -1096,7 +1096,6 @@ class TestAwaitApprovalExtractsNothing:
             ("act", 10),
             ("think", 300),
         ]
-        fsm = build_fsm(_registry([]), include_approval_state=True)
         loaded = FSMDefinition(**fsm).states["await_approval"]
         assert not loaded.extraction_instructions
         assert not loaded.field_extractions

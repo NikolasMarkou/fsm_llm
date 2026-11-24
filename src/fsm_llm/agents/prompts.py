@@ -216,56 +216,6 @@ def build_think_terminate_instructions() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Reflexion prompts
-# ---------------------------------------------------------------------------
-
-
-def build_evaluate_field_instructions() -> dict[str, str]:
-    """Per-field instructions for the Reflexion ``evaluate`` state.
-
-    Returns ``{field_name: instructions}`` for ``evaluation_passed`` (bool),
-    ``evaluation_score`` (float) and ``evaluation_feedback`` (str).
-    """
-    criteria = (
-        "Judge whether the observations so far answer the task correctly and "
-        "completely: every part of the question addressed, the evidence "
-        "reliable and consistent."
-    )
-    return {
-        ContextKeys.EVALUATION_PASSED: (
-            f"{criteria} true if they are sufficient, false otherwise."
-        ),
-        ContextKeys.EVALUATION_SCORE: (
-            f"{criteria} A number from 0.0 to 1.0 rating the answer quality."
-        ),
-        ContextKeys.EVALUATION_FEEDBACK: (
-            f"{_COMPOSE}{criteria} One or two sentences on what is good or missing."
-        ),
-    }
-
-
-def build_reflect_field_instructions() -> dict[str, str]:
-    """Per-field instructions for the Reflexion ``reflect`` state.
-
-    Returns ``{field_name: instructions}`` for ``reflection`` and ``lessons``
-    (both str). The prompt shows the evaluation feedback and the episodic
-    memory, so a new episode's reflection differs from earlier ones.
-    """
-    return {
-        ContextKeys.REFLECTION: (
-            f"{_COMPOSE}The last evaluation found the answer insufficient (see "
-            "evaluation_feedback). Critique what went wrong in this attempt "
-            "and what to try differently. Do not repeat a reflection already "
-            "in episodic_memory."
-        ),
-        ContextKeys.LESSONS: (
-            f"{_COMPOSE}One short lesson to remember for the next attempt, based on "
-            "evaluation_feedback and not already listed in episodic_memory."
-        ),
-    }
-
-
-# ---------------------------------------------------------------------------
 # Plan-and-Execute prompts
 # ---------------------------------------------------------------------------
 
@@ -345,14 +295,6 @@ def build_execute_step_instructions(
     )
 
 
-def build_synthesize_response_instructions() -> str:
-    """Build response instructions for the synthesize state."""
-    return (
-        "Present a clear, complete answer that integrates results from all "
-        "plan steps. Reference specific step results as evidence."
-    )
-
-
 # ---------------------------------------------------------------------------
 # REWOO prompts
 # ---------------------------------------------------------------------------
@@ -410,14 +352,6 @@ def build_rewoo_plan_field_instructions(
     )
 
 
-def build_rewoo_solve_response_instructions() -> str:
-    """Build response instructions for the REWOO solve state."""
-    return (
-        "Present your final answer clearly, referencing the evidence gathered "
-        "from the planned tool executions."
-    )
-
-
 # ---------------------------------------------------------------------------
 # Maker-Checker prompts
 # ---------------------------------------------------------------------------
@@ -460,50 +394,6 @@ def build_maker_checker_field_instructions(
             "needs revision. " + criteria
         ),
     }
-
-
-def build_maker_checker_output_response_instructions() -> str:
-    """Build response instructions for the Maker-Checker output state."""
-    return "Present the final, reviewed output as your answer."
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator-Workers prompts
-# ---------------------------------------------------------------------------
-
-
-def build_orchestrator_field_instructions() -> dict[str, str]:
-    """Per-field instructions for the orchestrator's typed fields.
-
-    Returns ``{field_name: instructions}`` for ``subtasks`` (orchestrate) and
-    ``all_collected`` (collect). Both prompts show the task and
-    ``worker_results`` only (fix 21.1 of plan 06a5ec0a). ``subtasks`` is
-    generated, so it opens with :data:`_COMPOSE`; the ``all_collected``
-    wording is permissive, like the debate judge's (D-035): a false sends
-    the run back to orchestrate for another delegation round.
-    """
-    return {
-        ContextKeys.SUBTASKS: (
-            f"{_COMPOSE}Your decomposition of the task: a JSON list of subtask "
-            "description strings, each specific, self-contained and actionable "
-            "for one worker. If worker_results holds results from earlier "
-            "rounds, list only the work those results do not cover yet."
-        ),
-        ContextKeys.ALL_COLLECTED: (
-            "Weigh the worker_results value against the task. true when those "
-            "results are enough to write a useful final answer, even if some "
-            "detail is thin; false only when a clearly required part of the "
-            "task has no result at all."
-        ),
-    }
-
-
-def build_orchestrator_synthesize_response_instructions() -> str:
-    """Build response instructions for the orchestrator synthesize state."""
-    return (
-        "Present a clear, complete answer that integrates results from all "
-        "workers. Reference specific worker results as evidence."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -667,12 +557,3 @@ def build_debate_field_instructions(
             f"{_persona_line(judge_persona)}"
         ),
     }
-
-
-def build_debate_conclude_response_instructions() -> str:
-    """Build response instructions for the debate conclude state."""
-    return (
-        "Give the final, definitive answer to the task from the debate: state "
-        "the answer first, then the key arguments from debate_rounds that "
-        "shaped it."
-    )

@@ -40,10 +40,6 @@ from tests.executables_corpus import CASES, INDEX_PATH, canonical_sha256
 #: ``tests/test_fsm_llm/test_executables_corpus.py``; their rows were dropped here (plan
 #: ace7a8c8 step 4, G2.3) after a one by one comparison found every literal equal.
 _GOLDEN: dict[str, tuple[str, str]] = {
-    "await_approval_state": (
-        "393e8623fb20ed25ddea4f976ed2feae6905132dc4606d18ad0ec26c485bd08a",
-        "",
-    ),
     "conclude_logic": (
         "0dbd0c38d9d910979b5f2eb9b3ea6370e0969b8d1eabd43b6cba0618f3b1e529",
         "",
@@ -66,26 +62,6 @@ _GOLDEN: dict[str, tuple[str, str]] = {
     ),
     "loop_field_context_keys_extra": (
         "3ab03b0c58a5c064ecedf093cfcd13f12f3c2f8af72cef3de498547a025bcecf",
-        "",
-    ),
-    "reply_kind_condition": (
-        "6d86bb241f242498f02ef25398d0c3dc5fa3d1e946854307e660c2e379553a73",
-        "",
-    ),
-    "think_fields": (
-        "63a1b85d464f03fdd089906ba900f8ecffea824a91858973fdf7cee3b651a98d",
-        "",
-    ),
-    "think_fields_no_name": (
-        "d54e2dbaa4ae50822270e6626eb9f3f0d3a3d03308041d71ab70ef7a052b70ec",
-        "",
-    ),
-    "tool_selection": (
-        "5784ab0b6a088748fae20b2c7ad23fac0cdaced80fc9cb6d4be0b5b71e1d0050",
-        "",
-    ),
-    "tool_selection_no_name": (
-        "3ab71852345a3ef8844d9212965d9da8fb80981ed8e02233ce0c53dd8bd912ba",
         "",
     ),
 }

@@ -30,7 +30,7 @@ from fsm_llm.agents import build_parallel_react_fsm
 from fsm_llm.agents import fsm_definitions as fd
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.definitions import ChainStep
-from fsm_llm.agents.fsm_definitions import _common, _loop, native_fc
+from fsm_llm.agents.fsm_definitions import _common
 from fsm_llm.core.definitions import FSMDefinition, definition_digest, fsm_id_of
 from fsm_llm.reasoning.strategy_files import FSM_NAMES, STRATEGY_ORDER, strategy_facts
 from fsm_llm.reasoning.utilities import get_reasoning_fsm
@@ -218,31 +218,12 @@ CASES: dict[str, tuple[Callable[[], Any], bool]] = {
         lambda: fd.loop_field_context_keys(("a", ContextKeys.TASK, "b", "a")),
         False,
     ),
-    "tool_selection": (
-        lambda: _loop._tool_selection_field_extractions("pick", context_keys=("k",)),
-        False,
-    ),
-    "tool_selection_no_name": (
-        lambda: _loop._tool_selection_field_extractions(
-            "pick", include_tool_name=False, context_keys=()
-        ),
-        False,
-    ),
-    "think_fields": (lambda: _loop._think_field_extractions("pick"), False),
-    "think_fields_no_name": (
-        lambda: _loop._think_field_extractions(
-            "pick", include_tool_name=False, context_keys=("k",)
-        ),
-        False,
-    ),
     "conclude_logic": (lambda: fd.conclude_on_evidence_logic(), False),
     "conclude_logic_flag": (
         lambda: fd.conclude_on_evidence_logic(ContextKeys.EVALUATION_PASSED),
         False,
     ),
-    "await_approval_state": (lambda: _loop._await_approval_state(), False),
     "flag_condition": (lambda: _common._flag_condition("flag", "A flag"), False),
-    "reply_kind_condition": (lambda: native_fc._reply_kind_condition("calls"), False),
     "finalize": (
         lambda: _common._finalize_fsm("n", "dflt", "s", "p", {"s": {}}),
         False,

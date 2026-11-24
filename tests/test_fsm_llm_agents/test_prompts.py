@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from fsm_llm.agents.fsm_definitions import build_debate_fsm
 from fsm_llm.agents.prompts import (
     build_conclude_response_instructions,
-    build_debate_conclude_response_instructions,
     build_plan_steps_instructions,
     build_think_extraction_instructions,
 )
@@ -73,7 +73,7 @@ class TestPromptBuilders:
         "build",
         [
             build_conclude_response_instructions,
-            build_debate_conclude_response_instructions,
+            lambda: build_debate_fsm()["states"]["conclude"]["response_instructions"],
         ],
     )
     def test_conclude_instructions_name_no_turn_mechanics(self, build):

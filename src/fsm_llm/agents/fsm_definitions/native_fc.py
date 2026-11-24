@@ -5,18 +5,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from fsm_llm.agents.constants import NativeFCContextKeys
-
-
-def _reply_kind_condition(kind: str) -> dict[str, Any]:
-    """Condition that passes when the ``call_model`` reply is of ``kind``."""
-    key = NativeFCContextKeys.MODEL_REPLY
-    return {
-        "description": f"The model turn was {kind}",
-        "requires_context_keys": [key],
-        "logic": {"===": [{"var": f"{key}.kind"}, kind]},
-    }
-
 
 def native_fc_options(
     schemas: Sequence[dict[str, Any]], force_final_tool: str | None, repair: bool

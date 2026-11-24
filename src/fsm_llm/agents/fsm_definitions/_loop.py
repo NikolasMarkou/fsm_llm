@@ -1,4 +1,4 @@
-"""The think/act/conclude parts the loop patterns (ReAct, Reflexion, Plan-and-Execute, parallel ReAct) share."""
+"""The think/act/conclude parts of the code-backed tool loop (parallel ReAct) and the typed-field helpers."""
 
 from __future__ import annotations
 
@@ -7,50 +7,12 @@ from typing import TYPE_CHECKING, Any
 
 from fsm_llm import typed_field_extraction
 from fsm_llm.agents.constants import AgentStates, ContextKeys
-from fsm_llm.agents.prompts import build_think_terminate_instructions
 from fsm_llm.constants import has_internal_prefix
 
-from ._common import _edge, _is, _state, _when
+from ._common import _edge, _state, _when
 
 if TYPE_CHECKING:  # annotation only: core owns the name, agents keep no copy
     from fsm_llm.core.definitions import TypedFieldType
-
-
-def _tool_selection_field_extractions(
-    think_instructions: str,
-    *,
-    include_tool_name: bool = True,
-    context_keys: Sequence[str],
-) -> list[dict[str, Any]]:
-    """Typed ``field_extractions`` for a think state's tool selection.
-
-    Contract: ``think_instructions`` is the think prompt (tools, examples,
-    rules); returns raw dicts for ``State(field_extractions=...)``:
-    ``tool_name`` as ``str`` (omitted when ``include_tool_name`` is False, i.e.
-    the classifier owns it) and ``tool_input`` as ``dict``. ``context_keys``
-    (required) narrows each prompt's context to those keys (see
-    :func:`loop_field_context_keys`). Never raises.
-
-    # DECISION plan-2026-09-19T175721-21cd7f8e/D-024
-    Do NOT drop these and rely on the auto-minted config from
-    ``required_context_keys``: that config is ``field_type="any"``, whose grammar
-    (D-001) excludes ``object``, and on qwen3.5:9b-q8_0 the model then returns
-    null for both keys so no tool ever runs (live s15 A/B: 0/3 vs 3/3 with these
-    configs). Do NOT widen the ``any`` union to admit ``object`` (1/3 live, and it
-    reopens LV-01 for every auto-minted key). See decisions.md D-024.
-    """
-    fields = [("tool_input", "dict")]
-    if include_tool_name:
-        fields.insert(0, ("tool_name", "str"))
-    return [
-        {
-            "field_name": name,
-            "field_type": field_type,
-            "extraction_instructions": f"Extract the '{name}' field. {think_instructions}",
-            "context_keys": list(context_keys),
-        }
-        for name, field_type in fields
-    ]
 
 
 # DECISION plan-2026-09-29T103145-06a5ec0a/D-050
@@ -119,39 +81,6 @@ def _field(
     )
 
 
-def _think_field_extractions(
-    think_instructions: str,
-    *,
-    include_tool_name: bool = True,
-    context_keys: Sequence[str] = (),
-) -> list[dict[str, Any]]:
-    """Every typed field a ReAct/Reflexion ``think`` turn extracts.
-
-    Contract: the tool selection (:func:`_tool_selection_field_extractions`,
-    unchanged types), then ``should_terminate`` (bool, optional: a null costs
-    no retry and gates no edge). No ``reasoning`` field: that name is an
-    extraction envelope key (D-034/D-035 of plan 06a5ec0a). Every prompt
-    lists ``task``, ``observations``, ``agent_feedback`` and ``context_keys``,
-    never ``agent_trace``. ``think_instructions`` is the think prompt; pair
-    the result with an empty state-level ``extraction_instructions`` unless the
-    classifier owns ``tool_name`` (D-019 of plan 21cd7f8e keeps the bulk fill
-    there). Raises ``ValueError`` like :func:`loop_field_context_keys`.
-    """
-    keys = loop_field_context_keys((ContextKeys.AGENT_FEEDBACK, *context_keys))
-    return [
-        *_tool_selection_field_extractions(
-            think_instructions, include_tool_name=include_tool_name, context_keys=keys
-        ),
-        typed_field_extraction(
-            ContextKeys.SHOULD_TERMINATE,
-            "bool",
-            build_think_terminate_instructions(),
-            context_keys=keys,
-            required=False,
-        ),
-    ]
-
-
 def conclude_on_evidence_logic(
     flag: str = ContextKeys.SHOULD_TERMINATE,
 ) -> dict[str, Any]:
@@ -192,56 +121,6 @@ def conclude_on_evidence_logic(
     }
 
 
-def _await_approval_state() -> dict[str, Any]:
-    """The ``await_approval`` state shared by every approval-gated FSM.
-
-    Contract: returns a fresh state dict with edges to ``conclude`` (forced
-    termination), ``act`` (``approval_granted`` True) and ``think``
-    (``approval_granted`` False); the builder must define those three states.
-    The agent's loop driver (``BaseAgent._handle_hitl_approval``) writes the
-    decision before the state's step, so the state makes no LLM call. Never
-    raises.
-    """
-    # DECISION plan-2026-09-30T062855-07ad3f8c/D-033: this state extracts
-    # nothing. Do NOT give it `extraction_instructions`, `required_context_keys`
-    # or a field for `approval_granted`: the driver's callback asks the
-    # approver and writes the decision before this step, the model has no
-    # human reply to read, and any extraction here is a model write channel
-    # inside the state that guards the approval (the old bulk pass cost one
-    # LLM call per visit and let the reply fill an empty `tool_input` after
-    # the ask and add keys of its own, live: `denied_tool_call`).
-    # LOOP-09: an intermediate state; the driver asks the approver, so no
-    # Pass-2 prose (core skips Pass 2 on empty instructions).
-    return _state(
-        AgentStates.AWAIT_APPROVAL,
-        "Waiting for human approval before executing action",
-        "Hold the selected action until the approval decision is set",
-        [
-            _when(
-                AgentStates.CONCLUDE,
-                "Terminate when framework signals completion",
-                1,
-                "Framework or agent decided to terminate",
-                _is(ContextKeys.SHOULD_TERMINATE, True),
-            ),
-            _when(
-                AgentStates.ACT,
-                "Approval granted, proceed with action",
-                10,
-                "User approved the action",
-                _is(ContextKeys.APPROVAL_GRANTED, True),
-            ),
-            _when(
-                AgentStates.THINK,
-                "Approval denied, reconsider approach",
-                300,
-                "User denied the action",
-                _is(ContextKeys.APPROVAL_GRANTED, False),
-            ),
-        ],
-    )
-
-
 _TERMINATE_ON_EVIDENCE = (
     "Agent decided to terminate AND a tool has run or termination is forced"
 )
@@ -250,18 +129,14 @@ _TERMINATE_ON_EVIDENCE = (
 def _think_transitions(
     conclude_description: str,
     act_description: str = "Execute the selected tool",
-    *,
-    include_approval: bool = False,
 ) -> list[dict[str, Any]]:
-    """The ``think`` edges of every tool loop (ReAct, Reflexion, ParallelReact).
+    """The ``think`` edges of the parallel tool loop (no approval edge: the
+    approval patterns are pattern files).
 
     Contract: ``think -> conclude`` p10 on :func:`conclude_on_evidence_logic`,
-    then ``think -> await_approval`` p150 when ``include_approval`` (it beats
-    the fallback and loses to conclude), then the D-002 unconditional
-    ``think -> act`` p300. The descriptions are the prompt-visible wording each
-    pattern keeps. Never raises.
+    then the D-002 unconditional ``think -> act`` p300. Never raises.
     """
-    transitions = [
+    return [
         # DECISION plan_2026-05-30_5598b755/D-004 [STALE]
         # B4 under-call fix: do NOT conclude on the model's
         # should_terminate alone — require evidence that a tool has
@@ -280,32 +155,15 @@ def _think_transitions(
             10,
             _TERMINATE_ON_EVIDENCE,
             conclude_on_evidence_logic(),
-        )
+        ),
+        # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
+        # Unconditional lowest-priority fallback. Do NOT gate this edge on the
+        # tool selection: a gated edge BLOCKS `think` on a null/unknown tool,
+        # and no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn,
+        # so the run burns the 3x loop ceiling. `act` handles a missing or
+        # unknown tool (an empty batch for ParallelReact).
+        _edge(AgentStates.ACT, act_description, 300),
     ]
-    if include_approval:
-        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-005
-        # The approval edge (150) must beat the fallback below (300).
-        # Do NOT drop it while the agent registers the HITL gate: without
-        # it think -> act runs execute_tool before the driver asks, and
-        # every gated call burns an act/evaluate/reflect cycle on the
-        # D-004 refusal.
-        transitions.append(
-            _when(
-                AgentStates.AWAIT_APPROVAL,
-                "Action requires human approval before execution",
-                150,
-                "Approval is required for this action",
-                _is(ContextKeys.APPROVAL_REQUIRED, True),
-            )
-        )
-    # DECISION plan-2026-09-24T045559-3e4eb3e5/D-002
-    # Unconditional lowest-priority fallback. Do NOT gate this edge on the
-    # tool selection: a gated edge BLOCKS `think` on a null/unknown tool, and
-    # no PRE_TRANSITION or `act`-entry handler runs on a BLOCKED turn, so the
-    # run burns the 3x loop ceiling. `act` handles a missing/unknown tool (an
-    # empty batch for ParallelReact).
-    transitions.append(_edge(AgentStates.ACT, act_description, 300))
-    return transitions
 
 
 def _act_state(
