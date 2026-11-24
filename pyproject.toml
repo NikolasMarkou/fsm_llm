@@ -179,6 +179,7 @@ fsm_llm = ["py.typed"]
 "fsm_llm.monitor" = ["static/**/*", "templates/*"]
 "fsm_llm.core.definitions" = ["schemas/*.json"]
 "fsm_llm.reasoning" = ["strategies/*.json"]
+"fsm_llm.agents" = ["patterns/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

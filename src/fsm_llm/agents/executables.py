@@ -6,8 +6,11 @@ that function as the ``agents`` source of the ``executable_sources`` namespace, 
 ``ExecutableRegistry().load_sources()`` serves them by id without the engine importing this
 package. They run on today's classes: the executable builds the agent PER RUN through
 ``create_agent`` (never ``_PATTERNS`` directly, no per-run state on the executable: plan
-089d0ec7 D-014, plan 06a5ec0a D-052) and calls its ``run``. Roadmap E4.2 later replaces the bodies
-with files under the same ids.
+089d0ec7 D-014, plan 06a5ec0a D-052) and calls its ``run``. Roadmap E4.2 replaces the bodies
+with files under the same ids, one pattern per step: a pattern with a file under
+``agents/patterns/`` is served by a ``PatternExecutable`` built from its file (plan a555dcfe step 9, D-015), and
+``pattern_adapter`` is the ``pattern`` kind of the ``executable_kinds`` namespace, so a registry
+loads a user pattern file the same way.
 
 Interface contract:
 
@@ -35,6 +38,16 @@ Interface contract:
   grant; the host's ``hitl`` passes through unchanged and the agent's own gate stays the only
   place a grant is made. A ``requires_approval`` tool with no ``hitl`` raises ``AgentError`` at
   construction, before any model call.
+- ``PatternExecutable(pattern, envelope=None, agent_class=None, pins=None)`` with an ``envelope``: a loaded
+  ``PatternEnvelope`` as an executable (``pattern_adapter`` builds it). Header fields, contract and requires come from the envelope, ``template_identity``
+  is the envelope digest (``identity_of``: stable across releases, never reads a task or an option),
+  there is no instance identity (the tool text depends on the per-run registry), the objects it
+  reads are the envelope's ``requires.callables`` plus the optional ``config`` (and ``hitl`` for a
+  file that claims the ``hitl`` capability). A run builds the agent per run: the packaged class
+  through ``create_agent`` (``agent_class`` given) or a ``PatternAgent`` for a user file. ``pins``
+  is accepted for the registry's call and unused (an executable that is code runs no retained
+  instance). The HITL rules of this module hold unchanged: the host's ``hitl`` passes through and
+  the agent's own gate is the only place a grant is made.
 - The meta-builder is single-shot (``run(task)``): ``MetaBuilderResult.is_valid`` false is
   ``failed`` (no reason), the artifact in ``outputs``, the validation errors in ``detail``.
 """
@@ -54,14 +67,27 @@ from fsm_llm.agents.definitions import (
     model_or_placeholder,
 )
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.agents.pattern_agent import PatternAgent
+from fsm_llm.agents.pattern_files import PATTERN_ORDER, load_envelope
 from fsm_llm.aio import aoffload
 from fsm_llm.core.codes import Reason, Status
-from fsm_llm.core.definitions.executable import Capability, Contract, Requires
+from fsm_llm.core.definitions.executable import (
+    Capability,
+    Contract,
+    PatternEnvelope,
+    Requires,
+)
+from fsm_llm.core.definitions.executable_instance import identity_of
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
+from fsm_llm.tools import ToolRegistry, registry_from
 
-__all__ = ["PatternExecutable", "builtin_executables"]
+__all__ = [
+    "PatternExecutable",
+    "builtin_executables",
+    "pattern_adapter",
+]
 
 _TOOLS = Capability.TOOLS
 _HITL = Capability.HITL
@@ -116,10 +142,23 @@ class PatternExecutable(CodeBackedExecutable):
         "max_steps",
     )  # `execute` refuses it: set `AgentConfig.max_iterations`
 
-    def __init__(self, pattern: str) -> None:
+    def __init__(
+        self,
+        pattern: str,
+        *,
+        envelope: PatternEnvelope | None = None,
+        agent_class: type | None = None,
+        pins: Any = None,
+    ) -> None:
+        self.pattern = pattern
+        self.envelope = envelope
+        self._agent_class = agent_class
+        if envelope is not None:
+            self._init_from_file(envelope, agent_class)
+            return
         row = _ROWS[pattern]
         cls = _PATTERNS[pattern]
-        self.pattern = pattern
+        self._row = row
         outputs = ["artifact", "artifact_type"] if pattern == "meta_builder" else []
         super().__init__(
             id=pattern,
@@ -131,6 +170,41 @@ class PatternExecutable(CodeBackedExecutable):
             optional_inputs=("initial_context",) if row.initial_context else (),
             optional_callables=row.optional,
         )
+
+    def _init_from_file(
+        self, envelope: PatternEnvelope, agent_class: type | None
+    ) -> None:
+        """Header, contract and objects from a loaded pattern file (D-015).
+
+        ``template_identity`` is the digest of the document (never a release or a caller), the
+        lifecycle is the document's, and the objects read are its ``requires.callables`` plus the
+        optional ``tools`` (when the file may use some), ``hitl`` (a file that claims the
+        capability) and ``config``.
+        """
+        required = tuple(envelope.requires.callables)
+        some_tools = envelope.requires.tools not in ("none", [])
+        optional = tuple(
+            name
+            for name in ("tools", "hitl", "config")
+            if name not in required
+            and (name != "hitl" or Capability.HITL in envelope.capabilities)
+            and (name != "tools" or some_tools)
+        )
+        self._row = _Row(required, optional)
+        cls = agent_class or PatternAgent
+        super().__init__(
+            id=envelope.id,
+            kind="pattern",
+            impl=f"{cls.__module__}.{cls.__qualname__}",
+            contract=envelope.contract,
+            requires=envelope.requires,
+            capabilities=envelope.capabilities,
+            optional_inputs=("initial_context",),
+            optional_callables=optional,
+            version=envelope.version,
+        )
+        self.template_identity = identity_of(envelope).template_identity or ""
+        self.lifecycle = envelope.lifecycle
 
     # DECISION plan-2026-11-20T055240-ace7a8c8/D-061
     # An executable NEVER supplies an approval grant: the host's `hitl` object passes through
@@ -160,7 +234,7 @@ class PatternExecutable(CodeBackedExecutable):
             raise ValueError("input 'initial_context' must be a mapping")
         agent = self._build(objects, context)
         try:
-            if _ROWS[self.pattern].initial_context:
+            if self._row.initial_context:
                 outcome = await aoffload(
                     agent.run, task, dict(seed) if seed is not None else None
                 )
@@ -202,6 +276,18 @@ class PatternExecutable(CodeBackedExecutable):
             else:
                 timeout = min(timeout, config.timeout_seconds)
             config = config_with(config, timeout_seconds=timeout)
+        return self._make_agent(tools, config, kwargs)
+
+    def _make_agent(self, tools: Any, config: Any, kwargs: dict[str, Any]) -> Any:
+        """The agent of one run: the pattern's class built by ``create_agent``, or, for a file
+        that no class stands behind, a ``PatternAgent`` over its envelope."""
+        if self.envelope is not None and self._agent_class is None:
+            registry = (
+                tools
+                if tools is None or isinstance(tools, ToolRegistry)
+                else registry_from(tools)
+            )
+            return PatternAgent(self.envelope, tools=registry, config=config, **kwargs)
         return create_agent(self.pattern, tools, config=config, **kwargs)
 
     def _result(self, outcome: Any, identity: Identity) -> RunResult:
@@ -227,6 +313,22 @@ class PatternExecutable(CodeBackedExecutable):
         )
 
 
+def pattern_adapter(
+    envelope: PatternEnvelope, *, pins: Any = None
+) -> PatternExecutable:
+    """The adapter of the ``pattern`` kind (``EXECUTABLE_KINDS``): a loaded envelope to an executable."""
+    return PatternExecutable(envelope.id, envelope=envelope, pins=pins)
+
+
 def builtin_executables() -> list[PatternExecutable]:
-    """One executable per ``create_agent`` pattern, in ``_PATTERNS`` order."""
-    return [PatternExecutable(pattern) for pattern in _PATTERNS]
+    """One executable per ``create_agent`` pattern, in ``_PATTERNS`` order.
+
+    A pattern with a shipped file (``pattern_files.PATTERN_ORDER``) is served by its file.
+    """
+    shipped = {
+        name: PatternExecutable(
+            name, envelope=load_envelope(name), agent_class=_PATTERNS[name]
+        )
+        for name in PATTERN_ORDER
+    }
+    return [shipped.get(pattern) or PatternExecutable(pattern) for pattern in _PATTERNS]

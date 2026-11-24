@@ -948,7 +948,7 @@ fsm_llm.core.definitions.executable.PatternBody class(BaseModel)
   field generator: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
   field handlers: list[HandlerBinding] = factory
   field options_schema: OptionsSchema = factory
-  field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], str | int | float | bool | None | list[str | int | float | bool | None]] = factory
+  field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], str | int | float | bool | None | list[str | int | float | bool | None | dict[str, str | int | float | bool | None]]] = factory
   field variants: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], list[dict[str, Any]]] = factory
   field run: RunBlock = factory
 fsm_llm.core.definitions.executable.PatternEnvelope class(ExecutableEnvelope)
@@ -1045,7 +1045,9 @@ fsm_llm.core.definitions.executable_pattern.ItemSpec class(BaseModel)
   field maximum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
   field maxLength: int | None = None
   field enum: list[Annotated[str, Strict(strict=True)] | Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)]] | None = None
-  field type: Literal['string', 'integer', 'number', 'boolean'] required
+  field type: Literal['string', 'integer', 'number', 'boolean', 'object'] required
+  field properties: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], PropertySpec] = factory
+  def entry_annotation(self) -> Any
   def scalar_annotation(self, kind: str) -> Any
 fsm_llm.core.definitions.executable_pattern.OptionSpec class(BaseModel)
   field minimum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
@@ -1067,10 +1069,17 @@ fsm_llm.core.definitions.executable_pattern.PatternBody class(BaseModel)
   field generator: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
   field handlers: list[HandlerBinding] = factory
   field options_schema: OptionsSchema = factory
-  field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], str | int | float | bool | None | list[str | int | float | bool | None]] = factory
+  field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], str | int | float | bool | None | list[str | int | float | bool | None | dict[str, str | int | float | bool | None]]] = factory
   field variants: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], list[dict[str, Any]]] = factory
   field run: RunBlock = factory
 fsm_llm.core.definitions.executable_pattern.PatternBodyError class(FSMError, ValueError)
+fsm_llm.core.definitions.executable_pattern.PropertySpec class(BaseModel)
+  field minimum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
+  field maximum: Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)] | None = None
+  field maxLength: int | None = None
+  field enum: list[Annotated[str, Strict(strict=True)] | Annotated[int, Strict(strict=True)] | Annotated[float, Strict(strict=True)]] | None = None
+  field type: Literal['string', 'integer', 'number', 'boolean'] required
+  def scalar_annotation(self, kind: str) -> Any
 fsm_llm.core.definitions.executable_pattern.RunBlock class(BaseModel)
   field agent_type: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
   field answer_keys: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])]] = factory
@@ -1412,7 +1421,7 @@ fsm_llm.agents.PythonToolLoader class
 fsm_llm.agents.REWOOAgent class(BaseAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
-fsm_llm.agents.ReactAgent class(BaseAgent)
+fsm_llm.agents.ReactAgent class(PatternAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, hitl: HumanInTheLoop | None = None, use_classification: bool = False, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
   def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]

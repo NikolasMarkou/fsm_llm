@@ -16,9 +16,11 @@ The model of a template:
   other keys, never inside another hole and never the root; its value is inserted verbatim and
   never rescanned for ``{{name}}`` text (a text variable is a different channel).
 - ``options_schema`` is a closed subset (``OptionSpec``: ``string``, ``integer``, ``number``,
-  ``boolean`` and ``array`` of those; ``minimum``, ``maximum``, ``maxLength``, ``maxItems``,
-  ``enum``; no ``$ref``, no ``object``), each value checked by a pydantic ``TypeAdapter`` (strict:
-  a bool is no integer); an option with no entry in ``options`` has no default and is required.
+  ``boolean`` and ``array`` of those or of FLAT objects (D-016: ``items.type = object`` with scalar
+  ``properties``, every property required, no extra key); ``minimum``, ``maximum``, ``maxLength``,
+  ``maxItems``, ``enum``; no ``$ref``, no top-level ``object``), each value checked by a pydantic
+  ``TypeAdapter`` (strict: a bool is no integer); an option with no entry in ``options`` has no
+  default and is required.
 - ``variants`` are chosen only by the caller of ``instantiate_body`` (never by an option), applied
   one ``apply_json_patch`` each in DECLARATION order, before the holes are filled.
 
@@ -72,6 +74,7 @@ __all__ = [
     "OptionsSchema",
     "PatternBody",
     "PatternBodyError",
+    "PropertySpec",
     "RunBlock",
     "apply_variants",
     "fill_holes",
@@ -93,6 +96,9 @@ MAX_OPTIONS = 64
 MAX_VARIANTS = 16
 MAX_OPTION_TEXT_CHARS = 10_000  # longest string option, and the cap of ``maxLength``
 MAX_OPTION_ITEMS = 256  # most entries of a list option, and the cap of ``maxItems``
+MAX_ITEM_PROPERTIES = (
+    16  # most properties of the object entries of a list option (D-016)
+)
 MAX_VARIANT_OPS = 64
 MAX_VARIANT_CHARS = 200_000
 _MAX_PROBLEMS = 10  # lines one scan reports
@@ -105,6 +111,7 @@ _Name = Annotated[str, Field(min_length=1, max_length=EXECUTABLE_NAME_MAX_LENGTH
 _Names = Annotated[list[_Name], Field(max_length=EXECUTABLE_MAX_ITEMS)]
 _OptionName = Annotated[str, Field(pattern=_NAME_PATTERN, max_length=64)]
 _Scalar = str | int | float | bool | None
+_Entry = dict[str, _Scalar]  # one flat object of a list option (D-016)
 
 
 class PatternBodyError(FSMError, ValueError):
@@ -167,8 +174,8 @@ class _ScalarSpec(_Model):
         return base
 
 
-class ItemSpec(_ScalarSpec):
-    """The entries of an ``array`` option: one scalar type and its bounds."""
+class PropertySpec(_ScalarSpec):
+    """One property of an object entry (D-016): a scalar type and its bounds."""
 
     type: Literal["string", "integer", "number", "boolean"]
 
@@ -176,6 +183,55 @@ class ItemSpec(_ScalarSpec):
     def _bounds(self) -> Self:
         self._check_bounds(self.type)
         return self
+
+
+class ItemSpec(_ScalarSpec):
+    """The entries of an ``array`` option: one scalar type and its bounds, or a flat object.
+
+    ``type = "object"`` declares ``properties`` (at most ``MAX_ITEM_PROPERTIES``, scalar only, no
+    nesting): an entry is an object with exactly those keys, each required (D-016).
+    """
+
+    type: Literal["string", "integer", "number", "boolean", "object"]
+    properties: dict[_OptionName, PropertySpec] = Field(
+        default_factory=dict, max_length=MAX_ITEM_PROPERTIES
+    )
+
+    @model_validator(mode="after")
+    def _bounds(self) -> Self:
+        if self.type == "object":
+            if not self.properties:
+                raise ValueError("an object entry declares its properties")
+            if (
+                self.minimum is not None
+                or self.maximum is not None
+                or self.maxLength is not None
+                or self.enum is not None
+            ):
+                raise ValueError("bounds of an object's values go in its properties")
+        else:
+            if self.properties:
+                raise ValueError("properties belong to an object entry")
+            self._check_bounds(self.type)
+        return self
+
+    def entry_annotation(self) -> Any:
+        """The annotation that checks one entry: a scalar, or a dict with exactly the properties."""
+        if self.type != "object":
+            return self.scalar_annotation(self.type)
+        checks = {
+            name: TypeAdapter(spec.scalar_annotation(spec.type))
+            for name, spec in self.properties.items()
+        }
+
+        def _flat(entry: dict[str, Any]) -> dict[str, Any]:
+            if set(entry) != set(checks):
+                raise ValueError("an entry has exactly the declared properties")
+            for name, check in checks.items():
+                check.validate_python(entry[name])
+            return entry
+
+        return Annotated[dict[str, Any], AfterValidator(_flat)]
 
 
 class OptionSpec(_ScalarSpec):
@@ -208,7 +264,7 @@ class OptionSpec(_ScalarSpec):
         """The ``TypeAdapter`` that checks a value of this option (strict, bounded)."""
         if self.type == "array":
             assert self.items is not None
-            entry = self.items.scalar_annotation(self.items.type)
+            entry = self.items.entry_annotation()
             cap = self.maxItems if self.maxItems is not None else MAX_OPTION_ITEMS
             listed = Annotated[list[entry], Field(max_length=cap)]  # type: ignore[valid-type]
             return TypeAdapter(listed)
@@ -300,7 +356,7 @@ class PatternBody(_Model):
         default_factory=list, max_length=EXECUTABLE_MAX_ITEMS
     )
     options_schema: OptionsSchema = Field(default_factory=OptionsSchema)
-    options: dict[_OptionName, _Scalar | list[_Scalar]] = Field(
+    options: dict[_OptionName, _Scalar | list[_Scalar | _Entry]] = Field(
         default_factory=dict,
         description="The default value of each option that has one",
         max_length=MAX_OPTIONS,
@@ -359,7 +415,8 @@ PATTERN_FIELD_VERSIONS: dict[str, dict[str, str]] = {
     "OptionSpec": {
         "1.0": "type items minimum maximum maxLength maxItems enum description"
     },
-    "ItemSpec": {"1.0": "type minimum maximum maxLength enum"},
+    "ItemSpec": {"1.0": "type properties minimum maximum maxLength enum"},
+    "PropertySpec": {"1.0": "type minimum maximum maxLength enum"},
 }
 
 

@@ -17,6 +17,8 @@ import pytest
 
 from fsm_llm.agents.base.registration import RegistrationMixin
 from fsm_llm.agents.constants import (
+    REACT_THINK_FRESH_KEYS,
+    AgentStates,
     ContextKeys,
     HandlerNames,
 )
@@ -124,8 +126,14 @@ def _context_of(agent: ReactAgent) -> HandlerContext:
 
 
 def _live(agent: ReactAgent) -> list[Any]:
+    """What ``ReactAgent._register_handlers`` registered before step 9 (plan a555dcfe): the
+    registration helpers of ``RegistrationMixin`` and ``HitlGateMixin`` the other agents still use."""
     api = _FakeApi()
-    agent._register_handlers(api, agent._call_handlers(agent.tools))
+    handlers = agent._call_handlers(agent.tools)
+    agent._register_tool_executor(api, AgentStates.ACT, handlers.execute_tool)
+    agent._register_iteration_limiter(api, handlers.check_iteration_limit)
+    agent._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
+    agent._register_approval_gate(api)
     return api.handlers
 
 
@@ -243,14 +251,16 @@ class TestAPatternFileNamingTheLibraryVerifies:
         from fsm_llm.engine.executables import ExecutableRegistry
         from fsm_llm.engine.executables.protocol import ExecutableError
 
-        registry = ExecutableRegistry()
+        # a registry with no adapter for the kind (the agents package registers one, step 9)
+        registry = ExecutableRegistry(kinds=NameRegistry("executable_kinds"))
         with pytest.raises(ExecutableError) as unknown:
             registry.add_document(_file(["agents.not_there"]))
         assert "does not resolve" in str(unknown.value)
-        # a library name passes the names check; the kind has no adapter until a later step
+        # a library name passes the names check; only the missing adapter refuses it
         with pytest.raises(ExecutableError) as known:
             registry.add_document(_file(["agents.tool_executor"]))
         assert "does not resolve" not in str(known.value)
+        assert "adapter" in str(known.value)
 
     def test_an_ordinary_document_naming_handlers_is_not_judged_by_default(self):
         from fsm_llm.engine.executables import ExecutableRegistry

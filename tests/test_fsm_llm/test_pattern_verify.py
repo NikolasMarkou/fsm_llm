@@ -683,12 +683,16 @@ class TestTheValidatorIsNeverStricterThanTheLoader:
             assert envelope is None, name
 
 
-class TestNoRouteBuildsAnExecutableFromAPatternYet:
-    def test_the_registry_has_no_adapter_for_the_kind_and_refuses_the_document(self):
+class TestNoRouteBuildsAnExecutableFromAPatternWithoutAnAdapter:
+    """Step 6 pinned "no registry serves a pattern yet"; since plan a555dcfe step 9 the agents
+    package registers the ``pattern`` kind, so the fail-closed row asks a registry with none."""
+
+    def test_a_registry_with_no_adapter_for_the_kind_refuses_the_document(self):
+        from fsm_llm.core.names import NameRegistry
         from fsm_llm.engine.executables.protocol import ExecutableKindError
         from fsm_llm.engine.executables.registry import ExecutableRegistry
 
-        registry = ExecutableRegistry()
+        registry = ExecutableRegistry(kinds=NameRegistry("executable_kinds"))
 
         with pytest.raises(ExecutableKindError):
             registry.add_document(_doc(), variables={"tone": "x"})

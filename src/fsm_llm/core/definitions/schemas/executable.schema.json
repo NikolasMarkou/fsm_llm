@@ -332,7 +332,7 @@
     },
     "ItemSpec": {
       "additionalProperties": false,
-      "description": "The entries of an ``array`` option: one scalar type and its bounds.",
+      "description": "The entries of an ``array`` option: one scalar type and its bounds, or a flat object.\n\n``type = \"object\"`` declares ``properties`` (at most ``MAX_ITEM_PROPERTIES``, scalar only, no\nnesting): an entry is an object with exactly those keys, each required (D-016).",
       "properties": {
         "enum": {
           "anyOf": [
@@ -405,12 +405,26 @@
           "default": null,
           "title": "Minimum"
         },
+        "properties": {
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z][a-z0-9_]*$": {
+              "$ref": "#/$defs/PropertySpec"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64
+          },
+          "title": "Properties",
+          "type": "object"
+        },
         "type": {
           "enum": [
             "string",
             "integer",
             "number",
-            "boolean"
+            "boolean",
+            "object"
           ],
           "title": "Type",
           "type": "string"
@@ -658,6 +672,28 @@
                       },
                       {
                         "type": "boolean"
+                      },
+                      {
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "type": "object"
                       },
                       {
                         "type": "null"
@@ -928,6 +964,98 @@
         "body"
       ],
       "title": "ProcedureEnvelope",
+      "type": "object"
+    },
+    "PropertySpec": {
+      "additionalProperties": false,
+      "description": "One property of an object entry (D-016): a scalar type and its bounds.",
+      "properties": {
+        "enum": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              "maxItems": 256,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum"
+        },
+        "maxLength": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxlength"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "integer",
+            "number",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "PropertySpec",
       "type": "object"
     },
     "Requires": {

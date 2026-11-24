@@ -787,3 +787,184 @@ class TestTheShippedSchemaNamesThePattern:
             "run",
         }
         assert "maxLength" in schema["$defs"]["OptionSpec"]["properties"]
+
+
+_INTENTS = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "maxLength": 20},
+            "description": {"type": "string"},
+            "weight": {"type": "number", "minimum": 0, "maximum": 1},
+        },
+    },
+    "maxItems": 3,
+}
+_ENTRY = {"name": "search", "description": "Find things", "weight": 0.5}
+
+
+def _intents_body(default: Any = None, spec: Any = None) -> dict[str, Any]:
+    """A template whose one hole is the list of flat objects (D-016)."""
+    fsm = _fsm()
+    fsm["states"]["start"]["required_context_keys"] = {"$hole": "intents"}
+    fsm["states"]["start"]["transitions"][0]["priority"] = 1
+    return _body(
+        fsm=fsm,
+        options_schema={"properties": {"intents": spec or _INTENTS}},
+        options={} if default is None else {"intents": default},
+        variants={},
+    )
+
+
+def _intents_envelope(default: Any = None) -> ex.PatternEnvelope:
+    return _envelope(body=_intents_body(default))
+
+
+class TestAListOfFlatObjects:
+    """Plan a555dcfe D-016: ``items.type = object`` with scalar ``properties``, a pure addition."""
+
+    def test_an_array_of_flat_objects_fills_a_hole_with_the_callers_key_order(self):
+        envelope = _intents_envelope([_ENTRY])
+        reordered = {"weight": 1, "description": "d", "name": "n"}
+
+        out = ei.instantiate_body(
+            envelope, {"intents": [reordered, _ENTRY]}, variables=TONE
+        )
+        keys = out["states"]["start"]["required_context_keys"]
+
+        assert [list(k) for k in keys] == [
+            ["weight", "description", "name"],
+            ["name", "description", "weight"],
+        ]
+        assert keys[1] == _ENTRY and keys[1] is not _ENTRY
+
+    def test_the_default_may_be_a_list_of_objects_and_is_checked(self):
+        out = ei.instantiate_body(_intents_envelope([_ENTRY]), variables=TONE)
+
+        assert out["states"]["start"]["required_context_keys"] == [_ENTRY]
+        for bad in ([{"name": "x"}], [{**_ENTRY, "extra": 1}], ["x"]):
+            assert "option 'intents' is not valid" in _only_problem(
+                _doc(body=_intents_body(bad))
+            )
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"name": "search", "description": "d"},
+            {**_ENTRY, "extra": "x"},
+            {**_ENTRY, "name": 3},
+            {**_ENTRY, "weight": True},
+            {**_ENTRY, "weight": 2},
+            {**_ENTRY, "name": "n" * 21},
+            "search",
+            ["search"],
+            None,
+            {**_ENTRY, "description": {"a": 1}},
+        ],
+    )
+    def test_an_entry_must_have_exactly_the_declared_scalar_properties(self, entry):
+        envelope = _intents_envelope([_ENTRY])
+
+        with pytest.raises(
+            ei.InstantiationError, match="option 'intents' is not valid"
+        ):
+            ei.instantiate_body(envelope, {"intents": [entry]}, variables=TONE)
+
+    def test_the_array_is_bounded_and_the_value_is_never_mutated(self):
+        envelope = _intents_envelope([_ENTRY])
+        given = {"intents": [dict(_ENTRY)]}
+        before = copy.deepcopy(given)
+
+        ei.instantiate_body(envelope, given, variables=TONE)
+
+        assert given == before
+        with pytest.raises(ei.InstantiationError, match="is not valid"):
+            ei.instantiate_body(envelope, {"intents": [_ENTRY] * 4}, variables=TONE)
+
+    @pytest.mark.parametrize(
+        "items",
+        [
+            {"type": "object"},
+            {"type": "object", "properties": {}},
+            {"type": "object", "properties": {"a": {"type": "object"}}},
+            {"type": "object", "properties": {"a": {"type": "array"}}},
+            {"type": "object", "properties": {"Bad Name": {"type": "string"}}},
+            {"type": "string", "properties": {"a": {"type": "string"}}},
+            {"type": "object", "minimum": 1, "properties": {"a": {"type": "string"}}},
+            {
+                "type": "object",
+                "properties": {f"p{i}": {"type": "string"} for i in range(17)},
+            },
+            {"type": "object", "properties": {"a": {"type": "string", "$ref": "#/x"}}},
+        ],
+    )
+    def test_the_object_shape_is_closed(self, items):
+        spec = {"type": "array", "items": items}
+
+        _refused(_doc(body=_intents_body([_ENTRY], spec)))
+
+    def test_an_option_that_is_an_object_alone_is_still_refused(self):
+        spec = {"type": "object", "properties": {"a": {"type": "string"}}}
+
+        _refused(_doc(body=_intents_body(None, spec)))
+
+    def test_a_hole_value_is_never_rescanned_and_the_template_identity_is_the_documents(
+        self,
+    ):
+        envelope = _intents_envelope([_ENTRY])
+        text = {**_ENTRY, "description": "use {{tone}} here"}
+
+        out = ei.instantiate_body(envelope, {"intents": [text]}, variables=TONE)
+
+        assert out["states"]["start"]["required_context_keys"][0]["description"] == (
+            "use {{tone}} here"
+        )
+        assert (
+            ei.identity_of(envelope).template_identity
+            == ei.identity_of(_intents_envelope([_ENTRY])).template_identity
+        )
+
+    def test_a_record_with_a_list_of_objects_replays_to_the_same_instance(self):
+        fsm = _fsm()
+        fsm["states"]["start"]["required_context_keys"] = []
+        fsm["states"]["start"]["transitions"][0]["priority"] = 1
+        fsm["states"]["start"]["classification_extractions"] = [
+            {
+                "field_name": "pick",
+                "intents": {"$hole": "intents"},
+                "fallback_intent": "none",
+                "confidence_threshold": 0.7,
+            }
+        ]
+        spec = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+            },
+        }
+        default = [
+            {"name": "none", "description": "no tool"},
+            {"name": "a", "description": "tool a"},
+        ]
+        envelope = _envelope(
+            body=_body(
+                fsm=fsm,
+                options_schema={"properties": {"intents": spec}},
+                options={"intents": default},
+                variants={},
+            )
+        )
+        given = [*default, {"name": "b", "description": "tool b"}]
+
+        definition, record = ei.instantiate_envelope(
+            envelope, options={"intents": given}, variables=TONE
+        )
+        rebuilt = ei.rebuild_instance(envelope, record, definition_digest(definition))
+
+        assert record["options"]["intents"] == given
+        assert definition_digest(rebuilt) == definition_digest(definition)

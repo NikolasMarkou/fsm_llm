@@ -31,7 +31,7 @@ from __future__ import annotations
 from fsm_llm.agents.constants import StopReason
 from fsm_llm.agents.fsm_definitions.parallel_react import build_parallel_react_fsm
 from fsm_llm.core.definitions import AgentError
-from fsm_llm.engine.executables.namespaces import EXECUTABLE_SOURCES
+from fsm_llm.engine.executables.namespaces import EXECUTABLE_KINDS, EXECUTABLE_SOURCES
 from fsm_llm.policy import (
     ApprovalCallback,
     ApprovalDeniedError,
@@ -292,8 +292,18 @@ def _builtin_executables() -> list:
     return builtin_executables()
 
 
+def _pattern_adapter(envelope, **options):
+    """The ``pattern`` kind of ``executable_kinds``: lazy like the source, so importing this
+    package never imports ``agents.executables`` (D4) and a registry that loads a pattern file
+    gets its executable (plan a555dcfe step 9, D-015)."""
+    from .executables import pattern_adapter
+
+    return pattern_adapter(envelope, **options)
+
+
 # `override=True`: re-importing the package (a reload) replaces the factory, never collides.
 EXECUTABLE_SOURCES.register("agents", _builtin_executables, override=True)
+EXECUTABLE_KINDS.register("pattern", _pattern_adapter, override=True)
 
 __all__ = [
     # Main classes

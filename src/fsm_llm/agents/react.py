@@ -3,6 +3,10 @@ ReactAgent — ReAct (Reasoning + Acting) agent implementation.
 
 Uses FSM-LLM's 2-pass architecture to implement the ReAct loop:
 Think -> Act -> Observe -> Think -> ... -> Conclude
+
+The loop is the pattern file ``patterns/react.json`` run by ``PatternAgent`` (plan a555dcfe step 9):
+this class keeps the constructor, the ``run`` and ``run_stream`` names the callers and the tests
+patch, and the call of ``build_react_fsm`` that builds the FSM of a run.
 """
 
 from __future__ import annotations
@@ -10,24 +14,18 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from fsm_llm import API
-from fsm_llm.agents.constants import (
-    REACT_THINK_FRESH_KEYS,
-    AgentStates,
-    Defaults,
-    LogMessages,
-)
+from fsm_llm.agents.constants import Defaults
 from fsm_llm.agents.fsm_definitions.react import build_react_fsm
-from fsm_llm.logging import logger
 from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.tools import ToolRegistry
 
-from .base import BaseAgent, caller_prompt_keys
+from .base import caller_prompt_keys
 from .definitions import AgentConfig, AgentResult
-from .handlers import AgentHandlers
+from .handlers.context import HandlerContext
+from .pattern_agent import PatternAgent
 
 
-class ReactAgent(BaseAgent):
+class ReactAgent(PatternAgent):
     """
     ReAct agent that uses tools to solve tasks step by step.
 
@@ -46,6 +44,8 @@ class ReactAgent(BaseAgent):
         print(result.answer)
     """
 
+    tools: ToolRegistry  # a ReAct agent always has tools (``PatternAgent.tools`` may be None)
+
     def __init__(
         self,
         tools: ToolRegistry,
@@ -54,37 +54,33 @@ class ReactAgent(BaseAgent):
         use_classification: bool = False,
         **api_kwargs: Any,
     ) -> None:
-        self._require_tools(tools)
+        from fsm_llm.agents.pattern_files import load_envelope  # lazy: reads the file
 
-        super().__init__(config, **api_kwargs)
-        self.tools = tools
-        self.hitl = hitl
-        self.use_classification = use_classification
-        self._refuse_unapprovable_flagged_tools()
-        # DECISION plan-2026-09-12T065608-089d0ec7/D-014
-        # No `self._handlers` here (and none is ever assigned anywhere in this
-        # class) — a per-instance AgentHandlers shared across concurrent
-        # run()/run_stream() calls is exactly the D-004/D-014 race. Each call
-        # builds and uses its own call-LOCAL AgentHandlers (see run()/
-        # run_stream() below). See decisions.md D-014.
-
-        logger.info(
-            LogMessages.AGENT_STARTED.format(
-                tool_count=len(tools), model=self.config.model
-            )
+        super().__init__(
+            load_envelope("react"),
+            tools=tools,
+            config=config,
+            hitl=hitl,
+            options={"classification": bool(use_classification)},
+            **api_kwargs,
         )
+        self.use_classification = use_classification
 
     def _react_inputs(
         self, task: str, initial_context: dict[str, Any] | None
-    ) -> tuple[dict[str, Any], dict[str, Any], AgentHandlers]:
-        """The FSM, initial context and call-local handlers of one run, shared
-        by ``run`` and ``run_stream`` so the two cannot drift.
+    ) -> tuple[dict[str, Any], dict[str, Any], HandlerContext]:
+        """The FSM, initial context and call-local handlers of one run (the name callers keep)."""
+        return self._run_inputs(task, initial_context)
 
-        The await_approval state is built under the SAME predicate that
-        registers the runtime approval gate (``BaseAgent._hitl_active``, D-001).
+    def _fsm_for_run(
+        self, task: str, initial_context: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """The FSM of one run, through ``build_react_fsm`` (the builder every caller shares).
+
+        The ``await_approval`` state is built under the SAME predicate that registers the runtime
+        approval gate (``BaseAgent._hitl_active``, D-001 of plan c1d5bfbc).
         """
-        handlers = self._call_handlers(self.tools)
-        fsm_def = build_react_fsm(
+        return build_react_fsm(
             self.tools,
             task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
             include_approval_state=self._hitl_active,
@@ -92,7 +88,6 @@ class ReactAgent(BaseAgent):
             output_schema=self.config.output_schema,
             context_keys=caller_prompt_keys(initial_context),
         )
-        return fsm_def, self._react_context(task, initial_context), handlers
 
     def run(
         self,
@@ -100,22 +95,17 @@ class ReactAgent(BaseAgent):
         initial_context: dict[str, Any] | None = None,
     ) -> AgentResult:
         # DECISION plan-2026-09-12T065608-089d0ec7/D-014 (supersedes D-004)
-        # A call-LOCAL AgentHandlers, threaded explicitly into
-        # `_register_handlers` via `_standard_run`'s `handlers=` parameter.
-        # D-004's fix (`self._handlers = AgentHandlers(...)` assigned here,
-        # read back later by `_register_handlers`) did NOT close the race:
-        # two concurrent run() calls on the SAME ReactAgent instance could
-        # each reassign `self._handlers` before either call's
-        # `_register_handlers` read it back, so whichever assignment landed
-        # LAST would win for BOTH calls — both runs would still bind to one
-        # shared AgentHandlers instance. `handlers` here is a plain local
-        # variable: it is never written to `self`, so no other thread's
-        # `run()` call can ever overwrite the reference this call is about
-        # to use. Do NOT reintroduce `self._handlers = AgentHandlers(...)`
-        # in this method — see decisions.md D-014.
-        # D-052 refusal and the shared predicate: `_call_handlers`.
-        fsm_def, context, handlers = self._react_inputs(task, initial_context)
-        return self._standard_run(task, fsm_def, context, "react", handlers=handlers)
+        # A call-LOCAL handler context (`PatternAgent._run_inputs`), threaded explicitly into
+        # `_register_handlers` via `_standard_run`'s `handlers=` parameter. D-004's fix
+        # (`self._handlers = AgentHandlers(...)` assigned here, read back later by
+        # `_register_handlers`) did NOT close the race: two concurrent run() calls on the SAME
+        # ReactAgent instance could each reassign `self._handlers` before either call's
+        # `_register_handlers` read it back, so whichever assignment landed LAST would win for
+        # BOTH calls. `handlers` is a plain local variable: it is never written to `self`, so no
+        # other thread's `run()` call can overwrite the reference this call is about to use. Do
+        # NOT reintroduce `self._handlers = ...` in this method; see decisions.md D-014.
+        # D-052 refusal and the shared predicate: `_run_inputs`.
+        return super().run(task, initial_context)
 
     def run_stream(
         self,
@@ -134,13 +124,8 @@ class ReactAgent(BaseAgent):
             for token in agent.run_stream("What is 2+2?"):
                 print(token, end="", flush=True)
         """
-        # See D-014 note in run() above — call-local handlers, threaded
-        # explicitly through `_standard_run_stream`'s `handlers=` parameter,
-        # never assigned to `self._handlers`.
-        fsm_def, context, handlers = self._react_inputs(task, initial_context)
-        yield from self._standard_run_stream(
-            task, fsm_def, context, "react", handlers=handlers
-        )
+        # See D-014 note in run() above: call-local handlers, never assigned to `self`.
+        yield from super().run_stream(task, initial_context)
 
     def _stream_via_run(
         self,
@@ -156,25 +141,3 @@ class ReactAgent(BaseAgent):
         one chunk (the answer, possibly empty); errors propagate from ``run()``.
         """
         yield self.run(task, initial_context).answer
-
-    # DECISION plan-2026-09-12T065608-089d0ec7/D-014
-    # `handlers` is REQUIRED in practice: `run()`/`run_stream()` always pass
-    # their own call-local `AgentHandlers` explicitly via
-    # `_standard_run`/`_standard_run_stream`'s `handlers=` parameter. The
-    # `| None = None` default exists only so this override's signature stays
-    # compatible with `BaseAgent._register_handlers`'s narrower abstract
-    # signature (most other agent subclasses never pass `handlers` at all).
-    # Do NOT fall back to reading `self._handlers` here if `handlers` is
-    # None — that attribute no longer exists on this class specifically so
-    # this method cannot silently regress to the D-004 shared-mutable-slot
-    # bug. See decisions.md D-014.
-    def _register_handlers(
-        self, api: API, handlers: AgentHandlers | None = None
-    ) -> None:
-        """Register agent handlers with the API."""
-        handlers = self._require_handlers(handlers)
-        self._register_tool_executor(api, AgentStates.ACT, handlers.execute_tool)
-        self._register_iteration_limiter(api, handlers.check_iteration_limit)
-        self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
-
-        self._register_approval_gate(api)

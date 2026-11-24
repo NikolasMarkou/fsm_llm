@@ -1,0 +1,432 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "react",
+  "name": "react",
+  "description": "ReAct agent with tool use: think, act, observe, conclude",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "outputs": []
+  },
+  "requires": {
+    "tools": "some",
+    "handlers": [
+      "agents.tool_executor",
+      "agents.think_turn_limiter",
+      "agents.think_fresh_keys",
+      "agents.feedback_consumed",
+      "agents.approval_fresh_keys",
+      "agents.approval_gate"
+    ],
+    "callables": [
+      "tools"
+    ]
+  },
+  "capabilities": [
+    "tools",
+    "hitl"
+  ],
+  "lifecycle": "builtin",
+  "variables": [
+    "think_instructions",
+    "context_names"
+  ],
+  "body": {
+    "fsm": {
+      "name": "react_agent",
+      "description": "ReAct agent with tool use",
+      "initial_state": "think",
+      "persona": "You are a methodical AI agent that solves tasks by using tools step by step. Think carefully before each action. Review previous observations before deciding. Terminate when you have gathered enough information to answer the task.",
+      "states": {
+        "think": {
+          "id": "think",
+          "description": "Reason about the task and select the next tool to use",
+          "purpose": "Analyze the task and previous observations to decide the next action",
+          "required_context_keys": [
+            "tool_name",
+            "tool_input",
+            "should_terminate"
+          ],
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "tool_name",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'tool_name' field. {{think_instructions}}",
+              "context_keys": {
+                "$hole": "context_keys"
+              }
+            },
+            {
+              "field_name": "tool_input",
+              "field_type": "dict",
+              "extraction_instructions": "Extract the 'tool_input' field. {{think_instructions}}",
+              "context_keys": {
+                "$hole": "context_keys"
+              }
+            },
+            {
+              "field_name": "should_terminate",
+              "field_type": "bool",
+              "extraction_instructions": "Extract the 'should_terminate' field (bool) from the task and the {{context_names}} values in the 'Already extracted:' context. true if you have enough information to answer the task: set it to true when the observations already answer the task or when no further tool call is needed; false only when another tool call is still required to answer it.",
+              "context_keys": {
+                "$hole": "context_keys"
+              },
+              "required": false
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "conclude",
+              "description": "Task can be answered (a tool has run, or termination is forced)",
+              "priority": 10,
+              "conditions": [
+                {
+                  "description": "Agent decided to terminate AND a tool has run or termination is forced",
+                  "logic": {
+                    "or": [
+                      {
+                        "and": [
+                          {
+                            "==": [
+                              {
+                                "var": "should_terminate"
+                              },
+                              true
+                            ]
+                          },
+                          {
+                            ">": [
+                              {
+                                "var": [
+                                  "observation_count",
+                                  0
+                                ]
+                              },
+                              0
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "==": [
+                          {
+                            "var": "max_iterations_reached"
+                          },
+                          true
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "act",
+              "description": "Execute the selected tool",
+              "priority": 300
+            }
+          ]
+        },
+        "act": {
+          "id": "act",
+          "description": "Execute the selected tool and observe the result",
+          "purpose": "Run the tool and record the observation",
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "conclude",
+              "description": "Terminate when framework signals completion",
+              "priority": 1,
+              "conditions": [
+                {
+                  "description": "Framework/agent decided to terminate AND a tool has run or termination is forced",
+                  "logic": {
+                    "or": [
+                      {
+                        "and": [
+                          {
+                            "==": [
+                              {
+                                "var": "should_terminate"
+                              },
+                              true
+                            ]
+                          },
+                          {
+                            ">": [
+                              {
+                                "var": [
+                                  "observation_count",
+                                  0
+                                ]
+                              },
+                              0
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "==": [
+                          {
+                            "var": "max_iterations_reached"
+                          },
+                          true
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "think",
+              "description": "Return to thinking with new observation",
+              "priority": 900
+            }
+          ]
+        },
+        "conclude": {
+          "id": "conclude",
+          "description": "Formulate and present the final answer",
+          "purpose": "Synthesize all observations into a complete answer",
+          "required_context_keys": {
+            "$hole": "schema_field_names"
+          },
+          "response_instructions": "Write the final answer to the ORIGINAL task (the 'task' value in the context) clearly and completely. Base it on the tool observations and on facts given in the task, and cite the observations that support it. This reply is the last output of the run: no further tool will run, so do not describe work in progress or planned next steps. If the observations do not hold enough evidence, say plainly what could not be determined and give the best answer the evidence supports.",
+          "transitions": []
+        }
+      },
+      "handler_only_keys": [
+        "max_iterations_reached",
+        "forced_stop_reason",
+        "iteration_count",
+        "observation_count",
+        "refused_actions"
+      ]
+    },
+    "handlers": [
+      {
+        "handler": "agents.tool_executor",
+        "on": "entry",
+        "states": [
+          "act"
+        ]
+      },
+      {
+        "handler": "agents.think_turn_limiter",
+        "on": "state"
+      },
+      {
+        "handler": "agents.think_fresh_keys",
+        "on": "entry",
+        "states": [
+          "think"
+        ]
+      },
+      {
+        "handler": "agents.feedback_consumed",
+        "on": "exit",
+        "states": [
+          "think"
+        ]
+      },
+      {
+        "handler": "agents.approval_fresh_keys",
+        "on": "entry",
+        "states": [
+          "await_approval"
+        ]
+      },
+      {
+        "handler": "agents.approval_gate",
+        "on": "context_update"
+      }
+    ],
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "classification": {
+          "type": "boolean",
+          "description": "Select the tool through a classification extraction instead of a typed field"
+        },
+        "context_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Context keys every think field prompt lists (filled by the agent)"
+        },
+        "schema_field_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Field names of the output schema that conclude must fill (filled by the agent)"
+        },
+        "tool_intents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "One intent per tool for the classification variant (filled by the agent)"
+        }
+      }
+    },
+    "options": {
+      "classification": false,
+      "context_keys": [
+        "task",
+        "observations",
+        "agent_feedback"
+      ],
+      "schema_field_names": [],
+      "tool_intents": [
+        {
+          "name": "example_tool",
+          "description": "An example tool"
+        },
+        {
+          "name": "none",
+          "description": "No tool is needed; answer directly or terminate"
+        }
+      ]
+    },
+    "variants": {
+      "approval": [
+        {
+          "op": "add",
+          "path": "/states/think/transitions/1",
+          "value": {
+            "target_state": "await_approval",
+            "description": "Action requires human approval before execution",
+            "priority": 150,
+            "conditions": [
+              {
+                "description": "Approval is required for this action",
+                "logic": {
+                  "==": [
+                    {
+                      "var": "approval_required"
+                    },
+                    true
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/states/conclude/response_instructions",
+          "value": "Write the final answer to the ORIGINAL task (the 'task' value in the context) clearly and completely. Base it on the tool observations and on facts given in the task, and cite the observations that support it. This reply is the last output of the run: no further tool will run, so do not describe work in progress or planned next steps. If the observations do not hold enough evidence, say plainly what could not be determined and give the best answer the evidence supports. If the context has a 'refused_actions' list, every action in it was refused by a human approver and was NOT performed: state in the answer that it was not performed because approval was refused, and never say or imply that a refused action was done or will be done."
+        },
+        {
+          "op": "add",
+          "path": "/states/await_approval",
+          "value": {
+            "id": "await_approval",
+            "description": "Waiting for human approval before executing action",
+            "purpose": "Hold the selected action until the approval decision is set",
+            "response_instructions": "",
+            "transitions": [
+              {
+                "target_state": "conclude",
+                "description": "Terminate when framework signals completion",
+                "priority": 1,
+                "conditions": [
+                  {
+                    "description": "Framework or agent decided to terminate",
+                    "logic": {
+                      "==": [
+                        {
+                          "var": "should_terminate"
+                        },
+                        true
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "target_state": "act",
+                "description": "Approval granted, proceed with action",
+                "priority": 10,
+                "conditions": [
+                  {
+                    "description": "User approved the action",
+                    "logic": {
+                      "==": [
+                        {
+                          "var": "approval_granted"
+                        },
+                        true
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "target_state": "think",
+                "description": "Approval denied, reconsider approach",
+                "priority": 300,
+                "conditions": [
+                  {
+                    "description": "User denied the action",
+                    "logic": {
+                      "==": [
+                        {
+                          "var": "approval_granted"
+                        },
+                        false
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "classification": [
+        {
+          "op": "remove",
+          "path": "/states/think/field_extractions/0"
+        },
+        {
+          "op": "replace",
+          "path": "/states/think/extraction_instructions",
+          "value": "{{think_instructions}}"
+        },
+        {
+          "op": "add",
+          "path": "/states/think/classification_extractions",
+          "value": [
+            {
+              "field_name": "tool_name",
+              "intents": {
+                "$hole": "tool_intents"
+              },
+              "fallback_intent": "none",
+              "confidence_threshold": 0.4
+            }
+          ]
+        }
+      ]
+    },
+    "run": {
+      "agent_type": "react"
+    }
+  }
+}

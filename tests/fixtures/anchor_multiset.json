@@ -924,6 +924,16 @@
       "delta": 1,
       "reason": "plan a555dcfe D-014: the host-binding exemption clause of the frame guard in ExecutableRegistry.resolve_target (a built-in strategy with a setup stays a frame)",
       "token": "plan-2026-11-24T043150-a555dcfe/D-014"
+    },
+    {
+      "delta": -1,
+      "reason": "plan a555dcfe step 9: the react builder body moved into agents/patterns/react.json; the 06a5ec0a/D-009 rule (no state-level bulk call) is the no_bulk row of test_pattern_shapes and a clause of the D-015 anchor (D-029 of plan ace7a8c8); D-015 is the one anchor token of the shipped pattern files",
+      "token": "plan-2026-09-29T103145-06a5ec0a/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe step 9: the react builder body moved into agents/patterns/react.json; the 06a5ec0a/D-009 rule (no state-level bulk call) is the no_bulk row of test_pattern_shapes and a clause of the D-015 anchor (D-029 of plan ace7a8c8); D-015 is the one anchor token of the shipped pattern files",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-015"
     }
   ]
 }

@@ -604,7 +604,29 @@ class TestNamespaces:
         assert namespaces.EXECUTABLE_SOURCES._group == "fsm_llm.executable_sources"
         assert namespaces.HANDLERS._group == "fsm_llm.handlers"
         assert namespaces.GENERATORS._group == "fsm_llm.generators"
-        assert namespaces.EXECUTABLE_KINDS.list() == ["fsm", "procedure", "strategy"]
+        # in-process the list also holds what an imported package registered (the agents package
+        # adds `pattern`, plan a555dcfe step 9), so the engine-only list is asked of a fresh interpreter
+        assert {"fsm", "procedure", "strategy"} <= set(
+            namespaces.EXECUTABLE_KINDS.list()
+        )
+
+    def test_the_engine_alone_registers_three_kinds_and_agents_adds_pattern(self):
+        code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(_SRC.parent)!r})\n"
+            "from fsm_llm.engine.executables import namespaces\n"
+            "assert namespaces.EXECUTABLE_KINDS.list() == ['fsm', 'procedure', 'strategy']\n"
+            "import fsm_llm.agents\n"
+            "assert namespaces.EXECUTABLE_KINDS.list() == ['fsm', 'pattern', 'procedure', 'strategy']\n"
+            "assert 'fsm_llm.agents.executables' not in sys.modules\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr
 
     def test_importing_the_engine_namespace_registers_no_source(self):
         # In-process the list depends on which packages other tests imported (agents and
