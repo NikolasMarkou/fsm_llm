@@ -88,6 +88,7 @@ from .aliases import AliasSpec, is_template_identity, make_alias, pick_route
 from .namespaces import (
     EXECUTABLE_KINDS,
     EXECUTABLE_SOURCES,
+    GENERATORS,
     adapter_for,
     namespace_resolver,
 )
@@ -283,15 +284,19 @@ class ExecutableRegistry:
         variables: Mapping[str, str] | None = None,
         resolver: Callable[[str, str], bool] | None = None,
     ) -> Executable:
+        generators = None
         if (
             resolver is None
             and isinstance(data, Mapping)
             and data.get("kind") == "pattern"
         ):
             # D-013: a pattern names handlers and generators, so its names resolve through the two
-            # namespaces by default; any other kind keeps "names are not resolved"
-            resolver = namespace_resolver()
-        envelope, report = load_executable(data, variables=variables, resolver=resolver)
+            # namespaces by default (D-019: and V2 runs its generator); any other kind keeps
+            # "names are not resolved"
+            resolver, generators = namespace_resolver(), GENERATORS.get
+        envelope, report = load_executable(
+            data, variables=variables, resolver=resolver, generators=generators
+        )
         if envelope is None or not report.is_valid:
             raise ExecutableError(
                 "invalid executable document: " + "; ".join(report.errors[:10])

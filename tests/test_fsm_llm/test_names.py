@@ -649,6 +649,7 @@ class TestNamespaces:
     def test_the_handler_library_registers_when_the_agents_package_is_imported(self):
         # D-013 of plan a555dcfe: the engine namespace is empty until a package registers its
         # library; the agents library registers the agents.* names at import, and nothing else
+        # (one generator since step 11, D-019)
         code = (
             "import sys\n"
             f"sys.path.insert(0, {str(_SRC.parent)!r})\n"
@@ -658,7 +659,7 @@ class TestNamespaces:
             "import fsm_llm.agents\n"
             "names = namespaces.HANDLERS.list()\n"
             "assert names and all(n.startswith('agents.') for n in names), names\n"
-            "assert namespaces.GENERATORS.list() == []\n"
+            "assert namespaces.GENERATORS.list() == ['agents.prompt_chain']\n"
         )
         done = subprocess.run(
             [sys.executable, "-I", "-c", code],

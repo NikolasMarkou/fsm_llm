@@ -22,7 +22,8 @@ agents handler library; until then nothing loads with a name it cannot resolve).
 
 Interface contract:
 
-``load_executable(data, *, variables=None, resolver=None, origin="operator", allow=None)
+``load_executable(data, *, variables=None, resolver=None, origin="operator", allow=None,
+generators=None)
 -> (envelope | None, FSMValidationResult)``.
 
 - ``data``: anything; a non-document, a document nested too deep or one the models refuse is an
@@ -75,6 +76,7 @@ from fsm_llm.core.definitions.executable import (
     scan_placeholders,
 )
 from fsm_llm.core.definitions.executable_instance import (
+    GeneratorLookup,
     substitute_variables,
     variable_problems,
 )
@@ -236,8 +238,13 @@ def load_executable(
     resolver: Resolver | None = None,
     origin: str = "operator",
     allow: Mapping[str, Collection[str]] | None = None,
+    generators: GeneratorLookup | None = None,
 ) -> tuple[ExecutableEnvelope | None, FSMValidationResult]:
-    """Load *data* as an executable and report every failure at once (see the module text)."""
+    """Load *data* as an executable and report every failure at once (see the module text).
+
+    *generators* (``name -> generator | None``, D-019) lets V2 build the default instance of a
+    pattern whose body is a generator; without it such a body is not instantiated.
+    """
     if origin not in ("operator", "model"):
         raise ValueError(f"origin must be 'operator' or 'model', not {origin!r}")
     doc_id = data.get("id") if isinstance(data, Mapping) else None
@@ -291,7 +298,7 @@ def load_executable(
     # with every variant applied once (D-012)
     instances: list[dict[str, Any]] = [fsm] if pattern is None and fsm else []
     if pattern is not None and buildable:
-        built = build_instances(pattern, variables)
+        built = build_instances(pattern, variables, generators)
         for line in built.problems:
             note("body", "error", line)
         for line in built.notes:

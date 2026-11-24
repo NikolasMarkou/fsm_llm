@@ -350,9 +350,15 @@ def accepts_tools(agent_cls: type) -> bool:
         ``True`` when some ``__init__`` on the MRO names a ``tools`` parameter
         and every ``__init__`` before it forwards ``**kwargs`` (VerifiedReact and
         AutoMemory forward to ReactAgent). ``BaseAgent.__init__`` ends the walk:
-        its ``**api_kwargs`` is not a tools sink (it rejects ``tools``). Never
+        its ``**api_kwargs`` is not a tools sink (it rejects ``tools``). A class
+        that sets the boolean class attribute ``takes_tools`` answers with it (a
+        tool-less pattern on ``PatternAgent`` forwards ``**api_kwargs`` to a base
+        that names ``tools``, so the signature walk would say yes). Never
         raises; an uninspectable signature counts as ``False``.
     """
+    declared = getattr(agent_cls, "takes_tools", None)
+    if isinstance(declared, bool):
+        return declared
     for klass in agent_cls.__mro__:
         init = klass.__dict__.get("__init__")
         if init is None:

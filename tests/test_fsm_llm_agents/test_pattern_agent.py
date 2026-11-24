@@ -26,7 +26,11 @@ from fsm_llm.agents.handlers.context import HandlerContext
 from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions import AgentError
-from fsm_llm.core.definitions.executable import PatternEnvelope, parse_executable
+from fsm_llm.core.definitions.executable import (
+    InstantiationError,
+    PatternEnvelope,
+    parse_executable,
+)
 from fsm_llm.core.definitions.executable_instance import identity_of
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.engine.context import RunContext
@@ -283,14 +287,22 @@ class TestFailClosed:
                 llm_interface=runs.ScriptedModel(),
             )
 
-    def test_a_generator_body_is_refused(self):
+    def test_a_generator_body_that_does_not_resolve_fails_the_run_closed(self):
+        # step 11 (D-019): a generator body is accepted (prompt_chain is one); a name nothing
+        # registered is refused when the FSM is written, before any model call
         doc = _user_doc(gate=False)
         doc["body"].pop("fsm")
         doc["body"].pop("variants")
         doc["body"]["generator"] = "agents.nothing"
+        agent = PatternAgent(
+            _envelope(doc),
+            tools=runs._tools(),
+            config=runs._config(),
+            llm_interface=runs.ScriptedModel(),
+        )
 
-        with pytest.raises(AgentError, match="generator"):
-            PatternAgent(_envelope(doc), tools=runs._tools(), config=runs._config())
+        with pytest.raises(InstantiationError, match=r"agents\.nothing"):
+            agent.run("t")
 
 
 class TestAUserFileRunsAToolLoopEndToEnd:

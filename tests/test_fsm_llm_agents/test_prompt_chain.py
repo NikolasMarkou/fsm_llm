@@ -13,6 +13,10 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.definitions import AgentConfig, ChainStep
 from fsm_llm.agents.fsm_definitions import build_prompt_chain_fsm
+from fsm_llm.agents.fsm_definitions.prompt_chain import chain_options
+from fsm_llm.agents.handlers.context import HandlerContext
+from fsm_llm.agents.handlers.library import chain_gate_checker, iteration_limiter
+from fsm_llm.agents.pattern_files import load_envelope
 from fsm_llm.agents.prompt_chain import PromptChainAgent
 from fsm_llm.core.definitions import (
     AgentError,
@@ -154,7 +158,7 @@ class TestPromptChainCreation:
         """PromptChainAgent does not require a ToolRegistry."""
         chain = _make_chain(2)
         agent = PromptChainAgent(chain=chain)
-        assert not hasattr(agent, "tools")
+        assert agent.tools is None
 
     def test_stores_api_kwargs(self):
         chain = _make_chain(1)
@@ -352,21 +356,40 @@ class TestPromptChainConstants:
 # -------------------------------------------------------------------------
 
 
+def _gates(chain):
+    """The gate handlers the file binds, built from the library for *chain* (plan a555dcfe step 11)."""
+    context = HandlerContext(
+        options=chain_options(chain),
+        callables={"validation_fns": [step.validation_fn for step in chain]},
+    )
+    return chain_gate_checker(context)
+
+
+def _limiter(chain):
+    """The iteration limiter body the file binds for *chain*."""
+    binding = load_envelope("prompt_chain").body.handlers[1]
+    context = HandlerContext(options=chain_options(chain))
+    return iteration_limiter(context, binding)[0].execution_lambda
+
+
 class TestPromptChainHandlers:
-    """Tests for internal handler methods without requiring LLM."""
+    """Tests for the library handlers of a chain without requiring LLM.
+
+    The rows below reached the closures through ``agent._make_gate_checker(i)`` and
+    ``agent._make_iteration_limiter()`` before the chain became a pattern file; those two methods
+    are gone, the rows read the same closures from the factories the file binds.
+    """
 
     def test_gate_checker_sets_step_index(self):
         chain = _make_chain(3)
-        agent = PromptChainAgent(chain=chain)
-        gate_fn = agent._make_gate_checker(1)
+        gate_fn = _gates(chain)[0].execution_lambda
         context = {}
         result = gate_fn(context)
         assert result[ContextKeys.CHAIN_STEP_INDEX] == 1
 
     def test_gate_checker_accumulates_step_result(self):
         chain = _make_chain(3)
-        agent = PromptChainAgent(chain=chain)
-        gate_fn = agent._make_gate_checker(1)
+        gate_fn = _gates(chain)[0].execution_lambda
         context = {
             ContextKeys.CHAIN_STEP_RESULT: "Step 0 output",
             ContextKeys.CHAIN_RESULTS: [],
@@ -379,8 +402,7 @@ class TestPromptChainHandlers:
             _make_step("s0", "Step 0", validation_fn=lambda ctx: True),
             _make_step("s1", "Step 1"),
         ]
-        agent = PromptChainAgent(chain=chain)
-        gate_fn = agent._make_gate_checker(1)
+        gate_fn = _gates(chain)[0].execution_lambda
         context = {}
         result = gate_fn(context)
         assert result.get(ContextKeys.GATE_PASSED) is True
@@ -390,8 +412,7 @@ class TestPromptChainHandlers:
             _make_step("s0", "Step 0", validation_fn=lambda ctx: False),
             _make_step("s1", "Step 1"),
         ]
-        agent = PromptChainAgent(chain=chain)
-        gate_fn = agent._make_gate_checker(1)
+        gate_fn = _gates(chain)[0].execution_lambda
         context = {}
         result = gate_fn(context)
         assert result.get(ContextKeys.GATE_PASSED) is False
@@ -400,16 +421,14 @@ class TestPromptChainHandlers:
 
     def test_iteration_limiter_increments(self):
         chain = _make_chain(2)
-        agent = PromptChainAgent(chain=chain)
-        limiter = agent._make_iteration_limiter()
+        limiter = _limiter(chain)
         context = {ContextKeys.ITERATION_COUNT: 3}
         result = limiter(context)
         assert result[ContextKeys.ITERATION_COUNT] == 4
 
     def test_limiter_triggers_at_max_minus_one_not_max_minus_two(self):
         # D-013 (item 15): the early limiter fires at count max - 1, not before.
-        agent = PromptChainAgent(chain=_make_chain(2))
-        limiter = agent._make_iteration_limiter()
+        limiter = _limiter(_make_chain(2))
         limit = 2 * Defaults.FSM_BUDGET_MULTIPLIER
 
         before = limiter({ContextKeys.ITERATION_COUNT: limit - 3})

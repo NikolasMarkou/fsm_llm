@@ -1,0 +1,99 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "prompt_chain",
+  "name": "prompt_chain",
+  "description": "Prompt chain agent: a fixed pipeline of steps with optional validation gates",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "outputs": []
+  },
+  "requires": {
+    "tools": "none",
+    "handlers": [
+      "agents.chain_gate_checker",
+      "agents.iteration_limiter"
+    ],
+    "callables": [
+      "chain"
+    ]
+  },
+  "capabilities": [],
+  "lifecycle": "builtin",
+  "body": {
+    "generator": "agents.prompt_chain",
+    "handlers": [
+      {
+        "handler": "agents.chain_gate_checker",
+        "on": "entry"
+      },
+      {
+        "handler": "agents.iteration_limiter",
+        "on": "state",
+        "keys": [
+          "should_terminate"
+        ]
+      }
+    ],
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "extraction_instructions": {
+                "type": "string"
+              },
+              "response_instructions": {
+                "type": "string"
+              },
+              "gated": {
+                "type": "boolean"
+              }
+            }
+          },
+          "description": "The chain, in order; a gated step has a validation function (callable validation_fns)"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Iteration ceiling of the limiter (three per step)"
+        }
+      }
+    },
+    "options": {
+      "steps": [
+        {
+          "name": "First step",
+          "extraction_instructions": "Extract the result of the first step.",
+          "response_instructions": "Report the first result.",
+          "gated": false
+        },
+        {
+          "name": "Second step",
+          "extraction_instructions": "Extract the result of the second step.",
+          "response_instructions": "Report the second result.",
+          "gated": false
+        }
+      ],
+      "max_iterations": 6
+    },
+    "run": {
+      "agent_type": "prompt_chain",
+      "success_keys": [
+        "chain_step_result"
+      ],
+      "context_seed": {
+        "chain_results": [],
+        "chain_step_index": 0
+      }
+    }
+  }
+}

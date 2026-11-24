@@ -11,9 +11,10 @@ options=None, *, variants=(), variables=None) -> dict``: a fresh FSM DICT (so ke
 observable), built from the variants the caller selected (declaration order), the options (given,
 else default, validated) and the text variables, with the record ``{"options": resolved,
 "variables": {...}, "variants": [selected]}`` that ``instantiate_envelope`` returns beside the
-loaded ``FSMDefinition`` and ``rebuild_instance`` replays. A generator body raises
-``GeneratorUnavailableError`` until the generator namespace exists. Template identity never reads
-options or variants chosen; instance identity is the digest of the instantiated FSM.
+loaded ``FSMDefinition`` and ``rebuild_instance`` replays. A generator body (D-019) is run through
+the caller's ``generators`` lookup (``name -> callable | None``) on the resolved options; with no
+lookup, or a name it does not know, it raises ``GeneratorUnavailableError``. Template identity never
+reads options or variants chosen; instance identity is the digest of the instantiated FSM.
 
 Interface contract: as the ``executable`` module docstring states it for ``identity_of``,
 ``instantiate_envelope`` and ``rebuild_instance``. ``canonical_digest(payload) -> str`` is the
@@ -30,7 +31,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from pydantic import ValidationError
@@ -58,6 +59,7 @@ from .fsm import FSMDefinition, definition_digest
 from .limits import nests_deeper_than
 
 __all__ = [
+    "GeneratorLookup",
     "GeneratorUnavailableError",
     "canonical_digest",
     "identity_of",
@@ -69,8 +71,15 @@ __all__ = [
 ]
 
 
+#: ``name -> generator`` (``None`` for an unknown name); a generator maps the resolved options of a
+#: pattern to its FSM dict. The caller passes ``GENERATORS.get`` (core imports no namespace).
+GeneratorLookup = Callable[
+    [str], Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
+]
+
+
 class GeneratorUnavailableError(InstantiationError):
-    """A pattern declares a generator and the generator namespace does not exist yet."""
+    """A pattern declares a generator and the caller gave no lookup that knows its name."""
 
 
 def canonical_digest(payload: Mapping[str, Any]) -> str:
@@ -224,11 +233,47 @@ def _load_definition(body: Mapping[str, Any]) -> FSMDefinition:
         ) from None
 
 
+def _generated(
+    body: PatternBody, resolved: Mapping[str, Any], generators: GeneratorLookup | None
+) -> dict[str, Any]:
+    """The checked FSM dict a generator writes from the resolved options (D-019)."""
+    # DECISION plan-2026-11-24T043150-a555dcfe/D-019
+    # A generator's output is run only after it is checked: a mapping, within the depth cap and a
+    # valid FSM definition, handed back as a deep copy. Do NOT hand it the task, a variant or the text
+    # variables, do NOT skip the FSMDefinition check (the loader would then accept what V2 never saw),
+    # and do NOT put a generator's message or an option value in an error: a step text must not leak.
+    name = body.generator or ""
+    make = None if generators is None else generators(name)
+    if make is None:
+        raise GeneratorUnavailableError(
+            f"the generator {name!r} cannot run: the caller gave no lookup that knows it"
+        )
+    try:
+        written = make(resolved)  # resolve_options returns copies
+    except (
+        Exception
+    ) as error:  # a generator is operator code: report its type, never its text
+        raise InstantiationError(
+            f"the generator {name!r} failed ({type(error).__name__})"
+        ) from None
+    if not isinstance(written, Mapping) or nests_deeper_than(
+        written, MAX_DOCUMENT_DEPTH
+    ):
+        raise InstantiationError(
+            f"the generator {name!r} wrote no mapping of at most "
+            f"{MAX_DOCUMENT_DEPTH} levels"
+        )
+    out = copy.deepcopy(dict(written))
+    _load_definition(out)
+    return out
+
+
 def _pattern_instance(
     envelope: ExecutableEnvelope,
     options: Mapping[str, Any] | None,
     variables: Mapping[str, str] | None,
     variants: Sequence[str],
+    generators: GeneratorLookup | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The instantiated FSM dict of a pattern and its record (the work of ``instantiate_body``)."""
     body = envelope.body
@@ -236,13 +281,11 @@ def _pattern_instance(
         raise InstantiationError(
             "options and variants belong to a pattern: this envelope has none"
         )
-    if body.fsm is None:
-        raise GeneratorUnavailableError(
-            f"the generator {body.generator!r} cannot run: no generator namespace exists yet"
-        )
     values = dict(variables or {})
     if problems := variable_problems(envelope, values):
         raise InstantiationError("; ".join(problems))
+    if body.fsm is None and variants:
+        raise InstantiationError("a generator body takes no variants")
     try:
         resolved = resolve_options(body, options)
         # the record is taken BEFORE the fill pass, from values the pass only copies
@@ -251,6 +294,8 @@ def _pattern_instance(
             "variables": dict(sorted(values.items())),
             "variants": [name for name in body.variants if name in set(variants)],
         }
+        if body.fsm is None:
+            return _generated(body, resolved, generators), record
         patched = apply_variants(body, variants)
         if nests_deeper_than(patched, MAX_DOCUMENT_DEPTH):
             raise InstantiationError(
@@ -270,15 +315,17 @@ def instantiate_body(
     *,
     variants: Sequence[str] = (),
     variables: Mapping[str, str] | None = None,
+    generators: GeneratorLookup | None = None,
 ) -> dict[str, Any]:
     """The FSM of a pattern *envelope* as a fresh dict: variants, then holes and text.
 
     *variants* are names the caller (the adapter) selects, applied in declaration order; an
     option can never select one. *options* are checked against the options schema and fall back
-    to the defaults of the body. A generator body raises ``GeneratorUnavailableError``. Two calls
+    to the defaults of the body. A generator body is written by ``generators(name)`` from the resolved
+    options (no variants; ``GeneratorUnavailableError`` when the lookup does not know it). Two calls
     return equal dicts that share nothing with each other or with the envelope.
     """
-    return _pattern_instance(envelope, options, variables, variants)[0]
+    return _pattern_instance(envelope, options, variables, variants, generators)[0]
 
 
 def instantiate_envelope(
@@ -287,13 +334,16 @@ def instantiate_envelope(
     options: Mapping[str, Any] | None = None,
     variables: Mapping[str, str] | None = None,
     variants: Sequence[str] = (),
+    generators: GeneratorLookup | None = None,
 ) -> tuple[FSMDefinition, dict[str, Any]]:
     """The FSM body of *envelope* with its variables filled, and the instantiation record.
 
     A pattern also takes *options* and *variants* (see ``instantiate_body``) and records both.
     """
     if isinstance(envelope.body, PatternBody):
-        filled, record = _pattern_instance(envelope, options, variables, variants)
+        filled, record = _pattern_instance(
+            envelope, options, variables, variants, generators
+        )
         return _load_definition(filled), record
     values = dict(variables or {})
     if options or variants:
@@ -314,6 +364,7 @@ def rebuild_instance(
     envelope: ExecutableEnvelope,
     record: Mapping[str, Any],
     expected_instance_identity: str,
+    generators: GeneratorLookup | None = None,
 ) -> FSMDefinition:
     """Re-instantiate from a logged *record*; the digest must equal the logged identity."""
     if (
@@ -332,6 +383,7 @@ def rebuild_instance(
         options=record.get("options"),
         variables=record.get("variables"),
         variants=record.get("variants") or (),
+        generators=generators,
     )
     actual = definition_digest(definition)
     if actual != expected_instance_identity:

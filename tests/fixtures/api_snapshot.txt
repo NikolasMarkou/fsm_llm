@@ -691,7 +691,7 @@ fsm_llm.core.results.RunResult class(BaseModel)
   field handle: str | None = None
   property success
 # fsm_llm.core.verify.executable
-fsm_llm.core.verify.executable.load_executable def(data: object, *, variables: Mapping[str, str] | None = None, resolver: Resolver | None = None, origin: str = 'operator', allow: Mapping[str, Collection[str]] | None = None) -> tuple[ExecutableEnvelope | None, FSMValidationResult]
+fsm_llm.core.verify.executable.load_executable def(data: object, *, variables: Mapping[str, str] | None = None, resolver: Resolver | None = None, origin: str = 'operator', allow: Mapping[str, Collection[str]] | None = None, generators: GeneratorLookup | None = None) -> tuple[ExecutableEnvelope | None, FSMValidationResult]
 # fsm_llm.core.verify.flow
 fsm_llm.core.verify.flow.FlowFinding class
   def __init__(self, analysis: str, code: str, state: str, message: str) -> None
@@ -1017,12 +1017,13 @@ fsm_llm.core.definitions.executable.parse_executable def(data: object) -> Execut
 fsm_llm.core.definitions.executable.scan_placeholders def(node: Any) -> tuple[set[str], set[str]]
 fsm_llm.core.definitions.executable.schema_text def() -> str
 # fsm_llm.core.definitions.executable_instance
+fsm_llm.core.definitions.executable_instance.GeneratorLookup alias Callable[[str], Callable[[Mapping[str, Any]], Mapping[str, Any]] | None]
 fsm_llm.core.definitions.executable_instance.GeneratorUnavailableError class(InstantiationError)
 fsm_llm.core.definitions.executable_instance.canonical_digest def(payload: Mapping[str, Any]) -> str
 fsm_llm.core.definitions.executable_instance.identity_of def(template: ExecutableEnvelope, instance: FSMDefinition | Mapping[str, Any] | None = None) -> Identity
-fsm_llm.core.definitions.executable_instance.instantiate_body def(envelope: ExecutableEnvelope, options: Mapping[str, Any] | None = None, *, variants: Sequence[str] = (), variables: Mapping[str, str] | None = None) -> dict[str, Any]
-fsm_llm.core.definitions.executable_instance.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None, variants: Sequence[str] = ()) -> tuple[FSMDefinition, dict[str, Any]]
-fsm_llm.core.definitions.executable_instance.rebuild_instance def(envelope: ExecutableEnvelope, record: Mapping[str, Any], expected_instance_identity: str) -> FSMDefinition
+fsm_llm.core.definitions.executable_instance.instantiate_body def(envelope: ExecutableEnvelope, options: Mapping[str, Any] | None = None, *, variants: Sequence[str] = (), variables: Mapping[str, str] | None = None, generators: GeneratorLookup | None = None) -> dict[str, Any]
+fsm_llm.core.definitions.executable_instance.instantiate_envelope def(envelope: ExecutableEnvelope, *, options: Mapping[str, Any] | None = None, variables: Mapping[str, str] | None = None, variants: Sequence[str] = (), generators: GeneratorLookup | None = None) -> tuple[FSMDefinition, dict[str, Any]]
+fsm_llm.core.definitions.executable_instance.rebuild_instance def(envelope: ExecutableEnvelope, record: Mapping[str, Any], expected_instance_identity: str, generators: GeneratorLookup | None = None) -> FSMDefinition
 fsm_llm.core.definitions.executable_instance.substitute_variables def(node: Any, values: Mapping[str, str]) -> Any
 fsm_llm.core.definitions.executable_instance.variable_problems def(envelope: ExecutableEnvelope, values: Mapping[str, Any]) -> list[str]
 # fsm_llm.core.definitions.executable_pattern
@@ -1404,9 +1405,8 @@ fsm_llm.agents.PlanStep class(BaseModel)
   field dependencies: list[int] = factory
   field status: str = 'pending'
   field result: str = ''
-fsm_llm.agents.PromptChainAgent class(BaseAgent)
+fsm_llm.agents.PromptChainAgent class(PatternAgent)
   def __init__(self, chain: list[ChainStep], config: AgentConfig | None = None, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.PythonToolDefinition class
   def __init__(self, name: str, description: str, execute: Callable[..., Any], parameter_schema: dict[str, Any] = <factory>, category: str = 'general', requires_approval: bool = False, metadata: dict[str, Any] = <factory>, annotations: ToolAnnotations = <factory>, timeout_seconds: float | None = None, args_model: type[BaseModel] | None = None) -> None
   def to_tool_definition(self) -> ToolDefinition

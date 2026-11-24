@@ -18,7 +18,7 @@ meta-builder can reuse a rule without the whole load. Each rule says which step 
   variants, a generator, an options schema, and the run fields that name code or the driver
   channel).
 
-Interface contract: ``build_instances(envelope, variables) -> PatternInstances`` (never raises;
+Interface contract: ``build_instances(envelope, variables, generators=None) -> PatternInstances`` (never raises;
 ``problems`` are ``[body]`` error lines, ``notes`` info lines); ``pattern_names(envelope) ->
 dict[str, list[str]]`` (keys ``handlers`` and ``generators``, each name once, in document order);
 ``hitl_problems(envelope, bodies) -> list[str]``; ``hole_text_problems(body) -> list[str]``;
@@ -38,7 +38,10 @@ from fsm_llm.core.definitions.executable import (
     InstantiationError,
     PatternEnvelope,
 )
-from fsm_llm.core.definitions.executable_instance import instantiate_body
+from fsm_llm.core.definitions.executable_instance import (
+    GeneratorLookup,
+    instantiate_body,
+)
 from fsm_llm.core.definitions.executable_pattern import (
     APPROVAL_GATE_HANDLER,
     APPROVAL_STATE,
@@ -98,16 +101,19 @@ def _why(error: Exception) -> str:
 
 
 def build_instances(
-    envelope: PatternEnvelope, variables: Mapping[str, str] | None
+    envelope: PatternEnvelope,
+    variables: Mapping[str, str] | None,
+    generators: GeneratorLookup | None = None,
 ) -> PatternInstances:
     """V2: the default instance and the every-variant instance of *envelope* (never raises).
 
     *variables* ``None`` leaves each declared ``{{name}}`` as its own text (the body is checked
     as written); a mapping fills them (the caller has already refused a bad one). A generator
-    body has no template: one note and no instance.
+    body has no template: with a *generators* lookup its default instance is built (D-019) and
+    checked like a template's, without one there is one note and no instance.
     """
     body = envelope.body
-    if body.fsm is None:
+    if body.fsm is None and generators is None:
         return PatternInstances(
             notes=["a generator body builds its FSM at run time: nothing to check here"]
         )
@@ -117,7 +123,7 @@ def build_instances(
         else {name: "{{" + name + "}}" for name in envelope.variables}
     )
     try:
-        default = instantiate_body(envelope, variables=values)
+        default = instantiate_body(envelope, variables=values, generators=generators)
     except (ValueError, TypeError, RecursionError) as error:
         return PatternInstances(
             problems=[f"the default instance cannot be built: {_why(error)}"]
@@ -191,7 +197,7 @@ def hitl_problems(
         problems.append(
             f"{APPROVAL_GATE_HANDLER!r} is bound but capabilities does not claim hitl"
         )
-    if body.fsm is not None:
+    if any(b is not None for b in bodies):
         has_state = any(APPROVAL_STATE in _state_ids(b) for b in bodies)
         if bound and not has_state:
             problems.append(

@@ -14,7 +14,8 @@ Interface contract:
   ``PATTERN_ORDER``; a name is never joined into a path unchecked). The text of every file is
   canonical (``json.dumps(indent=2, ensure_ascii=True)``, LF, one final newline).
 - ``load_envelope(name)``: the parsed, LOADED ``PatternEnvelope`` (``load_executable`` with the handler
-  resolver, so the default instance and the every-variant instance are checked as FSMs), cached for
+  resolver and the generator lookup, so the default instance and the every-variant instance are
+  checked as FSMs), cached for
   the process and shared: read it, never mutate it. A shipped file that does not load raises
   ``ExecutableError`` naming the file and its first problems: that is a packaging bug, not an input.
 
@@ -32,11 +33,11 @@ from typing import Any
 
 from fsm_llm.core.definitions.executable import ExecutableError, PatternEnvelope
 from fsm_llm.core.verify.executable import load_executable
-from fsm_llm.engine.executables.namespaces import namespace_resolver
+from fsm_llm.engine.executables.namespaces import GENERATORS, namespace_resolver
 
 __all__ = ["PATTERN_ORDER", "load_document", "load_envelope"]
 
-PATTERN_ORDER: tuple[str, ...] = ("react", "reflexion")
+PATTERN_ORDER: tuple[str, ...] = ("react", "reflexion", "prompt_chain")
 
 
 # DECISION plan-2026-11-24T043150-a555dcfe/D-015
@@ -68,7 +69,9 @@ def load_document(name: str) -> dict[str, Any]:
 def load_envelope(name: str) -> PatternEnvelope:
     """The loaded envelope of the shipped pattern *name* (cached; ``KeyError`` when unknown)."""
     document = load_document(name)
-    envelope, report = load_executable(document, resolver=namespace_resolver())
+    envelope, report = load_executable(
+        document, resolver=namespace_resolver(), generators=GENERATORS.get
+    )
     if not isinstance(envelope, PatternEnvelope) or not report.is_valid:
         raise ExecutableError(
             f"the shipped pattern file {name}.json does not load: "

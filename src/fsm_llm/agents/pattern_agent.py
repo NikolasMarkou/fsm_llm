@@ -11,8 +11,8 @@ binds only library handlers runs through it as it stands.
 Interface contract:
 
 - ``PatternAgent(envelope, tools=None, config=None, hitl=None, options=None, callables=None,
-  **api_kwargs)``: ``envelope`` is a LOADED ``PatternEnvelope`` with an ``fsm`` body (a generator
-  body is refused). ``tools`` is required and non-empty when the file lists ``tools`` in
+  **api_kwargs)``: ``envelope`` is a LOADED ``PatternEnvelope`` (a template or a generator body, D-019).
+  ``tools`` is required and non-empty when the file lists ``tools`` in
   ``requires.callables``. ``options`` are the caller's options: a boolean option of the same name as
   a variant selects it; an option named ``approval`` or like an input the agent derives is refused
   (``AgentError``). ``callables`` are named host objects a factory may read (``HandlerContext``).
@@ -24,7 +24,8 @@ Interface contract:
   ``_refuse_unapprovable_flagged_tools`` at construction and at the start of every run and selects the
   ``approval`` variant exactly under ``_hitl_active``; a file that binds ``agents.tool_executor`` and
   no gate runs ``_refuse_flagged_tools`` at both places; a ``HumanInTheLoop`` given to a file with no
-  gate is refused at construction. The grant check stays in ``AgentHandlers.approval_refusal``.
+  gate is refused at construction (a file whose ``requires.tools`` is ``none`` refuses ``tools=`` and ``hitl=``
+  with the base ``TypeError`` of ``reject_misplaced_kwargs``). The grant check stays in ``AgentHandlers.approval_refusal``.
 - ``run(task, initial_context=None) -> AgentResult`` and ``run_stream(...)``: one call-local
   ``HandlerContext`` per call (never stored on ``self``, D-014 of plan 089d0ec7). A subclass that
   needs another way to build the FSM overrides ``_fsm_for_run(task, initial_context)``.
@@ -48,7 +49,7 @@ from fsm_llm.logging import logger
 from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.tools import ToolRegistry
 
-from .base import BaseAgent, caller_prompt_keys
+from .base import BaseAgent, caller_prompt_keys, reject_misplaced_kwargs
 from .definitions import AgentConfig, AgentResult
 
 __all__ = ["PatternAgent"]
@@ -71,10 +72,6 @@ class PatternAgent(BaseAgent):
         **api_kwargs: Any,
     ) -> None:
         body = envelope.body
-        if body.fsm is None:
-            raise AgentError(
-                f"pattern {envelope.id!r} has a generator body: PatternAgent runs an FSM body"
-            )
         if unsupported := [f for f in _NO_SEAM if getattr(body.run, f)]:
             raise AgentError(
                 f"pattern {envelope.id!r} sets run fields {unsupported} that have no "
@@ -86,6 +83,13 @@ class PatternAgent(BaseAgent):
         if "tools" in envelope.requires.callables:
             self._require_tools(tools)
         refuse_reserved_options(envelope, options or {})
+        if envelope.requires.tools == "none":
+            # a pattern with no tools: `tools=` and `hitl=` are named here, so the base denylist
+            # (which looks at **api_kwargs) would never see them (D-003 of plan 06a5ec0a)
+            reject_misplaced_kwargs(
+                type(self).__name__,
+                {k: v for k, v in (("tools", tools), ("hitl", hitl)) if v is not None},
+            )
         if hitl is not None and not self._gate:
             raise AgentError(
                 f"pattern {envelope.id!r} binds no {APPROVAL_GATE_HANDLER}: a HumanInTheLoop "
@@ -166,6 +170,12 @@ class PatternAgent(BaseAgent):
             context = self._init_context(task, initial_context, extra=seed)
         return fsm_def, context, handlers
 
+    def _budget_kwargs(self) -> dict[str, Any]:
+        """The ``max_iterations`` of a run when the pattern has its own (default: none, the
+        config's); a pattern whose budget depends on its input overrides it (``PromptChainAgent``:
+        three per step)."""
+        return {}
+
     def _run_kwargs(self) -> dict[str, Any]:
         run = self.envelope.body.run
         return {
@@ -187,6 +197,7 @@ class PatternAgent(BaseAgent):
             self._agent_type,
             handlers=handlers,
             **self._run_kwargs(),
+            **self._budget_kwargs(),
         )
 
     def run_stream(
@@ -195,7 +206,12 @@ class PatternAgent(BaseAgent):
         """Run the pattern, streaming the reply of each speaking state (lazy, like ``run``)."""
         fsm_def, context, handlers = self._run_inputs(task, initial_context)
         yield from self._standard_run_stream(
-            task, fsm_def, context, self._agent_type, handlers=handlers
+            task,
+            fsm_def,
+            context,
+            self._agent_type,
+            handlers=handlers,
+            **self._budget_kwargs(),
         )
 
     # DECISION plan-2026-09-12T065608-089d0ec7/D-014

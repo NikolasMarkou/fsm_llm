@@ -161,13 +161,12 @@ class TestAPatternDocumentParses:
         assert "exactly one of fsm and generator" in _only_problem(_doc(body=both))
         assert "exactly one of fsm and generator" in _only_problem(_doc(body=neither))
 
-    def test_a_generator_body_parses_and_cannot_be_instantiated_yet(self):
+    def test_a_generator_body_parses_and_cannot_be_instantiated_without_a_lookup(self):
+        # step 11 (D-019) gave the seam; with no lookup the body still fails closed
         body = {"generator": "agents.prompt_chain", "options_schema": {}}
         envelope = _envelope(body=body)
 
-        with pytest.raises(
-            ei.GeneratorUnavailableError, match="no generator namespace"
-        ):
+        with pytest.raises(ei.GeneratorUnavailableError, match="no lookup"):
             ei.instantiate_body(envelope, variables=TONE)
         with pytest.raises(ei.InstantiationError):
             ei.instantiate_envelope(envelope, variables=TONE)

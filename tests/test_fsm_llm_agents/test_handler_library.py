@@ -171,6 +171,7 @@ class TestTheNamespaces:
             "agents.reflexion_evaluator",
             "agents.reflexion_fresh_keys",
             "agents.reflexion_reflector",
+            "agents.chain_gate_checker",
             "agents.approval_gate",
         ]
         for name, factory in LIBRARY:
@@ -203,7 +204,8 @@ class TestTheNamespaces:
         resolve = namespace_resolver()
         assert resolve("handlers", "agents.tool_executor")
         assert not resolve("handlers", "agents.nothing")
-        assert not resolve("generators", "agents.prompt_chain")
+        assert resolve("generators", "agents.prompt_chain")  # step 11 (D-019)
+        assert not resolve("generators", "agents.nothing")
         # not judged here: tools, callables and executables answer True
         assert resolve("tools", "anything") and resolve("executables", "anything")
 
@@ -402,6 +404,8 @@ class TestPerRunState:
         for name, factory in LIBRARY:
             if name == "agents.iteration_limiter":
                 continue  # needs a limit; its twin row is in TestTheContextCountingLimiter
+            if name == "agents.chain_gate_checker":
+                continue  # builds nothing without the chain options; test_pattern_prompt_chain has its row
             first = factory(_context_of(agent))
             second = factory(_context_of(agent))
             assert first and second, name

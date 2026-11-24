@@ -18,7 +18,7 @@ and the text variables ``think_instructions`` and ``context_names`` (the key nam
 field prompts print them). Raises ``AgentError`` for an option named
 ``approval`` or like a derived input; ``ValueError`` for a context key that is ``agent_trace`` or
 internal-prefixed (as the builder always did); ``InstantiationError`` for what the envelope
-refuses.
+refuses. A generator body (``prompt_chain``, D-019) is written by ``GENERATORS`` from the options.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from fsm_llm.agents.prompts import build_think_extraction_instructions
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
 from fsm_llm.core.definitions.executable_instance import instantiate_body
+from fsm_llm.engine.executables.namespaces import GENERATORS
 from fsm_llm.tools import ToolRegistry
 
 __all__ = [
@@ -116,4 +117,10 @@ def pattern_fsm(
         if tools is None:
             raise AgentError("the classification variant needs the run's tools")
         values["tool_intents"] = tools.to_classification_schema()["intents"]
-    return instantiate_body(envelope, values, variants=variants, variables=variables)
+    return instantiate_body(
+        envelope,
+        values,
+        variants=variants,
+        variables=variables,
+        generators=GENERATORS.get,
+    )

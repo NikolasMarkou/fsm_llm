@@ -5,7 +5,8 @@
 family: ``agents.tool_executor``, ``agents.think_turn_limiter``, ``agents.iteration_limiter``,
 ``agents.think_fresh_keys``, ``agents.feedback_consumed``, ``agents.approval_fresh_keys`` and
 ``agents.approval_gate``, and the Reflexion three (``agents.reflexion_evaluator``,
-``agents.reflexion_fresh_keys``, ``agents.reflexion_reflector``; bodies in ``reflection.py``). Each is its own function (a ``NameRegistry`` refuses one function under two
+``agents.reflexion_fresh_keys``, ``agents.reflexion_reflector``; bodies in ``reflection.py``) and the
+prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
 state filter and priority the live registration of ``base/registration.py`` and ``base/hitl_gate.py``
@@ -26,8 +27,8 @@ Interface contract:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, cast
 
 from fsm_llm.agents.constants import (
     REACT_THINK_FRESH_KEYS,
@@ -36,14 +37,16 @@ from fsm_llm.agents.constants import (
     Defaults,
     HandlerNames,
     HandlerPriorities,
+    PromptChainStates,
     ReflexionStates,
 )
 from fsm_llm.agents.tools import make_hitl_checker
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.core.definitions import AgentError
-from fsm_llm.engine.executables.namespaces import HANDLERS
+from fsm_llm.engine.executables.namespaces import GENERATORS, HANDLERS
 from fsm_llm.handlers import HandlerTiming, create_handler
 
+from .chain import make_gate_checker
 from .context import HandlerContext
 from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
@@ -306,6 +309,47 @@ def reflexion_reflector(
     ]
 
 
+def chain_gate_checker(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.chain_gate_checker``: one entry handler per state after a chain step (D-019).
+
+    Reads the options ``steps`` (the generator's own list) and the callables ``validation_fns``
+    (one function or ``None`` per step, aligned with ``steps``): the state after step ``i`` records
+    its result and runs its gate. A gated step with no function is refused: its gate edge would
+    never be taken. A function for a step that is not gated is ignored (the topology decides).
+    A binding may move the priority, never the states: they follow the chain.
+    """
+    steps: Sequence[Mapping[str, Any]] = ctx.options.get("steps") or ()
+    functions: Sequence[Callable[[dict[str, Any]], bool] | None] = cast(
+        "Sequence[Callable[[dict[str, Any]], bool] | None]",
+        ctx.callables.get("validation_fns") or (),
+    )
+    built: list[BaseHandler] = []
+    for index, previous in enumerate(steps, start=1):
+        last = index == len(steps)
+        validate = None
+        if previous["gated"]:
+            validate = functions[index - 1] if index <= len(functions) else None
+            if validate is None:
+                raise AgentError(
+                    f"chain step {previous['name']!r} is gated and has no validation function"
+                )
+        state = (
+            PromptChainStates.OUTPUT
+            if last
+            else f"{PromptChainStates.STEP_PREFIX}{index}"
+        )
+        suffix = "final" if last else index
+        built.append(
+            create_handler(f"{HandlerNames.CHAIN_GATE_CHECKER}_{suffix}")
+            .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+            .on_state_entry(state)
+            .do(make_gate_checker(index, previous["name"], validate, last))
+        )
+    return built
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -339,14 +383,20 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.reflexion_evaluator", reflexion_evaluator),
     ("agents.reflexion_fresh_keys", reflexion_fresh_keys),
     ("agents.reflexion_reflector", reflexion_reflector),
+    ("agents.chain_gate_checker", chain_gate_checker),
     ("agents.approval_gate", approval_gate),
 )
 
 
 def register_library() -> None:
-    """Register the library in ``HANDLERS`` (idempotent: a name is replaced by its own function)."""
+    """Register the library in ``HANDLERS`` and the generator in ``GENERATORS`` (idempotent: a name
+    is replaced by its own function)."""
+    # imported here: the generator module imports `agents.prompts` and the sibling builders
+    from fsm_llm.agents.fsm_definitions.prompt_chain import prompt_chain_fsm
+
     for name, factory in LIBRARY:
         HANDLERS.register(name, factory, override=True)
+    GENERATORS.register("agents.prompt_chain", prompt_chain_fsm, override=True)
 
 
 register_library()
