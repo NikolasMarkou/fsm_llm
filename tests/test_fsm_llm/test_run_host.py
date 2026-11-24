@@ -184,7 +184,9 @@ class TestTheHostRunsABody:
         assert order == ["announce", "body"]
         assert free == [True]
 
-    def test_a_failing_announce_starts_nothing_and_leaks_no_slot(self) -> None:
+    def test_a_failing_announce_starts_nothing_keeps_the_reservation_and_leaks_no_slot(
+        self,
+    ) -> None:
         ran = threading.Event()
 
         async def body(token: CancelToken) -> RunResult:
@@ -200,9 +202,14 @@ class TestTheHostRunsABody:
         with pytest.raises(OSError):
             host.start("h1", body, conversation_id="c1", announce=announce)
         assert not ran.is_set()
-        assert host.poll("h1", conversation_id="c1") is None
+        # D-057: nothing started, so the reservation is back (the next entry may start the handle)
+        assert host.poll("h1", conversation_id="c1") == RunPoll(False, None)
         assert _launch(host, "h2", _instant)  # the single slot is free again
         assert host.wait("h2", _BOUND)
+        assert host.start(
+            "h1", body, conversation_id="c1"
+        )  # and the same handle starts now
+        assert host.wait("h1", _BOUND) and ran.is_set()
 
     def test_a_thread_that_cannot_start_is_dropped(self, monkeypatch) -> None:
         class _NoThread:

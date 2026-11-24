@@ -12,6 +12,7 @@ bounded waits, no ordered scripted reply on two threads, thread rows skipped und
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -28,16 +29,25 @@ from fsm_llm.core.results import RunResult
 from fsm_llm.engine.api import delegated
 from fsm_llm.engine.api.delegated import RunMark, flush_run_ends
 from fsm_llm.engine.context import RunContext
-from fsm_llm.engine.executables import ExecutableRegistry
+from fsm_llm.engine.executables import ExecutableRegistry, runs
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
 from fsm_llm.engine.executables.runs import ExecutableTargets, RunHost
-from fsm_llm.engine.kinds.targets import ResolvedTarget
+from fsm_llm.engine.kinds.targets import (
+    MAX_DELEGATED_RETURN_CHARS,
+    ResolvedTarget,
+    RunPoll,
+)
 from fsm_llm.reasoning.executables import SolveExecutable
 from fsm_llm.runtime import EventLog
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.test_async_engine import _CHAT
 from tests.test_fsm_llm.test_call_delegated import _initial_call
-from tests.test_fsm_llm.test_call_delegated_settle import _TARGET, _lock_free, _Probe
+from tests.test_fsm_llm.test_call_delegated_settle import (
+    _BOUND,
+    _TARGET,
+    _lock_free,
+    _Probe,
+)
 from tests.test_fsm_llm.test_call_settle import _Gate
 from tests.test_fsm_llm.test_call_state import _call, _parent
 
@@ -665,3 +675,269 @@ class TestAPoppedFrameCancelsAndEndsItsRun:
             api.close()
             assert log is not None
             log.close()
+
+
+# ---- K7R.3: the finished results and the failed run/start --------------------------------------
+
+
+def _wait_finished(targets: ExecutableTargets, handle: str) -> None:
+    assert targets.host.wait(handle, _BOUND), "the run did not finish"
+
+
+def _handle_of(api: API, cid: str) -> str:
+    frame = api.conversation_stacks[cid][0].conversation_id
+    return api.fsm_manager.copy_raw_context_data(frame)["call_result"]["handle"]
+
+
+class TestAFinishedResultIsConsumedOnceItsRecordLanded:
+    """K7R.3, review warning 4."""
+
+    def test_a_landed_result_leaves_the_host(self, tmp_path) -> None:
+        """The reviewer's probe: the landed handle still sat in ``host._finished``.
+        Kills: ``flush_run_ends`` not calling ``forget``."""
+        probe = _Probe()
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            _drive(api, cid)
+            assert api.get_data(cid)["call_result"]["status"] == "ok"
+            assert list(targets.host._finished) == []
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+    def test_a_late_poll_survives_a_busy_host(self, tmp_path, monkeypatch) -> None:
+        """One parent leaves its finished run unpolled while six others run and land, on a host
+        that keeps five results. Before the fix the six filled the table and evicted the first
+        (its parent ended ``failed/run_lost`` for work that succeeded). Kills: no consumption."""
+        monkeypatch.setattr(runs, "MAX_FINISHED_RUNS", 5)
+        probe = _Probe()
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            first, _ = api.start_conversation({"topic": "late"})
+            api.advance(first)  # reserves, starts the run
+            _wait_finished(targets, _handle_of(api, first))
+            for n in range(6):
+                other, _ = api.start_conversation({"topic": f"busy {n}"})
+                _drive(api, other)
+                assert api.get_data(other)["call_result"]["status"] == "ok"
+            _drive(api, first)
+            record = api.get_data(first)["call_result"]
+            assert (record["status"], record["reason"]) == ("ok", None)
+            assert len(probe.runs) == 7  # nothing ran twice
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+    def test_the_host_forget_drops_only_a_finished_entry_of_that_conversation(
+        self,
+    ) -> None:
+        host = RunHost()
+        assert host.claim("h1", conversation_id="c1")
+        assert (
+            host.forget("h1", conversation_id="c1") is False
+        )  # reserved, not finished
+        done = threading.Event()
+
+        async def body(token):
+            done.set()
+            return RunResult(status=Status.OK, answer="a")
+
+        assert host.start("h1", body, conversation_id="c1")
+        assert host.wait("h1", _BOUND)
+        assert (
+            host.forget("h1", conversation_id="other") is False
+        )  # a foreign conversation
+        assert host.poll("h1", conversation_id="c1").finished
+        assert host.forget("h1", conversation_id="c1") is True
+        assert host.poll("h1", conversation_id="c1") is None
+        assert host.forget("h1", conversation_id="c1") is False
+
+    def test_an_unlanded_result_stays_until_its_record_lands(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The result leaves the host only when the record that lands it is committed: a
+        ``run/end`` is judged after a committed final record, so a turn that rolled back leaves
+        both the record ``running`` and the result in place."""
+        probe = _Probe(hold=True)
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)
+            handle = _handle_of(api, cid)
+            probe.release.set()
+            _wait_finished(targets, handle)
+            frame = api.conversation_stacks[cid][0].conversation_id
+            assert (
+                api.fsm_manager.copy_raw_context_data(frame)["call_result"]["status"]
+                == "running"
+            )
+            assert list(targets.host._finished) == [handle]  # not landed: still held
+            _drive(api, cid)
+            assert api.get_data(cid)["call_result"]["status"] == "ok"
+            assert list(targets.host._finished) == []
+        finally:
+            probe.release.set()
+            api.close()
+            assert log is not None
+            log.close()
+
+
+class TestAResultIsCappedAtStoreTime:
+    """K7R.3, review warning 4: each kept ``RunResult`` held its full, uncapped ``outputs``."""
+
+    def test_the_stored_result_is_bounded_before_any_merge(self, tmp_path) -> None:
+        big = "x" * 20_000
+        result = RunResult(
+            status=Status.OK,
+            outputs={"findings": big, "rows": [big] * 5},
+            answer=big,
+            detail={"trace": big},
+        )
+        probe = _Probe(result=result)
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)
+            handle = _handle_of(api, cid)
+            _wait_finished(targets, handle)
+            frame = api.conversation_stacks[cid][0].conversation_id
+            stored = targets.host.poll(handle, conversation_id=frame).result
+            cap = MAX_DELEGATED_RETURN_CHARS
+            assert len(stored.outputs["findings"]) <= cap + 64
+            assert stored.outputs["findings"].startswith("x" * cap)
+            assert (
+                isinstance(stored.outputs["rows"], str)
+                and len(stored.outputs["rows"]) < 200
+            )
+            assert stored.answer is not None and len(stored.answer) <= cap + 64
+            assert len(stored.detail["trace"]) <= cap + 64
+            _drive(api, cid)
+            found = api.get_data(cid)["found"]
+            assert found.startswith("x" * cap) and len(found) <= cap + 64
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+    def test_a_small_result_is_stored_as_it_is(self, tmp_path) -> None:
+        probe = _Probe()
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)
+            handle = _handle_of(api, cid)
+            _wait_finished(targets, handle)
+            frame = api.conversation_stacks[cid][0].conversation_id
+            stored = targets.host.poll(handle, conversation_id=frame).result
+            assert stored.outputs == {"findings": ["f1"]}
+            assert stored.answer == "the answer"
+        finally:
+            api.close()
+            assert log is not None
+            log.close()
+
+
+class TestAFailedRunStartKeepsTheReservation:
+    """K7R.3, review warning 5: one failed ``run/start`` write ended the call ``run_lost`` with
+    nothing started. The probe of the reviewer: the append raises once."""
+
+    def _flow(self, tmp_path: Path):
+        probe = _Probe()
+        api, targets, log = _build(
+            tmp_path,
+            probe,
+            config=_call(
+                target=_TARGET, inputs=["topic"], returns={"found": "findings"}
+            ),
+        )
+        assert log is not None
+        real = log.append
+        state = {"fail": True, "raised": 0}
+
+        def append(conversation_id, type, **kwargs):
+            if state["fail"] and getattr(type, "value", type) == "run/start":
+                state["fail"] = False
+                state["raised"] += 1
+                raise OSError("disk full")
+            return real(conversation_id, type, **kwargs)
+
+        log.append = append  # type: ignore[method-assign]
+        return api, targets, log, probe, state
+
+    def test_the_next_entry_starts_the_run(self, tmp_path) -> None:
+        """Kills: ``RunHost.start`` dropping the run on an ``announce`` failure (the next entry
+        ends the call ``failed/run_lost``)."""
+        api, targets, log, probe, state = self._flow(tmp_path)
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.advance(cid)  # the end settle meets the failed write and logs it
+            frame = api.conversation_stacks[cid][0].conversation_id
+            record = api.fsm_manager.copy_raw_context_data(frame)["call_result"]
+            assert state["raised"] == 1 and record["status"] == "running"
+            assert probe.runs == []
+            handle = record["handle"]
+            assert list(targets.host._reserved) == [handle]  # the reservation is back
+            _drive(api, cid)
+            final = api.get_data(cid)["call_result"]
+            assert (final["status"], final["reason"]) == ("ok", None)
+            assert len(probe.runs) == 1
+            assert [e["type"] for e in _types(log, cid, "run/start", "run/end")] == [
+                "run/start",
+                "run/end",
+            ]
+        finally:
+            api.close()
+            log.close()
+
+    def test_the_host_puts_the_reservation_back_and_still_raises(self) -> None:
+        host = RunHost()
+        assert host.claim("h1", conversation_id="c1")
+
+        def announce():
+            raise OSError("disk full")
+
+        async def body(token):
+            return RunResult(status=Status.OK)
+
+        with pytest.raises(OSError):
+            host.start("h1", body, conversation_id="c1", announce=announce)
+        assert host.poll("h1", conversation_id="c1") == RunPoll(False, None)
+        assert host.start(
+            "h1", body, conversation_id="c1"
+        )  # the same handle starts now
+        assert host.wait("h1", _BOUND)
+        result = host.poll("h1", conversation_id="c1").result
+        assert result is not None and result.status is Status.OK

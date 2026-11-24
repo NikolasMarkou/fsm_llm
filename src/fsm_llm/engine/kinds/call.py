@@ -113,10 +113,11 @@ def _recorded(value: Any) -> Any:
     return f"<{type(value).__name__}, {size} characters of JSON, not recorded>"
 
 
-def _bounded(value: Any) -> Any:
+def bounded_value(value: Any) -> Any:
     """A JSON-safe copy of a value a finished delegated run returns, capped (D-051).
 
-    Contract: walked iteratively with a depth cap (never a recursive dump: a small Windows
+    Contract (public since D-057: the run host caps a result with it at STORE time, the merge
+    caps it again): walked iteratively with a depth cap (never a recursive dump: a small Windows
     stack). A text over ``MAX_DELEGATED_RETURN_CHARS`` is cut there and ends with a marker; any
     other value over it is a one-line marker naming its type and size. Never raises for a value
     ``to_jsonable`` accepts (every value).
@@ -626,7 +627,7 @@ def _finished(
                 value = result.answer
             if value is None:
                 return settled(Status.FAILED, Reason.RETURN_KEYS_MISSING)
-            merged[parent_key] = _bounded(value)
+            merged[parent_key] = bounded_value(value)
         return settled(Status.OK, None, merged)
     if result.status is Status.ABORTED:
         return settled(Status.ABORTED, result.reason or Reason.BUDGET_SPENT)

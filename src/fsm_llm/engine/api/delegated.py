@@ -18,8 +18,10 @@ Interface contract (``api`` is an ``API``, ``root_id`` its root conversation id)
   the record contributes only its ``handle``, and the launcher starts that handle only when it holds
   a reservation of THIS conversation (Pass 1 made it): a forged record starts nothing and ends
   ``failed/run_lost``. ``run/start`` is appended (``checkpoint=True``, fsynced) by the ``announce``
-  hook the launcher calls right before it starts the thread. A ``BaseException`` propagates and
-  leaves the record ``running`` with its reservation: the next entry starts it.
+  hook the launcher calls right before it starts the thread. A failed ``announce`` (the
+  ``run/start`` write) propagates and the host puts the reservation back (``RunHost.start``,
+  D-057), so the record stays ``running`` and the next entry starts the same handle; the end settle
+  of a turn entry logs the failure at WARNING and the call's ``deadline`` still bounds it.
 - ``flush_run_ends(api, root_id)``: appends ``run/end`` (status, reason, target, identities of the
   committed FINAL record) for each started run of this root whose frame is no longer in flight and
   whose record is final, once, then forgets the mark. Written on the calling (engine) thread only.
@@ -311,6 +313,21 @@ def cancel_delegated_runs(
             )
 
 
+def _forget_result(api: _ApiSurface, handle: str, mark: RunMark) -> None:
+    """Tell a launcher that has a ``forget`` method to drop the finished result of a run whose
+    final record is committed (D-057); an error is one WARNING naming only its type."""
+    launcher = api._targets
+    forget = getattr(launcher, "forget", None)
+    if not isinstance(launcher, RunLauncher) or not callable(forget):
+        return
+    try:
+        forget(handle, conversation_id=mark.frame_id)
+    except Exception as error:
+        logger.warning(
+            f"Forgetting a finished delegated run failed: {type(error).__name__}"
+        )
+
+
 def flush_run_ends(api: _ApiSurface, root_id: str) -> None:
     """Write ``run/end`` for each started run of *root_id* whose committed record is final."""
     marks = api._call_marks
@@ -354,6 +371,8 @@ def flush_run_ends(api: _ApiSurface, root_id: str) -> None:
         )
         with api._stack_lock:
             marks.runs.pop(handle, None)
+        # the record landed: the host's copy of the result is not needed any more (D-057)
+        _forget_result(api, handle, mark)
 
 
 async def wait_for_run(api: _ApiSurface, root_id: str) -> None:

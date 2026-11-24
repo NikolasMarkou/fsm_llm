@@ -834,6 +834,7 @@ fsm_llm.engine.executables.ExecutableTargets class
   def cancel_for(self, conversation_id: str) -> int
   def claim(self, handle: str, *, conversation_id: str) -> bool
   property context
+  def forget(self, handle: str, *, conversation_id: str) -> bool
   property host
   def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None
   property registry
@@ -875,6 +876,7 @@ fsm_llm.engine.executables.RunHost class
   def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool
   def cancel_for(self, conversation_id: str) -> int
   def claim(self, handle: str, *, conversation_id: str) -> bool
+  def forget(self, handle: str, *, conversation_id: str) -> bool
   def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None
   def start(self, handle: str, body: _Body, *, conversation_id: str, announce: Callable[[], None] | None = None) -> bool
   def wait(self, handle: str, timeout_seconds: float) -> bool

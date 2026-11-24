@@ -212,11 +212,6 @@ class TestARealPatternThroughTheHostAndSettle:
             log.close()
 
 
-def _only_handle(log: EventLog, cid: str) -> str:
-    (start,) = [e for e in _run_events(log, cid) if e["type"] == "run/start"]
-    return start["handle"]
-
-
 class TestTheChildNeverGetsAGrant:
     """Census D1 through the delegated path. The parent's own context carries a forged grant at
     the top level and inside the mapping it passes as ``initial_context``."""
@@ -251,6 +246,16 @@ class TestTheChildNeverGetsAGrant:
                 callables=_callables(tools=_tools(executions, gated=True)),
             ),
         )
+        # the landed result leaves the host (D-057): read what the executor polled before that
+        seen: list[Any] = []
+        real_poll = targets.poll
+
+        def spy(handle, *, conversation_id):
+            polled = real_poll(handle, conversation_id=conversation_id)
+            seen.append(polled)
+            return polled
+
+        targets.poll = spy  # type: ignore[method-assign]
         try:
             cid, _ = self._start(api)
             api.run_until_terminal(cid, max_steps=30)
@@ -259,9 +264,8 @@ class TestTheChildNeverGetsAGrant:
                 "failed",
                 "unexpected_error",
             )
-            frame = api.conversation_stacks[cid][0].conversation_id
-            polled = targets.host.poll(_only_handle(log, cid), conversation_id=frame)
-            assert polled is not None and polled.finished and polled.result is not None
+            polled = next(p for p in seen if p is not None and p.finished)
+            assert polled.result is not None
             # the type only, and it is the agent's own refusal at construction
             assert polled.result.detail == {"error": "AgentError"}
             assert executions == [] and llm.calls == []  # before any tool or model call

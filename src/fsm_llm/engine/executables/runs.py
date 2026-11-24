@@ -18,8 +18,9 @@ Interface contract:
     ``CancelToken``.
   - ``start(handle, body, *, conversation_id, announce=None) -> bool``: consume the reservation of
     THAT conversation (``False``: no reservation, another conversation's, already started, or
-    ``max_runs`` reached by then), call ``announce()`` OUTSIDE the lock (an exception drops the run
-    and propagates: no thread was started), then start one DAEMON thread that runs
+    ``max_runs`` reached by then), call ``announce()`` OUTSIDE the lock (an exception puts the
+    reservation back and propagates: no thread was started, the next ``start`` of the handle may
+    try again, D-057), then start one DAEMON thread that runs
     ``asyncio.run(body(token))`` on a fresh empty ``contextvars.Context`` (so ``aio.SYNC`` and a
     turn-gate ticket of the starting thread never reach it). ``body`` is ``async (CancelToken) ->
     RunResult``. A thread that cannot start drops the run and returns ``False``.
@@ -32,7 +33,10 @@ Interface contract:
   - ``cancel_for(conversation_id) -> int``: set the token of every running run of the conversation,
     drop its reservations and finished results, and orphan the running ones (their result is
     dropped at the finish). Returns the number of running runs told to stop.
-  - ``wait(handle, timeout_seconds) -> bool``: one bounded ``Event.wait`` for a run to finish,
+  - ``forget(handle, *, conversation_id) -> bool``: drop the FINISHED result of a run whose record
+    landed (``False``: unknown, not finished or another conversation's); called by ``settle``
+    through ``ExecutableTargets.forget`` once the committed record is final (D-057).
+  - ``wait(handle, timeout_seconds) -> bool``: one bounded ``Event.wait` for a run to finish,
     ``False`` on a timeout or an unknown handle. It never joins a thread.
 - A worker exception of ANY kind (the body's, ``CancelledError`` and a wrong return value included)
   is stored as ``RunResult(failed, unexpected_error, detail={"error": <exception type name>})``:
@@ -75,6 +79,7 @@ from typing import Any
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.results import RunResult
 from fsm_llm.engine.context import CancelToken, RunContext
+from fsm_llm.engine.kinds.call import bounded_value
 from fsm_llm.engine.kinds.targets import DelegatedTarget, ResolvedTarget, RunPoll
 from fsm_llm.logging import logger
 
@@ -93,7 +98,8 @@ __all__ = [
 DEFAULT_MAX_RUNS = 32
 #: Hard cap on reservations that never started (a rolled-back turn leaves one); the oldest goes.
 MAX_RESERVED_RUNS = 1024
-#: Hard cap on finished results kept for a poll; the oldest goes (its poll is then ``None``).
+#: Hard cap on finished results kept until their record lands (``forget``) or their conversation
+#: ends; results not landed yet count toward it and the oldest goes (its poll is then ``None``).
 MAX_FINISHED_RUNS = 256
 #: The longest handle the host accepts.
 MAX_HANDLE_LENGTH = 128
@@ -177,7 +183,7 @@ class RunHost:
             if announce is not None:
                 announce()
         except BaseException:
-            self._drop_running(run)
+            self._unstart(run)  # nothing started: the reservation goes back (D-057)
             raise
         thread = Thread(
             target=self._work,
@@ -233,6 +239,16 @@ class RunHost:
             token.cancel()
         return len(tokens)
 
+    def forget(self, handle: str, *, conversation_id: str) -> bool:
+        """Drop the FINISHED result of *handle* once its record landed; ``False`` for a handle
+        that is unknown, not finished or another conversation's."""
+        with self._lock:
+            run = self._finished.get(handle)
+            if run is None or run.conversation_id != conversation_id:
+                return False
+            del self._finished[handle]
+        return True
+
     def wait(self, handle: str, timeout_seconds: float) -> bool:
         """One bounded wait for the run to finish; ``False`` on a timeout or an unknown handle."""
         with self._lock:
@@ -269,6 +285,14 @@ class RunHost:
                     self._finished.popitem(last=False)
         run.finished.set()
 
+    def _unstart(self, run: _Run) -> None:
+        """An ``announce`` that failed: the run never started, so it is reserved again."""
+        with self._lock:
+            self._running.pop(run.handle, None)
+            self._reserved[run.handle] = run
+            while len(self._reserved) > MAX_RESERVED_RUNS:
+                self._reserved.popitem(last=False)
+
     def _drop_running(self, run: _Run) -> None:
         with self._lock:
             self._running.pop(run.handle, None)
@@ -287,6 +311,20 @@ class RunHost:
             or self._running.get(handle)
             or self._reserved.get(handle)
         )
+
+
+def _bounded_result(result: RunResult) -> RunResult:
+    """The result a host stores: every value of ``outputs`` and ``detail`` and the ``answer`` go
+    through ``bounded_value`` (the 8000 character rule of the merge), so the finished table holds
+    small results. Contract: never raises for a ``RunResult``; a value under the cap is a
+    JSON-safe equal copy."""
+    return result.model_copy(
+        update={
+            "outputs": {k: bounded_value(v) for k, v in result.outputs.items()},
+            "answer": None if result.answer is None else bounded_value(result.answer),
+            "detail": {k: bounded_value(v) for k, v in result.detail.items()},
+        }
+    )
 
 
 class ExecutableTargets:
@@ -389,7 +427,7 @@ class ExecutableTargets:
             )
             instance = executable.instantiate()
             result: RunResult = await instance.arun(private, context=context)
-            return result
+            return _bounded_result(result)  # capped BEFORE the host stores it (D-057)
 
         return self._host.start(
             handle, body, conversation_id=conversation_id, announce=announce
@@ -402,6 +440,11 @@ class ExecutableTargets:
         """One bounded wait for a run to finish (``RunHost.wait``): the optional method of a
         launcher that ``aadvance`` waits through once per step (``engine/api/delegated.py``)."""
         return self._host.wait(handle, timeout_seconds)
+
+    def forget(self, handle: str, *, conversation_id: str) -> bool:
+        """Drop the finished result of a landed run (``RunHost.forget``): the optional method of a
+        launcher that ``flush_run_ends`` calls once the committed record is final (D-057)."""
+        return self._host.forget(handle, conversation_id=conversation_id)
 
     def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool:
         return self._host.cancel(handle, conversation_id=conversation_id)
