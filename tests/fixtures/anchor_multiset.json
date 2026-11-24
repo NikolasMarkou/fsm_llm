@@ -999,6 +999,26 @@
       "delta": -1,
       "reason": "step 15 of plan a555dcfe (plan_execute as a pattern file, D-026): 45a654de/D-012 x3 (the call-local handlers rule of PlanExecuteAgent, now held by PatternAgent and its 089d0ec7/D-014 anchor) and cb91a9d5/D-001 stale (the execution-evidence rule, now run.evidence_keys of patterns/plan_execute.json) dropped with the replaced code; 21cd7f8e/D-046, c1d5bfbc/D-024 and 5ed71cf2/D-011 kept as one anchor each in plan_execute.py (rules of the file); 5ed71cf2/D-011 second token moved with the checker body",
       "token": "plan_2026-05-31_cb91a9d5/D-001"
+    },
+    {
+      "delta": -1,
+      "reason": "step 16 (plan a555dcfe D-027, owner D-029): the builder of maker_checker is replaced by patterns/maker_checker.json: the fallback edge (3e4eb3e5 D-002), the check-edge budget rule (c1d5bfbc D-007), the field order (06a5ec0a D-039) and the cap edge (5ed71cf2 D-009) live in the file and are held by test_pattern_shapes and test_maker_checker; the handler anchors moved to handlers/maker_checker.py",
+      "token": "plan-2026-09-24T045559-3e4eb3e5/D-002"
+    },
+    {
+      "delta": -1,
+      "reason": "step 16 (plan a555dcfe D-027, owner D-029): the builder of maker_checker is replaced by patterns/maker_checker.json: the fallback edge (3e4eb3e5 D-002), the check-edge budget rule (c1d5bfbc D-007), the field order (06a5ec0a D-039) and the cap edge (5ed71cf2 D-009) live in the file and are held by test_pattern_shapes and test_maker_checker; the handler anchors moved to handlers/maker_checker.py",
+      "token": "plan-2026-09-24T091842-c1d5bfbc/D-007"
+    },
+    {
+      "delta": -1,
+      "reason": "step 16 (plan a555dcfe D-027, owner D-029): the builder of maker_checker is replaced by patterns/maker_checker.json: the fallback edge (3e4eb3e5 D-002), the check-edge budget rule (c1d5bfbc D-007), the field order (06a5ec0a D-039) and the cap edge (5ed71cf2 D-009) live in the file and are held by test_pattern_shapes and test_maker_checker; the handler anchors moved to handlers/maker_checker.py",
+      "token": "plan-2026-09-29T103145-06a5ec0a/D-039"
+    },
+    {
+      "delta": -1,
+      "reason": "step 16 (plan a555dcfe D-027, owner D-029): the builder of maker_checker is replaced by patterns/maker_checker.json: the fallback edge (3e4eb3e5 D-002), the check-edge budget rule (c1d5bfbc D-007), the field order (06a5ec0a D-039) and the cap edge (5ed71cf2 D-009) live in the file and are held by test_pattern_shapes and test_maker_checker; the handler anchors moved to handlers/maker_checker.py",
+      "token": "plan-2026-11-05T134105-5ed71cf2/D-009"
     }
   ]
 }

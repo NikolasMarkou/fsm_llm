@@ -119,7 +119,7 @@ class TestMakerCheckerCreation:
             maker_instructions="draft",
             checker_instructions="review",
         )
-        assert not hasattr(agent, "tools")
+        assert agent.tools is None
 
     def test_config_override_works(self):
         config = AgentConfig(

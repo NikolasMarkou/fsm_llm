@@ -63,7 +63,6 @@
  "src/fsm_llm/agents/evaluator_optimizer.py": 2,
  "src/fsm_llm/agents/fsm_definitions/_loop.py": 1,
  "src/fsm_llm/agents/handlers/executor.py": 4,
- "src/fsm_llm/agents/maker_checker.py": 1,
  "src/fsm_llm/agents/memory_persistence.py": 3,
  "src/fsm_llm/agents/meta_builder/assembly.py": 1,
  "src/fsm_llm/agents/meta_builder/session.py": 1,

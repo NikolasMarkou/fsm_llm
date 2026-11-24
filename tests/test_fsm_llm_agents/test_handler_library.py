@@ -180,6 +180,11 @@ class TestTheNamespaces:
             "agents.plan_step_fresh_keys",
             "agents.plan_step_checker",
             "agents.plan_replan_counter",
+            "agents.revision_count",
+            "agents.maker_checker_checker",
+            "agents.revise_entry",
+            "agents.revise_exit",
+            "agents.force_pass",
             "agents.approval_gate",
         ]
         assert [name for name, _ in lib.HOOKS] == [

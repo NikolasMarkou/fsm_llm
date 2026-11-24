@@ -159,7 +159,13 @@ class PatternAgent(BaseAgent):
                 initial_context,
                 () if self._react_loop else pattern_run_output_keys(self),
             ),
+            variables=self._text_variables(),
         )
+
+    def _text_variables(self) -> dict[str, str] | None:
+        """The agent's own text variables of the file (the maker and checker prompts of
+        ``MakerCheckerAgent``, D-027); none by default."""
+        return None
 
     def _handler_context(self) -> HandlerContext:
         """A new per-run context: the agent's tools, its own ``hitl`` and its one predicate."""

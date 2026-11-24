@@ -11,7 +11,9 @@ GROUP ``agents.native_fc`` (eight handlers; bodies in ``native_fc.py``) and the 
 (``agents.orchestrator_delegator``, body in ``orchestrator.py``, and ``agents.orchestrator_decision_reset``),
 the REWOO executor (``agents.rewoo_executor``, body in ``rewoo.py``), the Plan-and-Execute four
 (``agents.plan_step_executor``, ``plan_step_fresh_keys``, ``plan_step_checker`` and
-``plan_replan_counter``; bodies in ``plan_execute.py``), plus two HOOKS,
+``plan_replan_counter``; bodies in ``plan_execute.py``), the Maker-Checker five (``agents.revision_count``,
+``maker_checker_checker``, ``revise_entry``, ``revise_exit`` and ``force_pass``; bodies in ``maker_checker.py``),
+plus two HOOKS,
 ``agents.raise_run_ending_error`` and ``agents.rewoo_cut_off_answer`` (below). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
@@ -49,6 +51,7 @@ from fsm_llm.agents.constants import (
     ErrorMessages,
     HandlerNames,
     HandlerPriorities,
+    MakerCheckerStates,
     OrchestratorStates,
     PlanExecuteStates,
     PromptChainStates,
@@ -67,6 +70,12 @@ from .context import RUN_RESULT, HandlerContext
 from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
+from .maker_checker import (
+    count_revision,
+    force_pass_at_limit,
+    make_revise_handlers,
+    track_revisions,
+)
 from .native_fc import NativeFCHandlers
 from .orchestrator import delegate_to_workers
 from .plan_execute import (
@@ -609,6 +618,77 @@ def plan_replan_counter(
     )
 
 
+def revision_count(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.revision_count``: bumps ``revision_count`` on entry to ``check`` (D-009 of plan 5ed71cf2)."""
+    return _on_entry(
+        HandlerNames.MAKER_CHECKER_REVISION_COUNT,
+        binding,
+        MakerCheckerStates.CHECK,
+        HandlerPriorities.TOOL_EXECUTOR,
+        count_revision,
+    )
+
+
+def maker_checker_checker(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.maker_checker_checker``: the trace and the quality auto-pass, CONTEXT_UPDATE on ``check``.
+
+    Fires only on a turn that extracted ``checker_passed`` or ``quality_score``. The options
+    ``max_revisions`` and ``quality_threshold`` are the defaults for a context that carries neither.
+    """
+    max_revisions = ctx.options.get("max_revisions", Defaults.MAX_REVISIONS)
+    threshold = ctx.options.get("quality_threshold", Defaults.QUALITY_THRESHOLD)
+    return [
+        create_handler(HandlerNames.MAKER_CHECKER_CHECKER)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .at(HandlerTiming.CONTEXT_UPDATE)
+        .on_state(*_states(binding, (MakerCheckerStates.CHECK,)))
+        .when_keys_updated(ContextKeys.CHECKER_PASSED, ContextKeys.QUALITY_SCORE)
+        .do(lambda context: track_revisions(context, max_revisions, threshold))
+    ]
+
+
+def revise_entry(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.revise_entry``: on entry to ``revise`` the draft moves aside and a False verdict clears."""
+    return _on_entry(
+        HandlerNames.MAKER_CHECKER_REVISE_ENTRY,
+        binding,
+        MakerCheckerStates.REVISE,
+        HandlerPriorities.TOOL_EXECUTOR,
+        make_revise_handlers()[0],
+    )
+
+
+def revise_exit(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.revise_exit``: on exit from ``revise`` the consumed feedback clears (a missing draft is restored)."""
+    return [
+        create_handler(HandlerNames.MAKER_CHECKER_REVISE_EXIT)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_exit(*_states(binding, (MakerCheckerStates.REVISE,)))
+        .do(make_revise_handlers()[1])
+    ]
+
+
+def force_pass(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.force_pass``: forces ``checker_passed`` on a ``check`` turn once the budget or the cap is spent."""
+    return [
+        create_handler(HandlerNames.MAKER_CHECKER_FORCE_PASS)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .at(HandlerTiming.PRE_TRANSITION)
+        .on_state(*_states(binding, (MakerCheckerStates.CHECK,)))
+        .do(force_pass_at_limit)
+    ]
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -651,6 +731,11 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.plan_step_fresh_keys", plan_step_fresh_keys),
     ("agents.plan_step_checker", plan_step_checker),
     ("agents.plan_replan_counter", plan_replan_counter),
+    ("agents.revision_count", revision_count),
+    ("agents.maker_checker_checker", maker_checker_checker),
+    ("agents.revise_entry", revise_entry),
+    ("agents.revise_exit", revise_exit),
+    ("agents.force_pass", force_pass),
     ("agents.approval_gate", approval_gate),
 )
 

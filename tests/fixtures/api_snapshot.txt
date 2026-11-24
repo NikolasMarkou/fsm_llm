@@ -1315,9 +1315,8 @@ fsm_llm.agents.MCPToolProvider class
   def register_tools(self, registry: Any) -> int
   property skipped_tools
   property tools
-fsm_llm.agents.MakerCheckerAgent class(BaseAgent)
+fsm_llm.agents.MakerCheckerAgent class(PatternAgent)
   def __init__(self, maker_instructions: str, checker_instructions: str, config: AgentConfig | None = None, max_revisions: int = 3, quality_threshold: float = 0.7, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.MemoryEntry class
   def __init__(self, id: str, text: str, metadata: dict[str, Any] | None = None, embedding: list[float] | None = None) -> None
   classmethod def from_dict(cls, d: dict[str, Any]) -> MemoryEntry
