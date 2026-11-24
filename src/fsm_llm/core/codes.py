@@ -94,7 +94,9 @@ class Reason(str, Enum):
     ``CANCELLED`` is the 17th: a run ended from outside (``aborted`` with this
     reason); no synthesis string names it. ``UNKNOWN_TARGET`` is the 18th: a ``call``
     state named a target that is not resolvable or not in its closed list (``failed``
-    with this reason); no synthesis string names it either.
+    with this reason); no synthesis string names it either. ``RUN_LOST`` is the 19th: a
+    delegated ``call`` whose run the host never saw (a crash, a snapshot restore, a fork
+    inside the running window) ends ``failed`` with it, and nothing is re-run.
     """
 
     INPUTS_MISSING = "inputs_missing"
@@ -115,6 +117,7 @@ class Reason(str, Enum):
     NEEDS_USER_INPUT = "needs_user_input"
     CANCELLED = "cancelled"
     UNKNOWN_TARGET = "unknown_target"
+    RUN_LOST = "run_lost"
 
     @classmethod
     def from_string(cls, value: Reason | str) -> Reason:

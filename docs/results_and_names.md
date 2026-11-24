@@ -11,7 +11,7 @@ Four small pieces of the core that every part of the library builds on: the clos
 | Enum | Members (values) |
 |---|---|
 | `Status` | `ok`, `failed`, `aborted`, `running`, `abstained` |
-| `Reason` | `inputs_missing`, `return_keys_missing`, `provider_error`, `library_error`, `compile_failed`, `push_failed`, `approval_required`, `approval_denied`, `reviewer_error`, `depth_refused`, `completion_unsupported`, `lifecycle_too_low`, `not_simulated`, `budget_spent`, `unexpected_error`, `needs_user_input`, `cancelled`, `unknown_target` |
+| `Reason` | `inputs_missing`, `return_keys_missing`, `provider_error`, `library_error`, `compile_failed`, `push_failed`, `approval_required`, `approval_denied`, `reviewer_error`, `depth_refused`, `completion_unsupported`, `lifecycle_too_low`, `not_simulated`, `budget_spent`, `unexpected_error`, `needs_user_input`, `cancelled`, `unknown_target`, `run_lost` |
 | `Lifecycle` | `draft`, `verified`, `trusted`, `deprecated`, `builtin` |
 | `MessageSource` | `user`, `run`, `remote_client`, `simulator` |
 

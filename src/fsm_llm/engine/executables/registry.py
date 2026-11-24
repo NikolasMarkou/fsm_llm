@@ -32,6 +32,16 @@ Interface contract:
   output map (``ResolvedTarget.returns``, D-030 of plan baa37f40); ``None`` for a miss, a body
   that does not instantiate and a code-backed kind (``pattern``, ``workflow``). Never raises for a miss, never loads a module
   by the id and keeps no instance.
+- ``resolve_delegated(target_id, *, launcher, context=None, input_keys=(), max_steps=None) ->
+  DelegatedTarget | None`` (plan baa37f40 phase K7, D-049): the delegated twin, for the kinds
+  ``pattern`` and ``workflow`` only. ``None`` (the one answer a caller maps to
+  ``failed/unknown_target``) for: a *launcher* that is not a ``RunLauncher``, an unknown or
+  deprecated id, a kind that is not code-backed (a body kind stays a frame target), the
+  capability ``conversational`` (a delegated run has no user to talk to), a name of
+  ``requires.callables`` that ``context.callables`` lacks (judged against the HOST context, not
+  the global ``launchable`` flag), an input key outside ``contract.inputs`` plus the executable's
+  ``optional_inputs``, and ``max_steps`` when the executable's ``refused_budgets`` names it. Never
+  raises for a miss, never loads a module by the id and keeps no instance.
 - ``set_alias(name, routes, *, target=None)`` and ``resolve(name, *, experiment=None,
   conversation_id=None, pinned_template_identity=None) -> Resolution`` (see ``aliases``).
 - ``pin(executable)`` / ``unpin(executable)`` (counted, in memory): a pinned template survives
@@ -61,7 +71,8 @@ from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.definitions.executable import Capability, InstantiationError
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.verify.executable import load_executable
-from fsm_llm.engine.kinds.targets import ResolvedTarget
+from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.kinds.targets import DelegatedTarget, ResolvedTarget, RunLauncher
 from fsm_llm.logging import logger
 from fsm_llm.security import resolve_within
 
@@ -90,6 +101,8 @@ MAX_RETAINED_TEMPLATES = 256
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 _MEMORY = "memory"
+#: The envelope kinds that run as code on a host thread (delegated mode); the others are frames.
+_DELEGATED_KINDS = ("pattern", "workflow")
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
 
@@ -514,6 +527,54 @@ class ExecutableRegistry:
             executable.template_identity,
             instance.instance_identity,
             returns=None if decl is None else dict(decl.results),
+        )
+
+    def resolve_delegated(
+        self,
+        target_id: str,
+        *,
+        launcher: object | None,
+        context: RunContext | None = None,
+        input_keys: Iterable[str] = (),
+        max_steps: int | None = None,
+    ) -> DelegatedTarget | None:
+        """The code-backed executable a delegated ``call`` runs, or ``None`` (see the docstring)."""
+        if not isinstance(launcher, RunLauncher):
+            return None  # no launcher injected: a code-backed kind is never a target
+        try:
+            executable = self.get(target_id)
+        except ExecutableNotFoundError:
+            return None
+        kind = getattr(executable, "kind", None)
+        if kind not in _DELEGATED_KINDS:
+            return None
+        if getattr(executable, "lifecycle", None) is Lifecycle.DEPRECATED:
+            return None
+        if Capability.CONVERSATIONAL in executable.capabilities:
+            return None
+        callables = None if context is None else context.callables
+        if any(
+            callables is None or name not in callables
+            for name in executable.requires.callables
+        ):
+            return None
+        allowed = {
+            *executable.contract.inputs,
+            *getattr(executable, "optional_inputs", ()),
+        }
+        if any(key not in allowed for key in input_keys):
+            return None
+        if max_steps is not None and "max_steps" in getattr(
+            executable, "refused_budgets", ()
+        ):
+            return None
+        return DelegatedTarget(
+            target_id,
+            kind,
+            executable,
+            executable.template_identity,
+            None,
+            tuple(executable.contract.outputs),
         )
 
     # ---- aliases ------------------------------------------------------------------------

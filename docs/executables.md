@@ -186,7 +186,7 @@ The command reads the file and routes on its header: a file whose `schema` is `f
 
 A bad value raises `ValueError` (`TypeError` for a `cancel` or `callables` of the wrong type) when the context is built. `resolve_llm()` returns the interface, one fresh `llm_factory()` result, or `None`.
 
-`context.derive(parent=..., max_steps=None, max_seconds=None)` returns a child context that shares everything else, names `parent`, and narrows the limits it is given: a value above the parent's own raises `ValueError`, and `None` keeps the parent's limit, it never removes one. The limits are per run, not a shared ledger: a child's steps are not subtracted from the parent's.
+`context.derive(parent=..., max_steps=None, max_seconds=None, cancel=None)` returns a child context that shares everything else (the cancel token too, unless a `CancelToken` is given as `cancel`: then the child has its own, and cancelling it leaves the parent's alone), names `parent`, and narrows the limits it is given: a value above the parent's own raises `ValueError`, and `None` keeps the parent's limit, it never removes one. The limits are per run, not a shared ledger: a child's steps are not subtracted from the parent's.
 
 `CancelToken` is one thread-safe, set-once request: `cancel()`, `cancelled`, and `raise_if_cancelled()`, which raises `RunCancelledError` (an `FSMError`). A run checks it between steps. It never interrupts a model call that is already in flight, and it is not an `asyncio` cancel: a cancelled task still raises `CancelledError`, and the engine rolls its turn back whole.
 

@@ -670,7 +670,7 @@ from fsm_llm.engine.executables import (
 
 context = RunContext(llm_interface=None, llm_factory=None, event_log=None, max_steps=None,
                      max_seconds=None, cancel=CancelToken(), callables=None, parent=None)
-child = context.derive(parent="conversation-id", max_steps=5)   # narrows, never widens
+child = context.derive(parent="conversation-id", max_steps=5)   # narrows, never widens; cancel=CancelToken() gives it its own token
 context.resolve_llm()                                           # the interface, one factory() call, or None
 
 executable = FsmBodyExecutable(envelope, *, setup=None, pins=None)  # kinds fsm, strategy, procedure

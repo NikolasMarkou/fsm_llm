@@ -29,21 +29,59 @@ Interface contract:
 - ``check_targets(value)``: ``None`` or an object with a callable ``resolve_target``, returned
   as is; anything else raises ``TypeError``. The one check of ``API(targets=)``,
   ``FSMManager(targets=)``, ``MessagePipeline(targets=)`` and ``RunContext(registry=)``.
+
+Delegated mode (plan baa37f40 phase K7, D-049, roadmap E3.2 second half): a code-backed
+``pattern`` or ``workflow`` has no FSM body to push, so it is not a ``ResolvedTarget``.
+
+- ``DelegatedTarget(target_id, kind, executable, template_identity, instance_identity, outputs)``:
+  frozen, the mode is the constant ``TARGET_MODE_DELEGATED`` (not a parameter). ``executable`` is
+  the code-backed executable (typed ``Any``: this layer imports no ``engine.executables``),
+  ``instance_identity`` is ``None`` (a code-backed body has no static instance) and ``outputs``
+  the output names its contract declares.
+- ``RunLauncher`` (a runtime-checkable Protocol, six methods; one object may be a
+  ``TargetResolver`` too, behind the one ``API(targets=)``): ``resolve_run(target_id, *,
+  input_keys=(), max_steps=None, conversation_id=None) -> DelegatedTarget | None`` (``None``
+  is every refusal, mapped to ``failed/unknown_target``); ``claim(handle, *, conversation_id)
+  -> bool`` reserves a minted handle for a conversation in a bounded set (``False``: the host is
+  full, mapped to ``failed/push_failed``); ``start(handle, target, inputs, *, conversation_id,
+  max_seconds=None, announce=None) -> bool`` consumes the reservation, calls ``announce()`` (the
+  ``run/start`` write) and only then starts the run, returning ``False`` when the handle holds no
+  reservation of that conversation (a forged record starts nothing); ``poll(handle, *,
+  conversation_id) -> RunPoll | None`` (``None``: the host never saw the handle for that
+  conversation); ``cancel(handle, *, conversation_id=None) -> bool``; ``cancel_for(conversation_id)
+  -> int`` (every run and reservation of one conversation). A launcher never raises for an
+  unknown handle, never nests a manager lock and never calls back into the ``API`` it serves.
+- ``RunPoll(finished, result)``: frozen; ``result`` is the ``RunResult`` of a finished run, else
+  ``None``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from fsm_llm.core.definitions import FSMDefinition
 
-__all__ = ["TARGET_MODE_FRAME", "ResolvedTarget", "TargetResolver", "check_targets"]
+if TYPE_CHECKING:  # the result envelope loads on request, never with `import fsm_llm`
+    from fsm_llm.core.results import RunResult
+
+__all__ = [
+    "TARGET_MODE_DELEGATED",
+    "TARGET_MODE_FRAME",
+    "DelegatedTarget",
+    "ResolvedTarget",
+    "RunLauncher",
+    "RunPoll",
+    "TargetResolver",
+    "check_targets",
+]
 
 #: The one mode of a resolved target: a child FSM pushed as a frame of the parent's stack.
 TARGET_MODE_FRAME = "frame"
+#: The mode of a delegated target: a code-backed run on a host thread, polled by the parent.
+TARGET_MODE_DELEGATED = "delegated"
 
 
 @dataclass(frozen=True)
@@ -77,6 +115,67 @@ class TargetResolver(Protocol):
     def resolve_target(
         self, target_id: str, *, conversation_id: str | None = None
     ) -> ResolvedTarget | None: ...
+
+
+# DECISION plan-2026-11-23T122249-baa37f40/D-049
+# A delegated target is a SEPARATE value type, not a second mode of `ResolvedTarget`. A code-backed
+# pattern or workflow has no `FSMDefinition` to push, and `ResolvedTarget.definition` is read
+# without a guard at every frame site (the push plan of settle, the synthesis executor): do NOT make
+# it Optional and do NOT put a placeholder definition in it, a frame consumer must never hold a
+# target with nothing to push. The one answer of the frame resolver stays `ResolvedTarget | None`;
+# `RunLauncher.resolve_run` is the delegated twin, so no existing `TargetResolver` is widened.
+@dataclass(frozen=True)
+class DelegatedTarget:
+    """What a launcher answers for a target id: the executable to run and its identities."""
+
+    target_id: str
+    kind: str
+    executable: Any
+    template_identity: str
+    instance_identity: str | None
+    outputs: tuple[str, ...] = ()
+    mode: str = field(default=TARGET_MODE_DELEGATED, init=False)
+
+
+@dataclass(frozen=True)
+class RunPoll:
+    """What a poll of a launched run reports: finished or not, and the result once it is."""
+
+    finished: bool
+    result: RunResult | None = None
+
+
+@runtime_checkable
+class RunLauncher(Protocol):
+    """Starts and watches delegated runs. See the module docstring."""
+
+    def resolve_run(
+        self,
+        target_id: str,
+        *,
+        input_keys: Sequence[str] = (),
+        max_steps: int | None = None,
+        conversation_id: str | None = None,
+    ) -> DelegatedTarget | None: ...
+
+    def claim(self, handle: str, *, conversation_id: str) -> bool: ...
+
+    def start(
+        self,
+        handle: str,
+        target: DelegatedTarget,
+        inputs: Mapping[str, Any],
+        *,
+        conversation_id: str,
+        max_seconds: float | None = None,
+        announce: Callable[[], None] | None = None,
+    ) -> bool: ...
+
+    def poll(self, handle: str, *, conversation_id: str) -> RunPoll | None: ...
+
+    def cancel(self, handle: str, *, conversation_id: str | None = None) -> bool: ...
+
+    def cancel_for(self, conversation_id: str) -> int: ...
 
 
 def check_targets(targets: Any) -> TargetResolver | None:

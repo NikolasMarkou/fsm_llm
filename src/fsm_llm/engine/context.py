@@ -26,13 +26,17 @@ Interface contract:
 - ``resolve_llm()`` returns the interface, or calls the factory ONCE and returns its result
   (one call per run, nothing cached), or returns ``None`` (the run then resolves a model the
   way ``API`` does, from ``LLM_MODEL``).
-- ``derive(*, parent, max_steps=None, max_seconds=None)`` returns a child context that
-  shares the interface, factory, log, callables, registry and cancel token, names ``parent`` (the
+- ``derive(*, parent, max_steps=None, max_seconds=None, cancel=None)`` returns a child context
+  that shares the interface, factory, log, callables and registry, names ``parent`` (the
   handle of the run that is asking, not blank) and narrows each limit that is given: a value
   above the parent's own limit raises ``ValueError`` (a parent with no limit accepts any
-  valid one; ``None`` keeps the parent's, it never removes a limit). The limits are per run,
-  not a shared ledger: the parent's remaining steps are not decremented by a child (shared
-  budgets across runs wait for phase S).
+  valid one; ``None`` keeps the parent's, it never removes a limit). ``cancel=None`` shares the
+  parent's token (one cancel reaches every child); a ``CancelToken`` gives the child its OWN
+  token, so cancelling it leaves the parent's untouched (the token of a delegated run, plan
+  baa37f40 D-049; the parent's cancel does not reach the child by itself: the host that made
+  the token sets it). A value that is not a ``CancelToken`` raises ``TypeError``. The limits are
+  per run, not a shared ledger: the parent's remaining steps are not decremented by a child
+  (shared budgets across runs wait for phase S).
 - ``CancelToken``: one thread-safe, set-once request. ``cancel()``, ``cancelled``,
   ``raise_if_cancelled()`` (raises ``RunCancelledError``, an ``FSMError``). A token is checked
   BETWEEN steps (the executable's ``before_step``); it never interrupts a model call in
@@ -160,11 +164,13 @@ class RunContext:
         parent: str,
         max_steps: int | None = None,
         max_seconds: float | None = None,
+        cancel: CancelToken | None = None,
     ) -> RunContext:
         """A child context: same members, ``parent`` set, each given limit narrowed.
 
         Raises ``ValueError`` for a blank ``parent``, an invalid limit, or a limit above the
-        parent's own. ``None`` keeps the parent's limit.
+        parent's own, ``TypeError`` for a ``cancel`` that is not a ``CancelToken``. ``None``
+        keeps the parent's limit and its token.
         """
         if parent is None:
             raise ValueError("parent must name the run that is asking, not None")
@@ -183,6 +189,7 @@ class RunContext:
             parent=parent,
             max_steps=self.max_steps if max_steps is None else max_steps,
             max_seconds=self.max_seconds if max_seconds is None else max_seconds,
+            cancel=self.cancel if cancel is None else cancel,
         )
 
 

@@ -64,13 +64,14 @@ class TestMembers:
             "abstained",
         ]
 
-    def test_reason_values_are_the_pinned_tuple_then_three_more(self):
+    def test_reason_values_are_the_pinned_tuple_then_four_more(self):
         values = [m.value for m in Reason]
-        assert len(values) == 18
+        assert len(values) == 19
         assert values[:15] == list(synth_constants.REASONS)
         assert values[15] == "needs_user_input"
         assert values[16] == "cancelled"
         assert values[17] == "unknown_target"
+        assert values[18] == "run_lost"
 
     def test_unknown_target_is_outside_the_pinned_reasons(self):
         # `unknown_target` is the call kind's vocabulary (roadmap E3.1): the 18th member, no
@@ -78,6 +79,14 @@ class TestMembers:
         assert Reason.UNKNOWN_TARGET.value == "unknown_target"
         assert "unknown_target" not in synth_constants.REASONS
         assert Reason.from_string("unknown_target") is Reason.UNKNOWN_TARGET
+
+    def test_run_lost_is_outside_the_pinned_reasons(self):
+        # `run_lost` is the delegated mode of `call` (roadmap E3.2, plan baa37f40 K7.1): a run
+        # the host never saw (a crash, a restore, a fork inside the window) ends `failed` with
+        # it. The 19th member; no synthesis string names it.
+        assert Reason.RUN_LOST.value == "run_lost"
+        assert "run_lost" not in synth_constants.REASONS
+        assert Reason.from_string("run_lost") is Reason.RUN_LOST
 
     def test_cancelled_is_outside_the_pinned_reasons(self):
         # `cancelled` is run-level vocabulary (roadmap 0.16, 4.8): no synthesis

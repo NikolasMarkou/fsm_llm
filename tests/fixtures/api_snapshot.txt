@@ -649,6 +649,7 @@ fsm_llm.core.codes.Reason class(str, Enum)
   Reason.NEEDS_USER_INPUT = 'needs_user_input'
   Reason.CANCELLED = 'cancelled'
   Reason.UNKNOWN_TARGET = 'unknown_target'
+  Reason.RUN_LOST = 'run_lost'
 fsm_llm.core.codes.Status class(str, Enum)
   Status.OK = 'ok'
   Status.FAILED = 'failed'
@@ -780,7 +781,7 @@ fsm_llm.engine.context.RunCancelledError class(FSMError)
   def __init__(self, message: str = 'the run was cancelled', *, details: dict[str, Any] | None = None)
 fsm_llm.engine.context.RunContext class
   def __init__(self, llm_interface: LLMInterface | None = None, llm_factory: Callable[[], LLMInterface] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken = <factory>, callables: NameRegistry[Any] | None = None, parent: str | None = None, registry: TargetResolver | None = None) -> None
-  def derive(self, *, parent: str, max_steps: int | None = None, max_seconds: float | None = None) -> RunContext
+  def derive(self, *, parent: str, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken | None = None) -> RunContext
   def resolve_llm(self) -> LLMInterface | None
 # fsm_llm.engine.executables
 fsm_llm.engine.executables.AliasSpec class
@@ -822,6 +823,7 @@ fsm_llm.engine.executables.ExecutableRegistry class
   def register(self, executable: Executable) -> Executable
   def reload(self) -> ReloadReport
   def resolve(self, name: str, *, experiment: str | None = None, conversation_id: str | None = None, pinned_template_identity: str | None = None) -> Resolution
+  def resolve_delegated(self, target_id: str, *, launcher: object | None, context: RunContext | None = None, input_keys: Iterable[str] = (), max_steps: int | None = None) -> DelegatedTarget | None
   def resolve_target(self, target_id: str, *, conversation_id: str | None = None) -> ResolvedTarget | None
   def set_alias(self, name: str, routes: Mapping[str, float], *, target: str | None = None) -> None
   def unpin(self, executable: Executable) -> None
