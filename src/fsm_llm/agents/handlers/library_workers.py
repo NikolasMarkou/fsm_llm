@@ -23,7 +23,7 @@ from fsm_llm.core.definitions import AgentError
 from fsm_llm.handlers import create_handler
 
 from .context import RUN_RESULT, HandlerContext
-from .library_support import _priority, _states
+from .library_support import _priority, _refuse_flagged, _states
 from .orchestrator import delegate_to_workers
 from .rewoo import execute_plans
 from .run_guards import RunEndingErrorHolder
@@ -111,6 +111,7 @@ def rewoo_executor(
         raise AgentError(
             "agents.rewoo_executor needs the run's tools and the context has none"
         )
+    _refuse_flagged(ctx, "agents.rewoo_executor")
     return [
         create_handler(HandlerNames.REWOO_EXECUTOR)
         .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))

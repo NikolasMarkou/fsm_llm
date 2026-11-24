@@ -83,7 +83,13 @@ from .library_workers import (
 if TYPE_CHECKING:
     from fsm_llm.handlers import BaseHandler
 
-__all__ = ["HOOKS", "LIBRARY", "register_library"]
+__all__ = [
+    "HOOKS",
+    "LIBRARY",
+    "TOOL_RUNNING",
+    "UNGATED_TOOL_RUNNING",
+    "register_library",
+]
 
 
 #: ``(registered name, factory)`` in a stable order; each function once.
@@ -119,6 +125,18 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.refine_exit", refine_exit),
     ("agents.approval_gate", approval_gate),
 )
+
+#: The library names whose handlers RUN the run's tools (one source, D-035): ``agents.tool_executor``
+#: asks the run's one approval predicate before it runs a flagged tool, the other two have no approval
+#: path (they refuse a flagged tool themselves). ``PatternAgent`` decides "this file runs tools" from
+#: these bindings, never from a claim in the document; a new factory that calls a registry's
+#: ``execute`` joins this set (a test scans ``handlers/`` for the call).
+TOOL_RUNNING: frozenset[str] = frozenset(
+    {"agents.tool_executor", "agents.rewoo_executor", "agents.native_fc"}
+)
+#: The tool-running names that never consult an approval predicate: a flagged tool is refused for them
+#: even when the file also binds ``agents.approval_gate``.
+UNGATED_TOOL_RUNNING: frozenset[str] = TOOL_RUNNING - {"agents.tool_executor"}
 
 #: The hooks of the same namespace (``run.hooks``): ``factory(ctx, binding) -> Callable``.
 HOOKS: tuple[tuple[str, Callable[..., Callable[..., Any]]], ...] = (

@@ -25,8 +25,10 @@ Interface contract:
   ``seconds_exempt`` have no seam yet and are REFUSED at construction (``AgentError``), never ignored.
 - HITL, fail closed (census D1): a file that binds ``agents.approval_gate`` runs
   ``_refuse_unapprovable_flagged_tools`` at construction and at the start of every run and selects the
-  ``approval`` variant exactly under ``_hitl_active``; a file whose ``requires.tools`` is ``some`` (or that binds ``agents.tool_executor``) and
-  that binds no gate runs ``_refuse_flagged_tools`` at both places (D-021); a ``HumanInTheLoop`` given to a file with no
+  ``approval`` variant exactly under ``_hitl_active``; a file that runs tools (its ``requires.tools`` is not ``none``, or it
+  binds a factory of ``library.TOOL_RUNNING``) and binds no gate runs ``_refuse_flagged_tools`` at both places (D-021), and so
+  does a file that binds a runner with no approval path (``agents.rewoo_executor``, ``agents.native_fc``) even beside the
+  gate (D-035); a ``HumanInTheLoop`` given to a file with no
   gate is refused at construction (a file whose ``requires.tools`` is ``none`` refuses ``tools=`` and ``hitl=``
   with the base ``TypeError`` of ``reject_misplaced_kwargs``). The grant check stays in ``AgentHandlers.approval_refusal``.
 - ``run(task, initial_context=None) -> AgentResult`` and ``run_stream(...)``: one call-local
@@ -50,6 +52,7 @@ from fsm_llm.agents.handlers.context import (
     HandlerContext,
     Retry,
 )
+from fsm_llm.agents.handlers.library import TOOL_RUNNING, UNGATED_TOOL_RUNNING
 from fsm_llm.agents.pattern_inputs import pattern_fsm, refuse_reserved_options
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import AgentError
@@ -128,11 +131,17 @@ class PatternAgent(BaseAgent):
             )
         bound = {binding.handler for binding in body.handlers}
         self._gate = APPROVAL_GATE_HANDLER in bound
-        # a file that says it needs tools, or binds the executor, runs them (D-021); only the ReAct
-        # loop (the executor with the think-turn limiter) takes the react context seed
-        self._executes_tools = (
-            envelope.requires.tools == "some" or _TOOL_EXECUTOR in bound
+        # DECISION plan-2026-11-24T043150-a555dcfe/D-035
+        # "This file runs tools" is decided by what it BINDS (the library's `TOOL_RUNNING`) or by a
+        # `requires.tools` that is not "none" (a list of names or "some"), never by the claim "some"
+        # alone: a file that listed its tools by name and bound `agents.rewoo_executor` ran a flagged
+        # tool with no grant. A runner with no approval path refuses a flagged tool even beside the
+        # gate. Do NOT narrow this back to `== "some"`, and do NOT trust a claim over a binding.
+        # Only the ReAct loop (the executor with the think-turn limiter) takes the react context seed.
+        self._executes_tools = envelope.requires.tools != "none" or bool(
+            bound & TOOL_RUNNING
         )
+        self._ungated_runner = bool(bound & UNGATED_TOOL_RUNNING)
         self._react_loop = _TOOL_EXECUTOR in bound and _THINK_LIMITER in bound
         if "tools" in envelope.requires.callables:
             self._require_tools(tools)
@@ -187,7 +196,7 @@ class PatternAgent(BaseAgent):
         """The flagged-tool refusal of the file's HITL shape (construction and every run start)."""
         if self._gate:
             self._refuse_unapprovable_flagged_tools()
-        elif self._executes_tools:
+        if self._ungated_runner or (self._executes_tools and not self._gate):
             self._refuse_flagged_tools()
 
     def _fsm_for_run(

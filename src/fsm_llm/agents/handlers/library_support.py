@@ -11,13 +11,30 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from fsm_llm.agents.tools import flagged_tool_names
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.handlers import create_handler
 
 if TYPE_CHECKING:
+    from fsm_llm.agents.handlers.context import HandlerContext
     from fsm_llm.core.definitions.executable_pattern import HandlerBinding
     from fsm_llm.handlers import BaseHandler
+
+
+def _refuse_flagged(ctx: HandlerContext, name: str) -> None:
+    """Fail closed (D-035): a factory that runs tools with no approval path refuses a flagged tool.
+
+    ``agents.rewoo_executor`` and ``agents.native_fc`` never ask the run's approval predicate, so a
+    registry holding a ``requires_approval`` tool is an ``AgentError`` here, whatever the file or its
+    agent claims (``agents.tool_executor`` is gated and does not call this).
+    """
+    if flagged := flagged_tool_names(ctx.tools):
+        raise AgentError(
+            f"{name} has no human-in-the-loop approval, but tools {flagged} have "
+            "requires_approval=True. Use ReactAgent, ReflexionAgent or ReasoningReactAgent with a "
+            "HumanInTheLoop, or register these tools without requires_approval."
+        )
 
 
 def _states(binding: HandlerBinding | None, default: Sequence[str]) -> tuple[str, ...]:

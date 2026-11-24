@@ -1074,6 +1074,11 @@
       "delta": -1,
       "reason": "plan a555dcfe step 24 (owner D-029, D-032): dead code deleted with a reference search: 21cd7f8e/D-024 (typed tool-selection configs, _tool_selection_field_extractions, no reader since the react file: the field types str and dict live in patterns/react.json and the E0.1 react fixtures and request-byte golden hold them), c1d5bfbc/D-005 (include_approval branch of _think_transitions, no caller: the approval edge p150 is a row of test_pattern_shapes approval_edge), 07ad3f8c/D-033 (_await_approval_state, no src reader: test_pattern_shapes await_approval_silent and test_advance_driver state_declares_no_extraction hold the rule)",
       "token": "plan-2026-09-30T062855-07ad3f8c/D-033"
+    },
+    {
+      "delta": 1,
+      "reason": "step 28.1 of plan a555dcfe adds the D-035 anchor in agents/pattern_agent.py (a file runs tools by its bindings, not its claim)",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-035"
     }
   ]
 }

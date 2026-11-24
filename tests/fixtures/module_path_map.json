@@ -43,7 +43,7 @@
       "accepts_tools": "fsm_llm.agents.base.agent",
       "artifact_text": "fsm_llm.agents.handlers.recording",
       "caller_prompt_keys": "fsm_llm.agents.base.helpers",
-      "flagged_tool_names": "fsm_llm.agents.base.helpers",
+      "flagged_tool_names": "fsm_llm.agents.tools",
       "pattern_run_output_keys": "fsm_llm.agents.base.helpers",
       "reject_misplaced_kwargs": "fsm_llm.agents.base.helpers",
       "strip_caller_context": "fsm_llm.agents.base.helpers"

@@ -3,7 +3,7 @@
 The functions the agent patterns, ``create_agent`` and the meta-builder import by name: the
 ``AgentConfig.instructions`` prefixing and its overflow error, the one ``response_format`` builder,
 the caller-context strip (the driver-only approval grant and the run outputs a caller may not set),
-the flagged-tool readers and the misplaced-keyword refusal. Bodies are the old ones. (``artifact_text`` moved
+the flagged-tool policy (the reader ``flagged_tool_names`` lives in ``agents/tools.py``, which the handler factories read too) and the misplaced-keyword refusal. Bodies are the old ones. (``artifact_text`` moved
 to ``handlers/recording.py``: the debate judge handler reads it and ``handlers`` imports no ``base`` module.)
 """
 
@@ -22,6 +22,7 @@ from fsm_llm.agents.constants import (
     ContextKeys,
     ErrorMessages,
 )
+from fsm_llm.agents.tools import flagged_tool_names
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.logging import logger
@@ -274,26 +275,6 @@ def caller_prompt_keys(
         and key != ContextKeys.AGENT_TRACE
         and key not in exclude
     )
-
-
-def flagged_tool_names(tools: Any) -> list[str]:
-    """Names of the tools in *tools* registered with ``requires_approval=True``.
-
-    Interface contract (callers: ``BaseAgent._hitl_active``, the construction
-    warning, and ``BaseAgent._refuse_flagged_tools``):
-
-    Args:
-        tools: a ``ToolRegistry``, or ``None``/any object without
-            ``list_tools`` (an agent with no registry).
-
-    Returns:
-        The flagged names in registration order (a snapshot; ``[]`` when there
-        is no registry or nothing is flagged). Never raises.
-    """
-    list_tools = getattr(tools, "list_tools", None)
-    if list_tools is None:
-        return []
-    return [t.name for t in list_tools() if getattr(t, "requires_approval", False)]
 
 
 def _flagged_tool_policy(tools: Any) -> ApprovalPolicy:

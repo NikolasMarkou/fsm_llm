@@ -198,6 +198,7 @@ class TestOldPathsAreGone:
             "make_hitl_checker",  # step 86: the agent-side approval gate, D-037
             "refuse_execute_without_gated",
             "register_agent",
+            "flagged_tool_names",  # step 28.1: read by the handler factories
         }
         assert not hasattr(mod, "ToolRegistry")  # annotation-only, under TYPE_CHECKING
 

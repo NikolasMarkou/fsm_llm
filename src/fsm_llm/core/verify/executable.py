@@ -49,7 +49,8 @@ generators=None, bases=None)
   closed). V7: every ``requires`` name must be on the list; every tool the BODY declares in a
   completion state (read from the body as written and from the variable-filled body) must be on
   the ``tools`` list whatever ``requires.tools`` says, and ``requires.tools`` may not be ``"some"``
-  nor ``"none"`` beside declared tools; the body may not set a persona, a ``model`` or
+  nor ``"none"`` beside declared tools (a PRESET may not write ``requires.tools`` ``"none"`` at all:
+  it would replace its base's claim, D-035); the body may not set a persona, a ``model`` or
   ``prompt_config`` on a classification entry, a validation-rule ``pattern`` or a ``synthesize``
   state (a copy of what synthesis gate G5 refuses, D-053); ``requires.handlers`` must be empty (a
   handler binding comes from a template, never from a model), and ``lifecycle`` may only be
@@ -229,6 +230,16 @@ def _model_problems(
     base = getattr(envelope.body, "extends", None)
     if base is not None and base not in listed["executables"]:
         problems.append(f"extends names {_shown(base)}: not on the allow-list")
+    if (
+        base is not None
+        and "tools" in requires.model_fields_set
+        and requires.tools == "none"
+    ):
+        # a preset replaces its base's tool claim (D-033): a model may name allow-listed tools, but
+        # may not rewrite the claim to "no tools" over a base that runs them (D-035)
+        problems.append(
+            "requires.tools 'none' on a preset: it would replace its base's tool claim"
+        )
     if requires.handlers:
         problems.append(
             f"requires.handlers names {_shown(requires.handlers[0])}: a handler "

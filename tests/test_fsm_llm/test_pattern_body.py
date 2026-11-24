@@ -158,8 +158,12 @@ class TestAPatternDocumentParses:
         both = _body(generator="agents.prompt_chain")
         neither = {k: v for k, v in _body().items() if k != "fsm"}
 
-        assert "exactly one of fsm and generator" in _only_problem(_doc(body=both))
-        assert "exactly one of fsm and generator" in _only_problem(_doc(body=neither))
+        assert "exactly one of fsm, generator and extends" in _only_problem(
+            _doc(body=both)
+        )
+        assert "exactly one of fsm, generator and extends" in _only_problem(
+            _doc(body=neither)
+        )
 
     def test_a_generator_body_parses_and_cannot_be_instantiated_without_a_lookup(self):
         # step 11 (D-019) gave the seam; with no lookup the body still fails closed
@@ -779,6 +783,7 @@ class TestTheShippedSchemaNamesThePattern:
         assert set(body["properties"]) == {
             "fsm",
             "generator",
+            "extends",
             "handlers",
             "options_schema",
             "options",

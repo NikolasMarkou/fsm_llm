@@ -107,6 +107,27 @@ def make_hitl_checker(
     return check_approval
 
 
+def flagged_tool_names(tools: Any) -> list[str]:
+    """Names of the tools in *tools* registered with ``requires_approval=True``.
+
+    Interface contract (callers: ``BaseAgent._hitl_active``, the construction
+    warning, ``BaseAgent._refuse_flagged_tools`` and the two library factories that run
+    tools with no approval path, ``agents.rewoo_executor`` and ``agents.native_fc``):
+
+    Args:
+        tools: a ``ToolRegistry``, or ``None``/any object without
+            ``list_tools`` (an agent with no registry).
+
+    Returns:
+        The flagged names in registration order (a snapshot; ``[]`` when there
+        is no registry or nothing is flagged). Never raises.
+    """
+    list_tools = getattr(tools, "list_tools", None)
+    if list_tools is None:
+        return []
+    return [t.name for t in list_tools() if getattr(t, "requires_approval", False)]
+
+
 def refuse_execute_without_gated(tools: Any) -> None:
     """Raise ``AgentError`` when *tools*' ``execute`` cannot take ``gated=``.
 

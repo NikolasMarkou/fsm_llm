@@ -30,7 +30,7 @@ from .chain import make_gate_checker
 from .context import HandlerContext
 from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
-from .library_support import _keys, _params, _priority, _states
+from .library_support import _keys, _params, _priority, _refuse_flagged, _states
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
 from .native_fc import NativeFCHandlers
 from .reflection import (
@@ -325,6 +325,7 @@ def native_fc(
     """
     if ctx.tools is None or ctx.config is None:
         raise AgentError("agents.native_fc needs the run's tools and config")
+    _refuse_flagged(ctx, "agents.native_fc")
     config = ctx.config
     return NativeFCHandlers(
         ctx.tools,
