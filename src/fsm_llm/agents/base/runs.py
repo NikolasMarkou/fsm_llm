@@ -9,8 +9,8 @@ bodies are the old ones (plan d454fd62 step 87).
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
-from functools import partial
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from contextlib import aclosing
 from typing import Any
 
 from fsm_llm import API
@@ -24,6 +24,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.definitions import AgentResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.aio import acall, acall_stream, iterate_sync, run_sync
 from fsm_llm.core.definitions import (
     CONTEXT_KEY_CUT_OFF,
     AgentError,
@@ -41,6 +42,21 @@ class RunsMixin(_AgentSurface):
     """The run drivers of ``BaseAgent``: loop, budgets, API factory, standard run and stream."""
 
     def _run_conversation_loop(
+        self,
+        api: API,
+        context: dict[str, Any],
+        start_time: float,
+        agent_type: str,
+        max_iterations: int | None = None,
+    ) -> tuple[list[str], dict[str, Any], int]:
+        """The sync name of ``_arun_conversation_loop``, the one body."""
+        return run_sync(
+            self._arun_conversation_loop(
+                api, context, start_time, agent_type, max_iterations
+            )
+        )
+
+    async def _arun_conversation_loop(
         self,
         api: API,
         context: dict[str, Any],
@@ -68,7 +84,7 @@ class RunsMixin(_AgentSurface):
         # a silent state returns no text. If a pattern needs a budget or loop
         # behaviour core cannot express, extend core's loop with a core test.
         # See decisions.md D-030.
-        conv_id, greeting = api.start_conversation(context)
+        conv_id, greeting = await acall(api, "start_conversation", context)
         log = logger.bind(
             conversation_id=conv_id,
             package="fsm_llm.agents",
@@ -78,11 +94,13 @@ class RunsMixin(_AgentSurface):
         try:
             max_steps, max_seconds = self._run_budgets(start_time, max_iterations)
             try:
-                steps = api.run_until_terminal(
+                steps = await acall(
+                    api,
+                    "run_until_terminal",
                     conv_id,
                     max_steps=max_steps,
                     max_seconds=max_seconds,
-                    before_step=partial(self._on_loop_iteration, api, conv_id),
+                    before_step=self._before_step_hook(api, conv_id),
                     seconds_exempt_states=self._seconds_exempt_for(api),
                 )
             except RunBudgetExceededError as exc:
@@ -159,6 +177,25 @@ class RunsMixin(_AgentSurface):
             if conversation_id in api.list_active_conversations():
                 raise
             logger.debug(f"Conversation {conversation_id} was already ended")
+
+    def _before_step_hook(
+        self, api: API, conversation_id: str
+    ) -> Callable[[int], Awaitable[None]]:
+        """Core's ``before_step`` for one run: an async callable of the step number that
+        awaits ``_on_loop_iteration`` through ``acall`` (inline in sync mode, on a worker
+        thread in async mode)."""
+
+        # DECISION plan-2026-11-24T043150-a555dcfe/D-009
+        # The hook is AWAITED and reaches the sync `_on_loop_iteration` through
+        # `acall`. Do NOT pass a sync `partial` (in async mode it runs on the loop
+        # thread, and an approval callback that waits for a human freezes every
+        # task), do NOT schedule it without awaiting (the HITL ask must finish
+        # before the step it gates), do NOT add an `_aon_loop_iteration` (tests and
+        # subclasses override the sync name). See decisions.md D-009.
+        async def before_step(step: int) -> None:
+            await acall(self, "_on_loop_iteration", api, conversation_id, step)
+
+        return before_step
 
     def _on_loop_iteration(
         self, api: API, conversation_id: str, iteration: int
@@ -312,6 +349,22 @@ class RunsMixin(_AgentSurface):
         max_iterations: int | None = None,
         handlers: Any = None,
     ) -> Iterator[str]:
+        """The sync name of ``_astandard_run_stream``, the one body (lazy as it is)."""
+        return iterate_sync(
+            self._astandard_run_stream(
+                task, fsm_def, context, agent_type, max_iterations, handlers
+            )
+        )
+
+    async def _astandard_run_stream(
+        self,
+        task: str,
+        fsm_def: dict[str, Any],
+        context: dict[str, Any],
+        agent_type: str,
+        max_iterations: int | None = None,
+        handlers: Any = None,
+    ) -> AsyncGenerator[str, None]:
         """Streaming variant of ``_standard_run``.
 
         Runs the same FSM on ``API.run_until_terminal_stream`` and streams
@@ -323,18 +376,24 @@ class RunsMixin(_AgentSurface):
         api = self._prepare_run_api(fsm_def, agent_type, handlers)
 
         try:
-            conv_id, greeting = api.start_conversation(context)
+            conv_id, greeting = await acall(api, "start_conversation", context)
             try:
                 if greeting:
                     yield greeting
                 max_steps, max_seconds = self._run_budgets(start_time, max_iterations)
-                yield from api.run_until_terminal_stream(
-                    conv_id,
-                    max_steps=max_steps,
-                    max_seconds=max_seconds,
-                    before_step=partial(self._on_loop_iteration, api, conv_id),
-                    seconds_exempt_states=self._seconds_exempt_for(api),
-                )
+                async with aclosing(
+                    acall_stream(
+                        api,
+                        "run_until_terminal_stream",
+                        conv_id,
+                        max_steps=max_steps,
+                        max_seconds=max_seconds,
+                        before_step=self._before_step_hook(api, conv_id),
+                        seconds_exempt_states=self._seconds_exempt_for(api),
+                    )
+                ) as chunks:
+                    async for chunk in chunks:
+                        yield chunk
             finally:
                 self._end_run_conversation(api, conv_id)
         except RunBudgetExceededError as exc:
@@ -348,6 +407,35 @@ class RunsMixin(_AgentSurface):
             ) from e
 
     def _standard_run(
+        self,
+        task: str,
+        fsm_def: dict[str, Any],
+        context: dict[str, Any],
+        agent_type: str,
+        max_iterations: int | None = None,
+        extra_answer_keys: list[str] | None = None,
+        execution_evidence_keys: list[str] | None = None,
+        handlers: Any = None,
+        judged: bool = False,
+        success_keys: list[str] | None = None,
+    ) -> AgentResult:
+        """The sync name of ``_astandard_run``, the one body (see there for the arguments)."""
+        return run_sync(
+            self._astandard_run(
+                task,
+                fsm_def,
+                context,
+                agent_type,
+                max_iterations,
+                extra_answer_keys,
+                execution_evidence_keys,
+                handlers,
+                judged,
+                success_keys,
+            )
+        )
+
+    async def _astandard_run(
         self,
         task: str,
         fsm_def: dict[str, Any],
@@ -390,8 +478,14 @@ class RunsMixin(_AgentSurface):
         api = self._prepare_run_api(fsm_def, agent_type, handlers)
 
         try:
-            responses, final_context, iteration = self._run_conversation_loop(
-                api, context, start_time, agent_type, max_iterations
+            responses, final_context, iteration = await acall(
+                self,
+                "_run_conversation_loop",
+                api,
+                context,
+                start_time,
+                agent_type,
+                max_iterations,
             )
 
             answer = self._extract_answer(final_context, responses, extra_answer_keys)

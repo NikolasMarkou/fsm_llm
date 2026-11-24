@@ -14,6 +14,8 @@ Purpose: Agent patterns for FSM-LLM (ReAct and the others), most built as genera
 
 FSM-based patterns share `BaseAgent._standard_run`, a thin caller of core's bounded run loop: no agent-side loop, step counter, synthetic message or marker filter. A silent state (empty `response_instructions`) makes no LLM call and adds nothing to history, so only speaking states produce replies:
 
+The run has one async body (plan a555dcfe step 3, D-009): `_arun_conversation_loop`, `_astandard_run` and `_astandard_run_stream` in `base/runs.py` hold the code and the sync names are thin `run_sync`/`iterate_sync` wrappers (the stream runs in `aclosing`). The `before_step` hook is an awaited closure over the sync `_on_loop_iteration` through `acall`, so the HITL ask ends before the step it gates in both modes. `BaseAgent.arun` stays the offload default; a pattern calls `_astandard_run` from its own `arun` to be native. `tests/test_fsm_llm_agents/test_async_agents.py` pins it.
+
 ```mermaid
 sequenceDiagram
     participant U as caller

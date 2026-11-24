@@ -894,6 +894,11 @@
       "delta": 1,
       "reason": "D-056 (plan baa37f40 K7R.2): one new anchor on the popped-frame hook of pop_fsm",
       "token": "plan-2026-11-23T122249-baa37f40/D-056"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe step 3: the agents async seam re-homes the stash anchor ace7a8c8/D-005 (never in ANCHORS.md) as a555dcfe/D-009 on RunsMixin._before_step_hook; one token added",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-009"
     }
   ]
 }
