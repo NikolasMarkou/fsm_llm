@@ -52,7 +52,9 @@ Validates an FSM definition file, or an [executable](executables.md) document: t
 the file and routes on its `schema` header (`fsm-llm/executable`), never on the extension. The
 report is JSON on stdout and the exit code is 0 for a valid file and 1 otherwise. For an
 executable the report is the whole load sequence at once, each line tagged by its step, and no
-names are resolved. `--upgrade` validates first and then rewrites a definition that declares
+names are resolved: a `pattern` document that binds a handler or a hook, or names a generator,
+is therefore reported invalid (the command has no `handlers` or `generators` namespace to read),
+and a preset needs its base, which the command does not look up. `--upgrade` validates first and then rewrites a definition that declares
 version 4.0 up to below the current one to the current version; it exits 1 when the upgrade is
 refused or fails, and it never rewrites an executable (it prints the report, warns and exits 1).
 Calls no model.

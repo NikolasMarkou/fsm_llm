@@ -152,10 +152,10 @@ The data-flow pass catches a state that reads a key nothing extracts. The livene
 
 ### Agents, with a security boundary where it matters
 
-`create_agent(pattern, tools, config=...)` builds an agent on the same FSM core. There is one registry of patterns, plus `AgentGraph` for a DAG of agents and a meta-builder that designs FSMs, workflows and agents by chat.
+`create_agent(pattern, tools, config=...)` builds an agent on the same FSM core. Most patterns are JSON files under `fsm_llm/agents/patterns/` that one `PatternAgent` runs (see [Executables](https://github.com/NikolasMarkou/fsm_llm/blob/main/docs/executables.md)): a file of your own in a directory, or a preset that extends a pattern, builds through `create_agent(id, registry=...)`, and a file from a user directory is operator configuration, never a model's output. There is also `AgentGraph` for a DAG of agents and a meta-builder that designs FSMs, workflows and agents by chat.
 
 - **`fsm_llm.agents`**: the agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`, `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`, `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`, `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
-- **Tools done properly**: the `@tool` decorator with annotations, enforced timeouts, tools loaded from folders of Python files (trusted sources only), standard operating procedures, retry and caching registries, and semantic tool selection.
+- **Tools done properly**: the `@tool` decorator with annotations, enforced timeouts, tools loaded from folders of Python files (trusted sources only), presets (a task template and options over an existing pattern), retry and caching registries, and semantic tool selection.
 - **MCP client**: `MCPToolProvider` discovers and registers tools from a stdio or HTTP MCP server (the `mcp` extra). There is no MCP server in the package yet.
 - **Agent to agent over HTTP**: `AgentServer` exposes an agent at `/invoke`, `/stream`, `/health` and `/info` with an optional API key, and `RemoteAgentTool` calls it as a tool. It is a small HTTP protocol, not the full A2A specification.
 - **Memory**: semantic memory with embeddings, working-memory tools, auto-memory agents and a read-only OKF backend.

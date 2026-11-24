@@ -209,6 +209,7 @@ class TestTheReadmeNamesAreTrue:
     """Every name the showcase README gives is checked against the code; no number is asserted."""
 
     def test_the_agent_patterns_are_the_ones_create_agent_accepts(self, readme):
+        import fsm_llm.agents  # noqa: F401  (importing the package fills the class table)
         from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
 
         line = next(x for x in readme.splitlines() if "agent patterns (`react`" in x)

@@ -119,7 +119,10 @@ The library is organized into these groups of features.
   identities (of the template and of the instantiated FSM), checked by one load sequence that
   `fsm-llm-validate` runs. An `ExecutableRegistry` serves executables by id and runs them under a
   `RunContext`; the built-in agent patterns and reasoning strategies are served the same way, and
-  a workflow step runs one. See [Executables](executables.md).
+  a workflow step runs one. Most agent patterns are executables of kind `pattern`: JSON files
+  with typed holes, options and handler bindings that a `PatternAgent` runs, which you can also
+  write yourself (a user directory, or a preset that extends a pattern). See
+  [Executables](executables.md).
 * **One vocabulary for outcomes and names**: `Status` and `Reason` codes, the `RunResult`
   envelope that agent, workflow and synthesis runs project onto, a `NameRegistry` for names,
   and a JSON patch applier. See [Runs, results and names](results_and_names.md).
@@ -136,12 +139,14 @@ The library is organized into these groups of features.
 * **`fsm_llm.workflows`**: an async in-memory engine with its step types and a Python DSL
   (`create_workflow`, `auto_step`, `condition_step`). It runs without an LLM unless you add LLM
   steps.
-* **`fsm_llm.agents`**: the agent patterns (`react`, `rewoo`, `reflexion`, `plan_execute`,
+* **`fsm_llm.agents`**: the agent patterns, most of them JSON files under `agents/patterns/`
+  (`react`, `rewoo`, `reflexion`, `plan_execute`,
   `prompt_chain`, `self_consistency`, `debate`, `orchestrator`, `adapt`, `evaluator_optimizer`,
   `maker_checker`, `reasoning_react`, `parallel_react`, `verified_react`, `auto_memory`,
   `native_fc`, `swarm`, `meta_builder`) plus `AgentGraph`.
 * **Tools done properly**: the `@tool` decorator, annotations, enforced timeouts, MCP and A2A
-  support, tools loaded from folders of Python files, and standard operating procedures.
+  support, tools loaded from folders of Python files, and presets (a task template and options
+  over an existing pattern: `code-review`, `summarize`, `data-extraction`).
 * **Human approval as a security boundary**: a gated tool runs only with a driver-only grant
   bound to that exact call, which a caller's initial context can never set.
 * **A meta-builder** that designs FSMs, workflows and agents by chat (`fsm-llm-meta`).
