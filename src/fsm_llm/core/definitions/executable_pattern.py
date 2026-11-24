@@ -109,7 +109,6 @@ MAX_VARIANT_CHARS = 200_000
 _MAX_PROBLEMS = 10  # lines one scan reports
 _SHOWN_CHARS = 60
 
-_SCALAR_TYPES = ("string", "integer", "number", "boolean")
 _NAME_PATTERN = r"^[a-z][a-z0-9_]*$"
 _OPTION_NAME = re.compile(_NAME_PATTERN)
 _Name = Annotated[str, Field(min_length=1, max_length=EXECUTABLE_NAME_MAX_LENGTH)]

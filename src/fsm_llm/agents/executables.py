@@ -4,23 +4,23 @@
 (the ``pattern_agents`` namespace, ``PATTERN_AGENTS``: the one id list, never copied here). ``fsm_llm.agents`` registers
 that function as the ``agents`` source of the ``executable_sources`` namespace, so
 ``ExecutableRegistry().load_sources()`` serves them by id without the engine importing this
-package. They run on today's classes: the executable builds the agent PER RUN through
-``create_agent`` (never the class table directly, no per-run state on the executable: plan
-089d0ec7 D-014, plan 06a5ec0a D-052) and calls its ``run``. Roadmap E4.2 replaces the bodies
-with files under the same ids, one pattern per step: a pattern with a file under
-``agents/patterns/`` is served by a ``PatternExecutable`` built from its file (plan a555dcfe step 9, D-015), and
-``pattern_adapter`` is the ``pattern`` kind of the ``executable_kinds`` namespace, so a registry
-loads a user pattern file the same way.
+package. The executable builds the agent PER RUN through ``create_agent`` (never the class table
+directly, no per-run state on the executable: plan 089d0ec7 D-014, plan 06a5ec0a D-052) and calls
+its ``run``. A pattern with a file under ``agents/patterns/`` (``pattern_files.PATTERN_ORDER``) is
+served by a ``PatternExecutable`` built from its file (plan a555dcfe step 9, D-015); the others stay
+code-backed under the same ids. ``pattern_adapter`` is the ``pattern`` kind of the
+``executable_kinds`` namespace, so a registry loads a user pattern file the same way, and
+``preset_executables()`` serves the shipped presets that have no agent class.
 
 Interface contract:
 
 - ``PatternExecutable(pattern)``: kind ``pattern``, lifecycle ``builtin``, contract input
-  ``task`` (a ``str``); the 17 agent patterns also accept the optional input ``initial_context``
-  (a mapping; the agent strips caller grant and run-output keys itself), the meta-builder takes
-  ``task`` only. ``requires.callables`` lists the host objects the constructor NEEDS (``tools``,
+  ``task`` (a ``str``); every agent pattern but the meta-builder also accepts the optional input
+  ``initial_context`` (a mapping; the agent strips caller grant and run-output keys itself), the
+  meta-builder takes ``task`` only. ``requires.callables`` lists the host objects the constructor NEEDS (``tools``,
   ``chain``, ``evaluation_fn``, ``maker_instructions`` and ``checker_instructions``, ``agents``
-  and ``entry_agent`` for swarm): 12 of the 18, which are therefore not ``launchable`` (serve and
-  the monitor refuse them until E4.2). The optional objects of a row (``hitl``, ``config``, ``tools``
+  and ``entry_agent`` for swarm): a pattern that needs one is therefore not ``launchable`` (serve and
+  the monitor refuse it). The optional objects of a row (``hitl``, ``config``, ``tools``
   of plan_execute, adapt and orchestrator, ``worker_factory``, ``evaluation_fn`` of reflexion,
   ``memory``) are read from ``RunContext.callables`` when present. A name is the keyword of the
   pattern's constructor; ``tools`` and ``config`` reach ``create_agent``'s own parameters.
@@ -32,7 +32,7 @@ Interface contract:
   running, the documented cancel hazard). ``BudgetExhaustedError`` and ``AgentTimeoutError`` end
   ``aborted/budget_spent``; any other error propagates. The result is ``AgentResult.run_result()``
   with ``identity = (template digest, None)`` (a code-backed pattern has no static instance: the
-  task sits in the FSM ``description`` and the per-run tools shape the instructions) and ``handle
+  per-run tools shape the instructions) and ``handle
   None``; ``detail`` gains ``pattern``.
 - HITL (census D1): the executable never builds a ``HumanInTheLoop`` and never writes an approval
   grant; the host's ``hitl`` passes through unchanged and the agent's own gate stays the only

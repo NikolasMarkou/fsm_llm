@@ -2,7 +2,7 @@
 FSM-LLM Agents
 ==============
 
-Agent patterns (ReAct and 17 others, see ``create_agent``), tools,
+Agent patterns (ReAct and the others, see ``create_agent``), tools,
 Human-in-the-Loop approval, memory and MCP/A2A integration, built on the
 FSM-LLM core.
 

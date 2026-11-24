@@ -120,7 +120,7 @@ class CodeBackedExecutable(ABC):
         if options or variables:
             raise InstantiationError(
                 f"executable {self.id!r} is code-backed and takes no options or "
-                "variables yet (a pattern file declares them: roadmap E4.2)"
+                "variables (a pattern file declares them)"
             )
         return CodeBackedInstance(self, {"options": {}, "variables": {}}, None)
 
