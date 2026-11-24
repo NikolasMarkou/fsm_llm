@@ -1258,9 +1258,8 @@ fsm_llm.agents.ConfiguredAgentBuilder class
   def set_temperature(self, temperature: float) -> ConfiguredAgentBuilder
   def set_timeout_seconds(self, seconds: float) -> ConfiguredAgentBuilder
   def set_tool_registry(self, registry: ToolRegistry) -> ConfiguredAgentBuilder
-fsm_llm.agents.DebateAgent class(BaseAgent)
+fsm_llm.agents.DebateAgent class(PatternAgent)
   def __init__(self, config: AgentConfig | None = None, num_rounds: int = 3, proposer_persona: str = '', critic_persona: str = '', judge_persona: str = '', **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.DebateRound class(BaseModel)
   field round_num: int required
   field proposition: str = ''

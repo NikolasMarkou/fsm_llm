@@ -17,13 +17,13 @@ from pydantic import BaseModel
 from fsm_llm.agents.constants import ContextKeys, ErrorMessages, StopReason
 from fsm_llm.agents.definitions import AgentTrace
 from fsm_llm.agents.handlers import recorded_forced_reason
+from fsm_llm.agents.handlers.recording import artifact_text
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import CONTEXT_KEY_CUT_OFF
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.logging import logger
 from fsm_llm.tools import ToolCall
 
-from .helpers import artifact_text
 from .surface import _AgentSurface
 
 

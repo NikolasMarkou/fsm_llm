@@ -3,13 +3,13 @@
 The functions the agent patterns, ``create_agent`` and the meta-builder import by name: the
 ``AgentConfig.instructions`` prefixing and its overflow error, the one ``response_format`` builder,
 the caller-context strip (the driver-only approval grant and the run outputs a caller may not set),
-the flagged-tool readers, the misplaced-keyword refusal and ``artifact_text``. Bodies are the old ones.
+the flagged-tool readers and the misplaced-keyword refusal. Bodies are the old ones. (``artifact_text`` moved
+to ``handlers/recording.py``: the debate judge handler reads it and ``handlers`` imports no ``base`` module.)
 """
 
 from __future__ import annotations
 
 import inspect
-import json
 from collections.abc import Collection, Mapping, Set
 from typing import Any
 
@@ -349,26 +349,3 @@ def reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None
             f"set them on AgentConfig instead, e.g. "
             f"{pattern}(config=AgentConfig({config_owned[0]}=...))"
         )
-
-
-def artifact_text(value: Any) -> str:
-    """The text form of a generated artifact read from context.
-
-    Contract: ``None`` and every falsy non-``str`` value (``False``, ``0``,
-    ``0.0``, ``{}``, ``[]``) -> ``""``, i.e. no answer; a ``str`` as is; a
-    non-empty ``dict``/``list`` (an ``any`` artifact field the model returned
-    as native JSON) -> indented JSON text, so ``AgentResult.answer`` stays a
-    string that ``output_schema`` validation can parse; any other value ->
-    ``str(value)``. Never raises (unserialisable leaves go through ``str``).
-    Callers (answer extraction, the success seam, ``evaluation_fn``) rely on
-    the empty string meaning "nothing was produced": an ``any`` artifact the
-    model filled with ``[]``/``{}``/``false`` must not count as an answer
-    (D-056 of plan 06a5ec0a).
-    """
-    if value is None or (not isinstance(value, str) and not value):
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict | list):
-        return json.dumps(value, ensure_ascii=False, indent=2, default=str)
-    return str(value)

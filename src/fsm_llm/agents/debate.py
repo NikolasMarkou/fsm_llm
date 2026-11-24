@@ -3,44 +3,24 @@ DebateAgent -- Multi-perspective quality improvement through structured debate.
 
 Implements a propose -> critique -> counter -> judge loop with
 configurable personas and round limits.
+
+The machine is the pattern file ``patterns/debate.json`` run by ``PatternAgent`` (plan a555dcfe
+step 17); its handlers are the library factories ``agents.debate_judge``,
+``agents.debate_consensus_reset`` and ``agents.debate_limiter``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
-from fsm_llm import API
-from fsm_llm.agents.constants import (
-    ContextKeys,
-    DebateStates,
-    Defaults,
-    HandlerNames,
-    HandlerPriorities,
-    LogMessages,
-    StopReason,
-)
-from fsm_llm.agents.fsm_definitions.debate import build_debate_fsm
-from fsm_llm.handlers import HandlerTiming
-from fsm_llm.logging import logger
+from fsm_llm.agents.constants import ContextKeys, Defaults
+from fsm_llm.agents.fsm_definitions.debate import debate_texts
 from fsm_llm.tools import require_int_limit
 
-from .base import BaseAgent, artifact_text
-from .definitions import AgentConfig, AgentResult, DebateRound
-from .handlers import (
-    make_fresh_keys_handler,
-    make_iteration_limiter,
-    recorded_forced_reason,
-)
-
-# Every key a debate round writes, cleared on propose entry.
-_ROUND_KEYS: tuple[str, ...] = (
-    ContextKeys.CONSENSUS_REACHED,
-    ContextKeys.PROPOSITION,
-    ContextKeys.CRITIQUE,
-    ContextKeys.COUNTER_ARGUMENT,
-    ContextKeys.JUDGE_VERDICT,
-)
+from .definitions import AgentConfig
+from .handlers.library_stepwise import debate_iteration_check
+from .pattern_agent import PatternAgent
 
 _DEFAULT_PROPOSER_PERSONA = (
     "You are a constructive advocate who builds strong, well-reasoned arguments. "
@@ -58,7 +38,7 @@ _DEFAULT_JUDGE_PERSONA = (
 )
 
 
-class DebateAgent(BaseAgent):
+class DebateAgent(PatternAgent):
     """
     Debate agent that improves answer quality through structured argumentation.
 
@@ -79,6 +59,9 @@ class DebateAgent(BaseAgent):
         result = agent.run("Should cities ban cars from their centers?")
         print(result.answer)
     """
+
+    # No `tools` argument: `create_agent` raises for tools given to this pattern (`accepts_tools`).
+    takes_tools: ClassVar[bool] = False
 
     # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
     _run_output_keys = frozenset(
@@ -115,213 +98,64 @@ class DebateAgent(BaseAgent):
         # DECISION plan-2026-11-06T093029-0068b055/D-008 (12.8): refuse, never
         # clamp. ``max(1, num_rounds)`` made 0, -3 and every typo a silent 1.
         num_rounds = require_int_limit("num_rounds", num_rounds, minimum=1)
-        super().__init__(config, **api_kwargs)
+        from .pattern_files import load_envelope  # lazy: reads the file
+
+        super().__init__(
+            load_envelope("debate"),
+            config=config,
+            options={
+                "max_rounds": num_rounds,
+                "max_iterations": _fsm_budget(num_rounds),
+            },
+            **api_kwargs,
+        )
         self.num_rounds = num_rounds
         self.proposer_persona = proposer_persona or _DEFAULT_PROPOSER_PERSONA
         self.critic_persona = critic_persona or _DEFAULT_CRITIC_PERSONA
         self.judge_persona = judge_persona or _DEFAULT_JUDGE_PERSONA
 
-        logger.info(
-            f"DebateAgent initialized with {self.num_rounds} max rounds, model={self.config.model}"
+    def _text_variables(self) -> dict[str, str]:
+        """The persona and the field prompts around the three personas (read at run time)."""
+        return debate_texts(
+            self.proposer_persona,
+            self.critic_persona,
+            self.judge_persona,
+            self.num_rounds,
         )
 
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
-        """
-        Run the debate on a task.
+    def _context_seed(self) -> dict[str, Any]:
+        """The file's seed (``debate_rounds``, ``current_round``) and the round cap the prompts read."""
+        return {**super()._context_seed(), ContextKeys.MAX_ROUNDS: self.num_rounds}
 
-        :param task: The task/question for the agent to debate
-        :param initial_context: Optional initial context data
-        :return: AgentResult with answer, trace, and metadata
-        """
-        # Build FSM
-        fsm_def = build_debate_fsm(
-            proposer_persona=self.proposer_persona,
-            critic_persona=self.critic_persona,
-            judge_persona=self.judge_persona,
-            max_rounds=self.num_rounds,
-        )
-
-        # Build initial context
-        context = self._init_context(
-            task,
-            initial_context,
-            extra={
-                ContextKeys.DEBATE_ROUNDS: [],
-                ContextKeys.CURRENT_ROUND: 1,
-                ContextKeys.MAX_ROUNDS: self.num_rounds,
-            },
-        )
-
-        return self._standard_run(
-            task,
-            fsm_def,
-            context,
-            "debate",
-            max_iterations=self._fsm_budget(),
-            # DECISION plan-2026-09-29T103145-06a5ec0a/D-036
-            # The answer is the terminal conclude reply, NOT a context key: do
-            # NOT pass the round keys (or judge_verdict, PAT-03) as
-            # extra_answer_keys, which the base lookup prefers to the reply.
-            # ``proposition`` is the success key only, so a debate that
-            # produced no proposition reports success=False (a reply argued
-            # from nothing is no result).
-            success_keys=[ContextKeys.PROPOSITION],
-        )
-
-    def _register_handlers(self, api: API) -> None:
-        """Register debate-specific handlers with the API."""
-        # DECISION plan-2026-11-05T134105-5ed71cf2/D-009
-        # Round record + forced reason: PRE_TRANSITION on judge, NOT
-        # CONTEXT_UPDATE. Core skips every CONTEXT_UPDATE handler on a turn
-        # that committed no extracted key (a judge that returns null for the
-        # verdict and consensus), which left the round uncounted and the loop
-        # to the generic limiter (F-AM-01). The judge always transitions (its
-        # p300 fallback edge), so this runs on every judge exit. It runs after
-        # the gate, so it cannot route: the cap is the judge -> conclude
-        # edge's own `current_round >= max_rounds` disjunct, and this handler
-        # records the round and the forced reason. It runs before the
-        # iteration limiter (lower priority number) so a cap on the same turn
-        # is recorded as forced_pass, as the CONTEXT_UPDATE handler did.
-        # Do NOT move this back to CONTEXT_UPDATE or key it on extraction.
-        api.register_handler(
-            api.create_handler(HandlerNames.DEBATE_JUDGE)
-            .with_priority(HandlerPriorities.ITERATION_LIMITER - 1)
-            .at(HandlerTiming.PRE_TRANSITION)
-            .on_state(DebateStates.JUDGE)
-            .do(self._make_judge_handler())
-        )
-
-        # DECISION plan-2026-09-24T091842-c1d5bfbc/D-009
-        # Core extracts consensus_reached only while it is unset, so do NOT
-        # seed it in run() and do NOT leave a round's False in place: the
-        # judge could never extract a later True. Clear it on entry to
-        # propose (the redo state), NOT on entry to judge: that would erase
-        # the limiter's forced True (PRE_TRANSITION runs before entry;
-        # plan-2026-09-24T045559-3e4eb3e5/D-013). The round values are
-        # cleared there too (skip-if-set froze them after round 1, PAT-03);
-        # the judge handler already recorded them in debate_rounds. The
-        # round number advances here too (plan 5ed71cf2/D-009): the round
-        # is already recorded at judge exit, and this entry runs whatever
-        # the judge extracted.
-        clear_round = make_fresh_keys_handler(_ROUND_KEYS)
-
-        def on_propose_entry(context: dict[str, Any]) -> dict[str, Any]:
-            delta = clear_round(context)
-            delta[ContextKeys.CURRENT_ROUND] = (
-                context.get(ContextKeys.CURRENT_ROUND, 1) + 1
-            )
-            return delta
-
-        api.register_handler(
-            api.create_handler(HandlerNames.DEBATE_CONSENSUS_RESET)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(DebateStates.PROPOSE)
-            .do(on_propose_entry)
-        )
-
-        # Iteration limiter
-        self._register_iteration_limiter(api, self._make_iteration_limiter())
-
-    def _make_judge_handler(self) -> Any:
-        """Create the judge-exit handler: record the round, force the cap.
-
-        Does not advance ``current_round`` (propose entry does, so a null
-        judge extraction still counts the round).
-        """
-        num_rounds = self.num_rounds
-
-        def handle_judge(context: dict[str, Any]) -> dict[str, Any]:
-            current_round = context.get(ContextKeys.CURRENT_ROUND, 1)
-
-            logger.info(
-                LogMessages.DEBATE_ROUND.format(current=current_round, max=num_rounds)
-            )
-
-            # Record this debate round
-            debate_rounds = list(context.get(ContextKeys.DEBATE_ROUNDS, []))
-            round_entry = DebateRound(
-                round_num=current_round,
-                proposition=context.get(ContextKeys.PROPOSITION, ""),
-                critique=context.get(ContextKeys.CRITIQUE, ""),
-                counter_argument=context.get(ContextKeys.COUNTER_ARGUMENT, ""),
-                judge_verdict=context.get(ContextKeys.JUDGE_VERDICT, ""),
-            )
-            updates: dict[str, Any] = {
-                ContextKeys.DEBATE_ROUNDS: [
-                    *debate_rounds,
-                    round_entry.model_dump(mode="json"),
-                ],
-            }
-
-            # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: `proposition`
-            # is the success key, and propose entry clears it every round.
-            # Do NOT let a round whose proposer returned nothing erase the
-            # debate's position: the last recorded proposition is restored
-            # (the round entry still records this round's empty one).
-            if not artifact_text(context.get(ContextKeys.PROPOSITION)).strip():
-                earlier = [
-                    r.get("proposition")
-                    for r in debate_rounds
-                    if isinstance(r, dict)
-                    and artifact_text(r.get("proposition")).strip()
-                ]
-                if earlier:
-                    updates[ContextKeys.PROPOSITION] = earlier[-1]
-
-            # Force consensus if max rounds reached. D-051: a consensus the
-            # judge did not reach itself is a forced pass (D-011), not success.
-            if current_round >= num_rounds:
-                if context.get(ContextKeys.CONSENSUS_REACHED) is not True:
-                    updates[ContextKeys.FORCED_STOP_REASON] = (
-                        StopReason.FORCED_PASS.value
-                    )
-                updates[ContextKeys.CONSENSUS_REACHED] = True
-
-            return updates
-
-        return handle_judge
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-036
+    # The answer is the terminal conclude reply, NOT a context key: do
+    # NOT pass the round keys (or judge_verdict, PAT-03) as
+    # extra_answer_keys, which the base lookup prefers to the reply.
+    # ``proposition`` is the success key only, so a debate that
+    # produced no proposition reports success=False (a reply argued
+    # from nothing is no result). Both live in the run block of
+    # patterns/debate.json (no ``answer_keys``, ``success_keys`` proposition).
+    def _budget_kwargs(self) -> dict[str, Any]:
+        """The hard step ceiling of a run (``_fsm_budget``)."""
+        return {"max_iterations": self._fsm_budget()}
 
     def _fsm_budget(self) -> int:
-        """FSM budget: a pure function of constructor state, never stored on self.
-
-        4 states per round (propose/critique/counter/judge) + conclude;
-        multiplied by DEBATE_STATES_PER_ROUND to account for the number of
-        FSM transitions each debate round requires.
-        """
-        return (
-            self.num_rounds
-            * Defaults.FSM_BUDGET_MULTIPLIER
-            * Defaults.DEBATE_STATES_PER_ROUND
-        )
+        """FSM budget: a pure function of constructor state, never stored on self."""
+        return _fsm_budget(self.num_rounds)
 
     def _make_iteration_limiter(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the iteration limiter handler (shared rule, see handlers)."""
-        # Same cap as the run's max_iterations to avoid premature termination.
-        # Also set CONSENSUS_REACHED so the FSM transitions to CONCLUDE cleanly
-        # (A-ISSUE-006).
-        limiter = make_iteration_limiter(
-            self._fsm_budget(),
-            {
-                ContextKeys.SHOULD_TERMINATE: True,
-                ContextKeys.CONSENSUS_REACHED: True,
-            },
+        """The closure ``agents.debate_limiter`` registers for this agent (the file's binding)."""
+        binding = next(
+            b
+            for b in self.envelope.body.handlers
+            if b.handler == "agents.debate_limiter"
         )
+        return debate_iteration_check(self._handler_context(), binding)
 
-        # D-051 of plan 06a5ec0a: the limiter's consensus is a forced stop
-        # unless the judge already reached one on this turn (propose entry
-        # clears consensus_reached, and every forced True records a reason,
-        # so an unrecorded True is the judge's own).
-        def check_iteration_limit(context: dict[str, Any]) -> dict[str, Any]:
-            update = limiter(context)
-            if ContextKeys.CONSENSUS_REACHED not in update:
-                return update
-            genuine = context.get(ContextKeys.CONSENSUS_REACHED) is True
-            if not genuine and recorded_forced_reason(context) is None:
-                update[ContextKeys.FORCED_STOP_REASON] = StopReason.MAX_ITERATIONS.value
-            return update
 
-        return check_iteration_limit
+def _fsm_budget(num_rounds: int) -> int:
+    """4 states per round (propose/critique/counter/judge) + conclude; multiplied by
+    DEBATE_STATES_PER_ROUND to account for the FSM transitions each round requires."""
+    return (
+        num_rounds * Defaults.FSM_BUDGET_MULTIPLIER * Defaults.DEBATE_STATES_PER_ROUND
+    )

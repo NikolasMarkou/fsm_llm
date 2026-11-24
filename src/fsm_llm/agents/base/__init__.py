@@ -18,7 +18,7 @@ became this package at the same dotted path; the import surface is unchanged):
 - ``registration`` — ``RegistrationMixin``: the iteration limiter, the tool
   executor, the think-loop and lifecycle handlers
 - ``helpers`` — the module-level functions (``strip_caller_context``,
-  ``artifact_text``, ``reject_misplaced_kwargs``, ``_with_instructions``, ...)
+  ``reject_misplaced_kwargs``, ``_with_instructions``, ...)
 - ``surface`` — ``_AgentSurface``, the declarations the mixins share (mypy only)
 
 A private name is imported from its defining module
@@ -29,9 +29,10 @@ module that performs the lookup (``fsm_llm.agents.base.runs.API``,
 
 from __future__ import annotations
 
+from fsm_llm.agents.handlers.recording import artifact_text
+
 from .agent import BaseAgent, accepts_tools
 from .helpers import (
-    artifact_text,
     caller_prompt_keys,
     flagged_tool_names,
     pattern_run_output_keys,

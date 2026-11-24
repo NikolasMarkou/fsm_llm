@@ -1,17 +1,20 @@
 """The step-wise pattern factories of the handler library (split from ``library.py``, plan a555dcfe).
 
 The Plan-and-Execute four (``agents.plan_step_executor``, ``plan_step_fresh_keys``, ``plan_step_checker`` and
-``plan_replan_counter``; bodies in ``plan_execute.py``) and the Maker-Checker five (``agents.revision_count``,
+``plan_replan_counter``; bodies in ``plan_execute.py``), the Maker-Checker five (``agents.revision_count``,
 ``maker_checker_checker``, ``revise_entry``, ``revise_exit`` and ``force_pass``; bodies in
-``maker_checker.py``). The interface contract of a factory is in ``library.py``.
+``maker_checker.py``) and the Debate three (``agents.debate_judge``, ``debate_consensus_reset`` and
+``debate_limiter``; bodies in ``debate.py``). The interface contract of a factory is in ``library.py``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from fsm_llm.agents.constants import (
     ContextKeys,
+    DebateStates,
     Defaults,
     HandlerNames,
     HandlerPriorities,
@@ -22,7 +25,14 @@ from fsm_llm.handlers import HandlerTiming, create_handler
 from fsm_llm.tools import require_int_limit
 
 from .context import HandlerContext
+from .debate import (
+    ROUND_KEYS,
+    make_judge_handler,
+    make_propose_entry_handler,
+    record_forced_consensus,
+)
 from .freshness import make_fresh_keys_handler
+from .library_react import iteration_check
 from .library_support import _keys, _on_entry, _priority, _states
 from .maker_checker import (
     count_revision,
@@ -179,4 +189,71 @@ def force_pass(
         .at(HandlerTiming.PRE_TRANSITION)
         .on_state(*_states(binding, (MakerCheckerStates.CHECK,)))
         .do(force_pass_at_limit)
+    ]
+
+
+def debate_judge(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.debate_judge``: records the round and forces the cap, PRE_TRANSITION on ``judge``.
+
+    The cap is the option ``max_rounds`` (at least 1). It runs one priority before the iteration
+    limiter, so a cap on the same turn is recorded as ``forced_pass``.
+    """
+    # DECISION plan-2026-11-05T134105-5ed71cf2/D-009
+    # Round record + forced reason: PRE_TRANSITION on judge, NOT
+    # CONTEXT_UPDATE. Core skips every CONTEXT_UPDATE handler on a turn
+    # that committed no extracted key (a judge that returns null for the
+    # verdict and consensus), which left the round uncounted and the loop
+    # to the generic limiter (F-AM-01). The judge always transitions (its
+    # p300 fallback edge), so this runs on every judge exit. It runs after
+    # the gate, so it cannot route: the cap is the judge -> conclude
+    # edge's own `current_round >= max_rounds` disjunct, and this handler
+    # records the round and the forced reason. It runs before the
+    # iteration limiter (lower priority number) so a cap on the same turn
+    # is recorded as forced_pass, as the CONTEXT_UPDATE handler did.
+    # Do NOT move this back to CONTEXT_UPDATE or key it on extraction.
+    num_rounds = require_int_limit(
+        "max_rounds",
+        ctx.options.get("max_rounds", Defaults.MAX_DEBATE_ROUNDS),
+        minimum=1,
+    )
+    return [
+        create_handler(HandlerNames.DEBATE_JUDGE)
+        .with_priority(_priority(binding, HandlerPriorities.ITERATION_LIMITER - 1))
+        .at(HandlerTiming.PRE_TRANSITION)
+        .on_state(*_states(binding, (DebateStates.JUDGE,)))
+        .do(make_judge_handler(num_rounds))
+    ]
+
+
+def debate_consensus_reset(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.debate_consensus_reset``: clears the round keys and advances ``current_round`` on entry to ``propose``."""
+    return _on_entry(
+        HandlerNames.DEBATE_CONSENSUS_RESET,
+        binding,
+        DebateStates.PROPOSE,
+        HandlerPriorities.TOOL_EXECUTOR,
+        make_propose_entry_handler(_keys(binding, ROUND_KEYS)),
+    )
+
+
+def debate_iteration_check(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """The closure ``agents.debate_limiter`` registers: ``iteration_check`` with the forced stop recorded."""
+    return record_forced_consensus(iteration_check(ctx, binding))
+
+
+def debate_limiter(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.debate_limiter``: the iteration limiter whose forced consensus records its reason (``debate_iteration_check``)."""
+    return [
+        create_handler(HandlerNames.ITERATION_LIMITER)
+        .with_priority(_priority(binding, HandlerPriorities.ITERATION_LIMITER))
+        .at(HandlerTiming.PRE_TRANSITION)
+        .do(debate_iteration_check(ctx, binding))
     ]

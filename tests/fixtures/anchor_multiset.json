@@ -1019,6 +1019,16 @@
       "delta": -1,
       "reason": "step 16 (plan a555dcfe D-027, owner D-029): the builder of maker_checker is replaced by patterns/maker_checker.json: the fallback edge (3e4eb3e5 D-002), the check-edge budget rule (c1d5bfbc D-007), the field order (06a5ec0a D-039) and the cap edge (5ed71cf2 D-009) live in the file and are held by test_pattern_shapes and test_maker_checker; the handler anchors moved to handlers/maker_checker.py",
       "token": "plan-2026-11-05T134105-5ed71cf2/D-009"
+    },
+    {
+      "delta": -1,
+      "reason": "step 17 of plan a555dcfe (debate as a pattern file, D-028, owner D-029): the builder of debate is replaced by patterns/debate.json; the judge-edge round disjunct rule (c1d5bfbc D-009: the cap reads current_round, never an extracted value) and the consensus_reached prompt keys (06a5ec0a D-054: debate_rounds stays in the list, agent_trace stays out) live in the file and are held by test_pattern_debate and test_debate; the other debate anchors moved with their handler bodies to handlers/debate.py and handlers/library_stepwise.py",
+      "token": "plan-2026-09-24T091842-c1d5bfbc/D-009"
+    },
+    {
+      "delta": -1,
+      "reason": "step 17 of plan a555dcfe (debate as a pattern file, D-028, owner D-029): the builder of debate is replaced by patterns/debate.json; the judge-edge round disjunct rule (c1d5bfbc D-009: the cap reads current_round, never an extracted value) and the consensus_reached prompt keys (06a5ec0a D-054: debate_rounds stays in the list, agent_trace stays out) live in the file and are held by test_pattern_debate and test_debate; the other debate anchors moved with their handler bodies to handlers/debate.py and handlers/library_stepwise.py",
+      "token": "plan-2026-09-29T103145-06a5ec0a/D-054"
     }
   ]
 }

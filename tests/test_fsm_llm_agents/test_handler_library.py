@@ -185,6 +185,9 @@ class TestTheNamespaces:
             "agents.revise_entry",
             "agents.revise_exit",
             "agents.force_pass",
+            "agents.debate_judge",
+            "agents.debate_consensus_reset",
+            "agents.debate_limiter",
             "agents.approval_gate",
         ]
         assert [name for name, _ in library.HOOKS] == [

@@ -6,7 +6,7 @@
 ``library_react`` (the react family, ``agents.approval_gate``, the Reflexion three, the prompt-chain gate and
 the native function-calling group ``agents.native_fc``), ``library_workers`` (the orchestrator pair, the REWOO
 executor and the two HOOKS ``agents.raise_run_ending_error`` and ``agents.rewoo_cut_off_answer``),
-``library_stepwise`` (the Plan-and-Execute four and the Maker-Checker five) and ``library_support`` (the
+``library_stepwise`` (the Plan-and-Execute four, the Maker-Checker five and the Debate three) and ``library_support`` (the
 binding helpers they share). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``, and one module per pattern); a factory only builds the handler around them,
@@ -53,6 +53,9 @@ from .library_react import (
     tool_executor,
 )
 from .library_stepwise import (
+    debate_consensus_reset,
+    debate_judge,
+    debate_limiter,
     force_pass,
     maker_checker_checker,
     plan_replan_counter,
@@ -102,6 +105,9 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.revise_entry", revise_entry),
     ("agents.revise_exit", revise_exit),
     ("agents.force_pass", force_pass),
+    ("agents.debate_judge", debate_judge),
+    ("agents.debate_consensus_reset", debate_consensus_reset),
+    ("agents.debate_limiter", debate_limiter),
     ("agents.approval_gate", approval_gate),
 )
 
