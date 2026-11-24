@@ -302,12 +302,16 @@ served.executable, served.template_identity, served.route
 
 A route key is a version label of `target` (the alias name when `target` is omitted) or a 64-hex template identity. Weights are finite numbers of at least 0 that sum above 0. With several live routes both `experiment` and `conversation_id` are required, and the route is a pure function of them: the first 64 bits of `sha256(f"{experiment}:{conversation_id}")` placed on the cumulative weights of the routes sorted by key. The same pair always gets the same route, and a route of weight 0 is never picked. `resolve(..., pinned_template_identity=...)` returns that template as it is and never rolls again, which is how a resumed conversation keeps what it was served. A name that is not an alias resolves to the plain id. Aliases are held in memory and set by code; no file defines one, and `resolve` writes no event.
 
-### The two namespaces
+### The namespaces
 
-Two [name registries](results_and_names.md#name-registries) hold the extension points, both with an entry-point group:
+Four [name registries](results_and_names.md#name-registries) hold the extension points, each with an entry-point group:
 
 - `EXECUTABLE_KINDS` (`executable_kinds`, group `fsm_llm.executable_kinds`) maps a document `kind` to the adapter factory that turns a parsed envelope into an executable. `fsm`, `strategy` and `procedure` are registered, each to `FsmBodyExecutable`. `adapter_for(kind)` raises `ExecutableKindError` for a kind with no adapter.
 - `EXECUTABLE_SOURCES` (`executable_sources`, group `fsm_llm.executable_sources`) maps a source name to a function with no arguments that returns executables or envelope documents. `registry.load_sources()` calls each source that this registry has not called yet, once, and adds what it returns; a source or an item that fails is reported in the `ReloadReport` and warned, never raised. This is how `fsm_llm.agents` and `fsm_llm.reasoning` declare their built-ins without the engine importing them.
+- `HANDLERS` (`handlers`, group `fsm_llm.handlers`) maps a handler name that a `pattern` file binds to its factory `factory(ctx, binding) -> list[Handler]`. The registry stores factories, never built handlers: a factory is called once per run with that run's `HandlerContext`, so per-run state is never in a registry. `fsm_llm.agents.handlers` registers the `agents.*` library when it is imported (`agents.tool_executor`, `agents.think_turn_limiter`, `agents.iteration_limiter`, `agents.think_fresh_keys`, `agents.feedback_consumed`, `agents.approval_fresh_keys` and `agents.approval_gate`), so nothing is registered until a package imports its library. A key a binding names is refused when it is internal-prefixed or secret-looking, and a binding cannot move the approval gate.
+- `GENERATORS` (`generators`, group `fsm_llm.generators`) maps a generator name to a function that writes a pattern's FSM; it has no entry yet.
+
+A `pattern` document loaded through `ExecutableRegistry.add_document` resolves its handler and generator names through the last two namespaces, so a name that no package registered is refused; any other kind is not judged. The `fsm-llm-validate` command has no resolver and so refuses a pattern that names a handler.
 
 The package `pyproject.toml` declares no entry point for either group yet, so a source is registered by an explicit `EXECUTABLE_SOURCES.register(name, factory)` call, and `load_sources()` finds only the packages the process has imported. An entry point installed after the process started is not seen until it restarts. `ExecutableRegistry(kinds=..., sources=...)` takes registries of its own.
 

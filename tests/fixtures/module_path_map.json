@@ -1015,6 +1015,8 @@
     "fsm_llm.agents.debate",
     "fsm_llm.agents.evaluator_optimizer",
     "fsm_llm.agents.executables",
+    "fsm_llm.agents.handlers.context",
+    "fsm_llm.agents.handlers.library",
     "fsm_llm.agents.maker_checker",
     "fsm_llm.agents.mcp",
     "fsm_llm.agents.memory_persistence",

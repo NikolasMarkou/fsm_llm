@@ -11,7 +11,9 @@ Interface contract:
   once. ``kinds`` and ``sources`` default to the ``EXECUTABLE_KINDS`` and ``EXECUTABLE_SOURCES``
   namespaces.
 - ``add_document(data, *, variables=None, resolver=None) -> Executable``: core
-  ``load_executable``; an invalid document raises ``ExecutableError`` carrying every error,
+  ``load_executable`` (a ``pattern`` document with no ``resolver`` resolves its handler and
+  generator names through the ``HANDLERS`` and ``GENERATORS`` namespaces, D-013 of plan a555dcfe);
+  an invalid document raises ``ExecutableError`` carrying every error,
   a duplicate ``(id, version)`` raises ``ExecutableCollisionError``. ``register(executable)``
   adds a code-backed entry under the same collision rule.
 - ``load_sources() -> ReloadReport``: calls each factory of the sources namespace that this
@@ -82,7 +84,12 @@ from fsm_llm.logging import logger
 from fsm_llm.security import resolve_within
 
 from .aliases import AliasSpec, is_template_identity, make_alias, pick_route
-from .namespaces import EXECUTABLE_KINDS, EXECUTABLE_SOURCES, adapter_for
+from .namespaces import (
+    EXECUTABLE_KINDS,
+    EXECUTABLE_SOURCES,
+    adapter_for,
+    namespace_resolver,
+)
 from .protocol import (
     Executable,
     ExecutableCollisionError,
@@ -275,6 +282,14 @@ class ExecutableRegistry:
         variables: Mapping[str, str] | None = None,
         resolver: Callable[[str, str], bool] | None = None,
     ) -> Executable:
+        if (
+            resolver is None
+            and isinstance(data, Mapping)
+            and data.get("kind") == "pattern"
+        ):
+            # D-013: a pattern names handlers and generators, so its names resolve through the two
+            # namespaces by default; any other kind keeps "names are not resolved"
+            resolver = namespace_resolver()
         envelope, report = load_executable(data, variables=variables, resolver=resolver)
         if envelope is None or not report.is_valid:
             raise ExecutableError(

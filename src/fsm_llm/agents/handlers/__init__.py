@@ -17,6 +17,11 @@ became this package at the same dotted path; the import surface is unchanged):
 - ``freshness`` -- ``make_redraft_handlers`` and ``make_fresh_keys_handler``
 - ``run_guards`` -- ``run_evaluation_fn``, ``RUN_ENDING_ERRORS`` and
   ``RunEndingErrorHolder``
+- ``context`` -- ``HandlerContext``, the per-run value the library factories read (import it from
+  ``fsm_llm.agents.handlers.context``; it is not in ``__all__``)
+- ``library`` -- the named factories a pattern file binds (``agents.tool_executor``, ...),
+  registered at import in the ``HANDLERS`` namespace of ``fsm_llm.engine.executables.namespaces``
+  (``from fsm_llm.agents.handlers.library import LIBRARY``; not in ``__all__``)
 
 A private name is imported from its defining module; a patch aims at the module
 that performs the lookup (``fsm_llm.agents.handlers.executor.logger``), never
@@ -26,6 +31,7 @@ this package; a log record is named after its module
 
 from __future__ import annotations
 
+from . import library  # noqa: F401  (registers the factories in the HANDLERS namespace)
 from .approval import approval_grant, call_label, call_ran, refusal_record
 from .executor import AgentHandlers
 from .forced import (

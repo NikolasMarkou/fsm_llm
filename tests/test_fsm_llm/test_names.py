@@ -466,6 +466,18 @@ NAMESPACES: dict[str, tuple[str, str, str]] = {
         "and fsm_llm.reasoning register theirs when imported, step 23); "
         "entry-point group fsm_llm.executable_sources",
     ),
+    "handlers": (
+        "engine/executables/namespaces.py",
+        "HANDLERS",
+        "handler FACTORIES a pattern file binds by name; fsm_llm.agents.handlers.library registers "
+        "the agents.* names at import; entry-point group fsm_llm.handlers",
+    ),
+    "generators": (
+        "engine/executables/namespaces.py",
+        "GENERATORS",
+        "generator functions a pattern file names instead of an FSM (empty until the prompt_chain "
+        "step); entry-point group fsm_llm.generators",
+    ),
 }
 
 #: The private name tables that remain, each with the roadmap row that retires it (docs/2026_roadmap.md).
@@ -590,6 +602,8 @@ class TestNamespaces:
 
         assert namespaces.EXECUTABLE_KINDS._group == "fsm_llm.executable_kinds"
         assert namespaces.EXECUTABLE_SOURCES._group == "fsm_llm.executable_sources"
+        assert namespaces.HANDLERS._group == "fsm_llm.handlers"
+        assert namespaces.GENERATORS._group == "fsm_llm.generators"
         assert namespaces.EXECUTABLE_KINDS.list() == ["fsm", "procedure", "strategy"]
 
     def test_importing_the_engine_namespace_registers_no_source(self):
@@ -601,6 +615,28 @@ class TestNamespaces:
             "from fsm_llm.engine.executables import namespaces\n"
             "assert namespaces.EXECUTABLE_SOURCES.list() == []\n"
             "assert not any(m in sys.modules for m in ('fsm_llm.agents', 'fsm_llm.reasoning'))\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr
+
+    def test_the_handler_library_registers_when_the_agents_package_is_imported(self):
+        # D-013 of plan a555dcfe: the engine namespace is empty until a package registers its
+        # library; the agents library registers the agents.* names at import, and nothing else
+        code = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(_SRC.parent)!r})\n"
+            "from fsm_llm.engine.executables import namespaces\n"
+            "assert namespaces.HANDLERS.list() == []\n"
+            "assert namespaces.GENERATORS.list() == []\n"
+            "import fsm_llm.agents\n"
+            "names = namespaces.HANDLERS.list()\n"
+            "assert names and all(n.startswith('agents.') for n in names), names\n"
+            "assert namespaces.GENERATORS.list() == []\n"
         )
         done = subprocess.run(
             [sys.executable, "-I", "-c", code],
