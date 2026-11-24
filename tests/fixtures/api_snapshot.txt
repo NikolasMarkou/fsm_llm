@@ -1026,6 +1026,8 @@ fsm_llm.core.definitions.executable_instance.rebuild_instance def(envelope: Exec
 fsm_llm.core.definitions.executable_instance.substitute_variables def(node: Any, values: Mapping[str, str]) -> Any
 fsm_llm.core.definitions.executable_instance.variable_problems def(envelope: ExecutableEnvelope, values: Mapping[str, Any]) -> list[str]
 # fsm_llm.core.definitions.executable_pattern
+fsm_llm.core.definitions.executable_pattern.APPROVAL_GATE_HANDLER = 'agents.approval_gate'
+fsm_llm.core.definitions.executable_pattern.APPROVAL_STATE = 'await_approval'
 fsm_llm.core.definitions.executable_pattern.HOLE_KEY = '$hole'
 fsm_llm.core.definitions.executable_pattern.HandlerBinding class(BaseModel)
   field handler: str required

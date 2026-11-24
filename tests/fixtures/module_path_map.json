@@ -1066,6 +1066,7 @@
     "fsm_llm.core.results",
     "fsm_llm.core.verify",
     "fsm_llm.core.verify.executable",
+    "fsm_llm.core.verify.executable_pattern",
     "fsm_llm.core.verify.graph",
     "fsm_llm.core.visualize",
     "fsm_llm.engine",

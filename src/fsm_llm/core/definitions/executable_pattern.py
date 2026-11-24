@@ -61,6 +61,8 @@ from .limits import EXECUTABLE_MAX_ITEMS, EXECUTABLE_NAME_MAX_LENGTH
 from .patch import JsonPatchError, apply_json_patch
 
 __all__ = [
+    "APPROVAL_GATE_HANDLER",
+    "APPROVAL_STATE",
     "HOLE_KEY",
     "PATTERN_FIELD_VERSIONS",
     "HandlerBinding",
@@ -79,6 +81,13 @@ __all__ = [
 
 #: The one key of a hole leaf.
 HOLE_KEY = "$hole"
+
+#: The two names the ``hitl`` rule of the verifier holds equal (D-012): the library handler that
+#: gates a tool on a grant, and the state a run waits in for one. ``APPROVAL_STATE`` equals
+#: ``fsm_llm.agents.constants.AgentStates.AWAIT_APPROVAL`` (a test holds it: core may not import
+#: agents), and the handler library of the agents package registers ``APPROVAL_GATE_HANDLER``.
+APPROVAL_GATE_HANDLER = "agents.approval_gate"
+APPROVAL_STATE = "await_approval"
 
 MAX_OPTIONS = 64
 MAX_VARIANTS = 16

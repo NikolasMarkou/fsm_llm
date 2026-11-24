@@ -909,6 +909,11 @@
       "delta": 1,
       "reason": "plan a555dcfe D-011: the one-pass fill rule of fill_holes (key order, no rescan, no hole in a key position) anchor in executable_pattern.py",
       "token": "plan-2026-11-24T043150-a555dcfe/D-011"
+    },
+    {
+      "delta": 2,
+      "reason": "plan a555dcfe step 6: two D-012 anchors added in core/verify/executable_pattern.py (the hitl rule, the V7 fields)",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-012"
     }
   ]
 }

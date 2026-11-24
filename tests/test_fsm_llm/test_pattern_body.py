@@ -19,7 +19,6 @@ from fsm_llm.core.definitions import executable as ex
 from fsm_llm.core.definitions import executable_instance as ei
 from fsm_llm.core.definitions import executable_pattern as ep
 from fsm_llm.core.definitions.fsm import FSMDefinition, definition_digest
-from fsm_llm.core.verify.executable import load_executable
 
 _ADD_STATE = {
     "op": "add",
@@ -769,16 +768,6 @@ class TestTheRunBlock:
         _refused(_doc(body=_body(handlers=[{"handler": "h", "on": "sideways"}])))
         _refused(_doc(body=_body(run={"hooks": [{"hook": "h", "at": "never"}]})))
         _refused(_doc(body=_body(run={"step_budget": 0})))
-
-
-class TestUntilTheLoadSequenceExists:
-    def test_no_route_loads_a_pattern_document_yet(self):
-        for origin in ("operator", "model"):
-            envelope, result = load_executable(_doc(), origin=origin)
-
-            assert envelope is None
-            assert not result.is_valid
-            assert len(result.errors) == 1 and "[schema]" in result.errors[0]
 
 
 class TestTheShippedSchemaNamesThePattern:

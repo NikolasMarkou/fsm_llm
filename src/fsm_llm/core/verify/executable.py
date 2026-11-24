@@ -7,8 +7,18 @@ One call reports EVERY failure it can find in a document, each message tagged by
 persona text), ``[contract]`` (V5: the data-flow and liveness analyses against the declared
 contract, WARNINGS only, so a built-in is never refused by a finding), ``[names]`` (V3: the
 completion tool names against ``requires.tools``, and every required name through an injected
-resolver) and ``[model]`` (V7, only for ``origin="model"``). V4 variants wait for the pattern kind
-and V6 (strict mode) is not built.
+resolver) and ``[model]`` (V7, only for ``origin="model"``). V6 (strict mode) is not built.
+
+A ``pattern`` document (plan a555dcfe D-012) takes the same sequence over INSTANCES: V2 checks the
+default instance (every option at its default, every variant unselected) and the instance with
+every variant applied once, each as an FSM body, and a template with a required option (no default)
+is one ``[body]`` error; V4 refuses a ``{{name}}`` that is not a declared variable and a hole of a
+free-text option under an instruction-text key; V3 resolves the handler, hook and generator names
+it uses and holds the ``hitl`` capability, an ``agents.approval_gate`` binding and an
+``await_approval`` state equal; V7 refuses what binds code. The rules live in
+``core.verify.executable_pattern``. NO name of a pattern resolves without a resolver: a pattern that
+uses any handler, hook or generator name and gets none is refused (the namespaces arrive with the
+agents handler library; until then nothing loads with a name it cannot resolve).
 
 Interface contract:
 
@@ -21,9 +31,11 @@ Interface contract:
   required); a mapping, possibly empty, fills the variables first: a missing, undeclared or
   non-text value is a ``[variables]`` error, and V2 then checks the FILLED body.
 - ``resolver``: ``Callable[[str, str], bool]`` called with ``(category, name)`` pairs, the
-  category one of ``tools``, ``handlers``, ``callables``, ``executables``; build it from the
+  category one of ``tools``, ``handlers``, ``callables``, ``executables`` (and ``generators``
+  for a pattern; the names of its bindings and run hooks go under ``handlers``); build it from the
   ``NameRegistry`` namespaces (``lambda ns, n: n in namespaces[ns]``). ``None`` skips resolution
-  and says so once. This module reads no registry.
+  and says so once, except for a pattern that uses a handler, hook or generator name (refused).
+  This module reads no registry.
 - ``origin``: ``"operator"`` (a file a person wrote: V7 never applies) or ``"model"`` (model-written
   text, the synthesis and meta-builder output of roadmap E4.6: V7 applies). ``allow``: category
   to the names a model may require; ``None`` is an empty list, so every name is refused (fail
@@ -36,8 +48,10 @@ Interface contract:
   handler binding comes from a template, never from a model), and ``lifecycle`` may only be
   ``draft``. V7 is NOT gate G5: text length, key names, unknown keys, priorities and the abort edge
   stay G5's. Lifecycle, capabilities and contract are CLAIMS of the document, never
-  authorization. A body key that binds code (``handlers``, ``variants``, ``generator``) is
-  refused by V1 for every origin.
+  authorization. A pattern document a model wrote may carry no ``handlers``, run ``hooks``,
+  ``variants``, ``generator``, ``options_schema``, ``run.agent_type``, ``run.run_output_keys`` or
+  ``run.context_seed`` (one message each, whatever the claims say); an ``fsm`` body key that binds
+  code (``handlers``, ``variants``, ``generator``) is refused by V1 for every origin.
 - Model-authored text (names, keys, state ids) is capped and control-stripped before it reaches a
   message (``fsm_llm.text.capped_line``): a message may be shown to a model by a repair loop.
 
@@ -56,6 +70,7 @@ from fsm_llm.core.definitions.executable import (
     PROBLEM_LINE_CHARS,
     ExecutableDocumentError,
     ExecutableEnvelope,
+    PatternEnvelope,
     parse_executable,
     scan_placeholders,
 )
@@ -66,6 +81,13 @@ from fsm_llm.core.definitions.executable_instance import (
 from fsm_llm.core.state_kinds import raw_kinds
 from fsm_llm.text import capped_line
 
+from .executable_pattern import (
+    build_instances,
+    hitl_problems,
+    hole_text_problems,
+    pattern_names,
+)
+from .executable_pattern import model_problems as pattern_model_problems
 from .flow import analyze_data_flow, analyze_liveness
 from .result import FSMValidationResult
 from .validator import FSMValidator
@@ -78,6 +100,7 @@ Resolver = Callable[[str, str], bool]
 
 _TAGS = ("schema", "body", "variables", "inputs", "contract", "names", "model")
 _CATEGORIES = ("tools", "handlers", "callables", "executables")
+_PATTERN_CATEGORIES = (*_CATEGORIES, "generators")
 _NAME_CHARS = 60  # one model-authored name inside a message
 
 
@@ -242,15 +265,13 @@ def load_executable(
             note("schema", "error", line)
         return finish(None)
 
-    if envelope.kind == "pattern":
-        # the V2 to V7 branches of a pattern are step 6 of plan a555dcfe: until then no pattern
-        # document loads by any route (fail closed)
-        note("schema", "error", "kind 'pattern': its load sequence is not built yet")
-        return finish(None)
+    pattern = envelope if isinstance(envelope, PatternEnvelope) else None
 
     # V4, the values: fill the declared variables before the body is checked
     declared = set(envelope.variables)
-    fsm = envelope.body.fsm
+    template: dict[str, Any] | None = envelope.body.fsm  # None: a generator pattern
+    fsm = template
+    buildable = True
     if variables is None:
         if declared:
             note(
@@ -262,32 +283,55 @@ def load_executable(
         problems = variable_problems(envelope, variables)
         for line in problems:
             note("variables", "error", line)
-        if not problems:
-            fsm = substitute_variables(fsm, variables)
+        buildable = not problems
+        if buildable and pattern is None:
+            fsm = substitute_variables(template, variables)
 
-    # V2
-    validator = FSMValidator(fsm)
+    # V2: an FSM body as written or filled; for a pattern its DEFAULT instance and its instance
+    # with every variant applied once (D-012)
+    instances: list[dict[str, Any]] = [fsm] if pattern is None and fsm else []
+    if pattern is not None and buildable:
+        built = build_instances(pattern, variables)
+        for line in built.problems:
+            note("body", "error", line)
+        for line in built.notes:
+            note("body", "info", line)
+        instances = built.bodies()
     definition = None
-    try:
-        body = validator.validate()
-    except (
-        Exception
-    ) as error:  # a validator never raises on a mapping; a belt, not a path
-        note(
-            "body", "error", f"the body could not be validated ({type(error).__name__})"
-        )
-    else:
-        for severity, items in (
-            ("error", body.errors),
-            ("warning", body.warnings),
-            ("info", body.info),
-        ):
-            for text in items:
-                note("body", severity, text)
-        definition = validator._definition
+    default_errors: set[str] = set()
+    for index, instance in enumerate(instances):
+        validator = FSMValidator(instance)
+        try:
+            body = validator.validate()
+        except (
+            Exception
+        ) as error:  # a validator never raises on a mapping; a belt, not a path
+            note(
+                "body",
+                "error",
+                f"the body could not be validated ({type(error).__name__})",
+            )
+            continue
+        if index == 0:
+            default_errors = set(body.errors)
+            for severity, items in (
+                ("error", body.errors),
+                ("warning", body.warnings),
+                ("info", body.info),
+            ):
+                for text in items:
+                    note("body", severity, text)
+            definition = validator._definition
+        else:  # the every-variant instance says only what the default instance did not
+            for text in dict.fromkeys(body.errors):
+                if text not in default_errors:
+                    note("body", "error", f"with every variant applied: {text}")
+    read = [template, *instances] if pattern is not None else [fsm]
 
     # V4, the text: no caller input renders into instruction or persona text
-    leaves, keys = scan_placeholders(envelope.body.fsm)
+    leaves, keys = scan_placeholders(
+        template if pattern is None else [template, pattern.body.variants]
+    )
     contract = envelope.contract
     arguments = (
         set(contract.inputs)
@@ -301,13 +345,28 @@ def load_executable(
             "renders into instruction or persona text",
         )
     for name in sorted(leaves - declared - arguments):
-        note("variables", "warning", f"{_placeholder(name)} is not a declared variable")
+        if pattern is None:
+            note(
+                "variables",
+                "warning",
+                f"{_placeholder(name)} is not a declared variable",
+            )
+        else:  # the declared variables are the one text channel of a template (D-012)
+            note(
+                "variables",
+                "error",
+                f"{_placeholder(name)} is not a declared variable: only a declared "
+                "variable may put text into a template",
+            )
     for name in sorted(keys & declared):
         note(
             "variables",
             "warning",
             f"{_placeholder(name)} sits in a key and is left alone (text values only)",
         )
+    if pattern is not None:
+        for line in hole_text_problems(pattern.body):
+            note("inputs", "error", line)
 
     # V5: warnings only
     if definition is not None:
@@ -326,15 +385,37 @@ def load_executable(
 
     # V3
     tools = envelope.requires.tools
-    if isinstance(tools, list) and (absent := sorted(_tool_names(fsm) - set(tools))):
+    declared_tools = {name for body_ in read if body_ for name in _tool_names(body_)}
+    if isinstance(tools, list) and (absent := sorted(declared_tools - set(tools))):
         shown = ", ".join(_shown(n) for n in absent)
         note("names", "error", f"completion tools {shown} are not in requires.tools")
+    categories: tuple[str, ...] = _CATEGORIES
+    names: dict[str, Any] = {c: getattr(envelope.requires, c) for c in _CATEGORIES}
+    if pattern is not None:
+        categories = _PATTERN_CATEGORIES
+        names.update(pattern_names(pattern))
+        for line in hitl_problems(pattern, read):
+            note("names", "error", line)
     if resolver is None:
         note("names", "info", "names are not resolved: no resolver was given")
+        unresolved = (
+            [n for c in ("handlers", "generators") for n in names[c]]
+            if pattern is not None
+            else []
+        )
+        if unresolved:
+            # fail closed (D-012): until a namespace is given no name of a template resolves,
+            # so a pattern that binds one does not load
+            more = f" and {len(unresolved) - 1} more" if len(unresolved) > 1 else ""
+            note(
+                "names",
+                "error",
+                f"the pattern uses {_shown(unresolved[0])}{more} and no resolver was "
+                "given: a name that cannot be resolved is refused",
+            )
     else:
-        for category in _CATEGORIES:
-            names = getattr(envelope.requires, category)
-            for name in names if isinstance(names, list) else ():
+        for category in categories:
+            for name in names[category] if isinstance(names[category], list) else ():
                 if not resolver(category, name):
                     note(
                         "names",
@@ -344,6 +425,12 @@ def load_executable(
 
     # V7
     if origin == "model":
-        for line in _model_problems(envelope, allow, [envelope.body.fsm, fsm]):
+        bodies = [b for b in ([template, fsm] if pattern is None else read) if b]
+        for line in dict.fromkeys(
+            [
+                *_model_problems(envelope, allow, bodies),
+                *pattern_model_problems(envelope),
+            ]
+        ):
             note("model", "error", line)
     return finish(envelope)
