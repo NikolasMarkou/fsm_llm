@@ -11,7 +11,8 @@ hash goldens (``sort_keys=True``) cannot see state order. ``index.json`` holds
 ``SemanticToolRegistry`` retrieval (an embedding model, not reproducible).
 ``wrap(case)`` puts a case in its executable envelope (plan ace7a8c8, C7); ``--write`` also
 writes the shipped JSON Schema of the envelope. Regenerate with
-``python -m tests.executables_corpus --write`` and review the diff.
+``python -m tests.executables_corpus --write`` and review the diff. The same command writes the
+handler-order and request-byte goldens of the pattern runs (``tests/pattern_runs.py``).
 """
 
 from __future__ import annotations
@@ -38,6 +39,10 @@ from fsm_llm.tools import ToolRegistry
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "executables"
 INDEX_PATH = FIXTURES / "index.json"
+#: The handlers each pattern registers and the requests each sends to a scripted model
+#: (``tests/pattern_runs.py``, plan a555dcfe step 8).
+HANDLER_ORDER_PATH = FIXTURES / "pattern_handler_order.json"
+REQUEST_BYTES_PATH = FIXTURES / "pattern_request_bytes.json"
 
 
 class _Out(BaseModel):
@@ -294,6 +299,22 @@ def index_text() -> str:
     return json.dumps(index(), indent=2, sort_keys=True, ensure_ascii=True) + "\n"
 
 
+def pattern_run_texts() -> dict[Path, str]:
+    """``fixture path -> text`` of the two pattern-run goldens (sorted keys, one final newline)."""
+    from tests import pattern_runs
+
+    return {
+        HANDLER_ORDER_PATH: json.dumps(
+            pattern_runs.handler_order(), indent=1, sort_keys=True, ensure_ascii=True
+        )
+        + "\n",
+        REQUEST_BYTES_PATH: json.dumps(
+            pattern_runs.request_bytes(), indent=1, sort_keys=True, ensure_ascii=True
+        )
+        + "\n",
+    }
+
+
 def wrap(case: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
     """The envelope document of a full-FSM case, as a plain dict.
 
@@ -349,6 +370,7 @@ def write_all() -> None:
     files = {fixture_path(case): render(d) for case, d in cases.items()}
     files[INDEX_PATH] = index_text()
     files[SCHEMA_PATH] = schema_text()
+    files.update(pattern_run_texts())
     for path, text in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as handle:
