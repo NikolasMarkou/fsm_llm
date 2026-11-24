@@ -122,7 +122,6 @@
     },
     "fsm_llm.agents.fsm_definitions": {
       "_LOOP_FIELD_CONTEXT_KEYS": "fsm_llm.agents.fsm_definitions._loop",
-      "_MAX_DESC": "fsm_llm.agents.fsm_definitions._common",
       "_TERMINATE_ON_EVIDENCE": "fsm_llm.agents.fsm_definitions._loop",
       "_act_state": "fsm_llm.agents.fsm_definitions._loop",
       "_await_approval_state": "fsm_llm.agents.fsm_definitions._loop",
