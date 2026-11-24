@@ -8,10 +8,11 @@ write-time secret filter, reads and queries, blobs, and the checkpoint API of a 
 tool call (``tool_call``).
 
 Privacy (D-003 of plan 21e6f00d): structured state and context payloads go through
-``filter_context`` (``core.redaction.redact_context``, then internal-prefixed keys dropped
-except a caller's allow-list, then ``to_jsonable``); free text (a prompt, a reply, a user
-message) is stored as the model saw it, because the repository already keeps secret-looking
-context entries out of prompts. Keep the log directory as private as a session directory.
+``fsm_llm.runtime.filtering.filter_context`` (``core.redaction.redact_context``, then
+internal-prefixed keys dropped except a caller's allow-list, then ``to_jsonable``); free text
+(a prompt, a reply, a user message) is stored as the model saw it, because the repository
+already keeps secret-looking context entries out of prompts. Keep the log directory as private
+as a session directory.
 ``EventLog(root, privacy=, redact=)`` adds the ``shape`` level and the user's redaction hook
 (``runtime.privacy``, plan 5a6a1f80: read its limits, a free-text secret reaches disk at level
 ``values`` unless the hook handles it).
@@ -37,7 +38,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.logging import logger
 from fsm_llm.runtime.blobs import BlobStore, blob_ref
@@ -108,93 +108,6 @@ def _timestamp() -> str:
     except (OverflowError, OSError, ValueError):
         moment = datetime.datetime.fromtimestamp(0, tz=datetime.UTC)
     return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _redact_arguments(text: str) -> str:
-    """Redact the secret-named entries of tool-call arguments that travel as JSON TEXT.
-
-    A transcript stores ``tool_calls[].function.arguments`` as a JSON string, which a walk by
-    key name never reads. A string that parses to a JSON object goes through ``redact_context``
-    and is re-dumped (compact, ASCII) only when something was redacted, so every other
-    arguments string is returned byte for byte; text that is not a JSON object is returned as
-    it is.
-    """
-    try:
-        parsed = json.loads(text)
-    except (ValueError, RecursionError, MemoryError):
-        return text
-    if not isinstance(parsed, dict):
-        return text
-    safe = redact_context(parsed)
-    if safe == parsed:
-        return text
-    return json.dumps(safe, separators=(",", ":"), ensure_ascii=True)
-
-
-def _scrub_in_place(node: Any) -> None:
-    """Drop every internal-prefixed string key and redact the JSON text of ``arguments``
-    entries, in the dicts under *node*, in place.
-
-    Iterative with a visited set, so a shared subtree is walked once and a deep value cannot
-    raise ``RecursionError``. Only ever called on a fresh copy made by ``redact_context``.
-    """
-    stack = [node]
-    seen: set[int] = set()
-    while stack:
-        current = stack.pop()
-        if isinstance(current, dict):
-            if id(current) in seen:
-                continue
-            seen.add(id(current))
-            for key in [
-                k for k in current if isinstance(k, str) and has_internal_prefix(k)
-            ]:
-                del current[key]
-            arguments = current.get("arguments")
-            if isinstance(arguments, str):
-                current["arguments"] = _redact_arguments(arguments)
-            stack.extend(current.values())
-        elif isinstance(current, (list, tuple)):
-            stack.extend(current)
-
-
-def filter_context(
-    mapping: Mapping[str, Any], *, keep_internal: Iterable[str] = ()
-) -> dict[str, Any]:
-    """Return the log-safe copy of a structured payload (a context, a state, a delta).
-
-    Interface contract (callers: the engine's state blob and ``context/record`` producers):
-        - Secret-looking values are replaced through ``redact_context`` (names and values
-          judged by ``is_forbidden_context_entry``, depth cut at ``MAX_CONTEXT_FILTER_DEPTH``,
-          cycles cut); then every internal-prefixed key (``has_internal_prefix``) is dropped at
-          every depth, except the TOP-LEVEL names listed in *keep_internal* (the completion
-          transcript keys a definition declares; they are redacted like any value); an
-          ``arguments`` string that is a JSON object (a transcript's tool call) is redacted by
-          its entry names too; then ``to_jsonable`` turns what JSON cannot hold into typed
-          markers.
-        - The result is a new dict that shares nothing mutable with *mapping*, always passes
-          ``encode_event`` as an event field, and is at most ``MAX_PAYLOAD_DEPTH - 1`` deep.
-        - Never raises for content (a 100,000 deep value is cut, not recursed into);
-          ``TypeError`` for a non-mapping.
-    """
-    if not isinstance(mapping, Mapping):
-        raise TypeError(f"filter_context takes a mapping, got {type(mapping).__name__}")
-    # DECISION plan-2026-11-17T100529-21e6f00d/D-009
-    # Internal keys leave a payload at EVERY depth, and only the TOP-LEVEL names a caller
-    # allow-lists (the definition's transcript keys, see engine/events.py) stay. Do NOT keep
-    # internal keys by prefix or deny-list here: the grant `_approval_granted` lives in that
-    # namespace. Secret-looking values are replaced first (`redact_context`) and never
-    # restored. See decisions.md D-009.
-    keep = frozenset(keep_internal)
-    redacted = redact_context(dict(mapping))
-    top = {
-        key: value
-        for key, value in redacted.items()
-        if key in keep or not (isinstance(key, str) and has_internal_prefix(key))
-    }
-    _scrub_in_place(list(top.values()))
-    safe: dict[str, Any] = to_jsonable(top)
-    return safe
 
 
 class EventLog:

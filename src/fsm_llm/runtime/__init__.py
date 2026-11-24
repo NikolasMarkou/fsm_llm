@@ -35,7 +35,8 @@ from .events import (
     encode_event,
     to_jsonable,
 )
-from .log import EventLog, filter_context, warn_on_failure
+from .filtering import filter_context
+from .log import EventLog, warn_on_failure
 from .privacy import PrivacyLevel, RedactionKind
 from .retention import PruneReport
 from .scope import (

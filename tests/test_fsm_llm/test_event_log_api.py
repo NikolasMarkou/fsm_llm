@@ -31,7 +31,8 @@ from fsm_llm.runtime.events import (
     LogWriteError,
     check_depth,
 )
-from fsm_llm.runtime.log import EventLog, filter_context, warn_on_failure
+from fsm_llm.runtime.filtering import filter_context
+from fsm_llm.runtime.log import EventLog, warn_on_failure
 from fsm_llm.runtime.stores import jsonl
 from tests.conftest import EveryReadLater
 from tests.test_fsm_llm.event_log_support import (
