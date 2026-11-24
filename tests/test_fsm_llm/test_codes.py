@@ -20,7 +20,9 @@ from fsm_llm.core import codes
 from fsm_llm.core.codes import (
     CompletionKind,
     Lifecycle,
+    LlmFailureCode,
     MessageSource,
+    Purpose,
     Reason,
     Status,
     ToolErrorCode,
@@ -33,7 +35,16 @@ from fsm_llm.core.definitions import fsm as definitions
 from fsm_llm.synthesis import constants as synth_constants
 from fsm_llm.synthesis import tools as synth_tools
 
-_ENUMS = [Status, Reason, CompletionKind, Lifecycle, MessageSource, ToolErrorCode]
+_ENUMS = [
+    Status,
+    Reason,
+    CompletionKind,
+    Lifecycle,
+    MessageSource,
+    ToolErrorCode,
+    Purpose,
+    LlmFailureCode,
+]
 
 
 def _public_values(cls: type) -> dict[str, str]:
@@ -150,6 +161,41 @@ class TestMembers:
         assert ToolErrorCode.from_string("timeout") is ToolErrorCode.TIMEOUT
         with pytest.raises(ValueError, match="tool error code"):
             ToolErrorCode.from_string("http_500")
+
+    def test_purpose_members_and_values(self):
+        assert [m.value for m in Purpose] == [
+            "extract",
+            "classify",
+            "tie_break",
+            "reply",
+            "complete",
+            "compile",
+            "simulate",
+            "judge",
+            "summarize",
+        ]
+        assert Purpose.from_string("tie_break") is Purpose.TIE_BREAK
+        # embedding makes no logged call (the embedder has no observer): no member
+        with pytest.raises(ValueError, match="purpose"):
+            Purpose.from_string("embed")
+
+    def test_llm_failure_code_members_and_values(self):
+        # `http_<status>` cannot sit in a closed enum: `http_error` plus `status_code` (D-010)
+        assert [m.value for m in LlmFailureCode] == [
+            "timeout",
+            "rate_limited",
+            "auth",
+            "context_overflow",
+            "content_refused",
+            "malformed_response",
+            "transport",
+            "http_error",
+            "cancelled",
+            "unknown",
+        ]
+        assert LlmFailureCode.from_string("auth") is LlmFailureCode.AUTH
+        with pytest.raises(ValueError, match="llm failure code"):
+            LlmFailureCode.from_string("http_500")
 
     @pytest.mark.parametrize("enum", _ENUMS)
     def test_members_are_snake_case_with_upper_names(self, enum):
@@ -370,6 +416,8 @@ class TestSource:
             "Lifecycle",
             "MessageSource",
             "ToolErrorCode",
+            "Purpose",
+            "LlmFailureCode",
         }
 
         def _names_a_member(node: ast.AST) -> bool:
@@ -396,7 +444,9 @@ class TestSource:
             [
                 "CompletionKind",
                 "Lifecycle",
+                "LlmFailureCode",
                 "MessageSource",
+                "Purpose",
                 "Reason",
                 "Status",
                 "ToolErrorCode",

@@ -1,6 +1,6 @@
 """The shared vocabulary of run statuses, reason codes and completion kinds.
 
-Six closed vocabularies, each a ``str`` enum whose values are the strings
+Eight closed vocabularies, each a ``str`` enum whose values are the strings
 already on the wire (or, for ``Lifecycle`` and ``MessageSource``, the strings of
 the envelope and the event log), so a member and its string are interchangeable
 for ``==``, hashing, ``in``, ``json.dumps`` and pydantic:
@@ -16,7 +16,9 @@ for ``==``, hashing, ``in``, ``json.dumps`` and pydantic:
   (``draft``, ``verified``, ``trusted``, ``deprecated``, ``builtin``). A claim,
   never authorization.
 - ``MessageSource``: who sent a message or an input (``user``, ``run``,
-  ``remote_client``, ``simulator``). Vocabulary only: no producer writes it yet.
+  ``remote_client``, ``simulator``). ``run/start`` writes it (``run``).
+- ``ToolErrorCode``, ``Purpose`` and ``LlmFailureCode``: why a tool call or a model
+  call failed, and what a model call was for (event log rows 1.15 and 1.16).
 
 Three small pure mappers translate the agents' own vocabularies into it.
 They take plain strings or a bool and import nothing, so this module has no
@@ -39,7 +41,9 @@ from typing import TypeVar
 __all__ = [
     "CompletionKind",
     "Lifecycle",
+    "LlmFailureCode",
     "MessageSource",
+    "Purpose",
     "Reason",
     "Status",
     "ToolErrorCode",
@@ -201,6 +205,57 @@ class ToolErrorCode(str, Enum):
     def from_string(cls, value: ToolErrorCode | str) -> ToolErrorCode:
         """The member for a member or an exact value; ``ValueError`` otherwise."""
         return _parse(cls, value, "tool error code")
+
+
+class Purpose(str, Enum):
+    """Why a model call was made (roadmap row 1.15): the label of an LLM event.
+
+    Written on ``llm/request``, ``llm/response`` and ``provider/error`` from a ContextVar
+    scope (``fsm_llm.llm.purpose``), never from a request field: a purpose moves no request
+    byte. ``TIE_BREAK`` is the classifier call that settles an AMBIGUOUS transition;
+    ``CLASSIFY`` the one of ``classification_extractions``. Embedding is not logged.
+    """
+
+    EXTRACT = "extract"
+    CLASSIFY = "classify"
+    TIE_BREAK = "tie_break"
+    REPLY = "reply"
+    COMPLETE = "complete"
+    COMPILE = "compile"
+    SIMULATE = "simulate"
+    JUDGE = "judge"
+    SUMMARIZE = "summarize"
+
+    @classmethod
+    def from_string(cls, value: Purpose | str) -> Purpose:
+        """The member for a member or an exact value; ``ValueError`` otherwise."""
+        return _parse(cls, value, "purpose")
+
+
+class LlmFailureCode(str, Enum):
+    """Why a model call failed (roadmap row 1.15): the ``failure_code`` of ``provider/error``.
+
+    Set from the exception class, never from message text, except the one existing
+    garbled-tool-call marker (``MALFORMED_RESPONSE``). ``HTTP_ERROR`` is any other HTTP
+    status of 400 or more (the number is the event's ``status_code``), ``CANCELLED`` a call
+    cancelled by its caller, ``UNKNOWN`` the fail-closed fallback.
+    """
+
+    TIMEOUT = "timeout"
+    RATE_LIMITED = "rate_limited"
+    AUTH = "auth"
+    CONTEXT_OVERFLOW = "context_overflow"
+    CONTENT_REFUSED = "content_refused"
+    MALFORMED_RESPONSE = "malformed_response"
+    TRANSPORT = "transport"
+    HTTP_ERROR = "http_error"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_string(cls, value: LlmFailureCode | str) -> LlmFailureCode:
+        """The member for a member or an exact value; ``ValueError`` otherwise."""
+        return _parse(cls, value, "llm failure code")
 
 
 _STOP_REASON_CODES: dict[str, tuple[Status, Reason | None]] = {
