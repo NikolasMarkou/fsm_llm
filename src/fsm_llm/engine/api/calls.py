@@ -219,14 +219,21 @@ def _is_request(record: Any, state_id: str) -> TypeGuard[dict[str, Any]]:
     )
 
 
-def _is_unknown_mode(record: Any, state_id: str) -> bool:
+def _is_unknown_mode(record: Any, state_id: str, *, delegated_ok: bool = True) -> bool:
     """A ``running`` record of this state whose ``mode`` is neither ``frame`` nor ``delegated``
-    (a handler, an older snapshot): a delegated record is never an unknown mode, it is the
-    run host's (K7.4)."""
+    (a handler, an older snapshot): on a ``call`` state a delegated record is never an unknown
+    mode, it is the run host's (K7.4). ``delegated_ok=False`` is the synthesize path: that kind
+    never delegates, so a forged ``delegated`` record is an unknown mode there too and fails
+    instead of waiting for a host that was never asked."""
+    modes = (
+        (TARGET_MODE_FRAME, TARGET_MODE_DELEGATED)
+        if delegated_ok
+        else (TARGET_MODE_FRAME,)
+    )
     return (
         record_belongs(record, state_id)
         and record.get("status") == Status.RUNNING.value
-        and record.get("mode") not in (TARGET_MODE_FRAME, TARGET_MODE_DELEGATED)
+        and record.get("mode") not in modes
     )
 
 
@@ -588,7 +595,7 @@ async def _try_push_requested(
         return False
     data = api.fsm_manager.copy_raw_context_data(top.conversation_id) or {}
     record = data.get(result_key)
-    unknown_mode = _is_unknown_mode(record, state.id)
+    unknown_mode = _is_unknown_mode(record, state.id, delegated_ok=False)
     if not (unknown_mode or _is_request(record, state.id)) or not isinstance(
         record, dict
     ):
