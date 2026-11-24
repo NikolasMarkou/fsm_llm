@@ -23,9 +23,14 @@ Interface contract (``api`` is an ``API``, ``root_id`` its root conversation id)
 - ``flush_run_ends(api, root_id)``: appends ``run/end`` (status, reason, target, identities of the
   committed FINAL record) for each started run of this root whose frame is no longer in flight and
   whose record is final, once, then forgets the mark. Written on the calling (engine) thread only.
-- ``wait_for_run(api, root_id)``: the ONE bounded wait, at the end of ``aadvance``: when the top
+- ``wait_for_run(api, root_id)``: the ONE bounded wait (one helper, one semantics, D-056), at the end of
+  ``aadvance`` and of the step streams (``advance_stream``): when the top
   frame has a started, unfinished run and the launcher has a ``wait`` method, wait at most
   ``DELEGATED_WAIT_SECONDS`` for it to finish, on a worker thread (``aoffload``), holding no lock.
+- ``end_runs_of(api, root_id, frame_id)`` and ``cancel_delegated_runs(targets, conversation_id,
+  frame_ids=())``: what ``pop_fsm`` does for a popped frame (and ``end_conversation`` for the
+  ended ones, ``cancel_delegated_runs`` only): tell the launcher to stop the runs of the frame and write
+  ``run/end`` (``aborted``, ``cancelled``) for each started one, at the top frame (D-056).
 - ``RunMark``: what settle remembers of a started run (``CallMarks.runs``, keyed by handle).
 - ``DELEGATED_WAIT_SECONDS``: the bound of that wait (owner-visible: a run loop over a delegated
   parent polls once per wait, so its ``max_steps`` must cover the seconds of the run over this).
@@ -34,7 +39,7 @@ Interface contract (``api`` is an ``API``, ``root_id`` its root conversation id)
 from __future__ import annotations
 
 import copy
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +62,8 @@ if TYPE_CHECKING:
 __all__ = [
     "DELEGATED_WAIT_SECONDS",
     "RunMark",
+    "cancel_delegated_runs",
+    "end_runs_of",
     "flush_run_ends",
     "settle_delegated",
     "wait_for_run",
@@ -79,6 +86,8 @@ class RunMark:
     state_id: str
     result_key: str
     target: str
+    template_identity: str | None = None
+    instance_identity: str | None = None
 
 
 # DECISION plan-2026-11-23T122249-baa37f40/D-052
@@ -213,8 +222,93 @@ def _announce(
         )
     with api._stack_lock:
         api._call_marks.runs[handle] = RunMark(
-            root_id, top.conversation_id, state.id, config.result_key, target
+            root_id,
+            top.conversation_id,
+            state.id,
+            config.result_key,
+            target,
+            delegated.template_identity,
+            delegated.instance_identity,
         )
+
+
+#: The ``run/end`` of a run whose frame was popped: stopped from outside, never final.
+_ORPHAN_END = (Status.ABORTED.value, Reason.CANCELLED.value, None, None)
+
+
+def _append_run_end(
+    log: Any,
+    root_id: str,
+    frame_index: int,
+    handle: str,
+    mark: RunMark,
+    status: Any,
+    reason: Any,
+    template_identity: Any,
+    instance_identity: Any,
+) -> None:
+    """Append one ``run/end`` at the top frame; a failed write is a WARNING (after the fact).
+
+    ``template_identity`` and ``instance_identity`` default to those of ``run/start`` (the mark)
+    when the caller has none."""
+    if log is None:
+        return
+    with warn_on_failure(EventType.RUN_END):
+        log.append(
+            root_id,
+            EventType.RUN_END,
+            frame=frame_index,
+            handle=handle,
+            target=mark.target,
+            status=status,
+            reason=reason,
+            template_identity=template_identity or mark.template_identity,
+            instance_identity=instance_identity or mark.instance_identity,
+        )
+
+
+def end_runs_of(api: _ApiSurface, root_id: str, frame_id: str) -> None:
+    """Write ``run/end`` (``aborted``/``cancelled``) for each started run of a frame that was just
+    popped, at the top frame (the parent), then drop the marks.
+
+    Contract: called by ``pop_fsm`` right after its ``stack/pop`` event, on the engine thread, with
+    no lock held; a frame with no mark writes nothing; a failed append is a WARNING (D-056)."""
+    marks = api._call_marks
+    with api._stack_lock:
+        owed = [
+            (handle, mark)
+            for handle, mark in marks.runs.items()
+            if mark.root_id == root_id and mark.frame_id == frame_id
+        ]
+        for handle, _ in owed:
+            marks.runs.pop(handle, None)
+        frame_index = max(len(api.conversation_stacks.get(root_id) or ()) - 1, 0)
+    log = getattr(api, "_event_log", None)
+    for handle, mark in owed:
+        _append_run_end(log, root_id, frame_index, handle, mark, *_ORPHAN_END)
+
+
+def cancel_delegated_runs(
+    targets: object, conversation_id: str, frame_ids: Iterable[str] = ()
+) -> None:
+    """Tell a ``RunLauncher`` resolver to stop the runs of an ended or popped conversation.
+
+    Contract (K7.2, D-050; moved here by D-056, one hook for ``end_conversation`` and
+    ``pop_fsm``): a ``targets`` that is no ``RunLauncher`` is left alone; ``cancel_for`` is called
+    once for the id and once for each OTHER frame id (a call state in a pushed frame is run under
+    that frame's manager id, D-051 (9)), never under ``_stack_lock``; a launcher that raises costs
+    one WARNING naming only the exception type (the conversation is already gone, and no text of
+    a worker or launcher error may reach the log).
+    """
+    if not isinstance(targets, RunLauncher):
+        return
+    for owner in dict.fromkeys([conversation_id, *frame_ids]):
+        try:
+            targets.cancel_for(owner)
+        except Exception as error:
+            logger.warning(
+                f"Cancelling the delegated runs of {owner} failed: {type(error).__name__}"
+            )
 
 
 def flush_run_ends(api: _ApiSurface, root_id: str) -> None:
@@ -229,11 +323,12 @@ def flush_run_ends(api: _ApiSurface, root_id: str) -> None:
     frame_index = max(len(stack) - 1, 0)
     log = getattr(api, "_event_log", None)
     for handle, mark in pending:
-        if (
-            mark.frame_id not in on_stack
-        ):  # popped or ended: nothing will ever be final here
+        if mark.frame_id not in on_stack:
+            # popped or ended: nothing will ever be final here, but the run was started and
+            # logged, so its end is owed (D-056: the run is told to stop by `pop_fsm`)
             with api._stack_lock:
                 marks.runs.pop(handle, None)
+            _append_run_end(log, root_id, frame_index, handle, mark, *_ORPHAN_END)
             continue
         peek = api.fsm_manager.peek_turn(mark.frame_id)
         if peek is None or peek[1]:  # gone, or a turn is in flight: judge after it
@@ -246,25 +341,23 @@ def flush_run_ends(api: _ApiSurface, root_id: str) -> None:
         status = record.get("status")
         if status in (None, Status.RUNNING.value):
             continue
-        if log is not None:
-            with warn_on_failure(EventType.RUN_END):
-                log.append(
-                    root_id,
-                    EventType.RUN_END,
-                    frame=frame_index,
-                    handle=handle,
-                    target=mark.target,
-                    status=status,
-                    reason=record.get("reason"),
-                    template_identity=record.get("template_identity"),
-                    instance_identity=record.get("instance_identity"),
-                )
+        _append_run_end(
+            log,
+            root_id,
+            frame_index,
+            handle,
+            mark,
+            status,
+            record.get("reason"),
+            record.get("template_identity"),
+            record.get("instance_identity"),
+        )
         with api._stack_lock:
             marks.runs.pop(handle, None)
 
 
 async def wait_for_run(api: _ApiSurface, root_id: str) -> None:
-    """The one bounded wait at the end of ``aadvance`` (see the module docstring)."""
+    """The one bounded wait at the end of ``aadvance`` and of a step stream (module docstring)."""
     launcher = api._targets
     wait = getattr(launcher, "wait", None)
     if not isinstance(launcher, RunLauncher) or not callable(wait):

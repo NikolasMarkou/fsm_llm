@@ -180,6 +180,11 @@ def _open_stream(
                 for greeting in await _settle_after(api, conversation_id):
                     yield f"\n{greeting}" if sent else greeting
                     sent = True
+                if manager_name == "advance_stream":
+                    # the SAME bounded wait as `aadvance` (D-056: one helper, one semantics), after
+                    # the step's stream is closed and every lock released; a message stream has no
+                    # run loop to pace and never waits
+                    await wait_for_run(api, conversation_id)
             finally:
                 # Auto-save session after stream completes or is abandoned
                 _auto_save_session(api, conversation_id)

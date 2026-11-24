@@ -889,6 +889,11 @@
       "delta": 1,
       "reason": "plan baa37f40 D-052 (K7.4): the anchor above settle_delegated, the start of a delegated run after the commit and only from its reservation",
       "token": "plan-2026-11-23T122249-baa37f40/D-052"
+    },
+    {
+      "delta": 1,
+      "reason": "D-056 (plan baa37f40 K7R.2): one new anchor on the popped-frame hook of pop_fsm",
+      "token": "plan-2026-11-23T122249-baa37f40/D-056"
     }
   ]
 }

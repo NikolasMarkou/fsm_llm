@@ -23,6 +23,7 @@ from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.logging import logger
 
 from .budget import budget_kwargs
+from .delegated import cancel_delegated_runs, end_runs_of
 from .events import (
     child_event_scope,
     record_context_update,
@@ -468,6 +469,15 @@ class StackMixin(_ApiSurface):
                             )
                         # the depth this pop logs: the stack right after ITS removal
                         stack_depth = len(inner_stack)
+                    # DECISION plan-2026-11-23T122249-baa37f40/D-056
+                    # A popped frame's delegated runs are told to stop HERE (this pop ends the
+                    # child through the manager, not through `API.end_conversation`, so the hook
+                    # of D-050 never ran for it) and its `run/end` is written right after the
+                    # `stack/pop` event below. Do NOT drop the run marks of the frame without a
+                    # `run/end` (a `run/start` with no end after a CLEAN pop reads as lost), do NOT
+                    # call the launcher under `_stack_lock`, do NOT join the thread, and do NOT run
+                    # the hook for a REFUSED end (the frame stays and so does its run).
+                    cancel_delegated_runs(self._targets, current_frame.conversation_id)
 
             # The popped frame is gone; release any temp def it was the last
             # frame to reference (D-011). Reference-aware, so a sub-FSM shared
@@ -485,6 +495,7 @@ class StackMixin(_ApiSurface):
                 stack_depth,
                 parent_id=previous_frame.conversation_id,
             )
+            end_runs_of(self, conversation_id, current_frame.conversation_id)
             logger.info(
                 f"Popped FSM from conversation {conversation_id}, "
                 f"stack depth: {stack_depth}"
