@@ -1416,9 +1416,9 @@ fsm_llm.agents.PythonToolLoader class
   static def from_functions(*functions: Callable[..., Any], category: str = 'general') -> list[PythonToolDefinition]
   static def load_directory(path: str | Path, pattern: str = '*.py', category: str | None = None) -> PythonToolLoadReport
   static def to_tool_registry(python_tools: list[PythonToolDefinition], registry: ToolRegistry | None = None) -> ToolRegistry
-fsm_llm.agents.REWOOAgent class(BaseAgent)
+fsm_llm.agents.REWOOAgent class(PatternAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
+  def run_stream(self, task: str, initial_context: dict[str, Any] | None = None) -> Iterator[str]
 fsm_llm.agents.ReactAgent class(PatternAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, hitl: HumanInTheLoop | None = None, use_classification: bool = False, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult

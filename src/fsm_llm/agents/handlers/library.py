@@ -9,7 +9,8 @@ family: ``agents.tool_executor``, ``agents.think_turn_limiter``, ``agents.iterat
 prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``), the native function-calling
 GROUP ``agents.native_fc`` (eight handlers; bodies in ``native_fc.py``) and the orchestrator pair
 (``agents.orchestrator_delegator``, body in ``orchestrator.py``, and ``agents.orchestrator_decision_reset``),
-plus one HOOK, ``agents.raise_run_ending_error`` (below). Each is its own function (a ``NameRegistry`` refuses one function under two
+the REWOO executor (``agents.rewoo_executor``, body in ``rewoo.py``), plus two HOOKS,
+``agents.raise_run_ending_error`` and ``agents.rewoo_cut_off_answer`` (below). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
 state filter and priority the live registration of ``base/registration.py`` and ``base/hitl_gate.py``
@@ -27,7 +28,8 @@ Interface contract:
 - A HOOK is a library entry in the same namespace (D-004) bound under ``run.hooks``: ``factory(ctx,
   binding) -> Callable[[], None]``, called once per run, whose result the agent calls when the loop
   ends (``at: after_run``, in the declared order, also when the run raised). It reads the same
-  per-run ``ctx`` (the holder a handler fills lives in ``ctx.scope``).
+  per-run ``ctx`` (the holder a handler fills lives in ``ctx.scope``); a hook that rewrites the answer
+  replaces ``ctx.scope[RUN_RESULT]``.
 - Failure: ``AgentError`` for a missing ``tools`` registry (the executor and the limiter that shares
   it), a key that is internal-prefixed or secret-looking (D2), or a bad ``limit``.
 """
@@ -42,11 +44,13 @@ from fsm_llm.agents.constants import (
     AgentStates,
     ContextKeys,
     Defaults,
+    ErrorMessages,
     HandlerNames,
     HandlerPriorities,
     OrchestratorStates,
     PromptChainStates,
     ReflexionStates,
+    REWOOStates,
 )
 from fsm_llm.agents.tools import make_hitl_checker
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
@@ -55,7 +59,7 @@ from fsm_llm.engine.executables.namespaces import GENERATORS, HANDLERS
 from fsm_llm.handlers import HandlerTiming, create_handler
 
 from .chain import make_gate_checker
-from .context import HandlerContext
+from .context import RUN_RESULT, HandlerContext
 from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
@@ -66,6 +70,7 @@ from .reflection import (
     make_evaluation_handler,
     make_reflection_handler,
 )
+from .rewoo import execute_plans
 from .run_guards import RunEndingErrorHolder
 
 if TYPE_CHECKING:
@@ -459,6 +464,50 @@ def raise_run_ending_error(
     return _run_holder(ctx).raise_if_set
 
 
+def rewoo_executor(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.rewoo_executor``: runs the plan with the run's tools on entry to ``execute_plans``."""
+    tools = ctx.tools
+    if tools is None:
+        raise AgentError(
+            "agents.rewoo_executor needs the run's tools and the context has none"
+        )
+    return [
+        create_handler(HandlerNames.REWOO_EXECUTOR)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_entry(*_states(binding, (REWOOStates.EXECUTE_PLANS,)))
+        .do(lambda context: execute_plans(context, tools))
+    ]
+
+
+def rewoo_cut_off_answer(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> Callable[[], None]:
+    """``agents.rewoo_cut_off_answer`` (a HOOK, ``at: after_run``): a plan cut off at ``max_tokens`` ships its cause."""
+
+    # DECISION plan-2026-11-06T093029-0068b055/D-025: a plan cut off at
+    # max_tokens ships the cause as the answer, not the `solve` state's
+    # filler about evidence that does not exist. The `solve` call has
+    # already been made by then (the FSM is linear; adding a branch for the
+    # rare cut is not worth a second plan path). Do NOT run the cut plan's
+    # prefix and do NOT retry at a higher cap here.
+    def rewrite() -> None:
+        result = ctx.scope.get(RUN_RESULT)
+        if (
+            result is not None
+            and result.final_context.get(ContextKeys.PLAN_CUT_OFF) is True
+        ):
+            ctx.scope[RUN_RESULT] = result.model_copy(
+                update={
+                    "answer": ErrorMessages.REWOO_PLAN_CUT_OFF,
+                    "structured_output": None,
+                }
+            )
+
+    return rewrite
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -496,12 +545,14 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.native_fc", native_fc),
     ("agents.orchestrator_delegator", orchestrator_delegator),
     ("agents.orchestrator_decision_reset", orchestrator_decision_reset),
+    ("agents.rewoo_executor", rewoo_executor),
     ("agents.approval_gate", approval_gate),
 )
 
 #: The hooks of the same namespace (``run.hooks``): ``factory(ctx, binding) -> Callable[[], None]``.
 HOOKS: tuple[tuple[str, Callable[..., Callable[[], None]]], ...] = (
     ("agents.raise_run_ending_error", raise_run_ending_error),
+    ("agents.rewoo_cut_off_answer", rewoo_cut_off_answer),
 )
 
 

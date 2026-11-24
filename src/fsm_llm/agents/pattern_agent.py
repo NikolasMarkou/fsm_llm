@@ -18,7 +18,8 @@ Interface contract:
   (``AgentError``). ``callables`` are named host objects a factory may read (``HandlerContext``).
   The run block honours ``agent_type``, ``answer_keys``, ``success_keys``, ``evidence_keys``,
   ``judged``, ``context_seed`` and the hooks ``at: after_run`` (D-022: library entries called, in
-  declared order, when the loop ends, also when it raised; an error of a hook propagates);
+  declared order, when the loop ends, also when it raised; an error of a hook propagates; a hook may replace
+  the run's result in ``handlers.scope[RUN_RESULT]``, which ``run`` then returns);
   ``step_budget``, ``run_output_keys``, ``seconds_exempt`` and the hooks ``before_run`` and
   ``on_iteration`` have no seam yet and are REFUSED at construction (``AgentError``), never ignored.
 - HITL, fail closed (census D1): a file that binds ``agents.approval_gate`` runs
@@ -40,7 +41,7 @@ from typing import Any
 
 from fsm_llm import API
 from fsm_llm.agents.constants import Defaults, LogMessages
-from fsm_llm.agents.handlers.context import HandlerContext
+from fsm_llm.agents.handlers.context import RUN_RESULT, HandlerContext
 from fsm_llm.agents.pattern_inputs import pattern_fsm, refuse_reserved_options
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
@@ -214,7 +215,7 @@ class PatternAgent(BaseAgent):
         """Run the pattern on *task* (one call-local ``HandlerContext``; see the module docstring)."""
         fsm_def, context, handlers = self._run_inputs(task, initial_context)
         try:
-            return self._standard_run(
+            handlers.scope[RUN_RESULT] = self._standard_run(
                 task,
                 fsm_def,
                 context,
@@ -225,6 +226,8 @@ class PatternAgent(BaseAgent):
             )
         finally:
             self._after_run(handlers)
+        result: AgentResult = handlers.scope[RUN_RESULT]  # a hook may have replaced it
+        return result
 
     def run_stream(
         self, task: str, initial_context: dict[str, Any] | None = None
@@ -249,7 +252,8 @@ class PatternAgent(BaseAgent):
     # orchestrator had). Do NOT run them only on success, do NOT swallow a hook error, do NOT accept a
     # handler factory as a hook (or the reverse), and do NOT honour `before_run` or `on_iteration`
     # until a seam and a client exist (refused at construction). A model-origin document never binds
-    # a hook (V7).
+    # a hook (V7). A hook may replace the result of a finished run through `handlers.scope[RUN_RESULT]`
+    # (D-025 of this plan: REWOO's cut-off answer); on a raising loop or a stream the slot is empty.
     def _after_run(self, handlers: HandlerContext) -> None:
         """Call the file's ``after_run`` hooks, in declared order, each built from this run's context.
 

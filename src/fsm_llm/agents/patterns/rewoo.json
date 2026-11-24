@@ -1,0 +1,144 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "rewoo",
+  "name": "rewoo",
+  "description": "REWOO agent: plans every tool call upfront, runs them with no model call and answers from the evidence",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "outputs": []
+  },
+  "requires": {
+    "tools": "some",
+    "handlers": [
+      "agents.rewoo_executor",
+      "agents.iteration_limiter",
+      "agents.rewoo_cut_off_answer"
+    ],
+    "callables": [
+      "tools"
+    ]
+  },
+  "capabilities": [
+    "tools"
+  ],
+  "lifecycle": "builtin",
+  "variables": [
+    "plan_instructions",
+    "context_names"
+  ],
+  "body": {
+    "fsm": {
+      "name": "rewoo_agent",
+      "description": "REWOO agent with upfront planning",
+      "initial_state": "plan_all",
+      "persona": "You are a methodical AI agent that solves tasks by planning all tool calls upfront, then executing them, and finally synthesizing an answer from the collected evidence. You think before you act, and you plan completely.",
+      "states": {
+        "plan_all": {
+          "id": "plan_all",
+          "description": "Create a complete plan of all tool calls needed",
+          "purpose": "Generate a full plan with tool calls and variable references",
+          "required_context_keys": [
+            "plan_blueprint"
+          ],
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "plan_blueprint",
+              "field_type": "list",
+              "extraction_instructions": "Extract the 'plan_blueprint' field (list) from the task and the {{context_names}} values in the 'Already extracted:' context. {{plan_instructions}}",
+              "context_keys": {
+                "$hole": "context_keys"
+              },
+              "required": true
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "execute_plans",
+              "description": "Plan is complete, proceed to execution",
+              "priority": 100
+            }
+          ]
+        },
+        "execute_plans": {
+          "id": "execute_plans",
+          "description": "Execute all planned tool calls sequentially",
+          "purpose": "Run every tool call from the plan, substituting variable references",
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "solve",
+              "description": "All plans executed, proceed to synthesize answer",
+              "priority": 100
+            }
+          ]
+        },
+        "solve": {
+          "id": "solve",
+          "description": "Synthesize the final answer from all evidence",
+          "purpose": "Combine the task, plan, and all tool results into a final answer",
+          "response_instructions": "Present your final answer clearly, referencing the evidence gathered from the planned tool executions.",
+          "transitions": []
+        }
+      },
+      "handler_only_keys": [
+        "max_iterations_reached",
+        "forced_stop_reason",
+        "iteration_count",
+        "observation_count",
+        "refused_actions"
+      ]
+    },
+    "handlers": [
+      {
+        "handler": "agents.rewoo_executor",
+        "on": "entry",
+        "states": [
+          "execute_plans"
+        ]
+      },
+      {
+        "handler": "agents.iteration_limiter",
+        "on": "state",
+        "keys": [
+          "max_iterations_reached",
+          "should_terminate"
+        ]
+      }
+    ],
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "context_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Context keys every think field prompt lists (filled by the agent)"
+        }
+      }
+    },
+    "options": {
+      "context_keys": []
+    },
+    "run": {
+      "agent_type": "rewoo",
+      "evidence_keys": [
+        "evidence_status"
+      ],
+      "context_seed": {
+        "evidence_status": []
+      },
+      "hooks": [
+        {
+          "hook": "agents.rewoo_cut_off_answer",
+          "at": "after_run"
+        }
+      ]
+    }
+  }
+}

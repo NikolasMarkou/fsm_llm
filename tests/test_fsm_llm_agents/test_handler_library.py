@@ -175,9 +175,13 @@ class TestTheNamespaces:
             "agents.native_fc",
             "agents.orchestrator_delegator",
             "agents.orchestrator_decision_reset",
+            "agents.rewoo_executor",
             "agents.approval_gate",
         ]
-        assert [name for name, _ in lib.HOOKS] == ["agents.raise_run_ending_error"]
+        assert [name for name, _ in lib.HOOKS] == [
+            "agents.raise_run_ending_error",
+            "agents.rewoo_cut_off_answer",
+        ]
         for name, factory in (*LIBRARY, *lib.HOOKS):
             assert HANDLERS.resolve(name) is factory
             assert HANDLERS.name_of(factory) == name

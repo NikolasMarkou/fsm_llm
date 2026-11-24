@@ -43,6 +43,7 @@ PATTERN_ORDER: tuple[str, ...] = (
     "prompt_chain",
     "native_fc",
     "orchestrator",
+    "rewoo",
 )
 
 

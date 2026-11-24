@@ -10,7 +10,7 @@ Interface contract (plan a555dcfe step 7, D-013):
   ``_hitl_active`` and ``_approval_predicate``): the predicate is set exactly when the run is
   HITL-active, anything else raises ``AgentError`` at construction. ``options`` and ``callables`` are
   read-only copies (resolved option values; named callables a factory may call), ``scope`` is the run's
-  mutable bag (the shared ``AgentHandlers`` of a run lives in it).
+  mutable bag (the shared ``AgentHandlers`` of a run lives in it, and ``RUN_RESULT`` once the loop ended).
 - ``next_run()`` returns the same context with a new empty ``scope``: two runs never share one.
 - A factory reads a context and never stores it, or anything built from it, on a registry or on
   ``self``: the registry holds factories, a run holds its handlers (D-014 of plan 089d0ec7).
@@ -30,7 +30,11 @@ if TYPE_CHECKING:
     from fsm_llm.policy import ApprovalPolicy, HumanInTheLoop
     from fsm_llm.tools import ToolRegistry
 
-__all__ = ["HandlerContext"]
+__all__ = ["RUN_RESULT", "HandlerContext"]
+
+#: The ``scope`` key under which ``PatternAgent`` puts the ``AgentResult`` of a finished run for the
+#: ``after_run`` hooks: a hook may replace it, and the value left there is what ``run`` returns.
+RUN_RESULT = "run_result"
 
 
 @dataclass(frozen=True)

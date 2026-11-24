@@ -14,8 +14,8 @@ pattern with no tools), ``task_description`` is only the retrieval query of a se
 ``output_schema`` the config's output model, ``context_keys`` the caller's prompt keys (names
 only, ``caller_prompt_keys``). Derived, filled for the names the envelope declares: options
 ``context_keys`` (the default of that option is the file's lead keys, the caller's follow), ``schema_field_names``, ``tool_intents`` (with the ``classification`` variant)
-and the text variables ``think_instructions`` and ``context_names`` (the key names, quoted, as the
-field prompts print them); ``variables`` are the agent's own extra text variables (a pattern's system
+and the text variables ``think_instructions`` and ``plan_instructions`` (the tool sections of the ReAct and REWOO
+prompts) and ``context_names`` (the key names, quoted, as the field prompts print them); ``variables`` are the agent's own extra text variables (a pattern's system
 message, D-021), merged after those. Raises ``AgentError`` for an option named
 ``approval`` or like a derived input; ``ValueError`` for a context key that is ``agent_trace`` or
 internal-prefixed (as the builder always did); ``InstantiationError`` for what the envelope
@@ -24,7 +24,7 @@ refuses. A generator body (``prompt_chain``, D-019) is written by ``GENERATORS``
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
 from fsm_llm.agents.constants import ContextKeys
@@ -32,7 +32,10 @@ from fsm_llm.agents.fsm_definitions._loop import (
     _schema_field_names,
     loop_field_context_keys,
 )
-from fsm_llm.agents.prompts import build_think_extraction_instructions
+from fsm_llm.agents.prompts import (
+    build_rewoo_plan_field_instructions,
+    build_think_extraction_instructions,
+)
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
 from fsm_llm.core.definitions.executable_instance import instantiate_body
@@ -52,7 +55,11 @@ APPROVAL_VARIANT = "approval"
 #: The options the agent fills itself (a caller cannot give them).
 DERIVED_OPTIONS = frozenset({"context_keys", "schema_field_names", "tool_intents"})
 
-_THINK_TEXT = "think_instructions"
+#: The text variables built from the run's tools (the tool section of a prompt), by variable name.
+_TOOL_TEXTS: dict[str, Callable[..., str]] = {
+    "think_instructions": build_think_extraction_instructions,
+    "plan_instructions": build_rewoo_plan_field_instructions,
+}
 _KEYS_TEXT = "context_names"
 
 
@@ -93,12 +100,10 @@ def pattern_fsm(
         if name != APPROVAL_VARIANT and name in declared and given.get(name) is True
     ]
     texts: dict[str, str] = {}
-    if _THINK_TEXT in envelope.variables:
-        # first, as the builder did: an unusable registry fails before a bad key does
-        texts[_THINK_TEXT] = build_think_extraction_instructions(
-            tools,  # type: ignore[arg-type]
-            task_description=task_description,
-        )
+    for name, build in _TOOL_TEXTS.items():
+        if name in envelope.variables:
+            # first, as the builders did: an unusable registry fails before a bad key does
+            texts[name] = build(tools, task_description=task_description)
     values = dict(given)
     if "context_keys" in declared:
         # the file's default of this option holds its lead keys (react: agent_feedback;

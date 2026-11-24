@@ -24,6 +24,7 @@ became this package at the same dotted path; the import surface is unchanged):
 - ``native_fc`` -- ``NativeFCHandlers`` (the eight handlers of a native function-calling run, built by the library
   group ``agents.native_fc``; not in ``__all__``)
 - ``orchestrator`` -- ``delegate_to_workers``, the body of ``agents.orchestrator_delegator`` (not in ``__all__``)
+- ``rewoo`` -- ``execute_plans`` and the ``#E<n>`` substitution, the body of ``agents.rewoo_executor`` (not in ``__all__``)
 - ``context`` -- ``HandlerContext``, the per-run value the library factories read (import it from
   ``fsm_llm.agents.handlers.context``; it is not in ``__all__``)
 - ``library`` -- the named factories a pattern file binds (``agents.tool_executor``, ...),
