@@ -24,7 +24,7 @@ Interface contract:
   ``on_iteration`` have no seam yet and are REFUSED at construction (``AgentError``), never ignored.
 - HITL, fail closed (census D1): a file that binds ``agents.approval_gate`` runs
   ``_refuse_unapprovable_flagged_tools`` at construction and at the start of every run and selects the
-  ``approval`` variant exactly under ``_hitl_active``; a file whose ``requires.tools`` is ``some`` and
+  ``approval`` variant exactly under ``_hitl_active``; a file whose ``requires.tools`` is ``some`` (or that binds ``agents.tool_executor``) and
   that binds no gate runs ``_refuse_flagged_tools`` at both places (D-021); a ``HumanInTheLoop`` given to a file with no
   gate is refused at construction (a file whose ``requires.tools`` is ``none`` refuses ``tools=`` and ``hitl=``
   with the base ``TypeError`` of ``reject_misplaced_kwargs``). The grant check stays in ``AgentHandlers.approval_refusal``.
@@ -62,6 +62,7 @@ from .definitions import AgentConfig, AgentResult
 __all__ = ["PatternAgent"]
 
 _TOOL_EXECUTOR = "agents.tool_executor"
+_THINK_LIMITER = "agents.think_turn_limiter"
 _NO_SEAM = ("step_budget", "run_output_keys", "seconds_exempt")
 _AFTER_RUN = "after_run"
 
@@ -92,10 +93,12 @@ class PatternAgent(BaseAgent):
             )
         bound = {binding.handler for binding in body.handlers}
         self._gate = APPROVAL_GATE_HANDLER in bound
-        # a file that says it needs tools runs them (react, reflexion, native_fc: D-021); only the
-        # ReAct loop (`agents.tool_executor`) takes the react context seed
-        self._executes_tools = envelope.requires.tools == "some"
-        self._react_loop = _TOOL_EXECUTOR in bound
+        # a file that says it needs tools, or binds the executor, runs them (D-021); only the ReAct
+        # loop (the executor with the think-turn limiter) takes the react context seed
+        self._executes_tools = (
+            envelope.requires.tools == "some" or _TOOL_EXECUTOR in bound
+        )
+        self._react_loop = _TOOL_EXECUTOR in bound and _THINK_LIMITER in bound
         if "tools" in envelope.requires.callables:
             self._require_tools(tools)
         refuse_reserved_options(envelope, options or {})

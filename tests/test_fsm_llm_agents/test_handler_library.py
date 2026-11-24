@@ -176,6 +176,10 @@ class TestTheNamespaces:
             "agents.orchestrator_delegator",
             "agents.orchestrator_decision_reset",
             "agents.rewoo_executor",
+            "agents.plan_step_executor",
+            "agents.plan_step_fresh_keys",
+            "agents.plan_step_checker",
+            "agents.plan_replan_counter",
             "agents.approval_gate",
         ]
         assert [name for name, _ in lib.HOOKS] == [

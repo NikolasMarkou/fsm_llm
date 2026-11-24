@@ -1394,9 +1394,8 @@ fsm_llm.agents.OutputError class(MetaBuilderError)
 fsm_llm.agents.ParallelReactAgent class(BaseAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, max_parallel: int = 4, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
-fsm_llm.agents.PlanExecuteAgent class(BaseAgent)
+fsm_llm.agents.PlanExecuteAgent class(PatternAgent)
   def __init__(self, tools: ToolRegistry | None = None, config: AgentConfig | None = None, max_replans: int = 2, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.PlanStep class(BaseModel)
   field step_id: int required
   field description: str required

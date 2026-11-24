@@ -989,6 +989,16 @@
       "delta": -1,
       "reason": "step 13 of plan a555dcfe (D-022): orchestrator is a pattern file; OrchestratorAgent.run and build_orchestrator_fsm bodies are replaced: the call-local holder rule (06a5ec0a/D-014) is carried by the 06a5ec0a/D-042 anchor of agents.raise_run_ending_error and by HandlerContext.scope, the successful-worker-evidence rule (cb91a9d5/D-001, stale) by run.evidence_keys in orchestrator.json held by test_pattern_orchestrator, the FSM shape rules (06a5ec0a/D-053, 07ad3f8c/D-031, 0068b055/D-013) by test_pattern_shapes and the D-015 anchor of pattern_files; a555dcfe/D-022 is new",
       "token": "plan_2026-05-31_cb91a9d5/D-001"
+    },
+    {
+      "delta": -3,
+      "reason": "step 15 of plan a555dcfe (plan_execute as a pattern file, D-026): 45a654de/D-012 x3 (the call-local handlers rule of PlanExecuteAgent, now held by PatternAgent and its 089d0ec7/D-014 anchor) and cb91a9d5/D-001 stale (the execution-evidence rule, now run.evidence_keys of patterns/plan_execute.json) dropped with the replaced code; 21cd7f8e/D-046, c1d5bfbc/D-024 and 5ed71cf2/D-011 kept as one anchor each in plan_execute.py (rules of the file); 5ed71cf2/D-011 second token moved with the checker body",
+      "token": "plan-2026-09-12T135914-45a654de/D-012"
+    },
+    {
+      "delta": -1,
+      "reason": "step 15 of plan a555dcfe (plan_execute as a pattern file, D-026): 45a654de/D-012 x3 (the call-local handlers rule of PlanExecuteAgent, now held by PatternAgent and its 089d0ec7/D-014 anchor) and cb91a9d5/D-001 stale (the execution-evidence rule, now run.evidence_keys of patterns/plan_execute.json) dropped with the replaced code; 21cd7f8e/D-046, c1d5bfbc/D-024 and 5ed71cf2/D-011 kept as one anchor each in plan_execute.py (rules of the file); 5ed71cf2/D-011 second token moved with the checker body",
+      "token": "plan_2026-05-31_cb91a9d5/D-001"
     }
   ]
 }

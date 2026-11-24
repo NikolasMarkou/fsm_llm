@@ -1,0 +1,305 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "plan_execute",
+  "name": "plan_execute",
+  "description": "Plan-and-Execute agent: plans the steps, executes each one (with a tool when there are tools), checks the result and replans a failed step up to a cap",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "outputs": []
+  },
+  "requires": {
+    "tools": "none",
+    "handlers": [
+      "agents.tool_executor",
+      "agents.plan_step_executor",
+      "agents.plan_step_fresh_keys",
+      "agents.plan_step_checker",
+      "agents.plan_replan_counter"
+    ],
+    "callables": []
+  },
+  "capabilities": [],
+  "lifecycle": "builtin",
+  "variables": [
+    "step_instructions",
+    "step_result_instructions",
+    "plan_steps_instructions",
+    "replan_steps_instructions"
+  ],
+  "body": {
+    "fsm": {
+      "name": "plan_execute_agent",
+      "description": "Plan-and-Execute agent",
+      "initial_state": "plan",
+      "persona": "You are a strategic AI agent that solves tasks by first creating a plan, then executing each step methodically. If a step fails, you can revise the remaining plan. When all steps are complete, you synthesize results into a final answer.",
+      "states": {
+        "plan": {
+          "id": "plan",
+          "description": "Decompose the task into a sequence of steps",
+          "purpose": "Create an actionable plan to solve the task",
+          "required_context_keys": [
+            "plan_steps"
+          ],
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "plan_steps",
+              "field_type": "list",
+              "extraction_instructions": "Extract the 'plan_steps' field (list) from the task and the 'task', 'observations' values in the 'Already extracted:' context. {{plan_steps_instructions}}",
+              "context_keys": [
+                "task",
+                "observations"
+              ],
+              "required": true
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "execute_step",
+              "description": "Plan is ready, begin executing steps",
+              "priority": 100,
+              "conditions": [
+                {
+                  "description": "Plan steps have been generated",
+                  "logic": {
+                    "has_context": "plan_steps"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "execute_step": {
+          "id": "execute_step",
+          "description": "Execute the current plan step",
+          "purpose": "Produce a result for the current step using tools or LLM",
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "tool_name",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'tool_name' field. {{step_instructions}}",
+              "context_keys": [
+                "task",
+                "observations",
+                "current_step_description",
+                "step_results"
+              ]
+            },
+            {
+              "field_name": "tool_input",
+              "field_type": "dict",
+              "extraction_instructions": "Extract the 'tool_input' field. {{step_instructions}}",
+              "context_keys": [
+                "task",
+                "observations",
+                "current_step_description",
+                "step_results"
+              ]
+            },
+            {
+              "field_name": "step_result",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'step_result' field (str) from the task and the 'task', 'observations', 'current_step_description', 'step_results' values in the 'Already extracted:' context. {{step_result_instructions}}",
+              "context_keys": [
+                "task",
+                "observations",
+                "current_step_description",
+                "step_results"
+              ],
+              "required": false
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "check_result",
+              "description": "Step executed, check the result",
+              "priority": 100
+            }
+          ]
+        },
+        "check_result": {
+          "id": "check_result",
+          "description": "Assess the step result and decide next action",
+          "purpose": "Determine if step succeeded and whether to continue, replan, or synthesize",
+          "extraction_instructions": "",
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "synthesize",
+              "description": "All steps complete, synthesize final answer",
+              "priority": 10,
+              "conditions": [
+                {
+                  "description": "All plan steps are complete",
+                  "logic": {
+                    "==": [
+                      {
+                        "var": "all_steps_complete"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "replan",
+              "description": "Step failed, revise the plan",
+              "priority": 150,
+              "conditions": [
+                {
+                  "description": "The step did not succeed",
+                  "logic": {
+                    "==": [
+                      {
+                        "var": "step_failed"
+                      },
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "execute_step",
+              "description": "Proceed to the next plan step",
+              "priority": 300
+            }
+          ]
+        },
+        "replan": {
+          "id": "replan",
+          "description": "Revise the remaining plan after a step failure",
+          "purpose": "Incorporate lessons from the failure into a revised plan",
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "plan_steps",
+              "field_type": "list",
+              "extraction_instructions": "Extract the 'plan_steps' field (list) from the task and the 'task', 'observations', 'step_results', 'previous_plan_steps' values in the 'Already extracted:' context. {{replan_steps_instructions}}",
+              "context_keys": [
+                "task",
+                "observations",
+                "step_results",
+                "previous_plan_steps"
+              ],
+              "required": true
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "execute_step",
+              "description": "Resume execution with revised plan",
+              "priority": 100
+            }
+          ]
+        },
+        "synthesize": {
+          "id": "synthesize",
+          "description": "Combine all step results into a final answer",
+          "purpose": "Produce a comprehensive answer from all step results",
+          "response_instructions": "Present a clear, complete answer that integrates results from all plan steps. Reference specific step results as evidence.",
+          "transitions": []
+        }
+      },
+      "handler_only_keys": [
+        "max_iterations_reached",
+        "forced_stop_reason",
+        "iteration_count",
+        "observation_count",
+        "refused_actions"
+      ]
+    },
+    "handlers": [
+      {
+        "handler": "agents.tool_executor",
+        "on": "entry",
+        "states": [
+          "check_result"
+        ],
+        "params": {
+          "optional": true
+        }
+      },
+      {
+        "handler": "agents.plan_step_executor",
+        "on": "entry",
+        "states": [
+          "execute_step"
+        ]
+      },
+      {
+        "handler": "agents.plan_step_fresh_keys",
+        "on": "entry",
+        "states": [
+          "execute_step"
+        ]
+      },
+      {
+        "handler": "agents.plan_step_checker",
+        "on": "entry",
+        "states": [
+          "check_result"
+        ]
+      },
+      {
+        "handler": "agents.plan_replan_counter",
+        "on": "entry",
+        "states": [
+          "replan"
+        ]
+      }
+    ],
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "max_replans": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Replan cycles before a failed step ends the plan (0: no replans)"
+        }
+      }
+    },
+    "options": {
+      "max_replans": 2
+    },
+    "variants": {
+      "without_tools": [
+        {
+          "op": "remove",
+          "path": "/states/execute_step/field_extractions/1"
+        },
+        {
+          "op": "remove",
+          "path": "/states/execute_step/field_extractions/0"
+        },
+        {
+          "op": "replace",
+          "path": "/states/execute_step/field_extractions/0/required",
+          "value": true
+        }
+      ]
+    },
+    "run": {
+      "agent_type": "plan_execute",
+      "evidence_keys": [
+        "step_results"
+      ],
+      "context_seed": {
+        "observations": [],
+        "plan_steps": [],
+        "current_step_index": 0,
+        "step_results": [],
+        "all_steps_complete": false,
+        "step_failed": false
+      }
+    }
+  }
+}

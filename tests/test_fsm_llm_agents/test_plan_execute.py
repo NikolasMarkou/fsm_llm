@@ -124,28 +124,26 @@ class TestPlanExecuteAgentCreation:
         assert not hasattr(agent, "_handlers")
 
     def test_register_handlers_wires_executor_when_handlers_present(self):
-        """`_register_handlers(api, handlers)` registers the tool executor
-        when a real AgentHandlers is passed in (tools-configured mode)."""
+        """`_register_handlers(api, context)` registers the tool executor
+        first when the run has tools (the handlers are the file's, step 15)."""
         from unittest.mock import Mock
 
-        from fsm_llm.agents.handlers import AgentHandlers
-
-        registry = _make_registry()
-        agent = PlanExecuteAgent(tools=registry)
+        agent = PlanExecuteAgent(tools=_make_registry())
         api = Mock()
-        handlers = AgentHandlers(registry)
-        agent._register_handlers(api, handlers)
-        assert api.register_handler.called
+        agent._register_handlers(api, agent._handler_context())
+        names = [c.args[0].name for c in api.register_handler.call_args_list]
+        assert names[0] == "AgentToolExecutor" and len(names) == 5
 
-    def test_register_handlers_skips_executor_when_handlers_none(self):
-        """`_register_handlers(api, None)` must not raise — tool-less mode
-        is a legitimate, expected value distinct from react.py's mandatory-
-        tools guard (see decisions.md D-012 / plan.md invariant 9)."""
+    def test_register_handlers_skips_executor_when_there_are_no_tools(self):
+        """Tool-less mode must not raise and binds no executor: the four plan
+        handlers only (the file binds the executor as `optional`, D-012)."""
         from unittest.mock import Mock
 
         agent = PlanExecuteAgent()
         api = Mock()
-        agent._register_handlers(api, None)
+        agent._register_handlers(api, agent._handler_context())
+        names = [c.args[0].name for c in api.register_handler.call_args_list]
+        assert "AgentToolExecutor" not in names and len(names) == 4
 
     def test_stores_tools_reference(self):
         registry = _make_registry()
@@ -539,7 +537,7 @@ class TestPlanHandlers:
 
         track = PlanExecuteAgent()._make_step_tracker()
         plan = [f"step {i}" for i in range(Defaults.MAX_PLAN_STEPS + 5)]
-        with patch("fsm_llm.agents.plan_execute.logger") as log:
+        with patch("fsm_llm.agents.handlers.plan_execute.logger") as log:
             updates = track({ContextKeys.PLAN_STEPS: plan})
         assert updates[ContextKeys.PLAN_STEPS] == plan[: Defaults.MAX_PLAN_STEPS]
         assert any("capped" in str(c) for c in log.warning.call_args_list)

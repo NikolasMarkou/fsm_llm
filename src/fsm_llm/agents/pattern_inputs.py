@@ -8,14 +8,16 @@ inputs, which are the agent's own and which a caller may not give.
 
 Interface contract: ``pattern_fsm(envelope, *, tools, task_description="", approval=False,
 options=None, output_schema=None, context_keys=(), variables=None) -> dict``: the instantiated FSM as a fresh
-dict (key order is the template's). ``tools`` is the run's ``ToolRegistry`` (``None`` for a
+dict (key order is the template's). The variant ``without_tools`` is derived too: selected, when the file declares
+it, for a run whose registry is ``None`` or empty (step 15). ``tools`` is the run's ``ToolRegistry`` (``None`` for a
 pattern with no tools), ``task_description`` is only the retrieval query of a semantic registry,
 ``approval`` selects the ``approval`` variant, ``options`` are the caller's options,
 ``output_schema`` the config's output model, ``context_keys`` the caller's prompt keys (names
 only, ``caller_prompt_keys``). Derived, filled for the names the envelope declares: options
 ``context_keys`` (the default of that option is the file's lead keys, the caller's follow), ``schema_field_names``, ``tool_intents`` (with the ``classification`` variant)
-and the text variables ``think_instructions`` and ``plan_instructions`` (the tool sections of the ReAct and REWOO
-prompts) and ``context_names`` (the key names, quoted, as the field prompts print them); ``variables`` are the agent's own extra text variables (a pattern's system
+and the text variables ``think_instructions``, ``plan_instructions``, ``step_instructions``,
+``step_result_instructions``, ``plan_steps_instructions`` and ``replan_steps_instructions`` (the tool sections of the
+ReAct, REWOO and Plan-and-Execute prompts) and ``context_names`` (the key names, quoted, as the field prompts print them); ``variables`` are the agent's own extra text variables (a pattern's system
 message, D-021), merged after those. Raises ``AgentError`` for an option named
 ``approval`` or like a derived input; ``ValueError`` for a context key that is ``agent_trace`` or
 internal-prefixed (as the builder always did); ``InstantiationError`` for what the envelope
@@ -25,6 +27,7 @@ refuses. A generator body (``prompt_chain``, D-019) is written by ``GENERATORS``
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import Any, cast
 
 from fsm_llm.agents.constants import ContextKeys
@@ -33,6 +36,8 @@ from fsm_llm.agents.fsm_definitions._loop import (
     loop_field_context_keys,
 )
 from fsm_llm.agents.prompts import (
+    build_execute_step_instructions,
+    build_plan_steps_instructions,
     build_rewoo_plan_field_instructions,
     build_think_extraction_instructions,
 )
@@ -45,6 +50,7 @@ from fsm_llm.tools import ToolRegistry
 __all__ = [
     "APPROVAL_VARIANT",
     "DERIVED_OPTIONS",
+    "TOOLLESS_VARIANT",
     "pattern_fsm",
     "refuse_reserved_options",
 ]
@@ -55,10 +61,20 @@ APPROVAL_VARIANT = "approval"
 #: The options the agent fills itself (a caller cannot give them).
 DERIVED_OPTIONS = frozenset({"context_keys", "schema_field_names", "tool_intents"})
 
-#: The text variables built from the run's tools (the tool section of a prompt), by variable name.
+#: The variant a run with no tools (``None`` or an empty registry) selects when the file declares it.
+TOOLLESS_VARIANT = "without_tools"
+
+#: The text variables built from the run's tools (the tool section of a prompt), by variable name,
+#: in the order the builders called them.
 _TOOL_TEXTS: dict[str, Callable[..., str]] = {
     "think_instructions": build_think_extraction_instructions,
     "plan_instructions": build_rewoo_plan_field_instructions,
+    "step_instructions": build_execute_step_instructions,
+    "step_result_instructions": partial(
+        build_execute_step_instructions, step_result=True
+    ),
+    "plan_steps_instructions": build_plan_steps_instructions,
+    "replan_steps_instructions": partial(build_plan_steps_instructions, replan=True),
 }
 _KEYS_TEXT = "context_names"
 
@@ -99,6 +115,8 @@ def pattern_fsm(
         for name in body.variants
         if name != APPROVAL_VARIANT and name in declared and given.get(name) is True
     ]
+    if TOOLLESS_VARIANT in body.variants and not (tools is not None and len(tools) > 0):
+        variants.append(TOOLLESS_VARIANT)
     texts: dict[str, str] = {}
     for name, build in _TOOL_TEXTS.items():
         if name in envelope.variables:

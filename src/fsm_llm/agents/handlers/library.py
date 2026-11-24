@@ -9,7 +9,9 @@ family: ``agents.tool_executor``, ``agents.think_turn_limiter``, ``agents.iterat
 prompt-chain gate (``agents.chain_gate_checker``; body in ``chain.py``), the native function-calling
 GROUP ``agents.native_fc`` (eight handlers; bodies in ``native_fc.py``) and the orchestrator pair
 (``agents.orchestrator_delegator``, body in ``orchestrator.py``, and ``agents.orchestrator_decision_reset``),
-the REWOO executor (``agents.rewoo_executor``, body in ``rewoo.py``), plus two HOOKS,
+the REWOO executor (``agents.rewoo_executor``, body in ``rewoo.py``), the Plan-and-Execute four
+(``agents.plan_step_executor``, ``plan_step_fresh_keys``, ``plan_step_checker`` and
+``plan_replan_counter``; bodies in ``plan_execute.py``), plus two HOOKS,
 ``agents.raise_run_ending_error`` and ``agents.rewoo_cut_off_answer`` (below). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
@@ -48,6 +50,7 @@ from fsm_llm.agents.constants import (
     HandlerNames,
     HandlerPriorities,
     OrchestratorStates,
+    PlanExecuteStates,
     PromptChainStates,
     ReflexionStates,
     REWOOStates,
@@ -57,6 +60,7 @@ from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.engine.executables.namespaces import GENERATORS, HANDLERS
 from fsm_llm.handlers import HandlerTiming, create_handler
+from fsm_llm.tools import require_int_limit
 
 from .chain import make_gate_checker
 from .context import RUN_RESULT, HandlerContext
@@ -65,6 +69,11 @@ from .freshness import make_fresh_keys_handler
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
 from .native_fc import NativeFCHandlers
 from .orchestrator import delegate_to_workers
+from .plan_execute import (
+    make_replan_handler,
+    make_result_checker,
+    make_step_tracker,
+)
 from .reflection import (
     EVALUATION_KEYS,
     make_evaluation_handler,
@@ -142,7 +151,13 @@ def _agent_handlers(ctx: HandlerContext) -> AgentHandlers:
 def tool_executor(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
-    """``agents.tool_executor``: runs the selected tool on entry to ``act`` (AgentHandlers.execute_tool)."""
+    """``agents.tool_executor``: runs the selected tool on entry to ``act`` (AgentHandlers.execute_tool).
+
+    Param ``optional`` (true): no handler when the run has no registry (Plan-and-Execute, whose tools
+    are optional); without it a missing registry is an ``AgentError``.
+    """
+    if _params(binding).get("optional") is True and ctx.tools is None:
+        return []
     handlers = _agent_handlers(ctx)
     return [
         create_handler(HandlerNames.TOOL_EXECUTOR)
@@ -508,6 +523,92 @@ def rewoo_cut_off_answer(
     return rewrite
 
 
+def _on_entry(
+    name: str,
+    binding: HandlerBinding | None,
+    state: str,
+    priority: int,
+    do: Callable[[dict[str, Any]], dict[str, Any]],
+) -> list[BaseHandler]:
+    """One entry handler on *state* (the binding's ``states`` and ``priority`` win)."""
+    return [
+        create_handler(name)
+        .with_priority(_priority(binding, priority))
+        .on_state_entry(*_states(binding, (state,)))
+        .do(do)
+    ]
+
+
+def plan_step_executor(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.plan_step_executor``: bounds the plan and describes the current step on entry to ``execute_step``."""
+    return _on_entry(
+        HandlerNames.PLAN_STEP_EXECUTOR,
+        binding,
+        PlanExecuteStates.EXECUTE_STEP,
+        HandlerPriorities.TOOL_EXECUTOR,
+        make_step_tracker(),
+    )
+
+
+def plan_step_fresh_keys(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.plan_step_fresh_keys``: clears ``step_result`` on entry to ``execute_step`` (core extracts a key only while unset)."""
+    return _on_entry(
+        HandlerNames.PLAN_STEP_FRESH_KEYS,
+        binding,
+        PlanExecuteStates.EXECUTE_STEP,
+        HandlerPriorities.TOOL_EXECUTOR,
+        make_fresh_keys_handler(_keys(binding, (ContextKeys.STEP_RESULT,))),
+    )
+
+
+def plan_step_checker(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.plan_step_checker``: records the step and decides ``step_failed`` on entry to ``check_result``.
+
+    The cap is the option ``max_replans`` (at least 0: no replans). It runs one priority after the
+    tool executor, which writes the status it reads.
+    """
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-032
+    # step_failed is decided on check_result ENTRY, from the status of the
+    # tool that just ran (the executor above, D-024 order), and routes the
+    # check_result turn that follows. Do NOT move it to PRE_TRANSITION on
+    # check_result (core picks the edge before PRE_TRANSITION runs, D-031)
+    # and do NOT let the model extract step_failed (a False seed is never
+    # re-extracted, and a guessed verdict is not a tool outcome). The
+    # max_replans check lives here too, so a failure past the cap routes to
+    # synthesize instead of entering replan. See decisions.md D-032.
+    limit = require_int_limit(
+        "max_replans",
+        ctx.options.get("max_replans", Defaults.MAX_REPLANS),
+        minimum=0,
+    )
+    return _on_entry(
+        HandlerNames.PLAN_STEP_CHECKER,
+        binding,
+        PlanExecuteStates.CHECK_RESULT,
+        HandlerPriorities.TOOL_EXECUTOR + 1,
+        make_result_checker(limit),
+    )
+
+
+def plan_replan_counter(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.plan_replan_counter``: counts the replan and reopens ``plan_steps`` on entry to ``replan``."""
+    return _on_entry(
+        HandlerNames.PLAN_REPLANNER,
+        binding,
+        PlanExecuteStates.REPLAN,
+        HandlerPriorities.TOOL_EXECUTOR,
+        make_replan_handler(),
+    )
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -546,6 +647,10 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.orchestrator_delegator", orchestrator_delegator),
     ("agents.orchestrator_decision_reset", orchestrator_decision_reset),
     ("agents.rewoo_executor", rewoo_executor),
+    ("agents.plan_step_executor", plan_step_executor),
+    ("agents.plan_step_fresh_keys", plan_step_fresh_keys),
+    ("agents.plan_step_checker", plan_step_checker),
+    ("agents.plan_replan_counter", plan_replan_counter),
     ("agents.approval_gate", approval_gate),
 )
 
