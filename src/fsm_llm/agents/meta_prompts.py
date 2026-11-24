@@ -12,6 +12,7 @@ and the welcome message.
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from typing import Any
 
 from fsm_llm.agents.constants import (
@@ -162,7 +163,9 @@ def artifact_schema(artifact_type: ArtifactType) -> dict[str, Any]:
     return copy.deepcopy(_ARTIFACT_SCHEMAS[artifact_type])
 
 
-def build_response_format(artifact_type: ArtifactType) -> dict[str, Any]:
+def build_response_format(
+    artifact_type: ArtifactType, agent_types: Iterable[str] = ()
+) -> dict[str, Any]:
     """Return the response format of the meta FSM's ``build`` completion state.
 
     ``{"type": "json_schema", "json_schema": {"name", "schema"}}`` around
@@ -170,7 +173,7 @@ def build_response_format(artifact_type: ArtifactType) -> dict[str, Any]:
     ``agent_type``, an enum of ``AgentArtifactBuilder.VALID_AGENT_TYPES`` whose
     description lists each pattern, so the build call picks the agent pattern
     (no second classifier call, D-011). Never raises for an ``ArtifactType``
-    member.
+    member. ``agent_types`` are further pattern ids (a user directory) listed in the enum.
     """
     schema = artifact_schema(artifact_type)
     if artifact_type == ArtifactType.AGENT:
@@ -179,7 +182,7 @@ def build_response_format(artifact_type: ArtifactType) -> dict[str, Any]:
         )
         schema["properties"]["agent_type"] = {
             "type": "string",
-            "enum": sorted(AgentArtifactBuilder.VALID_AGENT_TYPES),
+            "enum": sorted({*AgentArtifactBuilder.VALID_AGENT_TYPES, *agent_types}),
             "description": (
                 f"The agent pattern that fits the requirement best. {patterns}"
             ),

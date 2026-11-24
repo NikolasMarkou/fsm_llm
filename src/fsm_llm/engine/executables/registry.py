@@ -153,11 +153,17 @@ class _Snapshot:
 def _assemble(
     candidates: Iterable[tuple[Any, str]],
 ) -> tuple[dict[tuple[str, str], _Entry], list[str]]:
-    """First-wins entries over *candidates* in order, and the refusals (pure, no I/O)."""
+    """First-wins entries over *candidates*, memory entries first, and the refusals (pure, no I/O)."""
     entries: dict[tuple[str, str], _Entry] = {}
     versions: dict[str, list[str]] = {}
     refused: list[str] = []
-    for executable, source in candidates:
+    # DECISION plan-2026-11-24T043150-a555dcfe/D-031
+    # A code-backed or registered entry (source `_MEMORY`) always precedes a file, whatever the
+    # order of the candidates: a built-in registered after `from_paths` must not lose its id to a
+    # user file of the same name. Do NOT sort path entries (their order is the registration order
+    # of the paths) and do NOT rely on the caller to register built-ins first.
+    ordered = sorted(candidates, key=lambda c: c[1] != _MEMORY)
+    for executable, source in ordered:
         key = (executable.id, executable.version)
         if key in entries:
             refused.append(
@@ -272,7 +278,10 @@ class ExecutableRegistry:
             if accepted:
                 self._snapshot = _Snapshot(entries)
                 self._retain_locked(executable)
-        if not accepted:
+        if accepted:
+            for message in refused:  # a file this entry now displaces (D-031)
+                logger.warning(f"executable refused: {message}")
+        else:
             raise ExecutableCollisionError(
                 f"cannot add executable: {refused[-1] if refused else 'refused'}"
             )

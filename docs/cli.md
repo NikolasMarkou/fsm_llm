@@ -95,7 +95,17 @@ JSON artifact. Needs a model.
 
 ```bash
 fsm-llm-meta [--model M] [--env-file PATH] [--output FILE] [--temperature T] [--max-turns N]
+             [--executables DIR]
 ```
+
+`--executables DIR` reads the pattern documents (`*.json`, any case of the suffix, a BOM accepted)
+of a directory, and the `id` of each becomes a valid `agent_type` beside the built-in ones: it is
+listed in the enum of the build schema the model answers, and a reply naming an id that is neither
+built in nor in the directory is rejected as before. A file that cannot be read or is not a valid
+document is one `warning:` line on stderr and is skipped; a file whose id is a built-in one is
+refused the same way and never replaces it; a directory that does not exist is an `error:` line
+and exit 1. The files are read as operator input, not as model output: the checks for a document a
+model wrote (V7) do not apply to them, so the directory is as trusted as the command line.
 
 ## fsm-llm-eval
 

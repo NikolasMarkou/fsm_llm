@@ -7,6 +7,7 @@ The class is a shell (construction and the session attributes) composed of six m
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from fsm_llm import API
@@ -62,6 +63,8 @@ class MetaBuilderAgent(
     def __init__(
         self,
         config: AgentConfig | None = None,
+        *,
+        agent_types: Iterable[str] = (),
         **api_kwargs: Any,
     ) -> None:
         reject_misplaced_kwargs(type(self).__name__, api_kwargs)
@@ -73,6 +76,8 @@ class MetaBuilderAgent(
             else MetaBuilderConfig.from_agent_config(config)
         )
         self._api_kwargs = api_kwargs
+        # Agent pattern ids beside ``VALID_AGENT_TYPES`` (``fsm-llm-meta --executables DIR``).
+        self._agent_types = tuple(sorted(set(agent_types)))
 
         # The turn-by-turn session (``start``) and the result of ``run``.
         self._api: API | None = None

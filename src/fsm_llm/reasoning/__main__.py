@@ -21,13 +21,13 @@ from fsm_llm.cli_support import (
 )
 from fsm_llm.context.filtering import redacting_json_default
 from fsm_llm.core.definitions import ModelNotConfiguredError
+from fsm_llm.engine.executables.directory import load_directory_registry
 from fsm_llm.logging import logger, setup_cli_logging
-from fsm_llm.text import capped_line
 
 from .__version__ import __version__
 from .constants import ContextKeys
 from .engine import ReasoningEngine
-from .executables import load_strategy_registry
+from .executables import strategy_builtins
 from .utilities import get_available_reasoning_types
 
 if TYPE_CHECKING:
@@ -478,23 +478,13 @@ def load_registry(directory: Path | None) -> ExecutableRegistry | None:
     """The registry of ``--executables DIR``, or ``None`` when the option is not given.
 
     Contract: the nine built-ins plus the ``*.json`` strategy documents of *directory*
-    (``executables.load_strategy_registry``); a built-in id in a file is refused, never
-    replaced. Each file that could not be read and each collision is ONE stderr line
-    ``python -m fsm_llm.reasoning: warning: <label>: <why>`` and the run goes on. Raises
-    ``FileNotFoundError`` (one ``error:`` line, exit 1, in ``main``) when *directory* is not an
-    existing directory.
+    (``engine.executables.directory.load_directory_registry``, which defines the warning lines and
+    the ``FileNotFoundError`` for a missing directory, one ``error:`` line and exit 1 in ``main``);
+    a built-in id in a file is refused, never replaced.
     """
     if directory is None:
         return None
-    if not directory.is_dir():
-        raise FileNotFoundError(f"--executables {directory}: not an existing directory")
-    registry, report = load_strategy_registry([directory])
-    for label, reasons in report.failed.items():
-        for reason in reasons:
-            report_error(_PROG, f"warning: {label}: {capped_line(reason, 300)}")
-    for collision in report.collisions:
-        report_error(_PROG, f"warning: {capped_line(collision, 300)}")
-    return registry
+    return load_directory_registry(directory, strategy_builtins(), prog=_PROG)
 
 
 def main() -> int:

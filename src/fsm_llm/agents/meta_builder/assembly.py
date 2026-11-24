@@ -7,6 +7,7 @@ artifact type. ``AssemblyMixin`` holds them.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from itertools import pairwise
 from typing import Any
 
@@ -186,7 +187,7 @@ class AssemblyMixin(_MetaBuilderSurface):
             except BuilderError as e:
                 logger.warning(f"Build reply agent_type rejected: {e}")
         normalized = requirement.strip().lower()
-        for pattern in sorted(AgentArtifactBuilder.VALID_AGENT_TYPES):
+        for pattern in sorted(builder.valid_agent_types):
             if pattern in normalized or pattern.replace("_", " ") in normalized:
                 builder.set_agent_type(pattern)
                 return
@@ -207,12 +208,12 @@ class AssemblyMixin(_MetaBuilderSurface):
 
     @staticmethod
     def _create_builder(
-        artifact_type: ArtifactType,
+        artifact_type: ArtifactType, agent_types: Iterable[str] = ()
     ) -> FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder:
         if artifact_type == ArtifactType.FSM:
             return FSMArtifactBuilder()
         if artifact_type == ArtifactType.WORKFLOW:
             return WorkflowArtifactBuilder()
         if artifact_type == ArtifactType.AGENT:
-            return AgentArtifactBuilder()
+            return AgentArtifactBuilder(agent_types)
         raise MetaBuilderError(f"Unknown artifact type: {artifact_type}")

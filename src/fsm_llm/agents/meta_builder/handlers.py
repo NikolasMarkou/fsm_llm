@@ -149,7 +149,9 @@ class HandlersMixin(_MetaBuilderSurface):
                     "content": build_artifact_prompt(artifact_type, requirement),
                 }
             ],
-            _K.BUILD_RESPONSE_FORMAT: build_response_format(artifact_type),
+            _K.BUILD_RESPONSE_FORMAT: build_response_format(
+                artifact_type, context.get(_K.AGENT_TYPES) or ()
+            ),
         }
 
     @classmethod
@@ -177,7 +179,7 @@ class HandlersMixin(_MetaBuilderSurface):
         artifact_type = ArtifactType(context[_K.ARTIFACT_TYPE])
         requirement = "\n".join(context.get(_K.REQUIREMENTS) or [])
         text = reply.get("text")
-        builder = cls._create_builder(artifact_type)
+        builder = cls._create_builder(artifact_type, context.get(_K.AGENT_TYPES) or ())
         outcome, errors = cls._assemble_reply(
             builder, artifact_type, text if isinstance(text, str) else "", requirement
         )

@@ -1111,7 +1111,7 @@ fsm_llm.agents.ADaPTAgent class(BaseAgent)
   def __init__(self, tools: ToolRegistry | None = None, config: AgentConfig | None = None, max_depth: int = 3, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None, _depth: int = 0, _start_time: float | None = None) -> AgentResult
 fsm_llm.agents.AgentArtifactBuilder class(ArtifactBuilder)
-  def __init__(self) -> None
+  def __init__(self, agent_types: Iterable[str] = ()) -> None
   def add_tool(self, name: str, description: str, parameter_schema: dict[str, Any] | None = None) -> AgentArtifactBuilder
   property artifact_type
   def get_missing_fields(self) -> list[str]
@@ -1330,7 +1330,7 @@ fsm_llm.agents.MemorySessionStore class(SessionStore)
   def save_memory(self, session_id: str, memory: WorkingMemory) -> None
   def save_session_with_memory(self, session_id: str, state: SessionState, memory: WorkingMemory) -> None
 fsm_llm.agents.MetaBuilderAgent class
-  def __init__(self, config: AgentConfig | None = None, **api_kwargs: Any) -> None
+  def __init__(self, config: AgentConfig | None = None, *, agent_types: Iterable[str] = (), **api_kwargs: Any) -> None
   def get_internal_state(self) -> dict[str, Any]
   def get_result(self) -> MetaBuilderResult
   def is_complete(self) -> bool

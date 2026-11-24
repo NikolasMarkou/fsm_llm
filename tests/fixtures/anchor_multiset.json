@@ -1039,6 +1039,11 @@
       "delta": 1,
       "reason": "step 19 of plan a555dcfe (create_agent through the registry, D-030): a new anchor token on create_agent; the anchors of the replaced _PATTERNS dict (none) are unchanged",
       "token": "plan-2026-11-24T043150-a555dcfe/D-030"
+    },
+    {
+      "delta": 1,
+      "reason": "plan a555dcfe step 20: new anchor D-031 in ExecutableRegistry._assemble (memory entries first)",
+      "token": "plan-2026-11-24T043150-a555dcfe/D-031"
     }
   ]
 }

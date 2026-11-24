@@ -61,6 +61,8 @@ class MetaContextKeys:
     # Build state: request, raw reply and the handler-assembled outcome.
     BUILD_MESSAGES = "_build_messages"
     BUILD_RESPONSE_FORMAT = "_build_response_format"
+    # Extra agent pattern ids of ``--executables DIR`` (internal, driver hint, absent when none).
+    AGENT_TYPES = "_agent_types"
     BUILD_REPLY = "build_reply"
     BUILD_OUTCOME = "build_outcome"
     ARTIFACT = "artifact"

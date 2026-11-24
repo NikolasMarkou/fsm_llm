@@ -8,6 +8,7 @@ the declaration here; one that calls a method of another mixin is checked agains
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ class _MetaBuilderSurface:
         _conversation_id: str | None
         _result: MetaBuilderResult | None
         _turn_count: int
+        _agent_types: tuple[str, ...]
 
         # HintsMixin (hints.py)
         @staticmethod
@@ -61,7 +63,7 @@ class _MetaBuilderSurface:
 
         @staticmethod
         def _create_builder(
-            artifact_type: ArtifactType,
+            artifact_type: ArtifactType, agent_types: Iterable[str] = ()
         ) -> FSMArtifactBuilder | WorkflowArtifactBuilder | AgentArtifactBuilder: ...
 
         # RunMixin (runs.py)

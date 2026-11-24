@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from fsm_llm.aio import aoffload
 from fsm_llm.core.codes import Reason, Status
@@ -52,7 +52,7 @@ from fsm_llm.core.definitions.executable import (
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.context import RunContext
-from fsm_llm.engine.executables import ExecutableRegistry, ReloadReport
+from fsm_llm.engine.executables import Executable, ExecutableRegistry, ReloadReport
 from fsm_llm.engine.executables.adapters import FsmBodyExecutable
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
 
@@ -67,6 +67,7 @@ __all__ = [
     "SolveExecutable",
     "builtin_executables",
     "load_strategy_registry",
+    "strategy_builtins",
     "strategy_id",
     "strategy_registry",
 ]
@@ -223,8 +224,13 @@ def load_strategy_registry(
     return registry, registry.reload()
 
 
+def strategy_builtins() -> list[Executable]:
+    """The nine built-in strategy executables in ``STRATEGY_ORDER`` (new objects on every call)."""
+    # FsmBodyExecutable satisfies the Executable protocol (its attributes are read-only)
+    return [cast("Executable", _strategy_executable(n)) for n in STRATEGY_ORDER]
+
+
 def _with_builtins(registry: ExecutableRegistry) -> ExecutableRegistry:
-    for name in STRATEGY_ORDER:
-        # FsmBodyExecutable satisfies the Executable protocol (its attributes are read-only)
-        registry.register(_strategy_executable(name))  # type: ignore[arg-type]
+    for executable in strategy_builtins():
+        registry.register(executable)
     return registry

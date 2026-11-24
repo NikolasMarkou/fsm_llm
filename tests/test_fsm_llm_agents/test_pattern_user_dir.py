@@ -29,6 +29,7 @@ from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
 from tests import executables_corpus as corpus
 from tests import pattern_runs as runs
+from tests.conftest import symlink_or_skip
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "fsm_llm"
 _FIRST_FOUR = [
@@ -262,3 +263,92 @@ class TestOneClassTable:
         assert [e.id for e in builtin_executables()] == [
             name for name, _ in PATTERN_AGENTS.items()
         ]
+
+
+class TestTheSharedDirectoryHelper:
+    """Plan a555dcfe step 20 (D-031): one loader for ``--executables DIR`` (built-ins first)."""
+
+    @staticmethod
+    def _load(directory: Path):
+        from fsm_llm.agents.executables import builtin_executables
+        from fsm_llm.engine.executables.directory import load_directory_registry
+
+        return load_directory_registry(directory, builtin_executables(), prog="prog-x")
+
+    @staticmethod
+    def _put(directory: Path, name: str, doc: Any, *, bom: bool = False) -> None:
+        text = ("﻿" if bom else "") + json.dumps(doc)
+        (directory / name).write_text(text, encoding="utf-8")
+
+    def test_a_bom_file_and_an_upper_case_suffix_load(self, tmp_path: Path):
+        self._put(tmp_path, "bom.json", _loop_doc("user.bom"), bom=True)
+        self._put(tmp_path, "UP.JSON", _loop_doc("user.up"))
+
+        registry = self._load(tmp_path)
+
+        assert {"user.bom", "user.up"} <= {e.id for e in registry.list(kind="pattern")}
+
+    def test_a_garbage_file_is_skipped_with_one_stderr_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        (tmp_path / "garbage.json").write_text("{not json", encoding="utf-8")
+        self._put(tmp_path, "good.json", _loop_doc("user.good"))
+
+        registry = self._load(tmp_path)
+
+        lines = capsys.readouterr().err.splitlines()
+        assert len(lines) == 1
+        assert lines[0].startswith("prog-x: warning: ") and "garbage.json" in lines[0]
+        assert registry.get("user.good").kind == "pattern"
+
+    def test_a_file_named_like_a_built_in_is_refused_and_the_built_in_runs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        shadow = _loop_doc("react")
+        self._put(tmp_path, "react.json", shadow)
+
+        registry = self._load(tmp_path)
+
+        err = capsys.readouterr().err.splitlines()
+        assert len(err) == 1 and "react.json" in err[0] and "react" in err[0]
+        assert (
+            registry.get("react").envelope.body.handlers != shadow["body"]["handlers"]
+        )
+        assert (
+            type(create_agent("react", runs._tools(), registry=registry, **_kw()))
+            is ReactAgent
+        )
+
+    def test_a_symlink_is_skipped_and_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        real = tmp_path / "elsewhere"
+        real.mkdir()
+        self._put(real, "t.json", _loop_doc("user.t"))
+        directory = tmp_path / "dir"
+        directory.mkdir()
+        symlink_or_skip(directory / "link.json", real / "t.json")
+
+        registry = self._load(directory)
+
+        assert "link.json" in capsys.readouterr().err
+        assert "user.t" not in {e.id for e in registry.list(kind="pattern")}
+
+    def test_a_missing_directory_is_a_file_not_found_error(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError, match="--executables"):
+            self._load(tmp_path / "nope")
+
+    def test_a_user_file_loads_as_operator_input_not_as_model_output(
+        self, tmp_path: Path
+    ):
+        doc = _loop_doc("user.operator")
+        assert doc["requires"]["handlers"]  # a model-origin document may bind none (V7)
+        self._put(tmp_path, "op.json", doc)
+
+        registry = self._load(tmp_path)
+
+        assert registry.get("user.operator").envelope.requires.handlers
+
+
+def _kw() -> dict[str, Any]:
+    return {"config": runs._config(), "llm_interface": runs.ScriptedModel()}

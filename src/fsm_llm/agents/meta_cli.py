@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
 
@@ -31,6 +33,9 @@ from .definitions import MetaBuilderConfig
 from .exceptions import MetaBuilderError
 from .meta_builder import MetaBuilderAgent
 from .meta_output import format_summary, save_artifact
+
+if TYPE_CHECKING:
+    from fsm_llm.engine.executables import Executable
 
 _PROG = "fsm-llm-meta"
 
@@ -65,9 +70,38 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"Maximum conversation turns (default: {MetaDefaults.MAX_TURNS})",
     )
+    parser.add_argument(
+        "--executables",
+        type=Path,
+        metavar="DIR",
+        help="directory of pattern documents (*.json): the id of each is a valid "
+        "agent type beside the built-in ones (a file named like a built-in is refused; "
+        "the files are read as operator input, not as model output)",
+    )
     add_env_file(parser)
     parser.set_defaults(func=_run)
     return parser
+
+
+def _user_agent_types(directory: Path | None) -> list[str]:
+    """The ids of the pattern files of ``--executables DIR`` (none for no directory).
+
+    Contract: ``FileNotFoundError`` for a directory that does not exist (one stderr line, exit 1);
+    each refused file is one stderr warning (``load_directory_registry``); a built-in id is never
+    listed (the files cannot replace one).
+    """
+    if directory is None:
+        return []
+    from fsm_llm.agents.executables import builtin_executables
+    from fsm_llm.engine.executables.directory import load_directory_registry
+
+    builtins = builtin_executables()
+    # the read-only attributes of PatternExecutable satisfy the protocol (as FsmBodyExecutable does)
+    registry = load_directory_registry(
+        directory, cast("list[Executable]", builtins), prog=_PROG
+    )
+    known = {executable.id for executable in builtins}
+    return [e.id for e in registry.list(kind="pattern") if e.id not in known]
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -83,7 +117,11 @@ def _run(args: argparse.Namespace) -> int:
     if args.max_turns is not None:
         config_kwargs["max_turns"] = args.max_turns
 
-    agent = MetaBuilderAgent(config=MetaBuilderConfig(**config_kwargs))
+    agent_types = _user_agent_types(args.executables)
+    agent = MetaBuilderAgent(
+        config=MetaBuilderConfig(**config_kwargs),
+        **({"agent_types": agent_types} if agent_types else {}),
+    )
     result = agent.run_interactive()
 
     print("\n" + "=" * 60)

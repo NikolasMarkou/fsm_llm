@@ -167,10 +167,13 @@ class HintsMixin(_MetaBuilderSurface):
         normalized = _normalize_message(message)
         if build_requested is None:
             build_requested = self._is_build_trigger(normalized)
-        return {
+        hints: dict[str, Any] = {
             _K.REQUIREMENTS: requirements,
             _K.LATEST_REQUEST: message,
             _K.BUILD_REQUESTED: build_requested,
             _K.TYPE_SWITCH: self._is_type_switch(normalized),
             _K.KEYWORD_TYPE: self._detect_type_fallback(message).value,
         }
+        if self._agent_types:
+            hints[_K.AGENT_TYPES] = list(self._agent_types)
+        return hints

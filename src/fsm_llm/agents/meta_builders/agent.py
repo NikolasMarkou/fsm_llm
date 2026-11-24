@@ -4,6 +4,7 @@ it seeds the config with and the anchor that says not to switch it stay in this 
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, ClassVar
 
 from pydantic import ValidationError
@@ -37,8 +38,10 @@ class AgentArtifactBuilder(ArtifactBuilder):
         "adapt",
     }
 
-    def __init__(self) -> None:
+    def __init__(self, agent_types: Iterable[str] = ()) -> None:
         super().__init__()
+        # the built-in set plus the ids of ``--executables DIR`` (instance state, never the class set)
+        self.valid_agent_types = frozenset({*self.VALID_AGENT_TYPES, *agent_types})
         self.agent_type: str | None = None
         self.name: str | None = None
         self.description: str | None = None
@@ -81,10 +84,10 @@ class AgentArtifactBuilder(ArtifactBuilder):
         agent_type = agent_type.strip().lower()
         # Resolve common LLM variations
         agent_type = self._AGENT_TYPE_ALIASES.get(agent_type, agent_type)
-        if agent_type not in self.VALID_AGENT_TYPES:
+        if agent_type not in self.valid_agent_types:
             raise BuilderError(
                 f"Unknown agent type '{agent_type}'. "
-                f"Valid: {', '.join(sorted(self.VALID_AGENT_TYPES))}",
+                f"Valid: {', '.join(sorted(self.valid_agent_types))}",
                 action="set_agent_type",
             )
         self.agent_type = agent_type

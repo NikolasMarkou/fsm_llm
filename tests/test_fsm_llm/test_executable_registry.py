@@ -732,6 +732,66 @@ class TestSources:
         assert out.stdout.strip() == "[]"
 
 
+class TestMemoryEntriesComeFirst:
+    """Plan a555dcfe step 20 (D-031): a registered built-in never loses its id to a file."""
+
+    def test_a_file_named_like_a_source_built_in_is_refused_and_warns_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path / "react.json", _doc("react", response="from the file"))
+        sources: NameRegistry[Any] = NameRegistry("executable_sources")
+        builtin = _CodeBacked("react")
+        sources.register("builtin", lambda: [builtin])
+        registry = ExecutableRegistry.from_paths([tmp_path], sources=sources)
+        warned: list[str] = []
+        monkeypatch.setattr(registry_module.logger, "warning", warned.append)
+
+        report = registry.load_sources()
+
+        assert registry.get("react") is builtin
+        assert report.failed == {}
+        assert [m for m in warned if "react" in m] and len(warned) == 1
+        assert "executable refused" in warned[0] and "react.json" in warned[0]
+        # a later reload keeps the built-in
+        registry.reload()
+        assert registry.get("react") is builtin
+
+    def test_register_after_the_files_displaces_a_file_entry_and_says_so(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _write(tmp_path / "x.json", _doc("x"))
+        registry = ExecutableRegistry.from_paths([tmp_path])
+        warned: list[str] = []
+        monkeypatch.setattr(registry_module.logger, "warning", warned.append)
+        builtin = _CodeBacked("x")
+
+        registry.register(builtin)  # type: ignore[arg-type]
+
+        assert registry.get("x") is builtin
+        assert len(warned) == 1 and "x.json" in warned[0]
+
+    def test_two_registered_entries_still_collide_and_the_first_stays(self) -> None:
+        registry = ExecutableRegistry()
+        first = _CodeBacked("same")
+        registry.register(first)  # type: ignore[arg-type]
+        with pytest.raises(ExecutableCollisionError):
+            registry.register(_CodeBacked("same"))  # type: ignore[arg-type]
+        assert registry.get("same") is first
+
+    def test_the_order_of_the_paths_still_decides_two_files(
+        self, tmp_path: Path
+    ) -> None:
+        one, two = tmp_path / "one", tmp_path / "two"
+        one.mkdir()
+        two.mkdir()
+        _write(one / "d.json", _doc("d", response="first"))
+        _write(two / "d.json", _doc("d", response="second"))
+        registry = ExecutableRegistry.from_paths([two, one])
+        assert registry.get("d").template_identity == (
+            ExecutableRegistry.from_paths([two]).get("d").template_identity
+        )
+
+
 # ---- aliases --------------------------------------------------------------------------------------------
 
 
