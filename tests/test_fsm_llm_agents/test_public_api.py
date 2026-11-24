@@ -28,7 +28,6 @@ from fsm_llm.agents import (
 )
 from fsm_llm.agents.base.helpers import _with_instructions
 from fsm_llm.agents.definitions import MetaBuilderConfig
-from fsm_llm.agents.sop import SOPDefinition, SOPRegistry
 from fsm_llm.testing import PromptGroundedLLM
 
 
@@ -136,12 +135,6 @@ class TestAgentConfigStrict:
         with pytest.raises(ValidationError, match="bogus"):
             MetaBuilderConfig(bogus=1)
         assert MetaBuilderConfig(max_turns=3).max_turns == 3
-
-    def test_sop_typo_override_is_rejected_at_registration(self):
-        sop = SOPDefinition(name="typo", config_overrides={"max_iteration": 3})
-
-        with pytest.raises(ValueError, match=r"(?s)typo.*max_iteration"):
-            SOPRegistry().register(sop)
 
     def test_instructions_are_length_capped(self):
         with pytest.raises(ValidationError, match="instructions"):
@@ -647,9 +640,10 @@ class TestPhase2Exports:
         assert hasattr(m, "AgentGraph")
         assert hasattr(m, "AgentGraphBuilder")
         assert hasattr(m, "MCPToolProvider")
-        assert hasattr(m, "SOPDefinition")
-        assert hasattr(m, "SOPRegistry")
-        assert hasattr(m, "load_builtin_sops")
+        for removed in ("SOPDefinition", "SOPRegistry", "load_builtin_sops"):
+            assert not hasattr(
+                m, removed
+            )  # plan a555dcfe step 22 (D-033): presets by id
         assert hasattr(m, "SemanticToolRegistry")
         assert hasattr(m, "AgentServer")
         assert hasattr(m, "RemoteAgentTool")

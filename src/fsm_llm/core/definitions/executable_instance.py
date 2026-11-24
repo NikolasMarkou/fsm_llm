@@ -20,7 +20,8 @@ Interface contract: as the ``executable`` module docstring states it for ``ident
 ``instantiate_envelope`` and ``rebuild_instance``. ``canonical_digest(payload) -> str`` is the
 64-hex sha256 of the sorted-key JSON; ``substitute_variables(node, values)`` is a pure copy;
 ``variable_problems(envelope, values) -> list[str]`` is empty when the values fill the declared
-variables.
+variables. ``render_inputs(contract, inputs, *, optional=())`` renders ``contract.input_templates``
+from the caller's arguments into input values (D-033).
 
 Imported by name (``from fsm_llm.core.definitions.executable_instance import identity_of``);
 neither ``fsm_llm/__init__.py`` nor ``core/definitions/__init__.py`` imports it.
@@ -31,7 +32,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
 
 from pydantic import ValidationError
@@ -42,11 +43,13 @@ from fsm_llm.core.results import Identity
 from .executable import (
     _PLACEHOLDER,
     MAX_DOCUMENT_DEPTH,
+    Contract,
     ExecutableDocumentError,
     ExecutableEnvelope,
     InstanceIdentityMismatchError,
     InstantiationError,
     _error_where,
+    scan_placeholders,
 )
 from .executable_pattern import (
     PatternBody,
@@ -190,6 +193,53 @@ def substitute_variables(node: Any, values: Mapping[str, str]) -> Any:
     return node
 
 
+# DECISION plan-2026-11-24T043150-a555dcfe/D-033
+# The ONE place where a caller's arguments become an input VALUE. Do NOT render into the body, a
+# variable, a persona or an instruction (V4 refuses a body that uses a placeholder of a template),
+# do NOT rescan a rendered value, do NOT pass an argument on as an input (the placeholders are
+# consumed), do NOT accept an argument that is neither a declared (or optional) input nor a
+# placeholder of a template: an internal-prefixed name is never either, so a caller cannot
+# smuggle a driver key through the arguments. A new input channel belongs in the contract.
+def render_inputs(
+    contract: Contract, inputs: Mapping[str, Any], *, optional: Collection[str] = ()
+) -> Mapping[str, Any]:
+    """*inputs* with each ``contract.input_templates`` entry rendered from the arguments.
+
+    No templates: *inputs* itself. Otherwise a new dict: every template whose input the caller
+    did not give is rendered in one pass from the placeholder arguments (text, number or bool) and
+    the placeholder arguments are dropped. ``ValueError`` (names only, never a value) for an
+    argument that is no declared input, no *optional* input and no placeholder, and for a missing
+    or non-scalar placeholder argument.
+    """
+    templates = contract.input_templates
+    if not templates:
+        return inputs
+    placeholders = scan_placeholders(list(templates.values()))[0]
+    known = {*contract.inputs, *optional, *placeholders}
+    if unknown := sorted(str(k) for k in inputs if k not in known):
+        raise ValueError(
+            f"arguments {unknown} are neither inputs nor placeholders of an input "
+            "template; an internal-prefixed name is never either"
+        )
+    out = {
+        k: v for k, v in inputs.items() if k not in placeholders or k in contract.inputs
+    }
+    for name, text in templates.items():
+        if name in inputs:
+            continue
+        needed = sorted(set(_PLACEHOLDER.findall(text)))
+        if absent := [n for n in needed if n not in inputs]:
+            raise ValueError(
+                f"input {name!r} is rendered from arguments {absent}, not given"
+            )
+        if bad := [
+            n for n in needed if not isinstance(inputs[n], (str, int, float, bool))
+        ]:
+            raise ValueError(f"arguments {bad} must be text, a number or a boolean")
+        out[name] = _PLACEHOLDER.sub(lambda m: str(inputs[m[1]]), text)
+    return out
+
+
 def variable_problems(
     envelope: ExecutableEnvelope, values: Mapping[str, Any]
 ) -> list[str]:
@@ -280,6 +330,11 @@ def _pattern_instance(
     if not isinstance(body, PatternBody):
         raise InstantiationError(
             "options and variants belong to a pattern: this envelope has none"
+        )
+    if body.extends is not None:
+        raise InstantiationError(
+            "a preset is resolved when it is loaded (load_executable(bases=)): "
+            "instantiate the flat envelope it returns"
         )
     values = dict(variables or {})
     if problems := variable_problems(envelope, values):

@@ -88,6 +88,7 @@ __all__ = [
     "PatternExecutable",
     "builtin_executables",
     "pattern_adapter",
+    "preset_executables",
 ]
 
 _TOOLS = Capability.TOOLS
@@ -334,8 +335,19 @@ def builtin_executables() -> list[PatternExecutable]:
             name, envelope=load_envelope(name), agent_class=PATTERN_AGENTS.resolve(name)
         )
         for name in PATTERN_ORDER
+        if name in PATTERN_AGENTS
     }
     return [
         shipped.get(pattern) or PatternExecutable(pattern)
         for pattern in (name for name, _ in PATTERN_AGENTS.items())
+    ]
+
+
+def preset_executables() -> list[PatternExecutable]:
+    """One executable per shipped preset with no agent class (the ``agent_presets`` source, D-033):
+    a ``PatternAgent`` runs it, ``contract.input_templates`` render the caller's arguments."""
+    return [
+        PatternExecutable(name, envelope=load_envelope(name))
+        for name in PATTERN_ORDER
+        if name not in PATTERN_AGENTS
     ]

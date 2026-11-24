@@ -74,7 +74,7 @@ def model_or_placeholder(model: str | None = None) -> str:
     """*model*, else env ``LLM_MODEL``, else ``PLACEHOLDER_MODEL``; never raises.
 
     Interface contract (callers: ``default_agent_config``,
-    ``composition.default_llm_judge``, ``SwarmAgent``, ``SOPRegistry``): for a
+    ``composition.default_llm_judge``, ``SwarmAgent``): for a
     config that must hold a model string although the model is owned elsewhere
     (an injected interface, a custom backend, member agents) or is not used at
     all (validating a template). Where an agent is really built from a

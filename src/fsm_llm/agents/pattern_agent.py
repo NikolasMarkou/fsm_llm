@@ -54,7 +54,10 @@ from fsm_llm.agents.pattern_inputs import pattern_fsm, refuse_reserved_options
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
-from fsm_llm.core.definitions.executable_pattern import APPROVAL_GATE_HANDLER
+from fsm_llm.core.definitions.executable_pattern import (
+    APPROVAL_GATE_HANDLER,
+    PatternBody,
+)
 from fsm_llm.engine.executables.namespaces import HANDLERS
 from fsm_llm.logging import logger
 from fsm_llm.policy import HumanInTheLoop
@@ -66,7 +69,7 @@ from .base import (
     pattern_run_output_keys,
     reject_misplaced_kwargs,
 )
-from .definitions import AgentConfig, AgentResult
+from .definitions import AgentConfig, AgentResult, config_with, default_agent_config
 
 __all__ = ["PatternAgent"]
 
@@ -74,6 +77,34 @@ _TOOL_EXECUTOR = "agents.tool_executor"
 _THINK_LIMITER = "agents.think_turn_limiter"
 _NO_SEAM = ("step_budget", "run_output_keys", "seconds_exempt")
 _BEFORE_RUN, _AFTER_RUN, _ON_ITERATION = "before_run", "after_run", "on_iteration"
+
+
+def _config_from_options(
+    config: AgentConfig | None,
+    body: PatternBody,
+    given: Mapping[str, Any],
+    llm_interface: Any,
+) -> AgentConfig | None:
+    """*config* with the options of the file that are ``AgentConfig`` field names applied (D-033).
+
+    Only a ``PatternAgent`` itself applies them (a preset or a user file): a thin class such as
+    ``DebateAgent`` owns its options (its ``max_iterations`` is a step budget, not the config's).
+    Precedence: an option the caller gave, then a field the host's *config* set itself, then the
+    file's default. A preset never names a model (``model`` is no option), so the interface or
+    ``LLM_MODEL`` still decides it. No such option: *config* as it is (possibly ``None``).
+    """
+    declared = body.options_schema.properties
+    fields = [name for name in declared if name in AgentConfig.model_fields]
+    if not fields:
+        return config
+    base = config or default_agent_config(llm_interface)
+    own = base.model_fields_set if config is not None else set()
+    updates = {
+        n: given[n] if n in given else body.options[n]
+        for n in fields
+        if n in given or (n in body.options and n not in own)
+    }
+    return config_with(base, **updates) if updates else config
 
 
 class PatternAgent(BaseAgent):
@@ -105,6 +136,13 @@ class PatternAgent(BaseAgent):
         self._react_loop = _TOOL_EXECUTOR in bound and _THINK_LIMITER in bound
         if "tools" in envelope.requires.callables:
             self._require_tools(tools)
+        wanted = envelope.requires.tools
+        if isinstance(wanted, list) and (
+            absent := [n for n in wanted if tools is None or n not in tools]
+        ):
+            raise AgentError(
+                f"pattern {envelope.id!r} requires the tools {absent}, which the registry lacks"
+            )
         refuse_reserved_options(envelope, options or {})
         if envelope.requires.tools == "none":
             # a pattern with no tools: `tools=` and `hitl=` are named here, so the base denylist
@@ -117,6 +155,11 @@ class PatternAgent(BaseAgent):
             raise AgentError(
                 f"pattern {envelope.id!r} binds no {APPROVAL_GATE_HANDLER}: a HumanInTheLoop "
                 "given to it could never be consulted"
+            )
+        # a class that stands behind a file owns its options (D-033)
+        if type(self) is PatternAgent:
+            config = _config_from_options(
+                config, body, options or {}, api_kwargs.get("llm_interface")
             )
         super().__init__(config, **api_kwargs)
         self.envelope = envelope

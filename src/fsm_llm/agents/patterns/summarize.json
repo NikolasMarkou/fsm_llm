@@ -1,0 +1,42 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "summarize",
+  "name": "summarize",
+  "description": "Summarize text into key points",
+  "lifecycle": "builtin",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "input_templates": {
+      "task": "Summarize the following text into {{num_points}} key points. Be concise and focus on the most important information.\n\n{{text}}"
+    }
+  },
+  "metadata": {
+    "category": "analysis"
+  },
+  "body": {
+    "extends": "react",
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature of the agent's model calls"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Think turns the agent may take"
+        }
+      }
+    },
+    "options": {
+      "temperature": 0.3,
+      "max_iterations": 3
+    }
+  }
+}

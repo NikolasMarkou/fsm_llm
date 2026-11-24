@@ -382,13 +382,16 @@ class RunBlock(_Model):
 
 
 class PatternBody(_Model):
-    """``{fsm | generator, handlers, options_schema, options, variants, run}`` (D-011)."""
+    """``{fsm | generator | extends, handlers, options_schema, options, variants, run}`` (D-011, D-033)."""
 
     fsm: dict[str, Any] | None = Field(
         None, description="The FSM template; holes and variants are applied to it"
     )
     generator: _Name | None = Field(
         None, description="A generator name, instead of fsm (not instantiable yet)"
+    )
+    extends: _Name | None = Field(
+        None, description="A preset: the id of the pattern it builds on, instead of fsm"
     )
     handlers: list[HandlerBinding] = Field(
         default_factory=list, max_length=EXECUTABLE_MAX_ITEMS
@@ -406,9 +409,19 @@ class PatternBody(_Model):
 
     @model_validator(mode="after")
     def _template_is_sound(self) -> Self:
-        if (self.fsm is None) == (self.generator is None):
-            raise ValueError("a pattern body has exactly one of fsm and generator")
+        if sum(x is not None for x in (self.fsm, self.generator, self.extends)) != 1:
+            raise ValueError(
+                "a pattern body has exactly one of fsm, generator and extends"
+            )
         properties = self.options_schema.properties
+        if "model" in properties or "model" in self.options:
+            raise ValueError("an option named 'model' is refused: one model resolver")
+        if self.extends is not None:  # a preset (D-033): the base owns the template
+            if self.handlers or self.variants or self.run.model_fields_set - {"hooks"}:
+                raise ValueError("a preset adds only options and hooks")
+            for name in set(self.options) & set(properties):
+                check_option(name, properties[name], self.options[name])
+            return self
         if unknown := sorted(set(self.options) - set(properties)):
             raise ValueError(f"options give defaults to undeclared options {unknown}")
         for name, value in self.options.items():
@@ -439,7 +452,7 @@ class PatternBody(_Model):
 #: table of ``executable`` (the pattern kind is part of format 1.0, which reserved it).
 PATTERN_FIELD_VERSIONS: dict[str, dict[str, str]] = {
     "PatternBody": {
-        "1.0": "fsm generator handlers options_schema options variants run"
+        "1.0": "fsm generator extends handlers options_schema options variants run"
     },
     "HandlerBinding": {"1.0": "handler on states keys priority params"},
     "HookBinding": {"1.0": "hook at params"},

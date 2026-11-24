@@ -48,7 +48,10 @@ from fsm_llm.core.definitions.executable import (
     InstantiationError,
     Requires,
 )
-from fsm_llm.core.definitions.executable_instance import canonical_digest
+from fsm_llm.core.definitions.executable_instance import (
+    canonical_digest,
+    render_inputs,
+)
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunCancelledError, RunContext
 
@@ -200,6 +203,7 @@ class CodeBackedInstance:
         """Check, resolve, then await the hook (see the module docstring)."""
         owner = self.executable
         context = RunContext() if context is None else context
+        inputs = render_inputs(owner.contract, inputs, optional=owner.optional_inputs)
         owner._check_input_keys(inputs)
         identity = Identity(
             template_identity=owner.template_identity,

@@ -101,6 +101,10 @@ MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
         "the body of a pattern executable (holes, options, variants; the envelope module imports "
         "it) loads when a loader imports it; `core/definitions/__init__.py` does not re-export it"
     ),
+    "fsm_llm.core.definitions.executable_preset": (
+        "the resolution of a preset (a pattern that `extends` another, D-033) loads when "
+        "`core/verify/executable.py` is imported; `core/definitions/__init__.py` does not re-export it"
+    ),
     "fsm_llm.core.verify.executable_pattern": (
         "the pattern checks of the load sequence (instances, names, the hitl rule, V4, V7) load "
         "when `core/verify/executable.py` is imported; `core/verify/__init__.py` does not"

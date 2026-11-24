@@ -8,14 +8,15 @@ never imported as code) and hands out what an agent and a registry need.
 Interface contract:
 
 - ``PATTERN_ORDER``: the names of the shipped files, in the order the ``agents`` source serves
-  them. The directory is read by name from this tuple, never listed, so a stray file is not served;
+  them (a PRESET, a file whose body ``extends`` another, sits in the same directory and tuple, D-033;
+  the ones with no agent class are served by the ``agent_presets`` source). The directory is read by name from this tuple, never listed, so a stray file is not served;
   a test holds the tuple equal to the files on disk.
 - ``load_document(name)``: a deep copy of the parsed document (``KeyError`` for a name not in
   ``PATTERN_ORDER``; a name is never joined into a path unchecked). The text of every file is
   canonical (``json.dumps(indent=2, ensure_ascii=True)``, LF, one final newline).
 - ``load_envelope(name)``: the parsed, LOADED ``PatternEnvelope`` (``load_executable`` with the handler
   resolver and the generator lookup, so the default instance and the every-variant instance are
-  checked as FSMs), cached for
+  checked as FSMs; a preset is returned FLAT, its base read from the shipped files), cached for
   the process and shared: read it, never mutate it. A shipped file that does not load raises
   ``ExecutableError`` naming the file and its first problems: that is a packaging bug, not an input.
 
@@ -31,7 +32,11 @@ from functools import cache
 from importlib import resources
 from typing import Any
 
-from fsm_llm.core.definitions.executable import ExecutableError, PatternEnvelope
+from fsm_llm.core.definitions.executable import (
+    ExecutableError,
+    PatternEnvelope,
+    parse_executable,
+)
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.executables.namespaces import GENERATORS, namespace_resolver
 
@@ -50,6 +55,9 @@ PATTERN_ORDER: tuple[str, ...] = (
     "evaluator_optimizer",
     "verified_react",
     "auto_memory",
+    "code-review",
+    "summarize",
+    "data-extraction",
 )
 
 
@@ -78,12 +86,24 @@ def load_document(name: str) -> dict[str, Any]:
     return copy.deepcopy(_document(name))
 
 
+def _as_written(name: str) -> PatternEnvelope | None:
+    """The shipped file *name* parsed as written (a preset stays a preset: the chain walker counts
+    its links), the ``bases`` of a preset's ``extends`` (D-033); ``None`` for a name not shipped."""
+    if name not in PATTERN_ORDER:
+        return None
+    found = parse_executable(_document(name))
+    return found if isinstance(found, PatternEnvelope) else None
+
+
 @cache
 def load_envelope(name: str) -> PatternEnvelope:
     """The loaded envelope of the shipped pattern *name* (cached; ``KeyError`` when unknown)."""
     document = load_document(name)
     envelope, report = load_executable(
-        document, resolver=namespace_resolver(), generators=GENERATORS.get
+        document,
+        resolver=namespace_resolver(),
+        generators=GENERATORS.get,
+        bases=_as_written,
     )
     if not isinstance(envelope, PatternEnvelope) or not report.is_valid:
         raise ExecutableError(

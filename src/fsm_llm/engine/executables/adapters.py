@@ -22,7 +22,7 @@ Interface contract:
 - ``FsmInstance.arun(inputs, *, context=None)`` is the one body; ``FsmInstance.run`` is
   ``run_sync`` over it. ``context`` defaults to a bare ``RunContext()``. Before any model call:
   an input key the contract does not declare, or one with an internal prefix, is a
-  ``ValueError``; a missing declared input returns ``failed/inputs_missing``. Then the run takes
+  ``ValueError`` (after ``contract.input_templates`` are rendered from the arguments, D-033); a missing declared input returns ``failed/inputs_missing``. Then the run takes
   the interface of the context (or the API's own model resolution), its event log, the budget
   (``max_steps`` defaults to ``DEFAULT_EXECUTABLE_MAX_STEPS``) and checks the cancel token before
   every step. The run's own ``API`` is given ``targets=context.registry``, so a body holding a
@@ -61,6 +61,7 @@ from fsm_llm.core.definitions.executable_instance import (
     identity_of,
     instantiate_envelope,
     rebuild_instance,
+    render_inputs,
 )
 from fsm_llm.core.definitions.fsm import definition_digest
 from fsm_llm.core.results import Identity, RunResult
@@ -196,6 +197,7 @@ class FsmInstance:
         """Run the body once (the one body; see the module docstring)."""
         owner = self.executable
         context = RunContext() if context is None else context
+        inputs = render_inputs(owner.contract, inputs)
         self._check_input_keys(inputs)
         identity = Identity(
             template_identity=owner.template_identity,

@@ -479,7 +479,6 @@ forbidden_modules =
     fsm_llm.agents.self_consistency
     fsm_llm.agents.semantic_memory
     fsm_llm.agents.semantic_tools
-    fsm_llm.agents.sop
     fsm_llm.agents.swarm
     fsm_llm.agents.tool_registries
     fsm_llm.agents.verified_react
@@ -538,7 +537,6 @@ forbidden_modules =
     fsm_llm.agents.self_consistency
     fsm_llm.agents.semantic_memory
     fsm_llm.agents.semantic_tools
-    fsm_llm.agents.sop
     fsm_llm.agents.swarm
     fsm_llm.agents.tool_registries
     fsm_llm.agents.verified_react
@@ -600,7 +598,6 @@ forbidden_modules =
     fsm_llm.agents.self_consistency
     fsm_llm.agents.semantic_memory
     fsm_llm.agents.semantic_tools
-    fsm_llm.agents.sop
     fsm_llm.agents.swarm
     fsm_llm.agents.tool_registries
     fsm_llm.agents.verified_react
@@ -659,7 +656,6 @@ forbidden_modules =
     fsm_llm.agents.self_consistency
     fsm_llm.agents.semantic_memory
     fsm_llm.agents.semantic_tools
-    fsm_llm.agents.sop
     fsm_llm.agents.swarm
     fsm_llm.agents.tool_registries
     fsm_llm.agents.verified_react

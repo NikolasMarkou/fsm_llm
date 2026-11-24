@@ -72,7 +72,11 @@ from typing import Any, NamedTuple
 
 from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.core.definitions.executable import Capability, InstantiationError
+from fsm_llm.core.definitions.executable import (
+    Capability,
+    InstantiationError,
+    PatternEnvelope,
+)
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.context import RunContext
@@ -304,7 +308,11 @@ class ExecutableRegistry:
             # "names are not resolved"
             resolver, generators = namespace_resolver(), GENERATORS.get
         envelope, report = load_executable(
-            data, variables=variables, resolver=resolver, generators=generators
+            data,
+            variables=variables,
+            resolver=resolver,
+            generators=generators,
+            bases=self._base_envelope,
         )
         if envelope is None or not report.is_valid:
             raise ExecutableError(
@@ -313,6 +321,12 @@ class ExecutableRegistry:
         factory = adapter_for(envelope.kind, self._kinds)
         built: Executable = factory(envelope, pins=self)
         return built
+
+    def _base_envelope(self, id: str) -> PatternEnvelope | None:
+        """The template of the pattern *id* this registry holds, for a preset's ``extends``
+        (D-033); ``None`` for no such id, another kind or a code-backed pattern."""
+        found = getattr(self._snapshot.latest.get(id), "envelope", None)
+        return found if isinstance(found, PatternEnvelope) else None
 
     def load_sources(self) -> ReloadReport:
         """Call each not-yet-called source factory once and add what it returns."""

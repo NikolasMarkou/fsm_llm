@@ -149,7 +149,6 @@ from .semantic_memory import (
     create_semantic_memory_tools,
 )
 from .semantic_tools import SemanticToolRegistry
-from .sop import SOPDefinition, SOPRegistry, load_builtin_sops
 from .summarization import make_observation_summarizer
 from .swarm import SwarmAgent
 from .tool_registries import CachingToolRegistry, RetryingToolRegistry
@@ -340,6 +339,15 @@ def _builtin_executables() -> list:
     return builtin_executables()
 
 
+def _builtin_presets() -> list:
+    """The ``agent_presets`` source: the shipped presets that no agent class stands behind
+    (``code-review``, ``summarize``, ``data-extraction``; plan a555dcfe D-033). Lazy like the
+    ``agents`` source."""
+    from .executables import preset_executables
+
+    return preset_executables()
+
+
 def _pattern_adapter(envelope, **options):
     """The ``pattern`` kind of ``executable_kinds``: lazy like the source, so importing this
     package never imports ``agents.executables`` (D4) and a registry that loads a pattern file
@@ -351,6 +359,7 @@ def _pattern_adapter(envelope, **options):
 
 # `override=True`: re-importing the package (a reload) replaces the factory, never collides.
 EXECUTABLE_SOURCES.register("agents", _builtin_executables, override=True)
+EXECUTABLE_SOURCES.register("agent_presets", _builtin_presets, override=True)
 EXECUTABLE_KINDS.register("pattern", _pattern_adapter, override=True)
 
 __all__ = [
@@ -381,14 +390,11 @@ __all__ = [
     "CachingToolRegistry",
     "RetryingToolRegistry",
     "HumanInTheLoop",
-    # Phase 2: Graph, MCP, SOP, Remote
+    # Phase 2: Graph, MCP, Remote
     "AgentGraph",
     "AgentGraphBuilder",
     "ConfiguredAgentBuilder",
     "MCPToolProvider",
-    "SOPDefinition",
-    "SOPRegistry",
-    "load_builtin_sops",
     "AgentServer",
     "RemoteAgentTool",
     "ReasoningReactAgent",

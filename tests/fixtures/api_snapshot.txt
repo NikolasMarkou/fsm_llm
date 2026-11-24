@@ -691,7 +691,7 @@ fsm_llm.core.results.RunResult class(BaseModel)
   field handle: str | None = None
   property success
 # fsm_llm.core.verify.executable
-fsm_llm.core.verify.executable.load_executable def(data: object, *, variables: Mapping[str, str] | None = None, resolver: Resolver | None = None, origin: str = 'operator', allow: Mapping[str, Collection[str]] | None = None, generators: GeneratorLookup | None = None) -> tuple[ExecutableEnvelope | None, FSMValidationResult]
+fsm_llm.core.verify.executable.load_executable def(data: object, *, variables: Mapping[str, str] | None = None, resolver: Resolver | None = None, origin: str = 'operator', allow: Mapping[str, Collection[str]] | None = None, generators: GeneratorLookup | None = None, bases: BaseLookup | None = None) -> tuple[ExecutableEnvelope | None, FSMValidationResult]
 # fsm_llm.core.verify.flow
 fsm_llm.core.verify.flow.FlowFinding class
   def __init__(self, analysis: str, code: str, state: str, message: str) -> None
@@ -946,6 +946,7 @@ fsm_llm.core.definitions.executable.PROBLEM_LINE_CHARS = 300
 fsm_llm.core.definitions.executable.PatternBody class(BaseModel)
   field fsm: dict[str, Any] | None = None
   field generator: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
+  field extends: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
   field handlers: list[HandlerBinding] = factory
   field options_schema: OptionsSchema = factory
   field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], Any] = factory
@@ -1068,6 +1069,7 @@ fsm_llm.core.definitions.executable_pattern.PATTERN_FIELD_VERSIONS dict
 fsm_llm.core.definitions.executable_pattern.PatternBody class(BaseModel)
   field fsm: dict[str, Any] | None = None
   field generator: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
+  field extends: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])] | None = None
   field handlers: list[HandlerBinding] = factory
   field options_schema: OptionsSchema = factory
   field options: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])], Any] = factory
@@ -1440,23 +1442,6 @@ fsm_llm.agents.RemoteAgentTool class
 fsm_llm.agents.RetryingToolRegistry class(ToolRegistry)
   def __init__(self, max_retries: int = 2, backoff_seconds: float = 0.0) -> None
   def execute(self, tool_call: ToolCall, *, gated: bool = False) -> ToolResult
-fsm_llm.agents.SOPDefinition class
-  def __init__(self, name: str, description: str = '', agent_pattern: str = 'react', task_template: str = '', required_tools: list[str] | None = None, output_schema: dict[str, Any] | None = None, config_overrides: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None) -> None
-  classmethod def from_dict(cls, data: dict[str, Any]) -> SOPDefinition
-  def render_task(self, **kwargs: Any) -> str
-  def to_agent_config(self, *, llm_interface: Any = None, **overrides: Any) -> AgentConfig
-  def to_dict(self) -> dict[str, Any]
-fsm_llm.agents.SOPRegistry class
-  def __init__(self) -> None
-  def get(self, name: str) -> SOPDefinition
-  def has(self, name: str) -> bool
-  def list_names(self) -> list[str]
-  def list_sops(self) -> list[SOPDefinition]
-  def register(self, sop: SOPDefinition) -> SOPRegistry
-  def register_directory(self, directory: str | Path) -> int
-  def register_from_dict(self, data: dict[str, Any]) -> SOPRegistry
-  def register_from_file(self, path: str | Path) -> SOPRegistry
-  def remove(self, name: str) -> bool
 fsm_llm.agents.SelfConsistencyAgent class(BaseAgent)
   def __init__(self, config: AgentConfig | None = None, num_samples: int = 5, aggregation_fn: Callable[[list[str]], str] | None = None, max_workers: int = 1, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
@@ -1574,7 +1559,6 @@ fsm_llm.agents.export_agent_result def(result: AgentResult, directory: str | Pat
 fsm_llm.agents.export_semantic_memory def(store: SemanticMemoryStore, directory: str | Path, *, overwrite: bool = False) -> list[Path]
 fsm_llm.agents.format_artifact_json def(artifact: dict[str, Any]) -> str
 fsm_llm.agents.format_summary def(result: MetaBuilderResult) -> str
-fsm_llm.agents.load_builtin_sops def() -> SOPRegistry
 fsm_llm.agents.load_working_memory def(path: str) -> WorkingMemory
 fsm_llm.agents.make_observation_summarizer def(threshold: int, keep_last: int | None = None, summarize_fn: SummarizeFn | None = None) -> Callable[[dict[str, Any]], dict[str, Any]]
 fsm_llm.agents.react_worker_factory def(tools: ToolRegistry, config: AgentConfig | None = None, agent_cls: type[ReactAgent] = ReactAgent, **agent_kwargs: Any) -> WorkerFn

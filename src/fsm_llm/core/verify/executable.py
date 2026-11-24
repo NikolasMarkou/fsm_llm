@@ -23,7 +23,7 @@ agents handler library; until then nothing loads with a name it cannot resolve).
 Interface contract:
 
 ``load_executable(data, *, variables=None, resolver=None, origin="operator", allow=None,
-generators=None)
+generators=None, bases=None)
 -> (envelope | None, FSMValidationResult)``.
 
 - ``data``: anything; a non-document, a document nested too deep or one the models refuse is an
@@ -37,6 +37,12 @@ generators=None)
   ``NameRegistry`` namespaces (``lambda ns, n: n in namespaces[ns]``). ``None`` skips resolution
   and says so once, except for a pattern that uses a handler, hook or generator name (refused).
   This module reads no registry.
+- ``bases`` (``id -> PatternEnvelope | None``, D-033): where a PRESET (a pattern whose body
+  ``extends`` another) finds its base; the result is the FLAT envelope (the base with the preset
+  applied, ``core.definitions.executable_preset``), checked like any pattern. A preset with no
+  ``bases``, an unknown base, a cycle or a chain over ``MAX_EXTENDS_DEPTH`` is one ``[schema]``
+  error. V7 judges the preset AS WRITTEN: its ``extends`` is an implied ``requires.executables``
+  name, so a model-origin preset may extend only a base on ``allow["executables"]``.
 - ``origin``: ``"operator"`` (a file a person wrote: V7 never applies) or ``"model"`` (model-written
   text, the synthesis and meta-builder output of roadmap E4.6: V7 applies). ``allow``: category
   to the names a model may require; ``None`` is an empty list, so every name is refused (fail
@@ -80,6 +86,8 @@ from fsm_llm.core.definitions.executable_instance import (
     substitute_variables,
     variable_problems,
 )
+from fsm_llm.core.definitions.executable_pattern import PatternBodyError
+from fsm_llm.core.definitions.executable_preset import BaseLookup, resolve_extends
 from fsm_llm.core.state_kinds import raw_kinds
 from fsm_llm.text import capped_line
 
@@ -218,6 +226,9 @@ def _model_problems(
             problems.append(f"body tool {_shown(n)} is not on the allow-list")
     for body in bodies:
         problems += _body_setting_problems(body)
+    base = getattr(envelope.body, "extends", None)
+    if base is not None and base not in listed["executables"]:
+        problems.append(f"extends names {_shown(base)}: not on the allow-list")
     if requires.handlers:
         problems.append(
             f"requires.handlers names {_shown(requires.handlers[0])}: a handler "
@@ -239,6 +250,7 @@ def load_executable(
     origin: str = "operator",
     allow: Mapping[str, Collection[str]] | None = None,
     generators: GeneratorLookup | None = None,
+    bases: BaseLookup | None = None,
 ) -> tuple[ExecutableEnvelope | None, FSMValidationResult]:
     """Load *data* as an executable and report every failure at once (see the module text).
 
@@ -272,6 +284,18 @@ def load_executable(
             note("schema", "error", line)
         return finish(None)
 
+    written = envelope
+    if isinstance(envelope, PatternEnvelope) and envelope.body.extends is not None:
+        try:  # a preset (D-033): everything below sees the flat envelope
+            if bases is None:
+                raise PatternBodyError(
+                    "a preset needs bases=: its base cannot be found"
+                )
+            envelope = parse_executable(resolve_extends(envelope, bases))
+        except (PatternBodyError, ExecutableDocumentError) as error:
+            for line in getattr(error, "problems", None) or (str(error),):
+                note("schema", "error", line)
+            return finish(None)
     pattern = envelope if isinstance(envelope, PatternEnvelope) else None
 
     # V4, the values: fill the declared variables before the body is checked
@@ -433,10 +457,14 @@ def load_executable(
     # V7
     if origin == "model":
         bodies = [b for b in ([template, fsm] if pattern is None else read) if b]
+        if (
+            written is not envelope
+        ):  # a preset: judged as written, its base is allow-listed
+            bodies = []
         for line in dict.fromkeys(
             [
-                *_model_problems(envelope, allow, bodies),
-                *pattern_model_problems(envelope),
+                *_model_problems(written, allow, bodies),
+                *pattern_model_problems(written),
             ]
         ):
             note("model", "error", line)

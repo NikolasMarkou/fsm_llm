@@ -1,0 +1,42 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "data-extraction",
+  "name": "data-extraction",
+  "description": "Extract structured data from unstructured text",
+  "lifecycle": "builtin",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "input_templates": {
+      "task": "Extract the following fields from the text: {{fields}}\n\nText:\n{{text}}\n\nReturn the extracted data as a structured response."
+    }
+  },
+  "metadata": {
+    "category": "extraction"
+  },
+  "body": {
+    "extends": "react",
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature of the agent's model calls"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Think turns the agent may take"
+        }
+      }
+    },
+    "options": {
+      "temperature": 0.1,
+      "max_iterations": 3
+    }
+  }
+}

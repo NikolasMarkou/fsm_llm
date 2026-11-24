@@ -468,20 +468,22 @@ class TestTheSeamShapes:
 
 class TestPresetsAndClasses:
     @pytest.mark.parametrize("name", ["verified_react", "auto_memory"])
-    def test_a_preset_is_the_react_template_plus_hooks_and_options(self, name):
-        react, preset = pf.load_document("react"), pf.load_document(name)
+    def test_a_preset_extends_react_and_holds_no_copy_of_its_template(self, name):
+        body = pf.load_document(name)["body"]
+        react, flat = pf.load_envelope("react"), pf.load_envelope(name)
 
-        assert preset["body"]["fsm"] == react["body"]["fsm"]
-        assert preset["body"]["variants"] == react["body"]["variants"]
-        assert preset["body"]["handlers"] == react["body"]["handlers"]
-        assert preset["variables"] == react["variables"]
-        assert preset["capabilities"] == react["capabilities"]
-        assert preset["body"]["run"]["agent_type"] == "react"
-        added = set(preset["body"]["options"]) - set(react["body"]["options"])
-        assert added == set(preset["body"]["options_schema"]["properties"]) - set(
-            react["body"]["options_schema"]["properties"]
+        assert body["extends"] == "react"
+        assert not {"fsm", "handlers", "variants"} & set(body)
+        assert (
+            flat.body.fsm == react.body.fsm
+            and flat.body.handlers == react.body.handlers
         )
-        assert all(h["hook"] in HANDLERS for h in preset["body"]["run"]["hooks"])
+        assert flat.body.run.agent_type == "react" and flat.requires.executables == [
+            "react"
+        ]
+        added = set(flat.body.options) - set(react.body.options)
+        assert added == set(body["options_schema"]["properties"])
+        assert all(h["hook"] in HANDLERS for h in body["run"]["hooks"])
 
     def test_the_option_defaults_of_the_files_are_those_of_the_hooks_and_classes(self):
         verified = pf.load_envelope("verified_react").body.options
@@ -501,7 +503,8 @@ class TestPresetsAndClasses:
             document,
             resolver=namespace_resolver(),
             origin="model",
-            allow={"tools": [], "handlers": [], "hooks": []},
+            allow={"tools": [], "handlers": [], "hooks": [], "executables": ["react"]},
+            bases=lambda n: parse_executable(pf.load_document(n)),
         )
 
         assert not report.is_valid

@@ -103,7 +103,7 @@ To see what happened inside a run, several files wrap agent internals: `_on_loop
 - `test_semantic_memory.py` - `SemanticMemoryStore` and its `remember`/`recall` tools, loaders.
 - `test_semantic_tools.py` - `SemanticToolRegistry`: retrieval, `top_k` bounds, embedding-failure log level.
 - `test_session_save_and_restore.py` - core session paths run from this suite: `converse_stream` auto-save, partial streams, restore seed (core code, kept here to keep the pinned ids).
-- `test_sop.py` - `SOPRegistry`: registration, `config_overrides` validation, load errors, the warning `register_directory` gives per failed file.
+- `test_presets.py` - presets: `extends` (depth, cycles, V7), the `input_templates` renderer, the three shipped presets run by id on the task their SOPs rendered, the config options, the clean break.
 - `test_swarm_graph.py` - `SwarmAgent` and `AgentGraph`: hand-offs, shared memory, iteration counts, edge-condition safety.
 - `test_semantic_memory_robustness.py` - thread safety, embedding model mismatch warning, `max_entries`, atomic save.
 - `test_python_tools.py` - `PythonToolLoader`: the `load_directory` report (`PythonToolLoadReport` with `tools` and `errors`), `from_directory` returning the list and warning once per failed file, dedupe, removed names.

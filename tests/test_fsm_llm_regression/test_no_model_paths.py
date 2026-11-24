@@ -6,7 +6,7 @@ ace7a8c8 D-048, roadmap 0.15, for ``fsm-llm-eval`` and the monitor too):
 when nothing names a model. The documented rule is "an injected
 ``llm_interface`` needs no model". The root autouse fixture of
 ``tests/conftest.py`` sets ``LLM_MODEL`` for every test, which hid two
-regressions once (the SOP registry and the eval runners, review gate 1
+regressions once (the preset and agent-config paths and the eval runners, review gate 1
 concerns 1 and 2). Every case below deletes ``LLM_MODEL`` itself and then
 builds, runs or launches a public entry point:
 
@@ -52,10 +52,11 @@ from fsm_llm.agents import (
     create_agent,
     tool,
 )
-from fsm_llm.agents import sop as sop_module
 from fsm_llm.agents.composition import default_llm_judge
 from fsm_llm.agents.definitions import default_agent_config
 from fsm_llm.agents.meta_builders import AgentArtifactBuilder
+from fsm_llm.agents.pattern_agent import PatternAgent
+from fsm_llm.agents.pattern_files import load_envelope
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
 from fsm_llm.eval import ConversationCase, EvalConfig, run_cases, run_dataset
@@ -71,6 +72,7 @@ from fsm_llm.synthesis import (
     create_procedure_tools,
 )
 from fsm_llm.testing import ScriptedLLM
+from fsm_llm.tools import registry_from
 from fsm_llm.workflows import (
     WorkflowEngine,
     agent_step,
@@ -179,39 +181,71 @@ def _agents_config_named(tmp_path: Path) -> None:
     AgentConfig(model="provider/named")
 
 
-def _sop_register_without_model_key(tmp_path: Path) -> None:
-    registry = sop_module.SOPRegistry()
-    registry.register(
-        sop_module.SOPDefinition(name="s", config_overrides={"temperature": 0.3})
-    )
+def _preset_document(name: str, options: dict[str, Any]) -> dict[str, Any]:
+    """A user preset of ``react`` that sets AgentConfig-named options (no ``model``)."""
+    kinds = {"temperature": "number", "max_iterations": "integer"}
+    properties = {name: {"type": kinds[name]} for name in options}
+    return {
+        "schema": "fsm-llm/executable",
+        "kind": "pattern",
+        "id": name,
+        "body": {
+            "extends": "react",
+            "options_schema": {"type": "object", "properties": properties},
+            "options": options,
+        },
+    }
 
 
-def _sop_builtin_registry(tmp_path: Path) -> None:
-    assert len(sop_module.load_builtin_sops()) >= 3
+def _with_builtins(directory: Path | None = None) -> Any:
+    from fsm_llm.agents.executables import builtin_executables
+    from fsm_llm.engine.executables.directory import load_directory_registry
+
+    if directory is not None:
+        return load_directory_registry(directory, builtin_executables(), prog="p")
+    from fsm_llm.engine.executables.registry import ExecutableRegistry
+
+    registry = ExecutableRegistry()
+    for executable in builtin_executables():
+        registry.register(executable)
+    return registry
 
 
-def _sop_from_dict_and_file(tmp_path: Path) -> None:
-    registry = sop_module.SOPRegistry()
-    registry.register_from_dict(
-        {"name": "d", "config_overrides": {"max_iterations": 3}}
-    )
+def _preset_register_without_model_key(tmp_path: Path) -> None:
+    _with_builtins().add_document(_preset_document("s", {"temperature": 0.3}))
+
+
+def _preset_builtin_registry(tmp_path: Path) -> None:
+    from fsm_llm.engine.executables.registry import ExecutableRegistry
+
+    registry = ExecutableRegistry()
+    registry.load_sources()
+    wanted = {"code-review", "summarize", "data-extraction"}
+    assert wanted <= {e.id for e in registry.list(kind="pattern")}
+    assert load_envelope("code-review").body.options["temperature"] == 0.3
+
+
+def _preset_from_dict_and_file(tmp_path: Path) -> None:
+    registry = _with_builtins()
+    registry.add_document(_preset_document("d", {"max_iterations": 3}))
     path = tmp_path / "f.json"
     path.write_text(
-        json.dumps({"name": "f", "config_overrides": {"temperature": 0.1}}),
-        encoding="utf-8",
+        json.dumps(_preset_document("f", {"temperature": 0.1})), encoding="utf-8"
     )
-    registry.register_from_file(path)
+    assert _with_builtins(tmp_path).get("f").id == "f"
 
 
-def _sop_to_agent_config_injected(tmp_path: Path) -> None:
-    sop = sop_module.SOPDefinition(name="s", config_overrides={"temperature": 0.3})
-    config = sop.to_agent_config(llm_interface=_double())
-    assert config.temperature == 0.3 and config.model
+def _preset_agent_injected(tmp_path: Path) -> None:
+    agent = PatternAgent(
+        load_envelope("code-review"), registry_from([_echo]), llm_interface=_double()
+    )
+    assert agent.config.temperature == 0.3 and agent.config.model
 
 
-def _sop_to_agent_config_named(tmp_path: Path) -> None:
-    sop = sop_module.SOPDefinition(name="s", config_overrides={"temperature": 0.3})
-    assert sop.to_agent_config(model="provider/named").model == "provider/named"
+def _preset_agent_named(tmp_path: Path) -> None:
+    config = AgentConfig(model="provider/named")
+    agent = PatternAgent(load_envelope("code-review"), registry_from([_echo]), config)
+    assert agent.config.model == "provider/named" and agent.config.temperature == 0.3
 
 
 def _every_pattern(pattern: str) -> Any:
@@ -367,17 +401,13 @@ _NO_MODEL_NEEDED: dict[str, Any] = {
     "core: Classifier(llm_interface=)": _core_classifier,
     "agents: default_agent_config(injected interface)": _agents_config_injected,
     "agents: AgentConfig(model=named)": _agents_config_named,
-    "agents: SOPRegistry.register, overrides name no model": (
-        _sop_register_without_model_key
+    "agents: a preset with AgentConfig options registers, no model key": (
+        _preset_register_without_model_key
     ),
-    "agents: load_builtin_sops()": _sop_builtin_registry,
-    "agents: SOPRegistry.register_from_dict and register_from_file": (
-        _sop_from_dict_and_file
-    ),
-    "agents: SOPDefinition.to_agent_config(llm_interface=)": (
-        _sop_to_agent_config_injected
-    ),
-    "agents: SOPDefinition.to_agent_config(model=)": _sop_to_agent_config_named,
+    "agents: the built-in presets load": _preset_builtin_registry,
+    "agents: a preset from a dict and from a file": _preset_from_dict_and_file,
+    "agents: a preset agent with an injected interface": _preset_agent_injected,
+    "agents: a preset agent with a named model": _preset_agent_named,
     "agents: ConfiguredAgentBuilder with an injected interface": (
         _agents_configured_builder
     ),
@@ -503,16 +533,17 @@ def _need_create_agent(tmp_path: Path) -> None:
     create_agent("react", [_echo])
 
 
-def _need_sop_to_agent_config(tmp_path: Path) -> None:
-    sop_module.SOPDefinition(name="s").to_agent_config()
+def _need_preset_agent(tmp_path: Path) -> None:
+    PatternAgent(load_envelope("code-review"), registry_from([_echo]))
 
 
-def _need_sop_config_outliving_its_interface(tmp_path: Path) -> None:
+def _need_preset_config_outliving_its_interface(tmp_path: Path) -> None:
     """A config made for an injected interface holds the placeholder; run on its
     own (no interface) the agent must say "no model", not reach a provider."""
-    sop = sop_module.SOPDefinition(name="s", config_overrides={"temperature": 0.3})
-    config = sop.to_agent_config(llm_interface=_double())
-    agent = create_agent("react", [_echo], config=config)
+    config = PatternAgent(
+        load_envelope("code-review"), registry_from([_echo]), llm_interface=_double()
+    ).config
+    agent = PatternAgent(load_envelope("code-review"), registry_from([_echo]), config)
     try:
         agent.run("hi")
     except AgentError as exc:
@@ -557,9 +588,9 @@ _MODEL_REQUIRED: dict[str, Any] = {
     "core: Classifier without an interface": _need_classifier,
     "agents: AgentConfig()": _need_agent_config,
     "agents: create_agent without an interface": _need_create_agent,
-    "agents: SOPDefinition.to_agent_config() for running": (_need_sop_to_agent_config),
-    "agents: to_agent_config(llm_interface=) config used without the interface": (
-        _need_sop_config_outliving_its_interface
+    "agents: a preset agent without an interface": _need_preset_agent,
+    "agents: a preset agent's config used without the interface": (
+        _need_preset_config_outliving_its_interface
     ),
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
     "agents: default_llm_judge() without a backend": _need_judge_without_backend,

@@ -602,8 +602,23 @@
     },
     "PatternBody": {
       "additionalProperties": false,
-      "description": "``{fsm | generator, handlers, options_schema, options, variants, run}`` (D-011).",
+      "description": "``{fsm | generator | extends, handlers, options_schema, options, variants, run}`` (D-011, D-033).",
       "properties": {
+        "extends": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A preset: the id of the pattern it builds on, instead of fsm",
+          "title": "Extends"
+        },
         "fsm": {
           "anyOf": [
             {
