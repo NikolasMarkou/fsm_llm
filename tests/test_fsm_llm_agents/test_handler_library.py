@@ -168,6 +168,9 @@ class TestTheNamespaces:
             "agents.think_fresh_keys",
             "agents.feedback_consumed",
             "agents.approval_fresh_keys",
+            "agents.reflexion_evaluator",
+            "agents.reflexion_fresh_keys",
+            "agents.reflexion_reflector",
             "agents.approval_gate",
         ]
         for name, factory in LIBRARY:

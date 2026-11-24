@@ -32,6 +32,7 @@ Interface contract:
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -158,7 +159,7 @@ class PatternAgent(BaseAgent):
         self._refuse_run_start()
         handlers = self._handler_context()
         fsm_def = self._fsm_for_run(task, initial_context)
-        seed = dict(self.envelope.body.run.context_seed) or None
+        seed = copy.deepcopy(dict(self.envelope.body.run.context_seed)) or None
         if self._executes_tools:
             context = self._react_context(task, initial_context, extra=seed)
         else:

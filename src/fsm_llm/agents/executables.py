@@ -190,8 +190,11 @@ class PatternExecutable(CodeBackedExecutable):
             and (name != "hitl" or Capability.HITL in envelope.capabilities)
             and (name != "tools" or some_tools)
         )
-        self._row = _Row(required, optional)
         cls = agent_class or PatternAgent
+        # a class may name host objects it reads when present (reflexion: evaluation_fn); a
+        # file's requires.callables are REQUIRED ones (D-018)
+        optional += tuple(getattr(cls, "optional_callables", ()))
+        self._row = _Row(required, optional)
         super().__init__(
             id=envelope.id,
             kind="pattern",

@@ -4,7 +4,8 @@
 ``HANDLERS`` namespace of ``fsm_llm.engine.executables.namespaces``. This module holds the react
 family: ``agents.tool_executor``, ``agents.think_turn_limiter``, ``agents.iteration_limiter``,
 ``agents.think_fresh_keys``, ``agents.feedback_consumed``, ``agents.approval_fresh_keys`` and
-``agents.approval_gate``. Each is its own function (a ``NameRegistry`` refuses one function under two
+``agents.approval_gate``, and the Reflexion three (``agents.reflexion_evaluator``,
+``agents.reflexion_fresh_keys``, ``agents.reflexion_reflector``; bodies in ``reflection.py``). Each is its own function (a ``NameRegistry`` refuses one function under two
 names). The handler bodies are the existing ones (``executor``, ``limiters``, ``freshness``,
 ``tools.make_hitl_checker``); a factory only builds the handler around them, with the name, timing,
 state filter and priority the live registration of ``base/registration.py`` and ``base/hitl_gate.py``
@@ -32,8 +33,10 @@ from fsm_llm.agents.constants import (
     REACT_THINK_FRESH_KEYS,
     AgentStates,
     ContextKeys,
+    Defaults,
     HandlerNames,
     HandlerPriorities,
+    ReflexionStates,
 )
 from fsm_llm.agents.tools import make_hitl_checker
 from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
@@ -45,6 +48,11 @@ from .context import HandlerContext
 from .executor import AgentHandlers
 from .freshness import make_fresh_keys_handler
 from .limiters import ThinkTurnLimiter, make_iteration_limiter
+from .reflection import (
+    EVALUATION_KEYS,
+    make_evaluation_handler,
+    make_reflection_handler,
+)
 
 if TYPE_CHECKING:
     from fsm_llm.core.definitions.executable_pattern import HandlerBinding
@@ -231,6 +239,73 @@ def approval_fresh_keys(
     ]
 
 
+def reflexion_evaluator(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.reflexion_evaluator``: the verdict on entry to ``evaluate``.
+
+    With the callable ``evaluation_fn`` (``ctx.callables``) the function writes the verdict;
+    without it the stale verdict is cleared so ``evaluate`` extracts a new one.
+    """
+    # DECISION plan-2026-09-29T103145-06a5ec0a/D-031
+    # The verdict is produced on evaluate ENTRY: evaluation_fn writes it
+    # there, otherwise the stale one is cleared so evaluate extracts a new
+    # one. Do NOT run evaluation_fn at CONTEXT_UPDATE (core skips it when
+    # extraction returns nothing, REACT-02) or at PRE_TRANSITION on
+    # evaluate (the edge is already chosen by then, so a null extraction
+    # takes the 900 fallback to reflect whatever the function said).
+    # See decisions.md D-031.
+    evaluation_fn = ctx.callables.get("evaluation_fn")
+    do = (
+        make_fresh_keys_handler(_keys(binding, EVALUATION_KEYS))
+        if evaluation_fn is None
+        else make_evaluation_handler(evaluation_fn)
+    )
+    return [
+        create_handler(HandlerNames.REFLEXION_EVALUATOR)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_entry(*_states(binding, (ReflexionStates.EVALUATE,)))
+        .do(do)
+    ]
+
+
+def reflexion_fresh_keys(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.reflexion_fresh_keys``: clears ``reflection`` and ``lessons`` on entry to ``reflect``."""
+    # REACT-01: reflect produces reflection/lessons, so they are cleared on reflect entry and
+    # recorded on reflect EXIT (agents.reflexion_reflector), after the reflect extraction.
+    clear = make_fresh_keys_handler(
+        _keys(binding, (ContextKeys.REFLECTION, ContextKeys.LESSONS))
+    )
+    return [
+        create_handler(HandlerNames.REFLEXION_FRESH_KEYS)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_entry(*_states(binding, (ReflexionStates.REFLECT,)))
+        .do(clear)
+    ]
+
+
+def reflexion_reflector(
+    ctx: HandlerContext, binding: HandlerBinding | None = None
+) -> list[BaseHandler]:
+    """``agents.reflexion_reflector``: records the episode on exit from ``reflect``.
+
+    The cap is the option ``max_reflections`` of the run (``ctx.options``), at least 1.
+    """
+    limit = ctx.options.get("max_reflections", Defaults.MAX_REFLECTIONS)
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise AgentError(
+            f"agents.reflexion_reflector needs max_reflections >= 1, got {limit!r}"
+        )
+    return [
+        create_handler(HandlerNames.REFLEXION_REFLECTOR)
+        .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))
+        .on_state_exit(*_states(binding, (ReflexionStates.REFLECT,)))
+        .do(make_reflection_handler(limit))
+    ]
+
+
 def approval_gate(
     ctx: HandlerContext, binding: HandlerBinding | None = None
 ) -> list[BaseHandler]:
@@ -261,6 +336,9 @@ LIBRARY: tuple[tuple[str, Callable[..., list[BaseHandler]]], ...] = (
     ("agents.think_fresh_keys", think_fresh_keys),
     ("agents.feedback_consumed", feedback_consumed),
     ("agents.approval_fresh_keys", approval_fresh_keys),
+    ("agents.reflexion_evaluator", reflexion_evaluator),
+    ("agents.reflexion_fresh_keys", reflexion_fresh_keys),
+    ("agents.reflexion_reflector", reflexion_reflector),
     ("agents.approval_gate", approval_gate),
 )
 

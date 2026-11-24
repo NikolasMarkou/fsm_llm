@@ -13,7 +13,7 @@ pattern with no tools), ``task_description`` is only the retrieval query of a se
 ``approval`` selects the ``approval`` variant, ``options`` are the caller's options,
 ``output_schema`` the config's output model, ``context_keys`` the caller's prompt keys (names
 only, ``caller_prompt_keys``). Derived, filled for the names the envelope declares: options
-``context_keys``, ``schema_field_names``, ``tool_intents`` (with the ``classification`` variant)
+``context_keys`` (the default of that option is the file's lead keys, the caller's follow), ``schema_field_names``, ``tool_intents`` (with the ``classification`` variant)
 and the text variables ``think_instructions`` and ``context_names`` (the key names, quoted, as the
 field prompts print them). Raises ``AgentError`` for an option named
 ``approval`` or like a derived input; ``ValueError`` for a context key that is ``agent_trace`` or
@@ -24,7 +24,7 @@ refuses.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from fsm_llm.agents.constants import ContextKeys
 from fsm_llm.agents.fsm_definitions._loop import (
@@ -98,7 +98,13 @@ def pattern_fsm(
         )
     values = dict(given)
     if "context_keys" in declared:
-        keys = loop_field_context_keys((ContextKeys.AGENT_FEEDBACK, *context_keys))
+        # the file's default of this option holds its lead keys (react: agent_feedback;
+        # reflexion adds episodic_memory), the caller's keys follow
+        lead = cast(
+            "Sequence[str]",
+            body.options.get("context_keys", (ContextKeys.AGENT_FEEDBACK,)),
+        )
+        keys = loop_field_context_keys((*lead, *context_keys))
         values["context_keys"] = keys
         if (
             _KEYS_TEXT in envelope.variables

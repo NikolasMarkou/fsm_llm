@@ -36,7 +36,7 @@ from fsm_llm.engine.executables.namespaces import namespace_resolver
 
 __all__ = ["PATTERN_ORDER", "load_document", "load_envelope"]
 
-PATTERN_ORDER: tuple[str, ...] = ("react",)
+PATTERN_ORDER: tuple[str, ...] = ("react", "reflexion")
 
 
 # DECISION plan-2026-11-24T043150-a555dcfe/D-015

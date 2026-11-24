@@ -401,7 +401,6 @@ class TestReactFamilySharedSkeleton:
         from fsm_llm.agents import ReflexionAgent
         from fsm_llm.agents.constants import HandlerNames
         from fsm_llm.agents.definitions import EvaluationResult
-        from fsm_llm.agents.handlers import AgentHandlers
 
         agent = ReflexionAgent(
             tools=self._registry(),
@@ -411,8 +410,9 @@ class TestReactFamilySharedSkeleton:
             else None,
         )
         api = MagicMock()
-        agent._register_handlers(api, AgentHandlers(agent.tools))
-        names = [c.args[0] for c in api.create_handler.call_args_list if c.args]
+        # the registration reads the call-local HandlerContext (plan a555dcfe step 10)
+        agent._register_handlers(api, agent._handler_context())
+        names = [c.args[0].name for c in api.register_handler.call_args_list]
         assert names.count(HandlerNames.REFLEXION_EVALUATOR) == 1
 
     def test_reflexion_shares_the_react_loop_states(self):

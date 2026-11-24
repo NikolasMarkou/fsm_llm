@@ -1,0 +1,572 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "pattern",
+  "id": "reflexion",
+  "name": "reflexion",
+  "description": "Reflexion agent: ReAct with evaluation, self-critique and episodic memory",
+  "contract": {
+    "inputs": [
+      "task"
+    ],
+    "outputs": []
+  },
+  "requires": {
+    "tools": "some",
+    "handlers": [
+      "agents.tool_executor",
+      "agents.think_turn_limiter",
+      "agents.think_fresh_keys",
+      "agents.feedback_consumed",
+      "agents.approval_fresh_keys",
+      "agents.reflexion_evaluator",
+      "agents.reflexion_fresh_keys",
+      "agents.reflexion_reflector",
+      "agents.approval_gate"
+    ],
+    "callables": [
+      "tools"
+    ]
+  },
+  "capabilities": [
+    "tools",
+    "hitl"
+  ],
+  "lifecycle": "builtin",
+  "variables": [
+    "think_instructions",
+    "context_names"
+  ],
+  "body": {
+    "fsm": {
+      "name": "reflexion_agent",
+      "description": "Reflexion agent with self-evaluation",
+      "initial_state": "think",
+      "persona": "You are a reflective AI agent that solves tasks by using tools, then evaluating and critiquing your own work. After each tool action, you evaluate whether you have a good answer. If not, you reflect on what went wrong and try a different approach. Use your episodic memory to avoid repeating past mistakes.",
+      "states": {
+        "think": {
+          "id": "think",
+          "description": "Reason about the task and select the next tool to use",
+          "purpose": "Analyze the task, episodic memory, and previous observations",
+          "required_context_keys": [
+            "tool_name",
+            "tool_input",
+            "should_terminate"
+          ],
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "tool_name",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'tool_name' field. {{think_instructions}}",
+              "context_keys": {
+                "$hole": "context_keys"
+              }
+            },
+            {
+              "field_name": "tool_input",
+              "field_type": "dict",
+              "extraction_instructions": "Extract the 'tool_input' field. {{think_instructions}}",
+              "context_keys": {
+                "$hole": "context_keys"
+              }
+            },
+            {
+              "field_name": "should_terminate",
+              "field_type": "bool",
+              "extraction_instructions": "Extract the 'should_terminate' field (bool) from the task and the {{context_names}} values in the 'Already extracted:' context. true if you have enough information to answer the task: set it to true when the observations already answer the task or when no further tool call is needed; false only when another tool call is still required to answer it.",
+              "context_keys": {
+                "$hole": "context_keys"
+              },
+              "required": false
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "conclude",
+              "description": "Agent decided to terminate",
+              "priority": 10,
+              "conditions": [
+                {
+                  "description": "Agent decided to terminate AND a tool has run or termination is forced",
+                  "logic": {
+                    "or": [
+                      {
+                        "and": [
+                          {
+                            "==": [
+                              {
+                                "var": "should_terminate"
+                              },
+                              true
+                            ]
+                          },
+                          {
+                            ">": [
+                              {
+                                "var": [
+                                  "observation_count",
+                                  0
+                                ]
+                              },
+                              0
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "==": [
+                          {
+                            "var": "max_iterations_reached"
+                          },
+                          true
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "act",
+              "description": "Execute the selected tool",
+              "priority": 300
+            }
+          ]
+        },
+        "act": {
+          "id": "act",
+          "description": "Execute the selected tool and observe the result",
+          "purpose": "Run the tool and record the observation",
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "conclude",
+              "description": "Terminate when framework signals completion",
+              "priority": 1,
+              "conditions": [
+                {
+                  "description": "Framework/agent decided to terminate AND a tool has run or termination is forced",
+                  "logic": {
+                    "or": [
+                      {
+                        "and": [
+                          {
+                            "==": [
+                              {
+                                "var": "should_terminate"
+                              },
+                              true
+                            ]
+                          },
+                          {
+                            ">": [
+                              {
+                                "var": [
+                                  "observation_count",
+                                  0
+                                ]
+                              },
+                              0
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "==": [
+                          {
+                            "var": "max_iterations_reached"
+                          },
+                          true
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "evaluate",
+              "description": "Evaluate the result quality",
+              "priority": 900
+            }
+          ]
+        },
+        "evaluate": {
+          "id": "evaluate",
+          "description": "Assess whether gathered information is sufficient",
+          "purpose": "Evaluate answer quality and decide whether to reflect or conclude",
+          "required_context_keys": [
+            "evaluation_score",
+            "evaluation_passed"
+          ],
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "evaluation_passed",
+              "field_type": "bool",
+              "extraction_instructions": "Extract the 'evaluation_passed' field (bool) from the task and the 'task', 'observations' values in the 'Already extracted:' context. Judge whether the observations so far answer the task correctly and completely: every part of the question addressed, the evidence reliable and consistent. true if they are sufficient, false otherwise.",
+              "context_keys": [
+                "task",
+                "observations"
+              ],
+              "required": true
+            },
+            {
+              "field_name": "evaluation_score",
+              "field_type": "float",
+              "extraction_instructions": "Extract the 'evaluation_score' field (float) from the task and the 'task', 'observations' values in the 'Already extracted:' context. Judge whether the observations so far answer the task correctly and completely: every part of the question addressed, the evidence reliable and consistent. A number from 0.0 to 1.0 rating the answer quality.",
+              "context_keys": [
+                "task",
+                "observations"
+              ],
+              "required": false
+            },
+            {
+              "field_name": "evaluation_feedback",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'evaluation_feedback' field (str) from the task and the 'task', 'observations' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. Judge whether the observations so far answer the task correctly and completely: every part of the question addressed, the evidence reliable and consistent. One or two sentences on what is good or missing.",
+              "context_keys": [
+                "task",
+                "observations"
+              ],
+              "required": false
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "conclude",
+              "description": "Evaluation passed, produce final answer",
+              "priority": 10,
+              "conditions": [
+                {
+                  "description": "Passed on evidence, or forced stop",
+                  "logic": {
+                    "or": [
+                      {
+                        "or": [
+                          {
+                            "and": [
+                              {
+                                "==": [
+                                  {
+                                    "var": "evaluation_passed"
+                                  },
+                                  true
+                                ]
+                              },
+                              {
+                                ">": [
+                                  {
+                                    "var": [
+                                      "observation_count",
+                                      0
+                                    ]
+                                  },
+                                  0
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "==": [
+                              {
+                                "var": "max_iterations_reached"
+                              },
+                              true
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "==": [
+                          {
+                            "var": "max_iterations_reached"
+                          },
+                          true
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "reflect",
+              "description": "Evaluation failed, reflect on approach",
+              "priority": 300,
+              "conditions": [
+                {
+                  "description": "Evaluation did not pass",
+                  "logic": {
+                    "==": [
+                      {
+                        "var": "evaluation_passed"
+                      },
+                      false
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "target_state": "reflect",
+              "description": "Fallback: reflect if evaluation result unclear",
+              "priority": 900,
+              "conditions": []
+            }
+          ]
+        },
+        "reflect": {
+          "id": "reflect",
+          "description": "Self-critique and plan a revised approach",
+          "purpose": "Analyze what went wrong and generate lessons for next attempt",
+          "required_context_keys": [
+            "reflection"
+          ],
+          "extraction_instructions": "",
+          "field_extractions": [
+            {
+              "field_name": "reflection",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'reflection' field (str) from the task and the 'task', 'observations', 'evaluation_feedback', 'evaluation_score', 'episodic_memory' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. The last evaluation found the answer insufficient (see evaluation_feedback). Critique what went wrong in this attempt and what to try differently. Do not repeat a reflection already in episodic_memory.",
+              "context_keys": [
+                "task",
+                "observations",
+                "evaluation_feedback",
+                "evaluation_score",
+                "episodic_memory"
+              ],
+              "required": true
+            },
+            {
+              "field_name": "lessons",
+              "field_type": "str",
+              "extraction_instructions": "Extract the 'lessons' field (str) from the task and the 'task', 'observations', 'evaluation_feedback', 'evaluation_score', 'episodic_memory' values in the 'Already extracted:' context. This value does not exist yet: do not look for it in the messages or the context, compose it yourself now and never return null. One short lesson to remember for the next attempt, based on evaluation_feedback and not already listed in episodic_memory.",
+              "context_keys": [
+                "task",
+                "observations",
+                "evaluation_feedback",
+                "evaluation_score",
+                "episodic_memory"
+              ],
+              "required": false
+            }
+          ],
+          "response_instructions": "",
+          "transitions": [
+            {
+              "target_state": "think",
+              "description": "Return to thinking with updated memory",
+              "priority": 100
+            }
+          ]
+        },
+        "conclude": {
+          "id": "conclude",
+          "description": "Formulate and present the final answer",
+          "purpose": "Synthesize all observations into a complete answer",
+          "response_instructions": "Write the final answer to the ORIGINAL task (the 'task' value in the context) clearly and completely. Base it on the tool observations and on facts given in the task, and cite the observations that support it. This reply is the last output of the run: no further tool will run, so do not describe work in progress or planned next steps. If the observations do not hold enough evidence, say plainly what could not be determined and give the best answer the evidence supports.",
+          "transitions": []
+        }
+      },
+      "handler_only_keys": [
+        "max_iterations_reached",
+        "forced_stop_reason",
+        "iteration_count",
+        "observation_count",
+        "refused_actions"
+      ]
+    },
+    "handlers": [
+      {
+        "handler": "agents.tool_executor",
+        "on": "entry",
+        "states": [
+          "act"
+        ]
+      },
+      {
+        "handler": "agents.think_turn_limiter",
+        "on": "state"
+      },
+      {
+        "handler": "agents.think_fresh_keys",
+        "on": "entry",
+        "states": [
+          "think"
+        ]
+      },
+      {
+        "handler": "agents.feedback_consumed",
+        "on": "exit",
+        "states": [
+          "think"
+        ]
+      },
+      {
+        "handler": "agents.approval_fresh_keys",
+        "on": "entry",
+        "states": [
+          "await_approval"
+        ]
+      },
+      {
+        "handler": "agents.reflexion_evaluator",
+        "on": "entry",
+        "states": [
+          "evaluate"
+        ]
+      },
+      {
+        "handler": "agents.reflexion_fresh_keys",
+        "on": "entry",
+        "states": [
+          "reflect"
+        ]
+      },
+      {
+        "handler": "agents.reflexion_reflector",
+        "on": "exit",
+        "states": [
+          "reflect"
+        ]
+      },
+      {
+        "handler": "agents.approval_gate",
+        "on": "context_update"
+      }
+    ],
+    "options_schema": {
+      "type": "object",
+      "properties": {
+        "context_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Context keys every think field prompt lists (filled by the agent)"
+        },
+        "max_reflections": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Reflect cycles before the run is forced to conclude"
+        }
+      }
+    },
+    "options": {
+      "context_keys": [
+        "task",
+        "observations",
+        "agent_feedback",
+        "episodic_memory"
+      ],
+      "max_reflections": 3
+    },
+    "variants": {
+      "approval": [
+        {
+          "op": "add",
+          "path": "/states/think/transitions/1",
+          "value": {
+            "target_state": "await_approval",
+            "description": "Action requires human approval before execution",
+            "priority": 150,
+            "conditions": [
+              {
+                "description": "Approval is required for this action",
+                "logic": {
+                  "==": [
+                    {
+                      "var": "approval_required"
+                    },
+                    true
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/states/conclude/response_instructions",
+          "value": "Write the final answer to the ORIGINAL task (the 'task' value in the context) clearly and completely. Base it on the tool observations and on facts given in the task, and cite the observations that support it. This reply is the last output of the run: no further tool will run, so do not describe work in progress or planned next steps. If the observations do not hold enough evidence, say plainly what could not be determined and give the best answer the evidence supports. If the context has a 'refused_actions' list, every action in it was refused by a human approver and was NOT performed: state in the answer that it was not performed because approval was refused, and never say or imply that a refused action was done or will be done."
+        },
+        {
+          "op": "add",
+          "path": "/states/await_approval",
+          "value": {
+            "id": "await_approval",
+            "description": "Waiting for human approval before executing action",
+            "purpose": "Hold the selected action until the approval decision is set",
+            "response_instructions": "",
+            "transitions": [
+              {
+                "target_state": "conclude",
+                "description": "Terminate when framework signals completion",
+                "priority": 1,
+                "conditions": [
+                  {
+                    "description": "Framework or agent decided to terminate",
+                    "logic": {
+                      "==": [
+                        {
+                          "var": "should_terminate"
+                        },
+                        true
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "target_state": "act",
+                "description": "Approval granted, proceed with action",
+                "priority": 10,
+                "conditions": [
+                  {
+                    "description": "User approved the action",
+                    "logic": {
+                      "==": [
+                        {
+                          "var": "approval_granted"
+                        },
+                        true
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "target_state": "think",
+                "description": "Approval denied, reconsider approach",
+                "priority": 300,
+                "conditions": [
+                  {
+                    "description": "User denied the action",
+                    "logic": {
+                      "==": [
+                        {
+                          "var": "approval_granted"
+                        },
+                        false
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "run": {
+      "agent_type": "reflexion",
+      "context_seed": {
+        "episodic_memory": [],
+        "reflection_count": 0
+      }
+    }
+  }
+}

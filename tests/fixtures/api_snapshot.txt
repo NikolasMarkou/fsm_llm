@@ -1428,9 +1428,8 @@ fsm_llm.agents.ReactAgent class(PatternAgent)
 fsm_llm.agents.ReasoningReactAgent class(BaseAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, hitl: HumanInTheLoop | None = None, reasoning_model: str | None = None, **api_kwargs: Any) -> None
   def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
-fsm_llm.agents.ReflexionAgent class(BaseAgent)
+fsm_llm.agents.ReflexionAgent class(PatternAgent)
   def __init__(self, tools: ToolRegistry, config: AgentConfig | None = None, evaluation_fn: Callable[[dict[str, Any]], EvaluationResult] | None = None, max_reflections: int = 3, hitl: HumanInTheLoop | None = None, **api_kwargs: Any) -> None
-  def run(self, task: str, initial_context: dict[str, Any] | None = None) -> AgentResult
 fsm_llm.agents.ReflexionMemory class(BaseModel)
   field episode: int required
   field task_summary: str = ''

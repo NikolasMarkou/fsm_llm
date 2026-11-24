@@ -934,6 +934,21 @@
       "delta": 1,
       "reason": "plan a555dcfe step 9: the react builder body moved into agents/patterns/react.json; the 06a5ec0a/D-009 rule (no state-level bulk call) is the no_bulk row of test_pattern_shapes and a clause of the D-015 anchor (D-029 of plan ace7a8c8); D-015 is the one anchor token of the shipped pattern files",
       "token": "plan-2026-11-24T043150-a555dcfe/D-015"
+    },
+    {
+      "delta": -3,
+      "reason": "plan a555dcfe step 10: reflexion becomes a pattern file; the anchors of the replaced builder and class bodies are dropped under owner D-029 of plan ace7a8c8 (45a654de/D-012 x3: the per-instance handlers race is closed by PatternAgent and its 089d0ec7/D-014 anchor; c1d5bfbc/D-005 and D-008: the approval edge and conclude on evidence of the reflexion states are held by test_pattern_shapes and the a555dcfe/D-015 anchor); 06a5ec0a/D-031 and D-051 moved with their handler bodies to handlers/library.py and handlers/reflection.py",
+      "token": "plan-2026-09-12T135914-45a654de/D-012"
+    },
+    {
+      "delta": -1,
+      "reason": "plan a555dcfe step 10: reflexion becomes a pattern file; the anchors of the replaced builder and class bodies are dropped under owner D-029 of plan ace7a8c8 (45a654de/D-012 x3: the per-instance handlers race is closed by PatternAgent and its 089d0ec7/D-014 anchor; c1d5bfbc/D-005 and D-008: the approval edge and conclude on evidence of the reflexion states are held by test_pattern_shapes and the a555dcfe/D-015 anchor); 06a5ec0a/D-031 and D-051 moved with their handler bodies to handlers/library.py and handlers/reflection.py",
+      "token": "plan-2026-09-24T091842-c1d5bfbc/D-005"
+    },
+    {
+      "delta": -1,
+      "reason": "plan a555dcfe step 10: reflexion becomes a pattern file; the anchors of the replaced builder and class bodies are dropped under owner D-029 of plan ace7a8c8 (45a654de/D-012 x3: the per-instance handlers race is closed by PatternAgent and its 089d0ec7/D-014 anchor; c1d5bfbc/D-005 and D-008: the approval edge and conclude on evidence of the reflexion states are held by test_pattern_shapes and the a555dcfe/D-015 anchor); 06a5ec0a/D-031 and D-051 moved with their handler bodies to handlers/library.py and handlers/reflection.py",
+      "token": "plan-2026-09-24T091842-c1d5bfbc/D-008"
     }
   ]
 }

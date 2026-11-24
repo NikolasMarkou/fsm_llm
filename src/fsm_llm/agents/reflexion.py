@@ -1,9 +1,12 @@
 """
-ReflexionAgent — ReAct with evaluation, verbal self-critique, and episodic memory.
+ReflexionAgent: ReAct with evaluation, verbal self-critique, and episodic memory.
 
-Extends the ReAct loop with an evaluation gate and a reflection state:
 Think -> Act -> Evaluate -> Reflect (if failed) -> Think (loop)
                           -> Conclude (if passed)
+
+The loop is the pattern file ``patterns/reflexion.json`` run by ``PatternAgent`` (plan a555dcfe
+step 10); the evaluate and reflect handlers are the library factories ``agents.reflexion_*``.
+This class keeps the constructor and the run-output keys.
 """
 
 from __future__ import annotations
@@ -11,40 +14,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fsm_llm import API
-from fsm_llm.agents.constants import (
-    REACT_THINK_FRESH_KEYS,
-    ContextKeys,
-    Defaults,
-    HandlerNames,
-    HandlerPriorities,
-    LogMessages,
-    ReflexionStates,
-    StopReason,
-)
-from fsm_llm.agents.fsm_definitions.reflexion import build_reflexion_fsm
-from fsm_llm.logging import logger
+from fsm_llm.agents.constants import ContextKeys, Defaults
 from fsm_llm.policy import HumanInTheLoop
 from fsm_llm.tools import ToolRegistry, require_int_limit
 
-from .base import BaseAgent, caller_prompt_keys
-from .definitions import (
-    AgentConfig,
-    AgentResult,
-    EvaluationResult,
-    ReflexionMemory,
-)
-from .handlers import AgentHandlers, make_fresh_keys_handler, run_evaluation_fn
-
-# The verdict keys evaluate produces (cleared on evaluate entry).
-_EVALUATION_KEYS = (
-    ContextKeys.EVALUATION_PASSED,
-    ContextKeys.EVALUATION_SCORE,
-    ContextKeys.EVALUATION_FEEDBACK,
-)
+from .definitions import AgentConfig, EvaluationResult
+from .pattern_agent import PatternAgent
 
 
-class ReflexionAgent(BaseAgent):
+class ReflexionAgent(PatternAgent):
     """
     Reflexion agent that evaluates and self-critiques its own outputs.
 
@@ -58,6 +36,9 @@ class ReflexionAgent(BaseAgent):
         result = agent.run("What year was the Eiffel Tower built?")
         print(result.answer)
     """
+
+    # Host objects an executable of this pattern reads when the run supplies them (D-018).
+    optional_callables = ("evaluation_fn",)
 
     # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
     _run_output_keys = frozenset(
@@ -102,193 +83,16 @@ class ReflexionAgent(BaseAgent):
         max_reflections = require_int_limit(
             "max_reflections", max_reflections, minimum=1
         )
+        from .pattern_files import load_envelope  # lazy: reads the file
 
-        super().__init__(config, **api_kwargs)
-        self.tools = tools
+        super().__init__(
+            load_envelope("reflexion"),
+            tools=tools,
+            config=config,
+            hitl=hitl,
+            options={"max_reflections": max_reflections},
+            callables={} if evaluation_fn is None else {"evaluation_fn": evaluation_fn},
+            **api_kwargs,
+        )
         self.evaluation_fn = evaluation_fn
         self.max_reflections = max_reflections
-        self.hitl = hitl
-        self._refuse_unapprovable_flagged_tools()
-        # DECISION plan-2026-09-12T135914-45a654de/D-012
-        # No `self._handlers` here (matches react.py's D-014 pattern) — a
-        # per-instance AgentHandlers shared across concurrent run() calls is
-        # the D-004/D-014 race. Each call builds and uses its own call-LOCAL
-        # AgentHandlers (see run() below). Do NOT reintroduce this
-        # assignment — see decisions.md D-012.
-
-        logger.info(
-            LogMessages.AGENT_STARTED.format(
-                tool_count=len(tools), model=self.config.model
-            )
-        )
-
-    def run(
-        self,
-        task: str,
-        initial_context: dict[str, Any] | None = None,
-    ) -> AgentResult:
-        """
-        Run the Reflexion agent on a task.
-
-        :param task: The task/question for the agent to solve
-        :param initial_context: Optional initial context data
-        :return: AgentResult with answer, trace, and metadata
-        """
-        # DECISION plan-2026-09-12T135914-45a654de/D-012
-        # A call-LOCAL AgentHandlers, threaded explicitly into
-        # `_register_handlers` via `_standard_run`'s `handlers=` parameter —
-        # see the fuller note in react.py's ReactAgent.run() (D-014). A fresh
-        # instance needs no `.reset()`. Do NOT reintroduce
-        # `self._handlers = AgentHandlers(...)` — see decisions.md D-012.
-        # plan-2026-09-24T091842-c1d5bfbc/D-005: the await_approval state, the
-        # gate in _register_handlers and the D-004 refusal share ONE predicate
-        # (BaseAgent._hitl_active), so a gated call is asked in await_approval
-        # before `act` runs it; the refusal stays as the backstop.
-        # D-052 refusal and the shared predicate: `_call_handlers`.
-        handlers = self._call_handlers(self.tools)
-
-        fsm_def = build_reflexion_fsm(
-            self.tools,
-            task_description=task[: Defaults.MAX_TASK_PREVIEW_LENGTH],
-            include_approval_state=self._hitl_active,
-            context_keys=caller_prompt_keys(initial_context),
-        )
-
-        context = self._react_context(
-            task,
-            initial_context,
-            {ContextKeys.EPISODIC_MEMORY: [], ContextKeys.REFLECTION_COUNT: 0},
-        )
-
-        return self._standard_run(
-            task, fsm_def, context, "reflexion", handlers=handlers
-        )
-
-    # DECISION plan-2026-09-12T135914-45a654de/D-012
-    # `handlers` is REQUIRED in practice: run() always passes its own
-    # call-local `AgentHandlers` explicitly via `_standard_run`'s `handlers=`
-    # parameter (mirrors react.py's D-014 guard). Do NOT fall back to
-    # reading a `self._handlers` attribute here — none exists on this class.
-    # See decisions.md D-012.
-    def _register_handlers(
-        self, api: API, handlers: AgentHandlers | None = None
-    ) -> None:
-        """Register agent handlers with the API."""
-        handlers = self._require_handlers(handlers)
-        self._register_tool_executor(api, ReflexionStates.ACT, handlers.execute_tool)
-        self._register_iteration_limiter(api, handlers.check_iteration_limit)
-        # should_terminate is refreshed on think entry like ReAct's, so the
-        # last think turn gives its own verdict (D-051 of plan 06a5ec0a); the
-        # max_reflections stop survives, it records a forced reason.
-        self._register_think_loop_handlers(api, REACT_THINK_FRESH_KEYS)
-
-        # DECISION plan-2026-09-29T103145-06a5ec0a/D-031
-        # The verdict is produced on evaluate ENTRY: evaluation_fn writes it
-        # there, otherwise the stale one is cleared so evaluate extracts a new
-        # one. Do NOT run evaluation_fn at CONTEXT_UPDATE (core skips it when
-        # extraction returns nothing, REACT-02) or at PRE_TRANSITION on
-        # evaluate (the edge is already chosen by then, so a null extraction
-        # takes the 900 fallback to reflect whatever the function said).
-        # See decisions.md D-031.
-        api.register_handler(
-            api.create_handler(HandlerNames.REFLEXION_EVALUATOR)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(ReflexionStates.EVALUATE)
-            .do(
-                make_fresh_keys_handler(_EVALUATION_KEYS)
-                if self.evaluation_fn is None
-                else self._make_evaluation_handler(self.evaluation_fn)
-            )
-        )
-
-        # REACT-01: reflect produces reflection/lessons, so they are cleared
-        # on reflect entry and recorded on reflect EXIT, after the reflect
-        # extraction (entry runs before it and stored the previous episode's).
-        api.register_handler(
-            api.create_handler(HandlerNames.REFLEXION_FRESH_KEYS)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_entry(ReflexionStates.REFLECT)
-            .do(make_fresh_keys_handler([ContextKeys.REFLECTION, ContextKeys.LESSONS]))
-        )
-        api.register_handler(
-            api.create_handler(HandlerNames.REFLEXION_REFLECTOR)
-            .with_priority(HandlerPriorities.TOOL_EXECUTOR)
-            .on_state_exit(ReflexionStates.REFLECT)
-            .do(self._make_reflection_handler())
-        )
-
-        # HITL: flag tools needing approval (same predicate as the FSM state)
-        self._register_approval_gate(api)
-
-    @staticmethod
-    def _make_evaluation_handler(
-        evaluation_fn: Callable[[dict[str, Any]], EvaluationResult],
-    ) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the evaluate-entry handler that runs the external evaluation_fn.
-
-        Its verdict replaces the self-evaluation: the keys it writes are set,
-        so evaluate extracts nothing (skip-if-set). A raising or wrong-typed
-        function is a failed evaluation (``run_evaluation_fn``), never a reason
-        to fall back to the model's own verdict."""
-
-        def handle_evaluation(context: dict[str, Any]) -> dict[str, Any]:
-            eval_result = run_evaluation_fn(evaluation_fn, context)
-            return {
-                ContextKeys.EVALUATION_PASSED: eval_result.passed,
-                ContextKeys.EVALUATION_SCORE: eval_result.score,
-                ContextKeys.EVALUATION_FEEDBACK: eval_result.feedback,
-            }
-
-        return handle_evaluation
-
-    def _make_reflection_handler(self) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        """Create the reflect-exit handler that records the episode.
-
-        It runs after the reflect extraction, so the memory entry holds this
-        episode's reflection and lessons and the verdict evaluate produced."""
-        max_reflections = self.max_reflections
-
-        def handle_reflection(context: dict[str, Any]) -> dict[str, Any]:
-            reflection_count = context.get(ContextKeys.REFLECTION_COUNT, 0) + 1
-            episodic_memory = list(context.get(ContextKeys.EPISODIC_MEMORY, []))
-
-            reflection_text = context.get(ContextKeys.REFLECTION, "")
-            lessons = context.get(ContextKeys.LESSONS, [])
-            if not isinstance(lessons, list):
-                lessons = [str(lessons)] if lessons else []
-
-            memory_entry = ReflexionMemory(
-                episode=reflection_count,
-                task_summary=context.get(ContextKeys.TASK, ""),
-                outcome=context.get(ContextKeys.EVALUATION_FEEDBACK, ""),
-                reflection=str(reflection_text),
-                lessons=lessons,
-            )
-            episodic_memory.append(memory_entry.model_dump(mode="json"))
-
-            logger.info(
-                LogMessages.REFLECTION.format(
-                    current=reflection_count,
-                    max=max_reflections,
-                    summary=str(reflection_text)[:80],
-                )
-            )
-
-            updates: dict[str, Any] = {
-                ContextKeys.REFLECTION_COUNT: reflection_count,
-                ContextKeys.EPISODIC_MEMORY: episodic_memory,
-            }
-            if reflection_count >= max_reflections:
-                # DECISION plan-2026-09-29T103145-06a5ec0a/D-051: the cap
-                # stops a run whose evaluation never passed (reflect runs only
-                # after a failed or unclear verdict), so it is a forced stop
-                # like EvalOpt's refinement cap (D-011). Do NOT report it as
-                # answered: the answer ships, success is False.
-                updates[ContextKeys.SHOULD_TERMINATE] = True
-                if context.get(ContextKeys.EVALUATION_PASSED) is not True:
-                    updates[ContextKeys.FORCED_STOP_REASON] = (
-                        StopReason.FORCED_PASS.value
-                    )
-            return updates
-
-        return handle_reflection
