@@ -163,6 +163,7 @@ async def settle_delegated(
         inputs,
         conversation_id=top.conversation_id,
         max_seconds=delegated_seconds(config.max_seconds),
+        max_steps=config.max_steps,
         announce=announce,
     )
     if started:

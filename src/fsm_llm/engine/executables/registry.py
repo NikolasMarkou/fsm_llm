@@ -30,11 +30,11 @@ Interface contract:
   ``FSMDefinition`` and both identities when the instance is an FSM body (kinds ``fsm``,
   ``strategy``, ``procedure``) and, for a ``strategy``, its declared ``results`` as the target's own
   output map (``ResolvedTarget.returns``, D-030 of plan baa37f40); ``None`` for a miss, a body
-  that does not instantiate and a code-backed kind (``pattern``, ``workflow``). Never raises for a miss, never loads a module
+  that does not instantiate and a code-backed kind (``pattern``). Never raises for a miss, never loads a module
   by the id and keeps no instance.
 - ``resolve_delegated(target_id, *, launcher, context=None, input_keys=(), max_steps=None) ->
   DelegatedTarget | None`` (plan baa37f40 phase K7, D-049): the delegated twin, for the kinds
-  ``pattern`` and ``workflow`` only. ``None`` (the one answer a caller maps to
+  ``pattern`` only (a ``workflow`` kind is no target: D-053, D-055). ``None`` (the one answer a caller maps to
   ``failed/unknown_target``) for: a *launcher* that is not a ``RunLauncher``, an unknown or
   deprecated id, a kind that is not code-backed (a body kind stays a frame target), the
   capability ``conversational`` (a delegated run has no user to talk to), a name of
@@ -101,8 +101,9 @@ MAX_RETAINED_TEMPLATES = 256
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 _MEMORY = "memory"
-#: The envelope kinds that run as code on a host thread (delegated mode); the others are frames.
-_DELEGATED_KINDS = ("pattern", "workflow")
+#: The kinds that run as code on a host thread (delegated mode); a body kind is a frame and a
+#: ``workflow`` is no target until E5.2 and E5.3 (D-053, D-055).
+_DELEGATED_KINDS = ("pattern",)
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
 

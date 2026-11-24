@@ -19,7 +19,7 @@ target, the inputs and the budgets from the parent's own definition and context,
 record: ``request`` is evidence and the durable intent, not an instruction (D-022, D-023).
 
 Delegated mode (plan baa37f40 phase K7, D-051, roadmap E3.2 second half): when the frame resolver
-answers ``None`` and the resolver is also a ``RunLauncher``, a code-backed ``pattern`` or ``workflow``
+answers ``None`` and the resolver is also a ``RunLauncher``, a code-backed ``pattern``
 target (``resolve_run``) is DELEGATED. Pass 1 then reserves a minted handle (``claim``) and writes the
 ``running`` record with ``mode: delegated``, the ``handle`` and a wall-clock ``deadline``; settle
 (K7.4) starts the run after the commit. On every later turn the executor POLLS the launcher instead of

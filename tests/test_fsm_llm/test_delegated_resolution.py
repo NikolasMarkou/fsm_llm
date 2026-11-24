@@ -1,6 +1,6 @@
 """Delegated resolution (plan baa37f40, step K7.1, D-049, roadmap E3.2 second half).
 
-A code-backed ``pattern`` or ``workflow`` has no FSM body to push, so it resolves to a
+A code-backed ``pattern`` has no FSM body to push, so it resolves to a
 ``DelegatedTarget`` (not a ``ResolvedTarget``) through ``ExecutableRegistry.resolve_delegated``,
 and only for a caller that holds a ``RunLauncher``. Every refusal is the one answer ``None`` that a
 caller maps to ``failed/unknown_target``. Frame resolution (``resolve_target``) is unchanged.
@@ -90,6 +90,7 @@ class _Launcher:
         *,
         conversation_id,
         max_seconds=None,
+        max_steps=None,
         announce=None,
     ):
         return False
@@ -262,7 +263,11 @@ class TestTheSeam:
 
 
 class TestResolvesDelegated:
-    @pytest.mark.parametrize("kind", ["pattern", "workflow"])
+    def test_a_workflow_kind_resolves_to_nothing(self) -> None:
+        """D-053, D-055: delegated mode is pattern targets only (E5.2 and E5.3 carry workflows)."""
+        assert _resolve(_registry(_Stub("workflow"))) is None
+
+    @pytest.mark.parametrize("kind", ["pattern"])
     def test_a_code_backed_kind_resolves_with_its_identities(self, kind) -> None:
         stub = _Stub(kind, outputs=["x", "y"])
         registry = _registry(stub)

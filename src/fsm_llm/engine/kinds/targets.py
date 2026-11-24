@@ -31,7 +31,7 @@ Interface contract:
   ``FSMManager(targets=)``, ``MessagePipeline(targets=)`` and ``RunContext(registry=)``.
 
 Delegated mode (plan baa37f40 phase K7, D-049, roadmap E3.2 second half): a code-backed
-``pattern`` or ``workflow`` has no FSM body to push, so it is not a ``ResolvedTarget``.
+``pattern`` has no FSM body to push, so it is not a ``ResolvedTarget``.
 
 - ``DelegatedTarget(target_id, kind, executable, template_identity, instance_identity, outputs)``:
   frozen, the mode is the constant ``TARGET_MODE_DELEGATED`` (not a parameter). ``executable`` is
@@ -44,9 +44,11 @@ Delegated mode (plan baa37f40 phase K7, D-049, roadmap E3.2 second half): a code
   is every refusal, mapped to ``failed/unknown_target``); ``claim(handle, *, conversation_id)
   -> bool`` reserves a minted handle for a conversation in a bounded set (``False``: the host is
   full, mapped to ``failed/push_failed``); ``start(handle, target, inputs, *, conversation_id,
-  max_seconds=None, announce=None) -> bool`` consumes the reservation, calls ``announce()`` (the
-  ``run/start`` write) and only then starts the run, returning ``False`` when the handle holds no
-  reservation of that conversation (a forged record starts nothing); ``poll(handle, *,
+  max_seconds=None, max_steps=None, announce=None) -> bool`` consumes the reservation, calls
+  ``announce()`` (the ``run/start`` write) and only then starts the run, returning ``False`` when the
+  handle holds no reservation of that conversation (a forged record starts nothing); ``max_steps`` is
+  the call's step budget, which the run must honour (an executable that cannot names it in
+  ``refused_budgets`` and is refused at resolution, D-055); ``poll(handle, *,
   conversation_id) -> RunPoll | None`` (``None``: the host never saw the handle for that
   conversation); ``cancel(handle, *, conversation_id=None) -> bool``; ``cancel_for(conversation_id)
   -> int`` (every run and reservation of one conversation). A launcher never raises for an
@@ -149,7 +151,7 @@ class TargetResolver(Protocol):
 
 # DECISION plan-2026-11-23T122249-baa37f40/D-049
 # A delegated target is a SEPARATE value type, not a second mode of `ResolvedTarget`. A code-backed
-# pattern or workflow has no `FSMDefinition` to push, and `ResolvedTarget.definition` is read
+# pattern has no `FSMDefinition` to push, and `ResolvedTarget.definition` is read
 # without a guard at every frame site (the push plan of settle, the synthesis executor): do NOT make
 # it Optional and do NOT put a placeholder definition in it, a frame consumer must never hold a
 # target with nothing to push. The one answer of the frame resolver stays `ResolvedTarget | None`;
@@ -198,6 +200,7 @@ class RunLauncher(Protocol):
         *,
         conversation_id: str,
         max_seconds: float | None = None,
+        max_steps: int | None = None,
         announce: Callable[[], None] | None = None,
     ) -> bool: ...
 

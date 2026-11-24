@@ -1,7 +1,7 @@
 """The run host: one daemon thread per delegated run, and the targets object that owns it.
 
 Plan baa37f40 phase K7 (D-050, roadmap E3.2 second half). A ``call`` state in delegated mode runs a
-code-backed ``pattern`` or ``workflow`` OFF the parent's turn, on a thread the engine does not own,
+code-backed ``pattern`` OFF the parent's turn, on a thread the engine does not own,
 and polls it on later turns. This module holds the thread side only: it never logs, never reads the
 parent's context and never calls back into an ``API`` (the engine writes ``run/start`` and
 ``run/end`` itself, on its own thread, through the ``announce`` hook of ``start``).
@@ -42,10 +42,12 @@ Interface contract:
   resolution) and a ``RunLauncher`` (``resolve_run`` is ``registry.resolve_delegated`` judged
   against ``context``, the HOST context: its ``callables``, limits and model; the others go to
   the ``RunHost``). ``start(handle, target, inputs, *, conversation_id, max_seconds=None,
-  announce=None)`` runs ``target.executable`` in the worker: it instantiates it there and runs it
-  with ``context.derive(parent=conversation_id, max_seconds=<the narrower of the call's and the
-  host's>, cancel=<the run's own token>)``. The caller passes ``inputs`` as a private copy (the
-  worker never shares a mutable value with the parent's context). A host context that sets
+  max_steps=None, announce=None)`` runs ``target.executable`` in the worker: it instantiates it there and runs it
+  with ``context.derive(parent=conversation_id, max_steps=<the narrower of the call's and the
+  host's>, max_seconds=<the narrower of the call's and the host's>, cancel=<the run's own
+  token>)`` (D-055: the call's step budget reaches an executable that accepts one). The caller
+  passes ``inputs`` as a private copy (the worker never shares a mutable value with the parent's
+  context). A host context that sets
   ``max_steps`` makes every pattern fail with the mapped type of its ``ValueError``.
   ``wait(handle, timeout_seconds) -> bool`` is the host's bounded wait, offered so ``aadvance``
   can pace a run loop over a delegated parent (K7.4); it is not part of the ``RunLauncher`` Protocol.
@@ -361,6 +363,7 @@ class ExecutableTargets:
         *,
         conversation_id: str,
         max_seconds: float | None = None,
+        max_steps: int | None = None,
         announce: Callable[[], None] | None = None,
     ) -> bool:
         if not isinstance(target, DelegatedTarget):
@@ -372,11 +375,17 @@ class ExecutableTargets:
         limit = max_seconds
         if limit is not None and base.max_seconds is not None:
             limit = min(limit, base.max_seconds)
+        steps = max_steps
+        if steps is not None and base.max_steps is not None:
+            steps = min(steps, base.max_steps)
         executable = target.executable
 
         async def body(token: CancelToken) -> RunResult:
             context = base.derive(
-                parent=conversation_id, max_seconds=limit, cancel=token
+                parent=conversation_id,
+                max_steps=steps,
+                max_seconds=limit,
+                cancel=token,
             )
             instance = executable.instantiate()
             result: RunResult = await instance.arun(private, context=context)
