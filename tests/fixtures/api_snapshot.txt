@@ -686,6 +686,8 @@ fsm_llm.core.codes.ToolErrorCode class(str, Enum)
   ToolErrorCode.DENIED = 'denied'
   ToolErrorCode.SANDBOX_VIOLATION = 'sandbox_violation'
 fsm_llm.core.codes.approval_code def(approved: bool | None, *, errored: bool = False) -> tuple[Status, Reason | None]
+fsm_llm.core.codes.current_message_source def() -> MessageSource
+fsm_llm.core.codes.message_source def(source: MessageSource | str) -> Iterator[MessageSource]
 fsm_llm.core.codes.status_of_stop_reason def(stop_reason: str) -> tuple[Status, Reason | None]
 fsm_llm.core.codes.status_of_tool_status def(tool_status: str) -> tuple[Status, Reason | None]
 # fsm_llm.core.names

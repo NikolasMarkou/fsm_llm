@@ -451,6 +451,8 @@ class TestSource:
                 "Status",
                 "ToolErrorCode",
                 "approval_code",
+                "current_message_source",
+                "message_source",
                 "status_of_stop_reason",
                 "status_of_tool_status",
             ]

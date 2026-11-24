@@ -75,6 +75,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
+from fsm_llm.core.codes import current_message_source
 from fsm_llm.core.definitions import FSMError
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.runtime import (
@@ -266,6 +267,8 @@ def begin_turn(
         "state": instance.current_state,
         "has_user_message": message is not None,
     }
+    if message is not None:
+        fields["source"] = current_message_source().value
     if message is not None and scope.log.stores_values:
         fields["user_message_ref"] = scope.log.put_json(
             message, kind=RedactionKind.USER_MESSAGE

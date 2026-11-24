@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fsm_llm import API
+from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
 
@@ -84,7 +85,8 @@ class FsmMixin(_InstanceSurface):
         """Send a message to a conversation and return response + state info."""
         with self._lock:
             inst = self._get_fsm(instance_id)
-        response = inst.api.converse(message, conversation_id)
+        with message_source(MessageSource.REMOTE_CLIENT):
+            response = inst.api.converse(message, conversation_id)
         current_state = inst.api.get_current_state(conversation_id)
         is_terminal = inst.api.has_conversation_ended(conversation_id)
 

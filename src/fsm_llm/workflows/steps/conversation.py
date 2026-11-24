@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import Field, field_validator, model_validator
 
 from fsm_llm import API
+from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.logging import logger
 
 from ..constants import CONTEXT_KEY_USER_INPUT
@@ -179,9 +180,10 @@ class ConversationStep(WorkflowStep):
             for message in messages:
                 if fsm.has_conversation_ended(conv_id) or turn >= self.max_turns:
                     break
-                response = await fsm.aconverse(
-                    user_message=message, conversation_id=conv_id
-                )
+                with message_source(MessageSource.RUN):
+                    response = await fsm.aconverse(
+                        user_message=message, conversation_id=conv_id
+                    )
                 if response:
                     last_spoken = response
                 logger.debug(

@@ -16,7 +16,8 @@ for ``==``, hashing, ``in``, ``json.dumps`` and pydantic:
   (``draft``, ``verified``, ``trusted``, ``deprecated``, ``builtin``). A claim,
   never authorization.
 - ``MessageSource``: who sent a message or an input (``user``, ``run``,
-  ``remote_client``, ``simulator``). ``run/start`` writes it (``run``).
+  ``remote_client``, ``simulator``). ``run/start`` and ``turn/start`` write it;
+  ``message_source`` is the scope a caller sets around its ``converse`` call.
 - ``ToolErrorCode``, ``Purpose`` and ``LlmFailureCode``: why a tool call or a model
   call failed, and what a model call was for (event log rows 1.15 and 1.16).
 
@@ -35,6 +36,9 @@ does not import it. Standard library only.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 from typing import TypeVar
 
@@ -48,6 +52,8 @@ __all__ = [
     "Status",
     "ToolErrorCode",
     "approval_code",
+    "current_message_source",
+    "message_source",
     "status_of_stop_reason",
     "status_of_tool_status",
 ]
@@ -167,9 +173,10 @@ class Lifecycle(str, Enum):
 class MessageSource(str, Enum):
     """Who sent a message or an input to a run (roadmap C4 and 1.17).
 
-    ``run/start`` records it (``run``); no other event does yet. ``RUN`` is a
-    parent run (a delegated task), ``REMOTE_CLIENT`` a caller over a protocol,
-    ``SIMULATOR`` the user simulator.
+    ``run/start`` records it (``run``) and so does ``turn/start`` of a turn with a user
+    message (``message_source``; ``user`` when no scope is set). ``RUN`` is a parent run
+    or a workflow step, ``REMOTE_CLIENT`` a caller over a protocol, ``SIMULATOR`` the
+    user simulator. A record only: nothing decides on it.
     """
 
     USER = "user"
@@ -181,6 +188,37 @@ class MessageSource(str, Enum):
     def from_string(cls, value: MessageSource | str) -> MessageSource:
         """The member for a member or an exact value; ``ValueError`` otherwise."""
         return _parse(cls, value, "message source")
+
+
+# DECISION plan-2026-11-24T193347-3f4530d3/D-012
+# The source of a message is a record on `turn/start`, never an input of a decision. Its one
+# reader is `engine/events.begin_turn`; do NOT read it in `policy/`, `handlers/`, the HITL gate or
+# a prompt (an approval is never selected by source, and no request byte may carry it), do NOT
+# hold the scope across a `yield`, and do NOT move it to `runtime` (`testing/` may import only
+# core). See decisions.md D-012.
+_MESSAGE_SOURCE: ContextVar[MessageSource] = ContextVar(
+    "fsm_llm_message_source", default=MessageSource.USER
+)
+
+
+@contextmanager
+def message_source(source: MessageSource | str) -> Iterator[MessageSource]:
+    """Label the user messages of the ``with`` body (wrap one ``converse`` call, never a ``yield``).
+
+    Interface contract: *source* is a ``MessageSource`` or its exact value (``ValueError``
+    otherwise); the scope resets on exit, an error included. Callers: the simulators, the
+    monitor send route, the workflow conversation step.
+    """
+    token = _MESSAGE_SOURCE.set(MessageSource.from_string(source))
+    try:
+        yield _MESSAGE_SOURCE.get()
+    finally:
+        _MESSAGE_SOURCE.reset(token)
+
+
+def current_message_source() -> MessageSource:
+    """The source in this context, ``MessageSource.USER`` when no scope is set."""
+    return _MESSAGE_SOURCE.get()
 
 
 class ToolErrorCode(str, Enum):

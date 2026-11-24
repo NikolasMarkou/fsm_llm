@@ -27,6 +27,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fsm_llm.context.filtering import redacting_json_default
+from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface, resolve_model
@@ -368,7 +369,8 @@ def run_case_trial(
         for turn in case.turns:
             if api.has_conversation_ended(conv_id) or (stop is not None and stop()):
                 break
-            result.responses.append(api.converse(turn, conv_id))
+            with message_source(MessageSource.SIMULATOR):
+                result.responses.append(api.converse(turn, conv_id))
             result.turns_sent += 1
             result.visited_states.append(api.get_current_state(conv_id))
         result.final_state = result.visited_states[-1]

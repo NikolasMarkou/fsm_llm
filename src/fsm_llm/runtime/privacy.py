@@ -113,7 +113,7 @@ _PROVIDER_CALL = ("source", "call_type", "stream", "purpose")
 #: absent here carries no field at all.
 SHAPE_FIELDS: Mapping[EventType, frozenset[str]] = MappingProxyType(
     {
-        EventType.TURN_START: frozenset({"state", "has_user_message"}),
+        EventType.TURN_START: frozenset({"state", "has_user_message", "source"}),
         EventType.TURN_END: frozenset({"outcome"}),
         EventType.LLM_REQUEST: frozenset({*_PROVIDER_CALL, "model"}),
         EventType.LLM_RESPONSE: frozenset(

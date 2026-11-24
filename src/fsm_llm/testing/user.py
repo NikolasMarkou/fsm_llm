@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.engine.api.conversation import API
 
 #: A rule's trigger: a regex (``str`` or compiled, searched in the last reply) or
@@ -186,7 +187,8 @@ class ScriptedUser:
                 message = self._next_message(len(sent), last, used)
                 if message is None:
                     break
-                last = api.converse(message, conversation_id)
+                with message_source(MessageSource.SIMULATOR):
+                    last = api.converse(message, conversation_id)
                 sent.append(message)
                 replies.append(last)
                 states.append(api.get_current_state(conversation_id))
