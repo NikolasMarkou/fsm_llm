@@ -52,13 +52,17 @@ from fsm_llm.agents.handlers.context import (
     HandlerContext,
     Retry,
 )
-from fsm_llm.agents.handlers.library import TOOL_RUNNING, UNGATED_TOOL_RUNNING
+from fsm_llm.agents.handlers.library import (
+    RETRY_HOOKS,
+    TOOL_RUNNING,
+    UNGATED_TOOL_RUNNING,
+)
 from fsm_llm.agents.pattern_inputs import (
     pattern_fsm,
     refuse_reserved_options,
     resolved_options,
 )
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import has_internal_prefix, is_forbidden_context_entry
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
 from fsm_llm.core.definitions.executable_pattern import (
@@ -86,13 +90,27 @@ _NO_SEAM = ("step_budget", "run_output_keys", "seconds_exempt")
 _BEFORE_RUN, _AFTER_RUN, _ON_ITERATION = "before_run", "after_run", "on_iteration"
 
 
+#: The ``AgentConfig`` fields a file's option is APPLIED to (D-033): limits and numbers. An option
+#: named like another field (``instructions``, ``force_final_tool``, ``output_schema``, ...) stays a
+#: plain option of the file and never reaches the config: only a declared text variable puts text into
+#: a prompt, and a model-written preset must not pick the forced tool (D-035).
+_FILE_CONFIG_FIELDS = frozenset(
+    {
+        "max_iterations",
+        "timeout_seconds",
+        "temperature",
+        "max_tokens",
+        "max_history_size",
+        "enable_prompt_cache",
+        "reflect_every_n",
+        "auto_summarize_after",
+    }
+)
+
+
 def _config_option_names(body: PatternBody) -> list[str]:
-    """The options of the file that are ``AgentConfig`` field names (applied to the config, D-033)."""
-    return [
-        name
-        for name in body.options_schema.properties
-        if name in AgentConfig.model_fields
-    ]
+    """The options of the file that are applied to the ``AgentConfig`` (D-033, D-035)."""
+    return [n for n in body.options_schema.properties if n in _FILE_CONFIG_FIELDS]
 
 
 def _config_from_options(
@@ -154,8 +172,14 @@ class PatternAgent(BaseAgent):
             bound & TOOL_RUNNING
         )
         self._ungated_runner = bool(bound & UNGATED_TOOL_RUNNING)
+        # a hook that can ask for a retry needs the finished result: a stream goes through `run` (D-035)
+        self._retrying = any(hook.hook in RETRY_HOOKS for hook in body.run.hooks)
         self._react_loop = _TOOL_EXECUTOR in bound and _THINK_LIMITER in bound
         if "tools" in envelope.requires.callables:
+            if tools is None:
+                raise AgentError(
+                    f"pattern {envelope.id!r} requires tools and none were given"
+                )
             self._require_tools(tools)
         wanted = envelope.requires.tools
         if isinstance(wanted, list) and (
@@ -354,8 +378,13 @@ class PatternAgent(BaseAgent):
     ) -> Iterator[str]:
         """Run the pattern, streaming the reply of each speaking state (lazy, like ``run``).
 
-        ``before_run`` applies; the ``after_run`` hooks run with an empty result slot (D-025, D-032).
+        ``before_run`` applies; the ``after_run`` hooks run with an empty result slot (D-025, D-032). A
+        file that binds a hook which can ask for a retry (``library.RETRY_HOOKS``) is run whole and
+        yields its answer once, so it never ships an unverified one (D-035).
         """
+        if self._retrying:
+            yield self.run(task, initial_context).answer
+            return
         task = self._before_run(task)
         fsm_def, context, handlers = self._run_inputs(task, initial_context)
         handlers.scope[RUN_TASK] = task
@@ -425,9 +454,16 @@ class PatternAgent(BaseAgent):
 
     @staticmethod
     def _hook_write(api: API, conversation_id: str, update: Mapping[str, Any]) -> None:
-        """The one writer of an ``on_iteration`` hook: no internal-prefixed key (the grant is one)."""
+        """The one writer of an ``on_iteration`` hook: no internal-prefixed key (the grant is one) and
+        no secret-looking entry (``is_forbidden_context_entry``, the one rule; the names only are shown)."""
         if internal := sorted(k for k in update if has_internal_prefix(k)):
             raise AgentError(f"a hook may not write the internal keys {internal}")
+        if secret := sorted(
+            k for k, v in update.items() if is_forbidden_context_entry(k, v)
+        ):
+            raise AgentError(
+                f"a hook may not write the secret-looking entries {secret}"
+            )
         api.update_context(conversation_id, dict(update))
 
     # DECISION plan-2026-09-12T065608-089d0ec7/D-014

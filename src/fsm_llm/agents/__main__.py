@@ -40,7 +40,7 @@ def main() -> None:
 
     if args.info:
         print(f"fsm_llm.agents v{__version__}")
-        print("Agent patterns for FSM-LLM (18, see create_agent):")
+        print("Agent patterns for FSM-LLM (see create_agent):")
         print("  - ReactAgent: ReAct (Reasoning + Acting) loop with tool use")
         print("  - HumanInTheLoop: Approval gates, escalation, and overrides")
         print("  - ToolRegistry: Tool management with schema and execution")

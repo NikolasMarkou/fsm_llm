@@ -200,3 +200,48 @@ class TestTheCliFlag:
         with pytest.raises(SystemExit):
             meta_cli.main(["--help"])
         assert "--executables DIR" in capsys.readouterr().out
+
+
+class TestTheShippedPresetsAreKnownToTheFlag:
+    """A user preset may extend ``code-review``, ``summarize`` or ``data-extraction`` (step 28.4)."""
+
+    @pytest.fixture(autouse=True)
+    def _fake(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _FakeAgent.seen = []
+        monkeypatch.setattr(meta_cli, "MetaBuilderAgent", _FakeAgent)
+        monkeypatch.setenv("LLM_MODEL", "x/y")
+
+    def _preset(self, doc_id: str, base: str) -> dict[str, Any]:
+        return {
+            "schema": "fsm-llm/executable",
+            "kind": "pattern",
+            "id": doc_id,
+            "name": doc_id,
+            "description": "d",
+            "body": {"extends": base, "options": {"max_iterations": 4}},
+        }
+
+    @pytest.mark.parametrize("base", ["code-review", "summarize", "data-extraction"])
+    def test_a_user_preset_over_a_shipped_preset_resolves_and_is_an_agent_type(
+        self, tmp_path: Path, base: str
+    ):
+        (tmp_path / "mine.json").write_text(
+            json.dumps(self._preset("user.mine", base)), encoding="utf-8"
+        )
+
+        assert meta_cli.main(["--executables", str(tmp_path)]) == 0
+
+        assert _FakeAgent.seen == [{"agent_types": ["user.mine"]}]
+
+    def test_a_file_named_like_a_shipped_preset_is_refused_and_not_listed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        (tmp_path / "cr.json").write_text(
+            json.dumps(_loop_doc("code-review")), encoding="utf-8"
+        )
+
+        assert meta_cli.main(["--executables", str(tmp_path)]) == 0
+
+        err = [x for x in capsys.readouterr().err.splitlines() if "warning" in x]
+        assert len(err) == 1 and "code-review" in err[0]
+        assert _FakeAgent.seen == [{}]

@@ -105,7 +105,7 @@ of a directory, and the `id` of each becomes a valid `agent_type` beside the bui
 listed in the enum of the build schema the model answers, and a reply naming an id that is neither
 built in nor in the directory is rejected as before. A file that cannot be read or is not a valid
 document is one `warning:` line on stderr and is skipped; a file whose id is a built-in one is
-refused the same way and never replaces it; a directory that does not exist is an `error:` line
+refused the same way and never replaces it (the three shipped presets `code-review`, `summarize` and `data-extraction` count as built in, and a user preset may extend one of them); a directory that does not exist is an `error:` line
 and exit 1. The files are read as operator input, not as model output: the checks for a document a
 model wrote (V7) do not apply to them, so the directory is as trusted as the command line.
 

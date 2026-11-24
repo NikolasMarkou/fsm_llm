@@ -86,6 +86,7 @@ if TYPE_CHECKING:
 __all__ = [
     "HOOKS",
     "LIBRARY",
+    "RETRY_HOOKS",
     "TOOL_RUNNING",
     "UNGATED_TOOL_RUNNING",
     "register_library",
@@ -147,6 +148,12 @@ HOOKS: tuple[tuple[str, Callable[..., Callable[..., Any]]], ...] = (
     ("agents.memory_recall", memory_recall),
     ("agents.memory_remember", memory_remember),
 )
+
+
+#: The hooks that can return a ``Retry`` (D-035): a retry needs the finished result of a run, which a
+#: stream does not have, so a file that binds one of them streams through ``run`` (the answer once).
+#: A hook that builds a ``Retry`` joins this set (a test scans ``handlers/`` for the call).
+RETRY_HOOKS: frozenset[str] = frozenset({"agents.verify_retry"})
 
 
 def register_library() -> None:

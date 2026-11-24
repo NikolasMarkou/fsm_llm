@@ -92,10 +92,11 @@ def _user_agent_types(directory: Path | None) -> list[str]:
     """
     if directory is None:
         return []
-    from fsm_llm.agents.executables import builtin_executables
+    from fsm_llm.agents.executables import builtin_executables, preset_executables
     from fsm_llm.engine.executables.directory import load_directory_registry
 
-    builtins = builtin_executables()
+    # the shipped presets are registered too: a user preset may extend one, and a file cannot take its id
+    builtins = [*builtin_executables(), *preset_executables()]
     # the read-only attributes of PatternExecutable satisfy the protocol (as FsmBodyExecutable does)
     registry = load_directory_registry(
         directory, cast("list[Executable]", builtins), prog=_PROG
