@@ -94,8 +94,8 @@ class _Scenario:
     ``make_llm`` builds the double, ``play(log, llm, record)`` runs the whole conversation on a
     log and calls ``record(api, conversation_id)`` after every step that wrote events,
     ``resume(store, llm)`` builds the API that restores from a store, ``view`` reads what a
-    restore must reproduce, ``greeting_calls`` is the model calls made before the first
-    event (the root greeting is not logged, D-021).
+    restore must reproduce. Every model call is logged before it is made, the root greeting
+    included (plan 3f4530d3 step 2 dropped ``greeting_calls``, the calls the log did not hold).
     """
 
     name: str
@@ -103,7 +103,6 @@ class _Scenario:
     play: Callable[[EventLog, Any, Callable[[API, str], None]], None]
     resume: Callable[[EventLogSessionStore, Any], API]
     view: Callable[[API, str], dict[str, Any]]
-    greeting_calls: int
 
 
 def _play_tools(log: EventLog, llm: Any, record: Callable[[API, str], None]) -> None:
@@ -123,7 +122,6 @@ TOOLS = _Scenario(
         child.tool_fsm(), llm_interface=llm, session_store=store
     ),
     view=child.view,
-    greeting_calls=0,
 )
 
 
@@ -185,7 +183,6 @@ CHAT = _Scenario(
         copy.deepcopy(_CHAT), llm_interface=llm, session_store=store
     ),
     view=_chat_view,
-    greeting_calls=1,
 )
 
 
@@ -263,7 +260,7 @@ def _check_death(
         )
         asked = sum(e["type"] == "llm/request" for e in events)
         # a model call ran only after its llm/request was on disk, and every durable request ran
-        assert len(llm.call_history) - scenario.greeting_calls == asked, where
+        assert len(llm.call_history) == asked, where
         raw = path.read_bytes()
         assert (
             (not raw.endswith(b"\n")) if torn else (raw == b"" or raw.endswith(b"\n"))

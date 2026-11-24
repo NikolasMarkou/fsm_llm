@@ -47,6 +47,10 @@ from fsm_llm.runtime.events import (
     encode_event,
     to_jsonable,
 )
+from tests.test_fsm_llm.test_event_log_producers import (
+    _PRODUCT_SCENARIOS,
+    NOT_YET_PRODUCED,
+)
 
 RUNTIME_DIR = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "runtime"
 
@@ -79,10 +83,6 @@ ROADMAP_TYPES = [
     "run/start",
     "run/end",
 ]
-
-#: The run vocabulary: declared; ``run/start`` and ``run/end`` are produced for a delegated call
-#: (plan baa37f40 K7.4), ``executable/resolve`` is declared only.
-RUN_TYPES = {"executable/resolve"}
 
 
 def _envelope(**fields: Any) -> dict[str, Any]:
@@ -130,36 +130,23 @@ class TestVocabulary:
     def test_the_declared_set_is_the_whole_enum(self) -> None:
         assert DECLARED_TYPES == frozenset(EventType)
 
-    def test_the_produced_set_is_16_and_a_subset_of_the_declared_set(self) -> None:
-        assert len(PRODUCED_TYPES) == 16
+    def test_the_produced_set_is_the_product_path_matrix(self) -> None:
+        # The count pin is gone (plan 3f4530d3 step 2): the set is whatever the matrix of
+        # `test_event_log_producers.py` reaches through product code, one scenario per type.
         assert PRODUCED_TYPES < DECLARED_TYPES
-        assert {t.value for t in PRODUCED_TYPES} == {
-            "turn/start",
-            "turn/end",
-            "llm/request",
-            "llm/response",
-            "provider/error",
-            "tool/call",
-            "tool/result",
-            "context/record",
-            "stack/push",
-            "stack/pop",
-            "executor/start",
-            "executor/result",
-            "transition",
-            "decision",
-            "run/start",
-            "run/end",
-        }
+        assert PRODUCED_TYPES == set(_PRODUCT_SCENARIOS)
 
     def test_the_declared_but_not_produced_types(self) -> None:
-        assert {t.value for t in DECLARED_TYPES - PRODUCED_TYPES} == RUN_TYPES | {
+        assert DECLARED_TYPES - PRODUCED_TYPES == NOT_YET_PRODUCED
+        assert {t.value for t in NOT_YET_PRODUCED} >= {
+            "tool/call",
+            "approval/request",
+            "approval/outcome",
             "extraction",
             "extraction/miss",
             "intent/out_of_scope",
             "handler",
-            "approval/request",
-            "approval/outcome",
+            "executable/resolve",
             "compaction/epoch",
         }
 

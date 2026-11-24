@@ -8,10 +8,11 @@ Two model paths: ``ScriptedLLM`` (an engine-path double that never reaches
 seam writes them). Bytes, counts and sequences, never timing. Unverified until the Windows run:
 nothing here opens a file itself (the files are ``stores.jsonl``'s and ``blobs``').
 
-Not produced here on purpose (declared in ``DECLARED_TYPES``, no producer in slice 1):
-``extraction``, ``extraction/miss``, ``handler``, ``intent/out_of_scope``,
-``approval/*``, ``compaction/epoch``. ``decision`` (the budget stop, plan 5a6a1f80 step 7)
-is produced; its tests are in ``test_turn_budgets.py`` and the scenario below includes one.
+Not produced yet (``NOT_YET_PRODUCED``, declared in ``DECLARED_TYPES``): ``tool/call``,
+``approval/*``, ``extraction``, ``extraction/miss``, ``intent/out_of_scope``, ``handler``,
+``executable/resolve`` and ``compaction/epoch``. ``TestTheProductPathMatrix`` runs one product
+scenario per produced type and bans a direct log write in this module. ``decision`` (the budget
+stop, plan 5a6a1f80 step 7) is produced; its tests are in ``test_turn_budgets.py``.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import ast
 import contextvars
 import copy
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -50,6 +51,7 @@ from fsm_llm.runtime import (
 )
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.testing import ScriptedLLM, final_reply
+from tests.test_fsm_llm import event_log_child as crash_child
 from tests.test_fsm_llm.event_log_support import (
     _chunk,
     _reply,
@@ -157,7 +159,7 @@ _CLASSIFY = '{"reasoning": "r", "intent": "left", "confidence": 0.9}'
 
 #: (frame, type) per operation of ``_run``: the whole scenario, the expected table.
 _TABLE: dict[str, list[tuple[int, str]]] = {
-    "start": [(0, "context/record")],
+    "start": [(0, "llm/request"), (0, "llm/response"), (0, "context/record")],
     "turn": [
         (0, "turn/start"),
         (0, "executor/start"),
@@ -302,7 +304,7 @@ class TestTheExpectedTable:
     def test_seq_is_strictly_increasing_and_contiguous(self, log: EventLog):
         _, cid, _ = _run(log)
         seqs = [e["seq"] for e in log.read(cid)]
-        assert seqs == list(range(1, len(seqs) + 1)) and len(seqs) == 42
+        assert seqs == list(range(1, len(seqs) + 1)) and len(seqs) == 44
 
     def test_every_logged_request_has_one_outcome_and_the_counts_match(
         self, log: EventLog
@@ -313,9 +315,8 @@ class TestTheExpectedTable:
         outcomes = _events(log, cid, "llm/response", "provider/error")
         assert [o["request_seq"] for o in outcomes] == [r["seq"] for r in requests]
         made = len(llm.call_history)
-        # The root greeting (made inside `FSMManager.start_conversation`, before any scope can
-        # name its conversation) is the one call that is not logged: D-021 of plan 21e6f00d.
-        assert made - 1 == len(requests) == 9
+        # every model call is logged, the root greeting included (step 2 of plan 3f4530d3)
+        assert made == len(requests) == 10
         assert {r["source"] for r in requests} == {"engine"}
         assert {r["call_type"] for r in requests} == {
             "field_extraction",
@@ -446,17 +447,25 @@ class TestTheProducers:
             (1, "greeting"),
         ]
 
-    def test_the_root_greeting_is_not_logged_but_its_text_is_in_the_start_record(
+    def test_the_root_greeting_is_logged_before_the_start_record_that_holds_its_text(
         self, log: EventLog
     ):
-        """D-021: the conversation id is minted inside `start_conversation`, after which the
-        greeting runs, so no scope can name it. The start record holds the greeting TEXT."""
+        """Step 2 of plan 3f4530d3 (was D-021: the id was minted inside the manager): the id is
+        minted by the API and the greeting runs in the scope of frame 0, as a turn's calls do."""
         llm = _script()
         api = API(copy.deepcopy(_FSM), llm_interface=llm, event_log=log)
         cid, greeting = api.start_conversation()
         assert greeting == "hi" and len(llm.call_history) == 1
-        assert [e["type"] for e in log.read(cid)] == ["context/record"]
-        state = log.get_json(next(iter(log.read(cid)))["state_ref"])
+        events = list(log.read(cid))
+        assert [(e["frame"], e["type"]) for e in events] == [
+            (0, "llm/request"),
+            (0, "llm/response"),
+            (0, "context/record"),
+        ]
+        request, response, record = events
+        assert (request["source"], request["call_type"]) == ("engine", "greeting")
+        assert response["request_seq"] == request["seq"]
+        state = log.get_json(record["state_ref"])
         assert state["conversation_history"] == [{"system": "hi"}]
 
     def test_an_update_context_record_carries_only_the_declared_internal_keys(
@@ -505,44 +514,6 @@ class TestTheProducers:
         record = _events(log, cid, "context/record")[-1]
         assert (record["frame"], record["source"]) == (1, "update_context")
 
-    def test_the_events_of_every_scenario_are_exactly_the_produced_types(
-        self, log: EventLog
-    ):
-        """The union over the scenario, a failing provider and a tool call is
-        ``PRODUCED_TYPES``: nothing else is written, and nothing declared as produced is missing."""
-        _, cid, _ = _run(log)
-        seen = {e["type"] for e in log.read(cid)}
-
-        failing = _Failing(responses={"intake": "hi"})
-        api = API(copy.deepcopy(_FSM), llm_interface=failing, event_log=log)
-        cid2, _ = api.start_conversation()
-        failing.down = True
-        with pytest.raises(FSMError):
-            api.converse("Ann", cid2)
-        seen |= {e["type"] for e in log.read(cid2)}
-        with log.tool_call("tools-1", name="add", call_id="c1", arguments={"a": 1}):
-            pass
-        seen |= {e["type"] for e in log.read("tools-1")}
-        capped = API(
-            copy.deepcopy(_CHAT),
-            llm_interface=ScriptedLLM(responses={"chat": "hi"}),
-            event_log=log,
-            max_steps=1,
-        )
-        cid3, _ = capped.start_conversation()
-        capped.converse("one", cid3)
-        with pytest.raises(FSMError):
-            capped.converse("two", cid3)
-        seen |= {e["type"] for e in log.read(cid3)}
-        seen |= {e["type"] for e in log.read(run_delegated(log))}
-        assert seen == {t.value for t in PRODUCED_TYPES}
-        assert seen <= {t.value for t in DECLARED_TYPES}
-        assert {
-            "extraction",
-            "extraction/miss",
-            "handler",
-        }.isdisjoint(seen)
-
     def test_a_failing_provider_writes_the_error_type_only(self, log: EventLog):
         failing = _Failing(responses={"chat": "hi"})
         api = API(copy.deepcopy(_CHAT), llm_interface=failing, event_log=log)
@@ -559,6 +530,159 @@ class TestTheProducers:
 
 def log_files(log: EventLog) -> list[Path]:
     return tree_files(log.root)
+
+
+def _types_of(log: EventLog, cid: str, after: int = 0) -> set[str]:
+    return {e["type"] for e in log.read(cid) if e["seq"] > after}
+
+
+def _scenario_turns(log: EventLog) -> set[str]:
+    """``start_conversation``, ``converse``, ``push_fsm``, ``pop_fsm``, a stream, ``update_context``
+    and ``advance`` on a scripted engine."""
+    _, cid, _ = _run(log)
+    return _types_of(log, cid)
+
+
+def _scenario_failing_provider(log: EventLog) -> set[str]:
+    failing = _Failing(responses={"intake": "hi"})
+    api = API(copy.deepcopy(_FSM), llm_interface=failing, event_log=log)
+    cid, _ = api.start_conversation()
+    failing.down = True
+    with pytest.raises(FSMError):
+        api.converse("Ann", cid)
+    return _types_of(log, cid)
+
+
+def _scenario_spent_budget(log: EventLog) -> set[str]:
+    capped = API(
+        copy.deepcopy(_CHAT),
+        llm_interface=ScriptedLLM(responses={"chat": "hi"}),
+        event_log=log,
+        max_steps=1,
+    )
+    cid, _ = capped.start_conversation()
+    capped.converse("one", cid)
+    with pytest.raises(FSMError):
+        capped.converse("two", cid)
+    return _types_of(log, cid)
+
+
+def _scenario_delegated_call(log: EventLog) -> set[str]:
+    return _types_of(log, run_delegated(log))
+
+
+def _scenario_resume_of_a_tool_in_flight(log: EventLog) -> set[str]:
+    """A log a kill left with a ``tool/call`` and no result, resumed: only what ``API.resume``
+    writes counts (the ``unknown`` ``tool/result``), never the setup."""
+    api = API.from_definition(
+        crash_child.tool_fsm(), llm_interface=ScriptedLLM([]), event_log=log
+    )
+    cid = crash_child.start(api)
+    crash_child.leave_a_tool_in_flight(log, cid)
+    last = max(e["seq"] for e in log.read(cid))
+    log.release(cid)  # the writer of the killed process is gone
+    resumed = API.from_definition(
+        crash_child.tool_fsm(), llm_interface=ScriptedLLM([]), event_log=log
+    )
+    resumed.resume(cid)
+    return _types_of(log, cid, after=last)
+
+
+#: Per type, the product scenario that writes it: through ``API``, ``API.resume`` or a delegated
+#: run, never through ``EventLog.tool_call`` or ``EventLog.append`` (an AST row below bans both
+#: in this module). Later steps move a type from ``NOT_YET_PRODUCED`` to this table.
+_PRODUCT_SCENARIOS: dict[EventType, Callable[[EventLog], set[str]]] = {
+    EventType.TURN_START: _scenario_turns,
+    EventType.TURN_END: _scenario_turns,
+    EventType.LLM_REQUEST: _scenario_turns,
+    EventType.LLM_RESPONSE: _scenario_turns,
+    EventType.TRANSITION: _scenario_turns,
+    EventType.EXECUTOR_START: _scenario_turns,
+    EventType.EXECUTOR_RESULT: _scenario_turns,
+    EventType.CONTEXT_RECORD: _scenario_turns,
+    EventType.STACK_PUSH: _scenario_turns,
+    EventType.STACK_POP: _scenario_turns,
+    EventType.PROVIDER_ERROR: _scenario_failing_provider,
+    EventType.DECISION: _scenario_spent_budget,
+    EventType.RUN_START: _scenario_delegated_call,
+    EventType.RUN_END: _scenario_delegated_call,
+    EventType.TOOL_RESULT: _scenario_resume_of_a_tool_in_flight,
+}
+
+#: Declared and with no product producer yet: tool/call (and every tool/result but the resume
+#: record), the approval pair, the extraction family, handler, executable/resolve; and
+#: compaction/epoch, which needs roadmap row 2.5 and is out of plan 3f4530d3.
+NOT_YET_PRODUCED = frozenset(
+    {
+        EventType.TOOL_CALL,
+        EventType.APPROVAL_REQUEST,
+        EventType.APPROVAL_OUTCOME,
+        EventType.EXTRACTION,
+        EventType.EXTRACTION_MISS,
+        EventType.INTENT_OUT_OF_SCOPE,
+        EventType.HANDLER,
+        EventType.EXECUTABLE_RESOLVE,
+        EventType.COMPACTION_EPOCH,
+    }
+)
+_DIRECT_WRITERS = {"tool_call", "append_batch"}
+_LOG_NAMES = {"log", "_event_log", "event_log"}
+
+
+def _direct_writes(source: str) -> list[int]:
+    """Line numbers of a direct write to a log object: ``.tool_call(`` and ``.append_batch(``
+    on anything, ``.append(`` on a receiver named like a log (a list's ``append`` is fine)."""
+    found: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr, receiver = node.func.attr, node.func.value
+        tail = (
+            receiver.id
+            if isinstance(receiver, ast.Name)
+            else receiver.attr
+            if isinstance(receiver, ast.Attribute)
+            else ""
+        )
+        if attr in _DIRECT_WRITERS or (attr == "append" and tail in _LOG_NAMES):
+            found.append(node.lineno)
+    return found
+
+
+class TestTheProductPathMatrix:
+    """``PRODUCED_TYPES`` is what product code writes: one scenario per type, none seeded by a
+    helper call of the test (plan 3f4530d3 step 2; roadmap row 1.1)."""
+
+    def test_the_table_has_one_row_per_produced_type(self):
+        assert set(_PRODUCT_SCENARIOS) == PRODUCED_TYPES
+        assert PRODUCED_TYPES.isdisjoint(NOT_YET_PRODUCED)
+        assert DECLARED_TYPES - PRODUCED_TYPES == NOT_YET_PRODUCED
+
+    @pytest.mark.parametrize("kind", sorted(PRODUCED_TYPES, key=lambda t: t.value))
+    def test_each_produced_type_is_written_by_its_product_scenario(
+        self, log: EventLog, kind: EventType
+    ):
+        assert kind.value in _PRODUCT_SCENARIOS[kind](log)
+
+    def test_the_union_of_the_scenarios_is_exactly_the_produced_set(
+        self, tmp_path: Path
+    ):
+        seen: set[str] = set()
+        for index, scenario in enumerate(dict.fromkeys(_PRODUCT_SCENARIOS.values())):
+            with EventLog(tmp_path / f"m{index}") as fresh:
+                seen |= scenario(fresh)
+        assert seen == {t.value for t in PRODUCED_TYPES}
+        assert {t.value for t in NOT_YET_PRODUCED}.isdisjoint(seen)
+
+    def test_this_module_never_writes_to_a_log_directly(self):
+        source = Path(__file__).read_text(encoding="utf-8")
+        assert _direct_writes(source) == []
+
+    def test_the_sweep_flags_a_direct_tool_call_and_a_direct_append(self):
+        assert _direct_writes("with log.tool_call('c', name='a'):\n    pass\n") == [1]
+        assert _direct_writes("api._event_log.append('c', kind)\n") == [1]
+        assert _direct_writes("scope.log.append_batch('c', [])\n") == [1]
+        assert _direct_writes("errors.append(exc)\nseen.append(1)\n") == []
 
 
 class TestFailClosedAtTheSites:
@@ -666,20 +790,20 @@ class TestTheProviderPath:
             turn_calls = completion.call_count - greeting_calls
         requests = _events(log, cid, "llm/request")
         responses = _events(log, cid, "llm/response")
-        assert (
-            greeting_calls == 1 and turn_calls == len(requests) == len(responses) == 1
-        )
-        assert requests[0]["source"] == responses[0]["source"] == "provider"
-        assert responses[0]["request_seq"] == requests[0]["seq"]
-        sent = log.get_json(requests[0]["prompt_ref"])
+        # the greeting is the first logged pair, the turn the second (it is no longer skipped)
+        assert greeting_calls == 1 and turn_calls == 1
+        assert len(requests) == len(responses) == greeting_calls + turn_calls
+        assert {e["source"] for e in requests + responses} == {"provider"}
+        assert [r["request_seq"] for r in responses] == [r["seq"] for r in requests]
+        sent = log.get_json(requests[-1]["prompt_ref"])
         assert sent["model"] == "gpt-4o" and "api_key" not in sent
         assert "sk-SECRET-key-0001" not in "".join(
             p.read_text(encoding="utf-8", errors="replace") for p in log_files(log)
         )
         assert not [e for e in log.read(cid) if e.get("source") == "engine"]
 
-    def test_the_greeting_request_is_not_logged_and_the_text_is(self, log: EventLog):
-        """D-021 pinned: a later fix (an id seam in `start_conversation`) is a visible diff."""
+    def test_the_greeting_request_is_logged_and_the_text_is(self, log: EventLog):
+        """Was pinned as unlogged (D-021); the greeting is now an `llm/request` and its reply."""
         api = API(
             self._chat(),
             llm_interface=LiteLLMInterface(model="gpt-4o"),
@@ -688,8 +812,15 @@ class TestTheProviderPath:
         with patch(COMPLETION, return_value=_reply("Welcome")) as completion:
             cid, greeting = api.start_conversation()
         assert completion.call_count == 1 and greeting == "Welcome"
-        assert [e["type"] for e in log.read(cid)] == ["context/record"]
-        state = log.get_json(next(iter(log.read(cid)))["state_ref"])
+        assert [e["type"] for e in log.read(cid)] == [
+            "llm/request",
+            "llm/response",
+            "context/record",
+        ]
+        request, response, record = log.read(cid)
+        assert request["source"] == "provider" and request["stream"] is False
+        assert response["request_seq"] == request["seq"]
+        state = log.get_json(record["state_ref"])
         assert state["conversation_history"] == [{"system": "Welcome"}]
 
     def test_a_streamed_reply_is_one_response_with_the_joined_text(self, log: EventLog):
@@ -703,8 +834,8 @@ class TestTheProviderPath:
         stream = iter([_chunk("a"), _chunk("b"), _chunk("c")])
         with patch(COMPLETION, return_value=stream):
             assert "".join(api.converse_stream("hi", cid)) == "abc"
-        (request,) = _events(log, cid, "llm/request")
-        (response,) = _events(log, cid, "llm/response")
+        request = _events(log, cid, "llm/request")[-1]  # [0] is the greeting
+        response = _events(log, cid, "llm/response")[-1]
         assert request["stream"] is True and request["source"] == "provider"
         assert response["stream"] is True and response["abandoned"] is False
         assert response["request_seq"] == request["seq"]
@@ -724,7 +855,7 @@ class TestTheProviderPath:
             stream = api.converse_stream("hi", cid)
             assert next(stream) == "a"
             stream.close()
-        (response,) = _events(log, cid, "llm/response")
+        response = _events(log, cid, "llm/response")[-1]  # [0] is the greeting
         assert response["abandoned"] is True
         assert log.get_json(response["response_ref"])["text"] == "a"
         end = _events(log, cid, "turn/end")[-1]
@@ -745,7 +876,8 @@ class TestTheProviderPath:
                 api.converse("hi", cid)
         (error,) = _events(log, cid, "provider/error")
         assert error["source"] == "provider"
-        assert [e["type"] for e in _events(log, cid)][1:] == [
+        start = _events(log, cid, "context/record")[0]["seq"]
+        assert [e["type"] for e in _events(log, cid) if e["seq"] > start] == [
             "turn/start",
             "executor/start",
             "executor/result",
@@ -779,10 +911,14 @@ class TestTheProviderPath:
         with patch(COMPLETION, **provider):
             with pytest.raises(Exception):
                 list(api.converse_stream("hi", cid))
-        assert _events(log, cid, "llm/response") == []
         (error,) = _events(log, cid, "provider/error")
         request = _events(log, cid, "llm/request")[-1]
         assert error["request_seq"] == request["seq"]
+        assert [
+            e
+            for e in _events(log, cid, "llm/response")
+            if e["request_seq"] == error["request_seq"]
+        ] == []
         # The interface wraps a failing stream as LLMResponseError; the log names that class.
         assert error["source"] == "provider"
         assert error["error_type"] == "LLMResponseError"

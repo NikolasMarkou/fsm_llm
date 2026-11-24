@@ -254,7 +254,8 @@ class TestTheScenario:
     ) -> None:
         pushes, pops = golden.types("stack/push"), golden.types("stack/pop")
         assert [p["depth"] for p in pushes + pops] == [2, 2, 1]
-        assert len(golden.events) == 48 and len(golden.types("turn/end")) == 6
+        # 50 events: the root greeting is logged (a request and its reply, plan 3f4530d3 step 2)
+        assert len(golden.events) == 50 and len(golden.types("turn/end")) == 6
         # frame 1 has turns, two deltas and a tool exchange; the second push is left open
         top = [e["type"] for e in golden.events if e["frame"] == 1]
         assert top.count("tool/call") == 1 and top.count("context/record") == 2
@@ -320,7 +321,7 @@ class TestEveryTornTail:
         assert {seq: tried[seq] for seq in stack_lines} == {
             seq: len(lines[seq - 1]) for seq in stack_lines
         }  # non-vacuity: tried == len(line) for each stack-carrying line
-        assert sum(tried.values()) > 1500 and set(tried) == set(range(1, 49))
+        assert sum(tried.values()) > 1500 and set(tried) == set(range(1, 51))
 
 
 def _variants(golden: _Golden) -> list[tuple[str, list[dict[str, Any]]]]:

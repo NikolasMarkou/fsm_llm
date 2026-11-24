@@ -502,7 +502,8 @@ class TestOptIn:
             .build()
         )
         cid, _ = api.start_conversation()
-        assert _types(log, cid) == [RECORD]
+        # the builder's log is the log of the greeting too: its pair, then the start record
+        assert _types(log, cid) == ["llm/request", "llm/response", RECORD]
 
     def test_a_pushed_child_turn_carries_the_root_id_and_a_frame(self, log: EventLog):
         api = _api(log)

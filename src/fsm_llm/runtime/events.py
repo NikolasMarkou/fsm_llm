@@ -112,8 +112,9 @@ class TurnOutcome(str, Enum):
 #: Every type the format declares (the 21 of roadmap row 1.1 and the three run types).
 DECLARED_TYPES: frozenset[EventType] = frozenset(EventType)
 
-#: The types something writes today (16: ``decision`` joined at plan 5a6a1f80 step 7, the budget
-#: stop; ``run/start`` and ``run/end`` at plan baa37f40 K7.4); the rest are declared for later rows.
+#: The types product code writes today (15: no producer of ``tool/call`` exists yet, and ``tool/result``
+#: is written only as the ``unknown`` record of ``API.resume``). The set test builds the table of
+#: scenarios from product paths only, never from ``EventLog.tool_call`` or ``EventLog.append``.
 PRODUCED_TYPES: frozenset[EventType] = frozenset(
     {
         EventType.TURN_START,
@@ -121,7 +122,6 @@ PRODUCED_TYPES: frozenset[EventType] = frozenset(
         EventType.LLM_REQUEST,
         EventType.LLM_RESPONSE,
         EventType.PROVIDER_ERROR,
-        EventType.TOOL_CALL,
         EventType.TOOL_RESULT,
         EventType.CONTEXT_RECORD,
         EventType.STACK_PUSH,

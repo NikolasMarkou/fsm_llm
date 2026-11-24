@@ -26,7 +26,13 @@ from fsm_llm.logging import logger
 from .budget import budget_kwargs
 from .calls import Settled, settle
 from .delegated import wait_for_run
-from .events import event_scope, event_stream, record_started
+from .events import (
+    event_scope,
+    event_stream,
+    record_started,
+    start_event_id,
+    start_event_scope,
+)
 from .helpers import _unexpected_error
 from .stack import FSMStackFrame
 from .surface import _ApiSurface
@@ -257,20 +263,22 @@ class TurnEntriesMixin(_ApiSurface):
         """The async twin of ``start_conversation``: the greeting awaits its model call."""
         try:
             # Start conversation using enhanced FSM manager
+            # a logged start mints its id here so the greeting can be logged (start_event_id)
+            minted = start_event_id(self, _suppress_start, _conversation_id)
+            given = _conversation_id or minted
             kept_id: dict[str, Any] = (
-                {}
-                if _conversation_id is None
-                else {"conversation_id": _conversation_id}
+                {} if given is None else {"conversation_id": given}
             )
-            conversation_id, response = await acall(
-                self.fsm_manager,
-                "start_conversation",
-                self.fsm_id,
-                initial_context=initial_context,
-                suppress_start=_suppress_start,
-                **kept_id,
-                **budget_kwargs(self, max_steps, max_seconds),
-            )
+            with start_event_scope(self, minted):
+                conversation_id, response = await acall(
+                    self.fsm_manager,
+                    "start_conversation",
+                    self.fsm_id,
+                    initial_context=initial_context,
+                    suppress_start=_suppress_start,
+                    **kept_id,
+                    **budget_kwargs(self, max_steps, max_seconds),
+                )
 
             # Track conversation and initialize stack
             with self._stack_lock:

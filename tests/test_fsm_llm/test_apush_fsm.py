@@ -255,9 +255,12 @@ class TestACancelledPush:
         if logged:
             kinds = [e["type"] for e in api._event_log.read(cid)]
             assert EventType.STACK_PUSH.value not in kinds
-            # the greeting request the cancel cut has its end: no request is left open
-            assert kinds.count(EventType.LLM_REQUEST.value) == 1
+            # the greeting request the cancel cut has its end: no request is left open (the
+            # root greeting, logged since plan 3f4530d3 step 2, is the first pair)
+            requests = kinds.count(EventType.LLM_REQUEST.value)
             assert kinds.count(EventType.PROVIDER_ERROR.value) == 1
+            assert requests == 1 + kinds.count(EventType.LLM_RESPONSE.value) == 2
+            assert kinds[-1] == EventType.PROVIDER_ERROR.value
 
     async def test_the_parent_and_a_retry_work_after_the_cancel(self):
         api, llm, cid = await _api(_Parked)

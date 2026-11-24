@@ -26,6 +26,15 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       "start"``) with the state after the greeting; when the log cannot be written the
       conversation is ended and the error raised, so the caller never holds an id whose every turn
       would refuse.
+    - ``start_event_id(api, suppress_start, given_id) -> str | None`` and
+      ``start_event_scope(api, conversation_id)``: the greeting of a logged ``start_conversation``
+      (a ``restore_session`` and a ``resume`` keep their own paths). With the log on, no
+      ``_suppress_start`` and no id given, the id is minted here (``uuid4``) and passed to the
+      manager, and the scope of frame 0 binds around the manager call, so the greeting is an
+      ``llm/request`` and ``llm/response`` under the same rules as a turn (the request fsynced
+      before the call). Any failure of the start (an error or a cancel) releases the writer of
+      the id, so no descriptor or lock stays with a conversation that never existed; the log keeps
+      the request and its ``provider/error``. ``None`` and the shared no-op context otherwise.
     - ``child_event_scope(api, conversation_id)``: the scope of the frame ``push_fsm`` is about to
       add (frame = the current depth), so the pushed FSM's greeting is logged under its own
       frame; the shared no-op context with the log off.
@@ -84,8 +93,9 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, nullcontext, suppress
+from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
 from typing import Any, TypeVar, cast
 
 from fsm_llm.aio import asteps
@@ -166,6 +176,31 @@ def child_event_scope(
     return (
         _NO_SCOPE if frame is None else activate(TurnScope(log, conversation_id, frame))
     )
+
+
+def start_event_id(
+    api: _ApiSurface, suppress_start: bool, given_id: str | None
+) -> str | None:
+    """A minted conversation id when a start must log its greeting, else ``None``."""
+    if getattr(api, "_event_log", None) is None or suppress_start or given_id:
+        return None
+    return str(uuid.uuid4())
+
+
+@contextmanager
+def start_event_scope(api: _ApiSurface, conversation_id: str | None) -> Iterator[None]:
+    """Bind frame 0 of *conversation_id* around a start (a no-op for ``None``); a failure of
+    the start releases the writer, and the failure is re-raised."""
+    log = getattr(api, "_event_log", None)
+    if log is None or conversation_id is None:
+        yield
+        return
+    try:
+        with activate(TurnScope(log, conversation_id, 0)):
+            yield
+    except BaseException:
+        log.release(conversation_id)
+        raise
 
 
 def _record_stack_event(

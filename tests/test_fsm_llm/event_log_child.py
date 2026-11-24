@@ -20,6 +20,9 @@ Interface contract:
       paired exchange with ``update_context`` and advance back to ``call_model``. *mark* (no
       arguments) is called after every step that wrote events, so a caller can record a view at
       each boundary. Raises whatever the API raises.
+    - ``leave_a_tool_in_flight(log, cid)``: a side-effecting ``tool/call`` with no result, the log a
+      kill inside a tool leaves (no product path writes ``tool/call`` yet, plan 3f4530d3 step 3):
+      the SETUP of a scenario whose product event is the ``unknown`` ``tool/result`` of ``API.resume``.
     - ``main(argv)``: the child. Drives the exchange, takes ``view`` as the expected restore,
       then calls ``api.advance`` inside a second ``tool_call`` named ``in-flight``; the model
       double announces itself by writing *ready_file* (``conversation_id`` and ``expected``,
@@ -52,7 +55,7 @@ from fsm_llm.constants import (
     DEFAULT_COMPLETION_RESULT_KEY,
 )
 from fsm_llm.core.definitions import CompletionResponse
-from fsm_llm.runtime import EventLog
+from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.testing import ScriptedLLM, final_reply, tool_call_reply
 
 MESSAGES = DEFAULT_COMPLETION_MESSAGES_KEY
@@ -174,6 +177,18 @@ def start(api: API) -> str:
     )
     assert greeting == ""
     return cid
+
+
+def leave_a_tool_in_flight(log: EventLog, cid: str) -> None:
+    log.append(
+        cid,
+        EventType.TOOL_CALL,
+        frame=0,
+        name="charge",
+        call_id="c-1",
+        side_effecting=True,
+        arguments={"n": 5},
+    )
 
 
 def view(api: API, cid: str) -> dict[str, Any]:

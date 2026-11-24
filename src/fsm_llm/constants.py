@@ -92,6 +92,7 @@ USAGE_KIND_EMBED = "embed"
 USAGE_KIND_BY_CALL_TYPE: Mapping[str, str] = MappingProxyType(
     {
         "response_generation": "generate",
+        "greeting": "generate",  # the engine fallback logs the greeting under its own call type
         "field_extraction": "extract",
         "data_extraction": "extract",
         "classification": "classify",

@@ -48,6 +48,7 @@ from tests.test_fsm_llm.test_event_log_producers import (
     _FSM,
     _TABLE,
     COMPLETION,
+    NOT_YET_PRODUCED,
     _events,
     _Failing,
     _run,
@@ -135,7 +136,10 @@ class TestTheLevelAndItsDefault:
                 assert not list(log.read("c-1"))
 
     def test_the_allow_list_is_per_type_names_only_and_never_a_reference(self):
-        assert set(SHAPE_FIELDS) == set(PRODUCED_TYPES)
+        assert PRODUCED_TYPES <= set(SHAPE_FIELDS)
+        assert (
+            set(SHAPE_FIELDS) - PRODUCED_TYPES <= NOT_YET_PRODUCED
+        )  # a list ahead of its producer
         for kind, names in SHAPE_FIELDS.items():
             assert not {n for n in names if n.endswith("_ref")}, kind
             assert not names & _ENVELOPE, kind
@@ -184,7 +188,7 @@ class TestAShapeLog:
                     (e["frame"], e["type"]) for e in events if first <= e["seq"] <= last
                 ]
                 assert got == _TABLE[name], name
-            assert len(events) == 42
+            assert len(events) == 44  # the root greeting's pair included
             assert {e["lvl"] for e in events} == {"shape"}
             assert not [e for e in events if any(k.endswith("_ref") for k in e)]
         root = tmp_path / "ev"
@@ -214,7 +218,10 @@ class TestAShapeLog:
                 pass
             run_delegated(log)  # run/start and run/end of a delegated call
             events = _all_events(log)
-        assert {e["type"] for e in events} == {t.value for t in PRODUCED_TYPES}
+        # `tool/call` has no product producer yet (step 3): the helper above writes it, so its
+        # allow-list is still walked here
+        wanted = PRODUCED_TYPES | {EventType.TOOL_CALL}
+        assert {e["type"] for e in events} == {t.value for t in wanted}
         for event in events:
             allowed = SHAPE_FIELDS[EventType(event["type"])] | _ENVELOPE
             assert set(event) <= allowed, event["type"]
@@ -622,15 +629,38 @@ class TestTheHookFailsClosed:
             return value
 
         llm = ScriptedLLM(responses={"chat": "ok"})
-        with EventLog(tmp_path / "ev", redact=hook) as log:
+        with EventLog(tmp_path / "ev", redact=lambda k, v: v) as log:
             api = _chat_api(log, llm)
             cid, _ = api.start_conversation()
+            log._redact = hook  # the hook that starts failing mid conversation
             made, history = len(llm.call_history), api.get_conversation_history(cid)
             with pytest.raises(FSMError):
                 api.converse("typed words", cid)
             assert len(llm.call_history) == made  # fail closed: no model call
             assert api.get_conversation_history(cid) == history  # the turn rolled back
         assert b"FieldExtractionRequest" not in tree_bytes(tmp_path / "ev")
+
+    def test_a_failing_prompt_hook_refuses_the_greeting_and_leaves_no_conversation(
+        self, tmp_path: Path
+    ):
+        """The greeting is a logged request now (plan 3f4530d3 step 2): the hook that cannot
+        redact its prompt means no model call, no registered conversation, no held writer."""
+
+        def hook(kind: RedactionKind, value: Any) -> Any:
+            if kind is RedactionKind.PROMPT:
+                raise RuntimeError("no")
+            return value
+
+        llm = ScriptedLLM(responses={"chat": "ok"})
+        with EventLog(tmp_path / "ev", redact=hook) as log:
+            api = _chat_api(log, llm)
+            with pytest.raises(Exception, match="could not be recorded"):
+                api.start_conversation()
+            assert llm.call_history == []
+            assert api.list_active_conversations() == []
+            assert [log.has_writer(c) for c in log.conversation_ids()] == [False] * len(
+                log.conversation_ids()
+            )
 
     def test_a_failing_state_hook_stops_the_turn_before_any_call(self, tmp_path: Path):
         def hook(kind: RedactionKind, value: Any) -> Any:

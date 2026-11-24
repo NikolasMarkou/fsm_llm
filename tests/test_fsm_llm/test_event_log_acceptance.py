@@ -166,10 +166,13 @@ class TestTheLogTest:
     ) -> None:
         run = _scenario(log, tmp_path / "store")
         requests = [e for e in log.read(run.cid) if e["type"] == "llm/request"]
-        # The root greeting (made inside `start_conversation`, before any scope can name its
-        # conversation) is the one call not logged: D-021 of plan 21e6f00d, pinned elsewhere.
-        sent = run.provider.received[1:]
+        # ALL provider calls, the root greeting first (plan 3f4530d3 step 2 dropped the `[1:]`)
+        sent = run.provider.received
         assert len(requests) == len(sent) > 8  # every call checked, and not vacuously
+        first_turn = next(
+            e["seq"] for e in log.read(run.cid) if e["type"] == "turn/start"
+        )
+        assert requests[0]["seq"] < first_turn and requests[0]["frame"] == 0
         assert {e["call_type"] for e in requests} == _PROVIDER_KINDS
         assert {e["frame"] for e in requests} == {0, 1}  # a pushed child's calls too
         assert any(e["stream"] for e in requests)
@@ -211,8 +214,8 @@ def engine_pairs(
         llm = _script()
         _, cid, _ = _run(opened, llm)
         requests = [e for e in opened.read(cid) if e["type"] == "llm/request"]
-        calls = llm.call_history[1:]  # the root greeting is the one unlogged call
-        assert len(requests) == len(calls) == 9
+        calls = llm.call_history  # every call, the root greeting included
+        assert len(requests) == len(calls) == 10
         yield opened, [(e, m, r) for e, (m, r) in zip(requests, calls, strict=True)]
 
 
@@ -239,8 +242,10 @@ class TestTheEngineFallbackRebuild:
     ) -> None:
         log, pairs = engine_pairs
         chosen = [(e, m, r) for e, m, r in pairs if e["call_type"] == kind]
-        # the root greeting is unlogged, so the scenario's only logged greeting is the child's
-        assert chosen, kind
+        # the greeting kind has two rows: the root's and the pushed child's
+        assert len(chosen) == (2 if kind == "greeting" else len(chosen)) and chosen, (
+            kind
+        )
         for event, method, request in chosen:
             assert method == _ENGINE_KINDS[kind]
             blob = log.get_json(event["prompt_ref"])
@@ -277,6 +282,8 @@ class TestStranglerParityOfARealInterface:
         assert on.usage["calls"] == len(on.provider.received) > 10
         # the provider got the same requests, in the same order, with the log on and off
         assert on.provider.received == off.provider.received
+        # D5: the greeting is the first provider call, and its bytes are the same log on or off
+        assert on.provider.received[0] == off.provider.received[0]
         assert len(log.conversation_ids()) == 1
         assert not list((tmp_path / "off").glob("*.jsonl"))
 

@@ -216,6 +216,7 @@ class TestOneRecordShapeAndOneFold:
         ("call_type", "stream", "kind"),
         [
             ("response_generation", False, "generate"),
+            ("greeting", False, "generate"),
             ("field_extraction", False, "extract"),
             ("data_extraction", False, "extract"),
             ("classification", False, "classify"),
@@ -430,10 +431,10 @@ class TestTheProjectionEqualsTheMeter:
         llm, state = _llm(), {}
         api = API(copy.deepcopy(_CHAT), llm_interface=llm, event_log=log)
         with patch(COMPLETION, _provider(state)):
-            # the root greeting runs before any scope can name its conversation (D-021 of
-            # plan 21e6f00d): the one call the log lacks, so the meter is read from after it
-            cid, _ = api.start_conversation()
+            # the root greeting is a logged call now (plan 3f4530d3 step 2): the meter is read
+            # from before it, so the projection must equal the whole ledger
             mark = ledger_mark(llm)
+            cid, _ = api.start_conversation()
             api.converse("one", cid)
             state["down"] = True
             with pytest.raises(FSMError):
@@ -452,8 +453,8 @@ class TestTheProjectionEqualsTheMeter:
     def test_an_engine_logged_double_carries_usage_missing_like_scripted_llm(self, log):
         llm = _script()
         api = API(copy.deepcopy(_FSM), llm_interface=llm, event_log=log)
+        mark = ledger_mark(llm)  # before the greeting: it is a logged call
         cid, _ = api.start_conversation()
-        mark = ledger_mark(llm)
         api.converse("Ann", cid)
         api.advance(cid)
 
@@ -468,13 +469,14 @@ class TestTheProjectionEqualsTheMeter:
         inner = _llm()
         api = API(copy.deepcopy(_CHAT), llm_interface=_Wrapper(inner), event_log=log)
         with patch(COMPLETION, _provider({})):
-            cid, _ = api.start_conversation()
             mark = ledger_mark(inner)
+            cid, _ = api.start_conversation()
             api.converse("one", cid)
 
         folded = projection().usage_from_events(log.read(cid))
 
-        assert folded.calls == ledger_since(inner, mark).calls == 1  # type: ignore[arg-type]
+        # the greeting and the turn, each counted once through the wrapper
+        assert folded.calls == ledger_since(inner, mark).calls == 2  # type: ignore[arg-type]
 
     def test_a_stream_that_errors_mid_read_is_one_error_where_the_meter_saw_a_call(
         self, log
