@@ -22,12 +22,14 @@ the model different bytes (STOP IF 2 of the plan).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from tests import pattern_runs as runs
 from tests.executables_corpus import REQUEST_BYTES_PATH
+from tests.test_fsm_llm.kind_corpus import _frozen_today
 
 _GOLDEN = json.loads(REQUEST_BYTES_PATH.read_text(encoding="utf-8"))
 _ROOT = Path(__file__).resolve().parents[2]
@@ -116,3 +118,139 @@ class TestGoldenRequests:
 
         monkeypatch.setattr(datetime, "date", _Later)
         assert runs.run_case("react")["requests"] == _GOLDEN["react"]["requests"]
+
+
+# ---- the blind spots of the first golden (plan a555dcfe, step 28.5, D-035) -----------------------
+#
+# The review found the golden blind to the retry note of ``verified_react``, the recall and remember
+# texts of ``auto_memory``, every ``run_stream`` path, a semantic registry under ``rewoo`` and
+# ``plan_execute`` and custom debate personas. Each is now a case of the harness whose golden entry was
+# written from a ``git archive`` of the tree BEFORE the conversion (commit 1a87fb4e, the old classes with
+# this harness copied in), with the full request text compared and equal there: the entries are the
+# parent's, never the tree's.
+
+_STREAMS_WITHOUT_A_PARENT = [
+    "reflexion",
+    "plan_execute",
+    "maker_checker",
+    "debate",
+    "evaluator_optimizer",
+    "prompt_chain",
+    "orchestrator",
+]
+
+
+def _texts(name: str) -> list[str]:
+    """The text of every request the scripted model of case *name* received (not hashed)."""
+    case = {**runs.CASES(), **runs._new_stream_cases()}[name]
+    model = runs.ScriptedModel(case.tool)
+    agent = case.build(model)
+    if case.stream:
+        list(agent.run_stream(case.task))
+    else:
+        agent.run(case.task)
+    return [
+        runs.normalise(json.dumps(request, sort_keys=True))
+        for _call, request in model.log
+    ]
+
+
+class TestTheBlindSpotsAreCovered:
+    """A case that never reached the text it guards would pass a wrong golden: check it did."""
+
+    def test_the_retry_note_reaches_the_second_attempt_only(self):
+        texts = _texts("verified_react_retry")
+        marked = [i for i, t in enumerate(texts) if "rejected by verification" in t]
+
+        assert marked and marked[0] > 0
+        assert _GOLDEN["verified_react_retry"]["outcome"]["status"] == "ok"
+        assert _GOLDEN["verified_react_rejected"]["outcome"]["stop_reason"] == (
+            "verification_failed"
+        )
+
+    def test_the_recall_block_is_sent_and_the_interaction_is_remembered(self):
+        texts = _texts("auto_memory")
+
+        assert any("[Relevant things you remember]" in t for t in texts)
+        assert any("second shelf" in t for t in texts)
+        remembered = _GOLDEN["auto_memory"]["outcome"]["memory"]
+        assert any(m.startswith("Q: Find the alpha thing") for m in remembered)
+
+    def test_the_recall_floor_keeps_only_the_memory_above_it(self):
+        texts = " ".join(_texts("auto_memory_floor"))
+        everything = " ".join(_texts("auto_memory"))
+
+        assert "second shelf" in texts and "Beta is unrelated" not in texts
+        assert "Beta is unrelated" in everything
+
+    @pytest.mark.parametrize("name", ["rewoo_semantic", "plan_execute_semantic"])
+    def test_a_semantic_registry_lists_the_retrieved_tool_in_the_prompt(self, name):
+        assert any("t0" in t for t in _texts(name))
+        assert _GOLDEN[name]["outcome"]["tools"][0][0] == "t0"
+
+    def test_the_three_custom_personas_reach_the_model(self):
+        joined = " ".join(_texts("debate_personas"))
+
+        for persona in (
+            "cautious systems engineer",
+            "bold product designer",
+            "neutral technical editor",
+        ):
+            assert persona in joined
+
+    @pytest.mark.parametrize(
+        "name", ["react_stream", "verified_react_stream", "auto_memory_stream"]
+    )
+    def test_a_stream_ends_with_one_chunk_of_the_answer(self, name):
+        assert _GOLDEN[name]["outcome"]["chunks"] == ["Answer: ok"]
+
+    def test_a_stream_through_run_sends_what_run_sends(self):
+        for stream, plain in (
+            ("verified_react_stream", "verified_react_retry"),
+            ("auto_memory_stream", "auto_memory"),
+        ):
+            assert _GOLDEN[stream]["requests"] == _GOLDEN[plain]["requests"], stream
+
+
+class TestAStreamSendsTheRequestsOfRun:
+    """A stream asks for a plain-text reply: each reply request differs from ``run``'s in the
+    ``<response_format>`` block and nowhere else (every other request is the same)."""
+
+    @staticmethod
+    def _without_format(texts: list[str]) -> list[str]:
+        return [re.sub(r"<response_format>.*?</response_format>", "", t) for t in texts]
+
+    @pytest.mark.parametrize("pattern", ["react", *_STREAMS_WITHOUT_A_PARENT])
+    def test_the_stream_differs_from_run_in_the_response_format_only(self, pattern):
+        with _frozen_today():
+            streamed = _texts(f"{pattern}_stream")
+            plain = _texts(pattern)
+
+        assert len(streamed) == len(plain)
+        assert streamed != plain  # the replies ask for plain text
+        assert self._without_format(streamed) == self._without_format(plain)
+
+
+class TestStreamsThatNoOldClassHad:
+    """The old ``reflexion``, ``plan_execute``, ``maker_checker``, ``debate``, ``evaluator_optimizer``,
+    ``prompt_chain`` and ``orchestrator`` had no ``run_stream`` (``AttributeError``), so there is no
+    parent golden of a stream: its rule is the one above against the same pattern's ``run``, whose golden
+    IS the parent's (and every request that is not a reply is hashed equal to it here)."""
+
+    @pytest.mark.parametrize("pattern", _STREAMS_WITHOUT_A_PARENT)
+    def test_every_request_that_is_not_a_reply_equals_the_golden_of_run(self, pattern):
+        streamed = runs.run_case(f"{pattern}_stream")
+
+        assert "raised" not in streamed["outcome"], streamed["outcome"]
+        want = _GOLDEN[pattern]["requests"]
+        assert len(streamed["requests"]) == len(want), pattern
+        for got, golden in zip(streamed["requests"], want, strict=True):
+            if (
+                golden["call"] != "generate_response"
+            ):  # a reply asks for plain text in a stream
+                assert got == golden, pattern
+        assert streamed["outcome"]["chunks"], pattern
+
+    def test_these_streams_have_no_golden_entry_of_their_own(self):
+        for pattern in _STREAMS_WITHOUT_A_PARENT:
+            assert f"{pattern}_stream" not in _GOLDEN

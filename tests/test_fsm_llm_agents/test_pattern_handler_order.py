@@ -27,6 +27,11 @@ _GOLDEN = json.loads(HANDLER_ORDER_PATH.read_text(encoding="utf-8"))
 _APPROVAL_NAMES = {"AgentHITLGate", "AgentApprovalFreshKeys"}
 
 
+def _attempts(handlers: list) -> list[list]:
+    """The handler lists of a run: one, or one per attempt of a retried run (verified_react)."""
+    return [handlers] if handlers and isinstance(handlers[0][0], str) else handlers
+
+
 def _names(handlers: list) -> list[str]:
     return [row[0] for row in handlers]
 
@@ -36,20 +41,23 @@ class TestGoldenFixture:
         assert sorted(_GOLDEN) == sorted(runs.CASES())
 
     def test_every_case_registers_the_error_and_compactor_handlers(self):
-        for name, handlers in _GOLDEN.items():
-            names = _names(handlers)
-            assert "AgentError" in names, name
-            assert "AgentContextCompactor" in names, name
+        for name, golden in _GOLDEN.items():
+            for handlers in _attempts(golden):
+                names = _names(handlers)
+                assert "AgentError" in names, name
+                assert "AgentContextCompactor" in names, name
 
     def test_execution_order_is_priority_order(self):
-        for name, handlers in _GOLDEN.items():
-            priorities = [row[5] for row in handlers]
-            assert priorities == sorted(priorities), name
+        for name, golden in _GOLDEN.items():
+            for handlers in _attempts(golden):
+                priorities = [row[5] for row in handlers]
+                assert priorities == sorted(priorities), name
 
     def test_only_a_run_with_an_approval_policy_registers_the_approval_handlers(self):
-        for name, handlers in _GOLDEN.items():
-            has = bool(_APPROVAL_NAMES & set(_names(handlers)))
-            assert has == name.endswith("_approval"), name
+        for name, golden in _GOLDEN.items():
+            for handlers in _attempts(golden):
+                has = bool(_APPROVAL_NAMES & set(_names(handlers)))
+                assert has == name.endswith("_approval"), name
 
     def test_the_gate_runs_before_everything_else_of_its_pattern(self):
         for name in ("react_approval", "reflexion_approval"):
@@ -93,3 +101,17 @@ class TestGoldenHandlers:
             runs.handler_tuple(h) for h in seen[1]
         ]
         assert not {id(h) for h in seen[0]} & {id(h) for h in seen[1]}
+
+
+class TestARetriedRunRegistersTheSameHandlersEveryAttempt:
+    """``verified_react`` runs the loop again on a rejected answer (step 28.5): each attempt gets its own,
+    equal handler list, never the first attempt's objects."""
+
+    @pytest.mark.parametrize(
+        "name", ["verified_react_retry", "verified_react_rejected"]
+    )
+    def test_every_attempt_has_the_same_handlers(self, name):
+        attempts = _attempts(_GOLDEN[name])
+
+        assert len(attempts) == 2
+        assert attempts[0] == attempts[1]

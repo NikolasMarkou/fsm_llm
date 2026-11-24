@@ -1,4 +1,167 @@
 {
+ "auto_memory": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "memory": [
+    "Beta is unrelated to the report.",
+    "Q: Find the alpha thing, then report it\nA: Answer: ok",
+    "The alpha thing is kept on the second shelf."
+   ],
+   "status": "ok",
+   "stop_reason": "answered",
+   "tools": [
+    [
+     "search",
+     {
+      "x": "1"
+     }
+    ]
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "dac319ef328621432a64bba83841c778a6134d7f3e404df3127b384d1acd63d4"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "fd2d79860c5b15094e951b2718ed22760dd3f9c4f9333425a233c7fd0a0dea9b"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "9402782404e144bdfad066dcab1818d30fc94672168d1a5c45374c8231a57128"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "7522f38b4655a70d1d1edc0527735e7e9cc420dbe8d2b571bd55c377a9c95d32"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "cf978f2329f6fb9c8164a584c3b1def41e7b8d35c89dcf79c6fe484e070aff3c"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "088f94bebda07c07b4fdaaf4fb54b18542986d48400bffca60cff06fa512990e"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "679a2f81faee4879bbc4678e42d371399ac35377a2860b499c8be441b95da5ce"
+   }
+  ]
+ },
+ "auto_memory_floor": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "memory": [
+    "Beta is unrelated to the report.",
+    "Q: Find the alpha thing, then report it\nA: Answer: ok",
+    "The alpha thing is kept on the second shelf."
+   ],
+   "status": "ok",
+   "stop_reason": "answered",
+   "tools": [
+    [
+     "search",
+     {
+      "x": "1"
+     }
+    ]
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "eb93f6b791435385a16242335b31339fdf0dba788c490d689cf933a68f3e5330"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "97f99baa9becdd4874492064610fdf49598bc97a597694a34a256882a2fc89cb"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "2182637ed19f89d2d6979122655f860c4c60f00508dd6940673d6cd4aa263d9b"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "a7aff96f4a2ea920f801352d22648be3237bcdc786b1858ee10f416b3e19e5b1"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "63f2d97ba9ed1ee0e2724f16c38d142fcd47184988b0b6d674a767cd6107081d"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "d9c01d11fcbbfeefd60cdf9affa1a6aea319fd4c436b2437a217207ab82f0a45"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "b767e6add2602f965be8d29b533dd29a129b71d9d8a68352d4244309a0956c22"
+   }
+  ]
+ },
+ "auto_memory_stream": {
+  "outcome": {
+   "chunks": [
+    "Answer: ok"
+   ],
+   "memory": [
+    "Beta is unrelated to the report.",
+    "Q: Find the alpha thing, then report it\nA: Answer: ok",
+    "The alpha thing is kept on the second shelf."
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "dac319ef328621432a64bba83841c778a6134d7f3e404df3127b384d1acd63d4"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "fd2d79860c5b15094e951b2718ed22760dd3f9c4f9333425a233c7fd0a0dea9b"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "9402782404e144bdfad066dcab1818d30fc94672168d1a5c45374c8231a57128"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "7522f38b4655a70d1d1edc0527735e7e9cc420dbe8d2b571bd55c377a9c95d32"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "cf978f2329f6fb9c8164a584c3b1def41e7b8d35c89dcf79c6fe484e070aff3c"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "088f94bebda07c07b4fdaaf4fb54b18542986d48400bffca60cff06fa512990e"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "679a2f81faee4879bbc4678e42d371399ac35377a2860b499c8be441b95da5ce"
+   }
+  ]
+ },
  "debate": {
   "outcome": {
    "answer": "Answer: ok",
@@ -61,6 +224,71 @@
     "call": "generate_response",
     "label": "reply",
     "sha256": "655ee284571831b7ed91ec33aad63904efb6191a18fba5fdd8eaee21945380a4"
+   }
+  ]
+ },
+ "debate_personas": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "status": "ok",
+   "stop_reason": "answered",
+   "tools": []
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:proposition",
+    "sha256": "3bdd6abd04160e88fbc324ae0d3e2b2364fb3088541f9cbe9f8a479ec09246bc"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:critique",
+    "sha256": "cc5e6567cdd93ea5f0db6cb15fe293319c2d9beeb018d0bd9ebf6c99ae21bf6a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:counter_argument",
+    "sha256": "41a4d818ecdb701c5ee99bc853bbd76c93edd4d8bed6b8a5789232bb8676730a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:judge_verdict",
+    "sha256": "cfa9bf2e3fa7c3375f6229097fae5d7dbfb1d61bccfab2122e1a5a84bd0441b5"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:consensus_reached",
+    "sha256": "cf646cdf3d1496724e62c912c12082c7d7845c8941c5e1f1984fb3477ddb6a68"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:proposition",
+    "sha256": "12fb635cab11ac2fcef99fcb8bca483fc3886746cff100521b185b79517526ba"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:critique",
+    "sha256": "cc5e6567cdd93ea5f0db6cb15fe293319c2d9beeb018d0bd9ebf6c99ae21bf6a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:counter_argument",
+    "sha256": "41a4d818ecdb701c5ee99bc853bbd76c93edd4d8bed6b8a5789232bb8676730a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:judge_verdict",
+    "sha256": "cfa9bf2e3fa7c3375f6229097fae5d7dbfb1d61bccfab2122e1a5a84bd0441b5"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:consensus_reached",
+    "sha256": "0413c357b2cd36cb8d90185956527c101df232d7b0bf2ceabc3d0668d6e81687"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "b7ecf72bea3ce6801f5a67014b763c8c74516d2f0ead1f846d6f7ce4281fe515"
    }
   ]
  },
@@ -290,6 +518,69 @@
     "call": "generate_response",
     "label": "reply",
     "sha256": "5f35c64fd3c1859048b0ff8f4ce0267397d0c4446cb52b443ad1cb103957f712"
+   }
+  ]
+ },
+ "plan_execute_semantic": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "status": "ok",
+   "stop_reason": "evidence",
+   "tools": [
+    [
+     "t0",
+     {
+      "x": "1"
+     }
+    ],
+    [
+     "t0",
+     {
+      "x": "1"
+     }
+    ]
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:plan_steps",
+    "sha256": "5c2c2bf302fff511635a79d9e8a547f9e811fba192bbe50b36efa9f8bed99afb"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "7c1f5c618e409f1c1c6e4ffe79a02fe49bf55a669ca0cdb5b00aa659487001c9"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "26b457af418699f4817fd94787c0ac3dc50dae6b69e6a36d619102e748e60460"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:step_result",
+    "sha256": "672c3c9ea00fc9a563c5b1010037b42e9372e9f0d7f3f39f218c720758900238"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "ab473640601252f3c26b708bffd799f25ee79e676a575f5eebc0cb3acc4788be"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "b3a2c4dae8c54cb54cbbedc33d2839cdd1d2de9b3e8b28fa1b45888c79a3d781"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:step_result",
+    "sha256": "da6fc56dd55fd6de998f7ba12ec3b91ed85d6a3533b45042ce15437f93df7513"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "fc85bd11a4177526cf00b66a78d9b7f97f90917304870d36b27172a53bd6528f"
    }
   ]
  },
@@ -544,6 +835,50 @@
    }
   ]
  },
+ "react_stream": {
+  "outcome": {
+   "chunks": [
+    "Answer: ok"
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "cdfac4bba69be050ec52ce7074ae4ba00f8a6dd2922b182c723f59b15a0f7c09"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "69f81efb941571e31f2dfbfbfac6b68cebb2a0e84241310118cadebc988a78c0"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "f8f3f4039b95c495c9276d0bfd925a750b49ee5c718790247392b2988de1a3e4"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "56a1a1e5d53ed7ee2989d6a3142682b7e862fedd607427d0395549c7997ab5e6"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "c936d2d194f5e8eb709192bb02b69b1f40125a513506569f31b3cfa065aeceb7"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "b1c1f5d9852c1186b06b2eadd5949da40641b72366c6ae19cbe9e473a1c0c730"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "c38250dd62be6946fb62ab192824ec35e5eedb5d702eb9b991831d956d9f166c"
+   }
+  ]
+ },
  "reflexion": {
   "outcome": {
    "answer": "Answer: ok",
@@ -722,6 +1057,286 @@
     "call": "generate_response",
     "label": "reply",
     "sha256": "608943c0f6c1bad2911369fb4d8f2a627c4037b4d5c1a16d2bdd8943b7dbc9fd"
+   }
+  ]
+ },
+ "rewoo_semantic": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "status": "ok",
+   "stop_reason": "evidence",
+   "tools": [
+    [
+     "t0",
+     {
+      "x": "1"
+     }
+    ]
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:plan_blueprint",
+    "sha256": "b7af7d02bbeef365146fca18caa592b65cd84a4495db788c4ec18a56188f864e"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "88068d36641a1f24d2426357db6e303fd97e108ac6b6a4fac184ab7b15bf37bd"
+   }
+  ]
+ },
+ "verified_react_rejected": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "status": "failed",
+   "stop_reason": "verification_failed",
+   "tools": [
+    [
+     "search",
+     {
+      "x": "1"
+     }
+    ]
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "b0738abcb7b277f1699e7f96b5a67f98e71139b13ef9480b78031f253ea9c05e"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "36409ff5eb74fe70d06ae9492b00e9ad5de420046b1bc952e10e6bf2bf8515b7"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "f8f3f4039b95c495c9276d0bfd925a750b49ee5c718790247392b2988de1a3e4"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "9025c3af81e7163dab138074adf0b42b8e11497481eacc5f445077c0b6c8a7d3"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "90e57dbf2fb8192fa5733250da42554b180172d3e873f296ba5c14fe57aacc50"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "b1c1f5d9852c1186b06b2eadd5949da40641b72366c6ae19cbe9e473a1c0c730"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "bcb747b123238c47e1d77e9bf640a9676809132b8ac1150757da9cf4cfbc17eb"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "bedd8ce5dbddc667dd6ed6206540e852ef4bf8132d8aee9246c2032844ae5027"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "1988f0cdc87e1bba8a24d8e0a1fa594618cc1e1eae276e2b8173f7d5742e300f"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "53a815815a36938e754ec4992d879af17fd2f4bcd74036e506a809ffdf5bf79e"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "6c47502d4e92f5e0f54304afaf07b9e0687e23c2fd99578c234f11c3f3a90038"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "bbe82c420ec4d5fe54166b254c89151bbaafac3190ac8aa12231dd12d1a5a56a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "18184bf2f12d792c299ceca52bd80ba533db1b9e0130b35fee792f43127b597a"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "a0a02f58761512caa799b98d3596bd96d4e4e6c19d94df7e220244de1af45266"
+   }
+  ]
+ },
+ "verified_react_retry": {
+  "outcome": {
+   "answer": "Answer: ok",
+   "status": "ok",
+   "stop_reason": "answered",
+   "tools": [
+    [
+     "search",
+     {
+      "x": "1"
+     }
+    ]
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "b0738abcb7b277f1699e7f96b5a67f98e71139b13ef9480b78031f253ea9c05e"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "36409ff5eb74fe70d06ae9492b00e9ad5de420046b1bc952e10e6bf2bf8515b7"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "f8f3f4039b95c495c9276d0bfd925a750b49ee5c718790247392b2988de1a3e4"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "9025c3af81e7163dab138074adf0b42b8e11497481eacc5f445077c0b6c8a7d3"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "90e57dbf2fb8192fa5733250da42554b180172d3e873f296ba5c14fe57aacc50"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "b1c1f5d9852c1186b06b2eadd5949da40641b72366c6ae19cbe9e473a1c0c730"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "bcb747b123238c47e1d77e9bf640a9676809132b8ac1150757da9cf4cfbc17eb"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "bedd8ce5dbddc667dd6ed6206540e852ef4bf8132d8aee9246c2032844ae5027"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "1988f0cdc87e1bba8a24d8e0a1fa594618cc1e1eae276e2b8173f7d5742e300f"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "53a815815a36938e754ec4992d879af17fd2f4bcd74036e506a809ffdf5bf79e"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "6c47502d4e92f5e0f54304afaf07b9e0687e23c2fd99578c234f11c3f3a90038"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "bbe82c420ec4d5fe54166b254c89151bbaafac3190ac8aa12231dd12d1a5a56a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "18184bf2f12d792c299ceca52bd80ba533db1b9e0130b35fee792f43127b597a"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "a0a02f58761512caa799b98d3596bd96d4e4e6c19d94df7e220244de1af45266"
+   }
+  ]
+ },
+ "verified_react_stream": {
+  "outcome": {
+   "chunks": [
+    "Answer: ok"
+   ]
+  },
+  "requests": [
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "b0738abcb7b277f1699e7f96b5a67f98e71139b13ef9480b78031f253ea9c05e"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "36409ff5eb74fe70d06ae9492b00e9ad5de420046b1bc952e10e6bf2bf8515b7"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "f8f3f4039b95c495c9276d0bfd925a750b49ee5c718790247392b2988de1a3e4"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "9025c3af81e7163dab138074adf0b42b8e11497481eacc5f445077c0b6c8a7d3"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "90e57dbf2fb8192fa5733250da42554b180172d3e873f296ba5c14fe57aacc50"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "b1c1f5d9852c1186b06b2eadd5949da40641b72366c6ae19cbe9e473a1c0c730"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "bcb747b123238c47e1d77e9bf640a9676809132b8ac1150757da9cf4cfbc17eb"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "bedd8ce5dbddc667dd6ed6206540e852ef4bf8132d8aee9246c2032844ae5027"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "1988f0cdc87e1bba8a24d8e0a1fa594618cc1e1eae276e2b8173f7d5742e300f"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "53a815815a36938e754ec4992d879af17fd2f4bcd74036e506a809ffdf5bf79e"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_name",
+    "sha256": "6c47502d4e92f5e0f54304afaf07b9e0687e23c2fd99578c234f11c3f3a90038"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:tool_input",
+    "sha256": "bbe82c420ec4d5fe54166b254c89151bbaafac3190ac8aa12231dd12d1a5a56a"
+   },
+   {
+    "call": "extract_field",
+    "label": "field:should_terminate",
+    "sha256": "18184bf2f12d792c299ceca52bd80ba533db1b9e0130b35fee792f43127b597a"
+   },
+   {
+    "call": "generate_response",
+    "label": "reply",
+    "sha256": "a0a02f58761512caa799b98d3596bd96d4e4e6c19d94df7e220244de1af45266"
    }
   ]
  }

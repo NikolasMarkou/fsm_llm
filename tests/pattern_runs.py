@@ -135,12 +135,18 @@ class ScriptedModel(LLMInterface):
 
 @dataclass(frozen=True)
 class Case:
-    """One scripted run: ``build(model)`` makes the agent, ``task`` is what it runs."""
+    """One scripted run: ``build(model)`` makes the agent, ``task`` is what it runs.
+
+    ``stream`` runs ``run_stream`` instead of ``run`` (the outcome is then the normalised chunks);
+    ``extra(agent)`` adds fields to the outcome after the run (what a memory backend stored).
+    """
 
     build: Callable[[ScriptedModel], BaseAgent]
     task: str = _TASK
     tool: str = "search"
     native: bool = False
+    stream: bool = False
+    extra: Callable[[BaseAgent], dict[str, Any]] | None = None
 
 
 def _tools(*, flagged: bool = False, many: bool = False) -> ToolRegistry:
@@ -207,7 +213,123 @@ def _kw(model: ScriptedModel) -> dict[str, Any]:
     return {"config": _config(), "llm_interface": model}
 
 
+def _rejecting(accept_from: int) -> Callable[[str, dict[str, Any]], bool]:
+    """A verifier that rejects the first ``accept_from - 1`` answers (a fresh counter per build)."""
+    seen: list[str] = []
+
+    def verify(answer: str, context: dict[str, Any]) -> bool:
+        seen.append(answer)
+        return len(seen) >= accept_from
+
+    return verify
+
+
+def _memory_store() -> Any:
+    from fsm_llm.agents import SemanticMemoryStore
+
+    store = SemanticMemoryStore(embed_fn=hash_embed(8))
+    store.add("The alpha thing is kept on the second shelf.")
+    store.add("Beta is unrelated to the report.")
+    return store
+
+
+def _stored(agent: BaseAgent) -> dict[str, Any]:
+    """What the auto-memory store holds after the run (the remember text)."""
+    store = agent.memory  # type: ignore[attr-defined]
+    return {
+        "memory": sorted(text for text, _score, _meta in store.search("alpha", k=50))
+    }
+
+
+def _verified(m: ScriptedModel, *, accept_from: int, **kw: Any) -> BaseAgent:
+    config = AgentConfig(
+        max_iterations=5, model="mock-model", verification_fn=_rejecting(accept_from)
+    )
+    return A.VerifiedReactAgent(
+        _tools(), config=config, llm_interface=m, max_verify_retries=1, **kw
+    )
+
+
+def _memory_agent(m: ScriptedModel, floor: float = 0.0) -> BaseAgent:
+    return A.AutoMemoryReactAgent(
+        _tools(), memory=_memory_store(), recall_min_score=floor, **_kw(m)
+    )
+
+
 def _cases() -> dict[str, Case]:
+    return {
+        **_base_cases(),
+        **_blind_spot_cases(),
+    }
+
+
+def _blind_spot_cases() -> dict[str, Case]:
+    """The paths the first golden did not cover (step 28.5 of plan a555dcfe, D-035): the retry note
+    of ``verified_react``, the recall and remember texts of ``auto_memory``, the stream of every
+    pattern that streams, a semantic registry under ``rewoo`` and ``plan_execute``, custom debate
+    personas. Their goldens come from the tree BEFORE the conversion (see the test module)."""
+    return {
+        "verified_react_retry": Case(lambda m: _verified(m, accept_from=2)),
+        "verified_react_rejected": Case(lambda m: _verified(m, accept_from=99)),
+        "auto_memory": Case(_memory_agent, extra=_stored),
+        "react_stream": Case(
+            lambda m: A.ReactAgent(_tools(many=True), **_kw(m)), stream=True
+        ),
+        "verified_react_stream": Case(
+            lambda m: _verified(m, accept_from=2), stream=True
+        ),
+        # a floor between the two stored scores (0.834 and 0.816 for the task): one memory recalled
+        "auto_memory_floor": Case(lambda m: _memory_agent(m, 0.82), extra=_stored),
+        "auto_memory_stream": Case(_memory_agent, stream=True, extra=_stored),
+        "rewoo_semantic": Case(
+            lambda m: A.REWOOAgent(_semantic(), **_kw(m)), tool="t0"
+        ),
+        "plan_execute_semantic": Case(
+            lambda m: A.PlanExecuteAgent(_semantic(), **_kw(m)), tool="t0"
+        ),
+        "debate_personas": Case(
+            lambda m: A.DebateAgent(
+                num_rounds=2,
+                proposer_persona="A cautious systems engineer",
+                critic_persona="A bold product designer",
+                judge_persona="A neutral technical editor",
+                **_kw(m),
+            )
+        ),
+    }
+
+
+def _new_stream_cases() -> dict[str, Case]:
+    """Streams of the patterns whose OLD classes had no ``run_stream`` (``AttributeError`` before the
+    conversion, a stream now): there is no parent golden, so the rule is that a stream sends the very
+    requests the same pattern's ``run`` sends (``test_pattern_request_bytes``)."""
+    return {
+        "reflexion_stream": Case(
+            lambda m: A.ReflexionAgent(_tools(many=True), **_kw(m)), stream=True
+        ),
+        "plan_execute_stream": Case(
+            lambda m: A.PlanExecuteAgent(_tools(many=True), **_kw(m)), stream=True
+        ),
+        "maker_checker_stream": Case(
+            lambda m: A.MakerCheckerAgent("make it", "check it", **_kw(m)), stream=True
+        ),
+        "debate_stream": Case(lambda m: A.DebateAgent(**_kw(m)), stream=True),
+        "evaluator_optimizer_stream": Case(
+            lambda m: A.EvaluatorOptimizerAgent(_passing, **_kw(m)), stream=True
+        ),
+        "prompt_chain_stream": Case(
+            lambda m: A.PromptChainAgent(_chain(), **_kw(m)), stream=True
+        ),
+        "orchestrator_stream": Case(
+            lambda m: A.OrchestratorAgent(
+                worker_factory=lambda sub: A.AgentResult(answer="done"), **_kw(m)
+            ),
+            stream=True,
+        ),
+    }
+
+
+def _base_cases() -> dict[str, Case]:
     return {
         "react": Case(lambda m: A.ReactAgent(_tools(many=True), **_kw(m))),
         "react_approval": Case(
@@ -300,7 +422,7 @@ def _outcome(result: Any) -> dict[str, Any]:
 
 def run_case(name: str) -> dict[str, Any]:
     """Run case *name* once and return its handlers, request hashes and outcome."""
-    case = _cases()[name]
+    case = {**_cases(), **_new_stream_cases()}[name]
     seen: list[list[Any]] = []
     original = BaseAgent._prepare_run_api
 
@@ -316,7 +438,11 @@ def run_case(name: str) -> dict[str, Any]:
         else:
             agent = case.build(model)
             try:
-                result_or_error = agent.run(case.task)
+                if case.stream:
+                    chunks = [normalise(c) for c in agent.run_stream(case.task)]
+                    result_or_error = {"chunks": chunks}
+                else:
+                    result_or_error = agent.run(case.task)
             except Exception as exc:  # recorded, never propagated
                 result_or_error = {"raised": type(exc).__name__}
             requests = [_request_row(call, req) for call, req in model.log]
@@ -325,6 +451,8 @@ def run_case(name: str) -> dict[str, Any]:
         if isinstance(result_or_error, dict)
         else _outcome(result_or_error)
     )
+    if case.extra is not None and not case.native:
+        outcome = {**outcome, **case.extra(agent)}
     return {
         "handlers": seen[0] if len(seen) == 1 else seen,
         "requests": requests,
