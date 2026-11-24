@@ -146,10 +146,9 @@ class TestTheFsmOfARun:
     def test_the_variant_is_derived_never_an_option(self):
         envelope = pf.load_envelope("plan_execute")
 
-        agent = PatternAgent(envelope, options={"without_tools": False})
-
-        with pytest.raises(Exception, match="without_tools"):
-            agent._fsm_for_run("t", None)
+        # refused when the agent is built (step 28.2: options are checked at construction)
+        with pytest.raises(AgentError, match="without_tools"):
+            PatternAgent(envelope, options={"without_tools": False})
 
     def test_a_semantic_registry_is_asked_once_per_prompt_with_the_task(self):
         class Sem(ToolRegistry):

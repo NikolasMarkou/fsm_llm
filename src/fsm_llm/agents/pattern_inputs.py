@@ -26,7 +26,7 @@ refuses. A generator body (``prompt_chain``, D-019) is written by ``GENERATORS``
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from functools import partial
 from typing import Any, cast
 
@@ -44,6 +44,7 @@ from fsm_llm.agents.prompts import (
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
 from fsm_llm.core.definitions.executable_instance import instantiate_body
+from fsm_llm.core.definitions.executable_pattern import PatternBodyError, check_option
 from fsm_llm.engine.executables.namespaces import GENERATORS
 from fsm_llm.tools import ToolRegistry
 
@@ -53,6 +54,7 @@ __all__ = [
     "TOOLLESS_VARIANT",
     "pattern_fsm",
     "refuse_reserved_options",
+    "resolved_options",
 ]
 
 #: The one variant the agent selects from its HITL predicate; no option may carry its name.
@@ -91,6 +93,46 @@ def refuse_reserved_options(
         )
     if owned := sorted(DERIVED_OPTIONS & set(given)):
         raise AgentError(f"options {owned} are filled by the agent, not given")
+
+
+def resolved_options(
+    envelope: PatternEnvelope,
+    given: Mapping[str, Any],
+    *,
+    config_named: Collection[str] = (),
+) -> dict[str, Any]:
+    """The options of ONE agent: *given* checked against the schema, then the file's default of every
+    other declared option that has one (D-035).
+
+    This is the one mapping the handler context, the hooks and ``pattern_fsm`` read, so a default
+    written in a file or a preset is the value everywhere, not only in the FSM holes. The derived
+    options (``DERIVED_OPTIONS``) are left out (``pattern_fsm`` fills them per run) and so are the
+    defaults of the *config_named* options: their value lives in the agent's config, where the host's
+    explicit field beats the file's default (D-033), so a handler falls back to the config. A given
+    option is always kept. An option with neither a value nor a default is simply absent (the
+    instantiation names it at run start). Raises ``AgentError`` naming the option, never its value,
+    for a name the file does not declare or a value its schema refuses.
+    """
+    properties = envelope.body.options_schema.properties
+    if unknown := sorted(n for n in given if n not in properties):
+        raise AgentError(
+            f"pattern {envelope.id!r} declares no option(s) {[str(n)[:60] for n in unknown[:5]]}"
+        )
+    out: dict[str, Any] = {}
+    try:
+        for name, value in given.items():
+            out[name] = check_option(name, properties[name], value)
+        for name, default in envelope.body.options.items():
+            if (
+                name in properties
+                and name not in out
+                and name not in DERIVED_OPTIONS
+                and name not in config_named
+            ):
+                out[name] = check_option(name, properties[name], default)
+    except PatternBodyError as error:
+        raise AgentError(f"pattern {envelope.id!r}: {error}") from None
+    return out
 
 
 def pattern_fsm(

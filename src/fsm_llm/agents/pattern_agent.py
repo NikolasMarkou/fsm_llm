@@ -53,7 +53,11 @@ from fsm_llm.agents.handlers.context import (
     Retry,
 )
 from fsm_llm.agents.handlers.library import TOOL_RUNNING, UNGATED_TOOL_RUNNING
-from fsm_llm.agents.pattern_inputs import pattern_fsm, refuse_reserved_options
+from fsm_llm.agents.pattern_inputs import (
+    pattern_fsm,
+    refuse_reserved_options,
+    resolved_options,
+)
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.core.definitions.executable import PatternEnvelope
@@ -82,6 +86,15 @@ _NO_SEAM = ("step_budget", "run_output_keys", "seconds_exempt")
 _BEFORE_RUN, _AFTER_RUN, _ON_ITERATION = "before_run", "after_run", "on_iteration"
 
 
+def _config_option_names(body: PatternBody) -> list[str]:
+    """The options of the file that are ``AgentConfig`` field names (applied to the config, D-033)."""
+    return [
+        name
+        for name in body.options_schema.properties
+        if name in AgentConfig.model_fields
+    ]
+
+
 def _config_from_options(
     config: AgentConfig | None,
     body: PatternBody,
@@ -96,8 +109,7 @@ def _config_from_options(
     file's default. A preset never names a model (``model`` is no option), so the interface or
     ``LLM_MODEL`` still decides it. No such option: *config* as it is (possibly ``None``).
     """
-    declared = body.options_schema.properties
-    fields = [name for name in declared if name in AgentConfig.model_fields]
+    fields = _config_option_names(body)
     if not fields:
         return config
     base = config or default_agent_config(llm_interface)
@@ -153,6 +165,15 @@ class PatternAgent(BaseAgent):
                 f"pattern {envelope.id!r} requires the tools {absent}, which the registry lacks"
             )
         refuse_reserved_options(envelope, options or {})
+        # the ONE resolved mapping (D-035): the caller's options checked against the schema plus the
+        # file's defaults, read by the handler context, the hooks and the FSM builder alike; the
+        # defaults of an option the config carries are left to the config (see `resolved_options`)
+        standalone = type(self) is PatternAgent
+        self._options = resolved_options(
+            envelope,
+            options or {},
+            config_named=_config_option_names(body) if standalone else (),
+        )
         if envelope.requires.tools == "none":
             # a pattern with no tools: `tools=` and `hitl=` are named here, so the base denylist
             # (which looks at **api_kwargs) would never see them (D-003 of plan 06a5ec0a)
@@ -166,7 +187,7 @@ class PatternAgent(BaseAgent):
                 "given to it could never be consulted"
             )
         # a class that stands behind a file owns its options (D-033)
-        if type(self) is PatternAgent:
+        if standalone:
             config = _config_from_options(
                 config, body, options or {}, api_kwargs.get("llm_interface")
             )
@@ -174,7 +195,6 @@ class PatternAgent(BaseAgent):
         self.envelope = envelope
         self.tools = tools
         self.hitl = hitl
-        self._options = dict(options or {})
         self._callables = dict(callables or {})
         self._refuse_run_start()
         # DECISION plan-2026-09-12T065608-089d0ec7/D-014
