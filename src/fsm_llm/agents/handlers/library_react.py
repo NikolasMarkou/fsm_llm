@@ -25,6 +25,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.tools import make_hitl_checker
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.handlers import HandlerTiming, create_handler
+from fsm_llm.tools import require_int_limit
 
 from .chain import make_gate_checker
 from .context import HandlerContext
@@ -129,10 +130,7 @@ def iteration_check(
     limit = params.get("limit", ctx.options.get("max_iterations"))
     if limit is None and ctx.config is not None:
         limit = ctx.config.max_iterations
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-        raise AgentError(
-            f"agents.iteration_limiter needs a positive integer limit, got {limit!r}"
-        )
+    limit = require_int_limit("agents.iteration_limiter limit", limit, minimum=1)
     limit_key = params.get("limit_key")
     return make_iteration_limiter(
         limit,
@@ -259,10 +257,7 @@ def reflexion_reflector(
     The cap is the option ``max_reflections`` of the run (``ctx.options``), at least 1.
     """
     limit = ctx.options.get("max_reflections", Defaults.MAX_REFLECTIONS)
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-        raise AgentError(
-            f"agents.reflexion_reflector needs max_reflections >= 1, got {limit!r}"
-        )
+    limit = require_int_limit("max_reflections", limit, minimum=1)
     return [
         create_handler(HandlerNames.REFLEXION_REFLECTOR)
         .with_priority(_priority(binding, HandlerPriorities.TOOL_EXECUTOR))

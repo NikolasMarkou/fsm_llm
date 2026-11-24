@@ -466,7 +466,7 @@ class TestTheFactories:
         )
         assert by_option.name == "AgentIterationLimiter"
         assert by_option.priority == HandlerPriorities.ITERATION_LIMITER
-        with pytest.raises(AgentError, match="positive integer"):
+        with pytest.raises(AgentError, match="limit must be an int"):
             lib.debate_limiter(_ctx(options={"max_iterations": 0}), binding)
 
     def test_a_binding_may_move_the_states_never_the_timing(self):

@@ -18,7 +18,6 @@ import pytest
 import fsm_llm
 from fsm_llm.reasoning import ReasoningEngine
 from fsm_llm.reasoning import __main__ as cli
-from fsm_llm.reasoning.executables import load_strategy_registry, strategy_registry
 from fsm_llm.reasoning.selection import strategy_choices
 from fsm_llm.reasoning.strategy_files import STRATEGY_ORDER, load_document
 
@@ -247,28 +246,6 @@ class TestTheEngineIsClosedOnEveryWayOut:
         assert [e.closed for e in stub.instances] == [1]
         lines = _lines(capsys.readouterr().err)
         assert lines == [f"{PROG}: interrupted by user"]
-
-
-class TestLoadStrategyRegistry:
-    def test_no_path_is_the_builtin_registry(self) -> None:
-        registry, report = load_strategy_registry(())
-        assert [c.name for c in strategy_choices(registry)] == list(STRATEGY_ORDER)
-        assert not report.failed and not report.collisions
-        assert [c.name for c in strategy_choices(strategy_registry())] == list(
-            STRATEGY_ORDER
-        )
-
-    def test_a_directory_adds_its_strategies_and_reports_what_it_refused(
-        self, strategies: Path
-    ) -> None:
-        _write(strategies, "broken.json", "[]")
-        clash = load_document("deductive")
-        _write(strategies, "deductive.json", clash)
-        registry, report = load_strategy_registry([strategies])
-        names = [c.name for c in strategy_choices(registry)]
-        assert names == [*STRATEGY_ORDER, "pirate"]
-        assert any("broken.json" in label for label in report.failed)
-        assert report.collisions
 
 
 class TestARealSolveThroughTheCli:

@@ -21,6 +21,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.core.definitions import AgentError
 from fsm_llm.handlers import create_handler
+from fsm_llm.tools import require_int_limit
 
 from .context import RUN_RESULT, HandlerContext
 from .library_support import _priority, _refuse_flagged, _states
@@ -55,14 +56,7 @@ def orchestrator_delegator(
     ``agents.raise_run_ending_error`` re-raises after the run.
     """
     max_workers = ctx.options.get("max_workers", Defaults.MAX_WORKERS)
-    if (
-        isinstance(max_workers, bool)
-        or not isinstance(max_workers, int)
-        or max_workers < 1
-    ):
-        raise AgentError(
-            f"agents.orchestrator_delegator needs max_workers >= 1, got {max_workers!r}"
-        )
+    max_workers = require_int_limit("max_workers", max_workers, minimum=1)
     delegate = ctx.callables.get("worker_factory")
     holder = _run_holder(ctx)
     return [

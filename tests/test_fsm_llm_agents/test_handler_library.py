@@ -618,5 +618,7 @@ class TestTheContextCountingLimiter:
     @pytest.mark.parametrize("limit", [0, -1, True, "3", 2.5, None])
     def test_a_bad_limit_is_refused(self, limit):
         params = {} if limit is None else {"limit": limit}
-        with pytest.raises(AgentError, match="positive integer limit"):
+        with pytest.raises(
+            AgentError, match=r"agents\.iteration_limiter limit must be an int"
+        ):
             lib.iteration_limiter(HandlerContext(), _Binding(params=params))
