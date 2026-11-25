@@ -16,7 +16,12 @@ no test reads or asserts on ``ts``):
    the acknowledged prefix, the model double ran only calls whose ``llm/request`` is on disk,
    and the restored conversation is the last committed state (the pre-turn state inside an
    open turn), never a half state.
-3. The fsync policy: exactly ``llm/request``, a side-effecting ``tool/call`` and ``turn/end``
+3. The product paths (plan 3f4530d3 step 9): the same sweep over a scripted run that goes through
+   the producers (a registry tool, an approval, the extraction family, a handler, the greeting),
+   through the sync and the async entry points (in async mode a death lands in a lane thread), and
+   over a spent turn budget. The golden is the LIVE view at each boundary and equals what the parent
+   archive showed with the log off (``fixtures/event_log_parity_golden.json``).
+4. The fsync policy: exactly ``llm/request``, a side-effecting ``tool/call`` and ``turn/end``
    are followed by one ``fsync``, counted through the ``_fsync`` indirection.
 
 Unverified until the Windows run: that ``Popen.kill()`` (``TerminateProcess``) on a Windows
@@ -47,6 +52,7 @@ from fsm_llm.runtime.stores import JsonlWriter, fold_session, jsonl, read_events
 from fsm_llm.testing import ScriptedLLM, final_reply
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import event_log_child as child
+from tests.test_fsm_llm import event_log_parity_cells as cells
 from tests.test_fsm_llm.event_log_support import (
     CHILD_MODULE,
     _Dead,
@@ -182,6 +188,28 @@ CHAT = _Scenario(
     resume=lambda store, llm: API(
         copy.deepcopy(_CHAT), llm_interface=llm, session_store=store
     ),
+    view=_chat_view,
+)
+
+
+def _play_budget(log: EventLog, llm: Any, record: Callable[[API, str], None]) -> None:
+    api = API(copy.deepcopy(_CHAT), llm_interface=llm, event_log=log, max_steps=1)
+    cid, _ = api.start_conversation()
+    record(api, cid)
+    api.converse("I am Ann", cid)
+    record(api, cid)
+    with pytest.raises(
+        FSMError
+    ):  # the spent turn budget refuses the next turn: a decision
+        api.converse("more", cid)
+    record(api, cid)
+
+
+BUDGET = _Scenario(
+    name="a spent turn budget refuses a turn and then a crash",
+    make_llm=_chat_llm,
+    play=_play_budget,
+    resume=CHAT.resume,
     view=_chat_view,
 )
 
@@ -358,6 +386,96 @@ class TestEveryDeathOffset:
             writer.close()
         assert path.read_bytes().endswith(b"\n")
         assert len(list(read_events(path))) == survive
+
+
+def _products(use_async: bool) -> _Scenario:
+    return _Scenario(
+        name=f"the product paths, {'async' if use_async else 'sync'} entry points",
+        make_llm=cells.product_llm,
+        play=lambda log, llm, record: cells.product_play(log, llm, record, use_async),
+        resume=lambda store, llm: API(
+            cells.product_fsm(), llm_interface=llm, session_store=store
+        ),
+        view=cells.product_view,
+    )
+
+
+PRODUCTS, PRODUCTS_ASYNC = _products(False), _products(True)
+#: what the product scenario writes besides the turn plumbing: a registry tool, an approval,
+#: the extraction family, a handler and the greeting (plan 3f4530d3 step 9)
+_PRODUCT_TYPES = {
+    "tool/call", "tool/result", "approval/request", "approval/outcome", "handler",
+    "extraction", "extraction/miss", "intent/out_of_scope", "llm/request", "llm/response",
+}  # fmt: skip
+
+
+class TestTheProductPaths:
+    """Every death offset of a run through the producers of plan 3f4530d3: a registry tool, an
+    approval, the extraction family, a handler and the greeting, through the sync and the async
+    entry points (in async mode every boundary write is a job of a lane thread, so a death lands
+    in a lane thread and reaches the awaiting turn as the same ``_Dead``). The golden view is the
+    LIVE view at each boundary and equals the view the PARENT archive showed with the log off
+    (``fixtures/event_log_parity_golden.json``, written on the plan base), never a fold."""
+
+    def _sweep_the_products(
+        self, tmp_path: Path, scenario: _Scenario, *, torn: bool
+    ) -> None:
+        golden, unknown_seen = _sweep(scenario, tmp_path, torn=torn)
+        types = [e["type"] for e in golden.events]
+        assert _PRODUCT_TYPES <= set(
+            types
+        )  # non-vacuity: the run holds what the sweep claims
+        assert golden.writes >= 50
+        side = [
+            e for e in golden.events if e["type"] == "tool/call" and e["side_effecting"]
+        ]
+        reads = [e for e in golden.events if e["type"] == "tool/call"]
+        assert len(side) == 2 and len(reads) == 4  # add and peek, in two turns
+        # one offset between each tool/call (read-only ones too: the fold lists every call
+        # without a result) and its tool/result
+        assert unknown_seen == len(reads)
+        outcomes = [
+            e["approved"] for e in golden.events if e["type"] == "approval/outcome"
+        ]
+        assert outcomes == [True, True]
+        assert golden.view_after(golden.writes)["current_state"] == "talk"
+        # the golden is the parent's live view at the same boundaries, state for state
+        wanted = cells.golden_views()["async" if scenario is PRODUCTS_ASYNC else "sync"]
+        assert [view for _, view in golden.views] == wanted
+
+    def test_the_sync_entry_points_die_at_every_offset_and_restore_a_whole_state(
+        self, tmp_path: Path
+    ) -> None:
+        self._sweep_the_products(tmp_path, PRODUCTS, torn=False)
+
+    def test_the_async_entry_points_die_at_every_offset_in_a_lane_thread(
+        self, tmp_path: Path
+    ) -> None:
+        self._sweep_the_products(tmp_path, PRODUCTS_ASYNC, torn=False)
+
+    def test_the_same_sync_deaths_with_a_torn_last_line(self, tmp_path: Path) -> None:
+        self._sweep_the_products(tmp_path, PRODUCTS, torn=True)
+
+    def test_the_same_async_deaths_with_a_torn_last_line(self, tmp_path: Path) -> None:
+        self._sweep_the_products(tmp_path, PRODUCTS_ASYNC, torn=True)
+
+    def test_a_spent_budget_decision_dies_at_every_offset_too(
+        self, tmp_path: Path
+    ) -> None:
+        golden, _ = _sweep(BUDGET, tmp_path, torn=False)
+        decisions = [e for e in golden.events if e["type"] == "decision"]
+        assert [e["kind"] for e in decisions] == ["budget_spent"]
+        assert golden.events[-1]["type"] in {"decision", "turn/end"}
+
+    def test_the_sync_and_the_async_run_write_the_same_events(
+        self, tmp_path: Path
+    ) -> None:
+        sync = _golden(PRODUCTS, tmp_path / "s")
+        aync = _golden(PRODUCTS_ASYNC, tmp_path / "a")
+        assert [(e["type"], e["frame"]) for e in sync.events] == [
+            (e["type"], e["frame"]) for e in aync.events
+        ]
+        assert [view for _, view in sync.views] == [view for _, view in aync.views]
 
 
 class TestFsyncPolicy:

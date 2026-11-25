@@ -1,0 +1,1484 @@
+{
+ "_sweep_views": {
+  "async": [
+   {
+    "current_state": "ask",
+    "data": {},
+    "history": [
+     {
+      "system": "reply"
+     }
+    ]
+   },
+   {
+    "current_state": "ask",
+    "data": {
+     "tools_ran": true,
+     "user_intent": "browse"
+    },
+    "history": [
+     {
+      "system": "reply"
+     },
+     {
+      "user": "I live somewhere"
+     },
+     {
+      "system": "reply"
+     }
+    ]
+   },
+   {
+    "current_state": "talk",
+    "data": {
+     "city": "Rome",
+     "tools_ran": true,
+     "user_intent": "browse"
+    },
+    "history": [
+     {
+      "system": "reply"
+     },
+     {
+      "user": "I live somewhere"
+     },
+     {
+      "system": "reply"
+     },
+     {
+      "user": "Rome"
+     },
+     {
+      "system": "talking"
+     }
+    ]
+   },
+   {
+    "current_state": "talk",
+    "data": {
+     "city": "Rome",
+     "tools_ran": true,
+     "user_intent": "browse"
+    },
+    "history": [
+     {
+      "system": "reply"
+     },
+     {
+      "user": "I live somewhere"
+     },
+     {
+      "system": "reply"
+     },
+     {
+      "user": "Rome"
+     },
+     {
+      "system": "talking"
+     },
+     {
+      "user": "more"
+     },
+     {
+      "system": "talking"
+     }
+    ]
+   }
+  ],
+  "sync": [
+   {
+    "current_state": "ask",
+    "data": {},
+    "history": [
+     {
+      "system": "reply"
+     }
+    ]
+   },
+   {
+    "current_state": "ask",
+    "data": {
+     "tools_ran": true,
+     "user_intent": "browse"
+    },
+    "history": [
+     {
+      "system": "reply"
+     },
+     {
+      "user": "I live somewhere"
+     },
+     {
+      "system": "reply"
+     }
+    ]
+   },
+   {
+    "current_state": "talk",
+    "data": {
+     "city": "Rome",
+     "tools_ran": true,
+     "user_intent": "browse"
+    },
+    "history": [
+     {
+      "system": "reply"
+     },
+     {
+      "user": "I live somewhere"
+     },
+     {
+      "system": "reply"
+     },
+     {
+      "user": "Rome"
+     },
+     {
+      "system": "talking"
+     }
+    ]
+   },
+   {
+    "current_state": "talk",
+    "data": {
+     "city": "Rome",
+     "tools_ran": true,
+     "user_intent": "browse"
+    },
+    "history": [
+     {
+      "system": "reply"
+     },
+     {
+      "user": "I live somewhere"
+     },
+     {
+      "system": "reply"
+     },
+     {
+      "user": "Rome"
+     },
+     {
+      "system": "talking"
+     },
+     {
+      "user": "more"
+     },
+     {
+      "system": "talking"
+     }
+    ]
+   }
+  ]
+ },
+ "approval": {
+  "async": {
+   "answer": "reply 1",
+   "asks": [
+    {
+     "context_summary": {
+      "agent_trace": [],
+      "approval_required": true,
+      "iteration_count": 1,
+      "max_iterations_reached": false,
+      "observation_count": 0,
+      "task": "do it",
+      "tool_input": {
+       "x": "y"
+      },
+      "tool_name": "danger"
+     },
+     "parameters": {
+      "x": "y"
+     },
+     "reasoning": "",
+     "tool_name": "danger"
+    },
+    {
+     "context_summary": {
+      "agent_trace": [
+       {
+        "action": "danger({'x': 'y'})",
+        "iteration": 1,
+        "observation": "danger done",
+        "thought": "",
+        "tool_input": {
+         "x": "y"
+        },
+        "tool_status": "success"
+       }
+      ],
+      "approval_required": true,
+      "iteration_count": 2,
+      "max_iterations_reached": false,
+      "observation_count": 1,
+      "task": "do it",
+      "tool_input": {
+       "x": "y"
+      },
+      "tool_name": "danger"
+     },
+     "parameters": {
+      "x": "y"
+     },
+     "reasoning": "",
+     "tool_name": "danger"
+    }
+   ],
+   "final_context": {
+    "agent_trace": [
+     {
+      "action": "danger({'x': 'y'})",
+      "iteration": 1,
+      "observation": "danger done",
+      "thought": "",
+      "tool_input": {
+       "x": "y"
+      },
+      "tool_status": "success"
+     }
+    ],
+    "approval_granted": false,
+    "approval_required": true,
+    "iteration_count": 3,
+    "max_iterations_reached": true,
+    "observation_count": 1,
+    "observations": [
+     "[Step 1] Tool: danger | Input: {'x': 'y'} | Result: danger done"
+    ],
+    "should_terminate": true,
+    "task": "do it",
+    "tool_input": {
+     "x": "y"
+    },
+    "tool_name": "danger"
+   },
+   "iterations": 3,
+   "requests": [
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "daff665a861fde21f5aad966aad67ae313cb69cf5d8a778c1fc1a129be2c42a4"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "ba1bc8ee35c56efcbd96d3db5cb5be8c928626643a79349fd2e303efdd4e7522"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "13d96b72af94e0f3dc3e8e1e17f96ce98816ced4856408841ae505d4311facdd"
+    },
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "45abd67213879e99a06679c208cf74b7041245c6ac7f727214ea7d0271504307"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "fc40ec27c1e59913177b6b18c26a8c7c1b82b90a3ce9e0912ab46b8dacc26f12"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "abc965455a3f0612d349779f93e44c11dc99f16f5c6bc422bff42b60204c524f"
+    },
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "f273a27e8507b803768aa21325f15431be9f5789e161f5f769138be7e88ca0e3"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "74a82796eb7d651d778eef39dc363287705bbc97dc3b114b7e24c6da50aae838"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "7ab0094f2e423c34cb3372e874b9edcf5ae80b52ae720441b4ef85888d5e1861"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "7d88e2e12a46cb96c089e218a4a182443d11e138b19a6902e4611d643f4f9cfe"
+    }
+   ],
+   "runs": [
+    "danger"
+   ],
+   "status": "aborted",
+   "stop_reason": "max_iterations",
+   "trace": "AgentTrace(tool_calls=[ToolCall(tool_name='danger', parameters={'x': 'y'}, reasoning='')], total_iterations=3)",
+   "usage": {
+    "by_kind": {
+     "extract": {
+      "calls": 9,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 9
+     },
+     "generate": {
+      "calls": 1,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 1
+     }
+    },
+    "calls": 10,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 10
+   }
+  },
+  "sync": {
+   "answer": "reply 1",
+   "asks": [
+    {
+     "context_summary": {
+      "agent_trace": [],
+      "approval_required": true,
+      "iteration_count": 1,
+      "max_iterations_reached": false,
+      "observation_count": 0,
+      "task": "do it",
+      "tool_input": {
+       "x": "y"
+      },
+      "tool_name": "danger"
+     },
+     "parameters": {
+      "x": "y"
+     },
+     "reasoning": "",
+     "tool_name": "danger"
+    },
+    {
+     "context_summary": {
+      "agent_trace": [
+       {
+        "action": "danger({'x': 'y'})",
+        "iteration": 1,
+        "observation": "danger done",
+        "thought": "",
+        "tool_input": {
+         "x": "y"
+        },
+        "tool_status": "success"
+       }
+      ],
+      "approval_required": true,
+      "iteration_count": 2,
+      "max_iterations_reached": false,
+      "observation_count": 1,
+      "task": "do it",
+      "tool_input": {
+       "x": "y"
+      },
+      "tool_name": "danger"
+     },
+     "parameters": {
+      "x": "y"
+     },
+     "reasoning": "",
+     "tool_name": "danger"
+    }
+   ],
+   "final_context": {
+    "agent_trace": [
+     {
+      "action": "danger({'x': 'y'})",
+      "iteration": 1,
+      "observation": "danger done",
+      "thought": "",
+      "tool_input": {
+       "x": "y"
+      },
+      "tool_status": "success"
+     }
+    ],
+    "approval_granted": false,
+    "approval_required": true,
+    "iteration_count": 3,
+    "max_iterations_reached": true,
+    "observation_count": 1,
+    "observations": [
+     "[Step 1] Tool: danger | Input: {'x': 'y'} | Result: danger done"
+    ],
+    "should_terminate": true,
+    "task": "do it",
+    "tool_input": {
+     "x": "y"
+    },
+    "tool_name": "danger"
+   },
+   "iterations": 3,
+   "requests": [
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "daff665a861fde21f5aad966aad67ae313cb69cf5d8a778c1fc1a129be2c42a4"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "ba1bc8ee35c56efcbd96d3db5cb5be8c928626643a79349fd2e303efdd4e7522"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "13d96b72af94e0f3dc3e8e1e17f96ce98816ced4856408841ae505d4311facdd"
+    },
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "45abd67213879e99a06679c208cf74b7041245c6ac7f727214ea7d0271504307"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "fc40ec27c1e59913177b6b18c26a8c7c1b82b90a3ce9e0912ab46b8dacc26f12"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "abc965455a3f0612d349779f93e44c11dc99f16f5c6bc422bff42b60204c524f"
+    },
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "f273a27e8507b803768aa21325f15431be9f5789e161f5f769138be7e88ca0e3"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "74a82796eb7d651d778eef39dc363287705bbc97dc3b114b7e24c6da50aae838"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "7ab0094f2e423c34cb3372e874b9edcf5ae80b52ae720441b4ef85888d5e1861"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "7d88e2e12a46cb96c089e218a4a182443d11e138b19a6902e4611d643f4f9cfe"
+    }
+   ],
+   "runs": [
+    "danger"
+   ],
+   "status": "aborted",
+   "stop_reason": "max_iterations",
+   "trace": "AgentTrace(tool_calls=[ToolCall(tool_name='danger', parameters={'x': 'y'}, reasoning='')], total_iterations=3)",
+   "usage": {
+    "by_kind": {
+     "extract": {
+      "calls": 9,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 9
+     },
+     "generate": {
+      "calls": 1,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 1
+     }
+    },
+    "calls": 10,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 10
+   }
+  }
+ },
+ "call": {
+  "async": {
+   "asked": [
+    "reasoning.analytical",
+    "reasoning.analytical"
+   ],
+   "data": {
+    "answer": "solved why",
+    "call_result": {
+     "instance_identity": "instance:reasoning.analytical",
+     "reason": null,
+     "state": "work",
+     "status": "ok",
+     "target": "reasoning.analytical",
+     "template_identity": "template:reasoning.analytical"
+    },
+    "topic": "why"
+   },
+   "history": [
+    {
+     "system": "reply 1"
+    },
+    {
+     "system": "reply 3"
+    }
+   ],
+   "requests": [
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "9afdfe6b03dda3ad92abea19219eb7e15d8f0d330de22f1cffad57e5ac0b98db"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "1370fefe985ee3d965354fdaf146eccca83317b8046d7c9673fa7bd742d23643"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "645d77fa1780ecb688c498e9ccc5d1dcfbb28354477a2a7e4924eff3d4c99bb9"
+    }
+   ],
+   "snapshot": {
+    "context_data": {
+     "answer": "solved why",
+     "call_result": {
+      "instance_identity": "instance:reasoning.analytical",
+      "reason": null,
+      "state": "work",
+      "status": "ok",
+      "target": "reasoning.analytical",
+      "template_identity": "template:reasoning.analytical"
+     },
+     "topic": "why"
+    },
+    "conversation_history": [
+     {
+      "system": "reply 1"
+     },
+     {
+      "system": "reply 3"
+     }
+    ],
+    "conversation_summary": null,
+    "current_state": "done",
+    "fsm_id": "fsm_Caller_e381b6e3",
+    "metadata": {},
+    "stack_depth": 1,
+    "working_memory": null
+   },
+   "state": "done",
+   "usage": {
+    "by_kind": {
+     "generate": {
+      "calls": 3,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 3
+     }
+    },
+    "calls": 3,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 3
+   }
+  },
+  "sync": {
+   "asked": [
+    "reasoning.analytical",
+    "reasoning.analytical"
+   ],
+   "data": {
+    "answer": "solved why",
+    "call_result": {
+     "instance_identity": "instance:reasoning.analytical",
+     "reason": null,
+     "state": "work",
+     "status": "ok",
+     "target": "reasoning.analytical",
+     "template_identity": "template:reasoning.analytical"
+    },
+    "topic": "why"
+   },
+   "history": [
+    {
+     "system": "reply 1"
+    },
+    {
+     "system": "reply 3"
+    }
+   ],
+   "requests": [
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "9afdfe6b03dda3ad92abea19219eb7e15d8f0d330de22f1cffad57e5ac0b98db"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "1370fefe985ee3d965354fdaf146eccca83317b8046d7c9673fa7bd742d23643"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "645d77fa1780ecb688c498e9ccc5d1dcfbb28354477a2a7e4924eff3d4c99bb9"
+    }
+   ],
+   "snapshot": {
+    "context_data": {
+     "answer": "solved why",
+     "call_result": {
+      "instance_identity": "instance:reasoning.analytical",
+      "reason": null,
+      "state": "work",
+      "status": "ok",
+      "target": "reasoning.analytical",
+      "template_identity": "template:reasoning.analytical"
+     },
+     "topic": "why"
+    },
+    "conversation_history": [
+     {
+      "system": "reply 1"
+     },
+     {
+      "system": "reply 3"
+     }
+    ],
+    "conversation_summary": null,
+    "current_state": "done",
+    "fsm_id": "fsm_Caller_e381b6e3",
+    "metadata": {},
+    "stack_depth": 1,
+    "working_memory": null
+   },
+   "state": "done",
+   "usage": {
+    "by_kind": {
+     "generate": {
+      "calls": 3,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 3
+     }
+    },
+    "calls": 3,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 3
+   }
+  }
+ },
+ "greeting": {
+  "async": {
+   "data": {},
+   "history": [
+    {
+     "system": "reply 1"
+    },
+    {
+     "user": "hi"
+    },
+    {
+     "system": "reply 2"
+    },
+    {
+     "user": "back"
+    },
+    {
+     "system": "reply 5"
+    }
+   ],
+   "replies": [
+    "reply 1",
+    "reply 2",
+    "reply 3",
+    "reply 4",
+    "reply 5",
+    "",
+    "reply 6"
+   ],
+   "requests": [
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "b60498950a1dc8a89e1b0816b684dd9df06019f2d0d295d200fd3cab635f29aa"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "d391210754c3ff3dcb2fb2e7977f93cd1d5593969f9cc6ae42aad8ad3b249586"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "4034705bbd01d7648a5c56236ea2a7191c2250dac95aedc677ffd894c8710f25"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "4150892f13d506e7ce3ca416bafad6ad066377669be53c0f4a912d4213df5859"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "07cbf74f0c77c92621bd0a735ebc96ba4055d52ffaec3d83cc2853f8f8105d08"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "f74b54db991f3d8de348d8fe85b413b1dbbd46760382dc23d60f986c0076cf88"
+    }
+   ],
+   "snapshot": {
+    "context_data": {},
+    "conversation_history": [
+     {
+      "system": "reply 1"
+     },
+     {
+      "user": "hi"
+     },
+     {
+      "system": "reply 2"
+     },
+     {
+      "user": "back"
+     },
+     {
+      "system": "reply 5"
+     }
+    ],
+    "conversation_summary": null,
+    "current_state": "talk",
+    "fsm_id": "fsm_Greeter_fb36ebde",
+    "metadata": {},
+    "stack_depth": 1,
+    "working_memory": null
+   },
+   "state": "talk",
+   "usage": {
+    "by_kind": {
+     "generate": {
+      "calls": 6,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 6
+     }
+    },
+    "calls": 6,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 6
+   }
+  },
+  "sync": {
+   "data": {},
+   "history": [
+    {
+     "system": "reply 1"
+    },
+    {
+     "user": "hi"
+    },
+    {
+     "system": "reply 2"
+    },
+    {
+     "user": "back"
+    },
+    {
+     "system": "reply 5"
+    }
+   ],
+   "replies": [
+    "reply 1",
+    "reply 2",
+    "reply 3",
+    "reply 4",
+    "reply 5",
+    "",
+    "reply 6"
+   ],
+   "requests": [
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "b60498950a1dc8a89e1b0816b684dd9df06019f2d0d295d200fd3cab635f29aa"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "d391210754c3ff3dcb2fb2e7977f93cd1d5593969f9cc6ae42aad8ad3b249586"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "4034705bbd01d7648a5c56236ea2a7191c2250dac95aedc677ffd894c8710f25"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "4150892f13d506e7ce3ca416bafad6ad066377669be53c0f4a912d4213df5859"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "07cbf74f0c77c92621bd0a735ebc96ba4055d52ffaec3d83cc2853f8f8105d08"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "f74b54db991f3d8de348d8fe85b413b1dbbd46760382dc23d60f986c0076cf88"
+    }
+   ],
+   "snapshot": {
+    "context_data": {},
+    "conversation_history": [
+     {
+      "system": "reply 1"
+     },
+     {
+      "user": "hi"
+     },
+     {
+      "system": "reply 2"
+     },
+     {
+      "user": "back"
+     },
+     {
+      "system": "reply 5"
+     }
+    ],
+    "conversation_summary": null,
+    "current_state": "talk",
+    "fsm_id": "fsm_Greeter_fb36ebde",
+    "metadata": {},
+    "stack_depth": 1,
+    "working_memory": null
+   },
+   "state": "talk",
+   "usage": {
+    "by_kind": {
+     "generate": {
+      "calls": 6,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 6
+     }
+    },
+    "calls": 6,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 6
+   }
+  }
+ },
+ "react": {
+  "async": {
+   "answer": "reply 1",
+   "final_context": {
+    "agent_trace": [
+     {
+      "action": "add({'a': 2, 'b': 3})",
+      "iteration": 1,
+      "observation": "5",
+      "thought": "",
+      "tool_input": {
+       "a": 2,
+       "b": 3
+      },
+      "tool_status": "success"
+     }
+    ],
+    "iteration_count": 2,
+    "max_iterations_reached": false,
+    "observation_count": 1,
+    "observations": [
+     "[Step 1] Tool: add | Input: {'a': 2, 'b': 3} | Result: 5"
+    ],
+    "should_terminate": true,
+    "task": "add 2 and 3",
+    "tool_input": {
+     "a": 2,
+     "b": 3
+    },
+    "tool_name": "none"
+   },
+   "iterations": 2,
+   "requests": [
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "cfe98c6edd470d2dbac510f1cc76fb9d0ab99f74a40c6602082bc021ea3f7780"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "60a8dd91062429e6e3e035b0330fc4e4e02915b9b23c1a264135d92ec1a6ab9c"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "5d8f136993d5835e92e3df91fcc0bc7a11a30c330d018565a40b149d74edbae1"
+    },
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "e81e8299798567e4ac5c2e93ea38a88746d1e329efb782f0c2d64f53224b5e9b"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "46935a4b105dbd90b9c2ae1ebc33c9ea4e46a6c127649c1ec015340336c31f0c"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "1882efc99357ce0b65f9fbab29896e3ba73b2fc6c98413fd1e79f07bf50187bc"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "72389d44846a6ca4aa76c8e6a9f343d2ff9ce9d428d58cfad9563b824a11f784"
+    }
+   ],
+   "status": "ok",
+   "stop_reason": "answered",
+   "trace": "AgentTrace(tool_calls=[ToolCall(tool_name='add', parameters={'a': 2, 'b': 3}, reasoning='')], total_iterations=2)",
+   "usage": {
+    "by_kind": {
+     "extract": {
+      "calls": 6,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 6
+     },
+     "generate": {
+      "calls": 1,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 1
+     }
+    },
+    "calls": 7,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 7
+   }
+  },
+  "sync": {
+   "answer": "reply 1",
+   "final_context": {
+    "agent_trace": [
+     {
+      "action": "add({'a': 2, 'b': 3})",
+      "iteration": 1,
+      "observation": "5",
+      "thought": "",
+      "tool_input": {
+       "a": 2,
+       "b": 3
+      },
+      "tool_status": "success"
+     }
+    ],
+    "iteration_count": 2,
+    "max_iterations_reached": false,
+    "observation_count": 1,
+    "observations": [
+     "[Step 1] Tool: add | Input: {'a': 2, 'b': 3} | Result: 5"
+    ],
+    "should_terminate": true,
+    "task": "add 2 and 3",
+    "tool_input": {
+     "a": 2,
+     "b": 3
+    },
+    "tool_name": "none"
+   },
+   "iterations": 2,
+   "requests": [
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "cfe98c6edd470d2dbac510f1cc76fb9d0ab99f74a40c6602082bc021ea3f7780"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "60a8dd91062429e6e3e035b0330fc4e4e02915b9b23c1a264135d92ec1a6ab9c"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "5d8f136993d5835e92e3df91fcc0bc7a11a30c330d018565a40b149d74edbae1"
+    },
+    {
+     "head": "Determine the value of the field 'tool_name' (str). There is",
+     "messages": 2,
+     "sha256": "e81e8299798567e4ac5c2e93ea38a88746d1e329efb782f0c2d64f53224b5e9b"
+    },
+    {
+     "head": "Determine the value of the field 'tool_input' (dict). There ",
+     "messages": 2,
+     "sha256": "46935a4b105dbd90b9c2ae1ebc33c9ea4e46a6c127649c1ec015340336c31f0c"
+    },
+    {
+     "head": "Determine the value of the field 'should_terminate' (bool). ",
+     "messages": 2,
+     "sha256": "1882efc99357ce0b65f9fbab29896e3ba73b2fc6c98413fd1e79f07bf50187bc"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component of a state ",
+     "messages": 2,
+     "sha256": "72389d44846a6ca4aa76c8e6a9f343d2ff9ce9d428d58cfad9563b824a11f784"
+    }
+   ],
+   "status": "ok",
+   "stop_reason": "answered",
+   "trace": "AgentTrace(tool_calls=[ToolCall(tool_name='add', parameters={'a': 2, 'b': 3}, reasoning='')], total_iterations=2)",
+   "usage": {
+    "by_kind": {
+     "extract": {
+      "calls": 6,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 6
+     },
+     "generate": {
+      "calls": 1,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 1
+     }
+    },
+    "calls": 7,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 7
+   }
+  }
+ },
+ "tool": {
+  "async": {
+   "data": {
+    "tools_ran": 12
+   },
+   "history": [
+    {
+     "system": "reply 1"
+    },
+    {
+     "user": "go"
+    },
+    {
+     "system": "reply 2"
+    },
+    {
+     "user": "again"
+    },
+    {
+     "system": "reply 3"
+    }
+   ],
+   "replies": [
+    "reply 1",
+    "reply 2",
+    "reply 3"
+   ],
+   "requests": [
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "c0a814f46d68ea3a751fc174fdf8fbb456145bc135ec9afc21fb6c28d43a84d8"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "02d07f0f8680f9f386842fa2c2a1cc64b93c24de589a98b03b514b7727607eba"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "43af30860885840b394fd5fe29cfac996aef1cc2abbd9f1b95ec4419451fa2f7"
+    }
+   ],
+   "results": [
+    [
+     "add",
+     "success",
+     true,
+     "5",
+     1,
+     null
+    ],
+    [
+     "peek",
+     "success",
+     true,
+     "peeked x",
+     8,
+     null
+    ],
+    [
+     "boom",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: boom text",
+     30,
+     "boom text"
+    ],
+    [
+     "big",
+     "success",
+     true,
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     2000,
+     null
+    ],
+    [
+     "nope",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool 'nope' not fou",
+     54,
+     "Tool 'nope' not found in registry"
+    ],
+    [
+     "add",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool requires param",
+     156,
+     "Tool requires parameters: ['a', 'b']. Model sent keys ['zzz'] which do not match. Provide values keyed by the expected parameter names."
+    ],
+    [
+     "add",
+     "success",
+     true,
+     "5",
+     1,
+     null
+    ],
+    [
+     "peek",
+     "success",
+     true,
+     "peeked x",
+     8,
+     null
+    ],
+    [
+     "boom",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: boom text",
+     30,
+     "boom text"
+    ],
+    [
+     "big",
+     "success",
+     true,
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     2000,
+     null
+    ],
+    [
+     "nope",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool 'nope' not fou",
+     54,
+     "Tool 'nope' not found in registry"
+    ],
+    [
+     "add",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool requires param",
+     156,
+     "Tool requires parameters: ['a', 'b']. Model sent keys ['zzz'] which do not match. Provide values keyed by the expected parameter names."
+    ]
+   ],
+   "snapshot": {
+    "context_data": {
+     "tools_ran": 12
+    },
+    "conversation_history": [
+     {
+      "system": "reply 1"
+     },
+     {
+      "user": "go"
+     },
+     {
+      "system": "reply 2"
+     },
+     {
+      "user": "again"
+     },
+     {
+      "system": "reply 3"
+     }
+    ],
+    "conversation_summary": null,
+    "current_state": "chat",
+    "fsm_id": "fsm_Tools_de994a4c",
+    "metadata": {},
+    "stack_depth": 1,
+    "working_memory": null
+   },
+   "state": "chat",
+   "usage": {
+    "by_kind": {
+     "generate": {
+      "calls": 3,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 3
+     }
+    },
+    "calls": 3,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 3
+   }
+  },
+  "sync": {
+   "data": {
+    "tools_ran": 12
+   },
+   "history": [
+    {
+     "system": "reply 1"
+    },
+    {
+     "user": "go"
+    },
+    {
+     "system": "reply 2"
+    },
+    {
+     "user": "again"
+    },
+    {
+     "system": "reply 3"
+    }
+   ],
+   "replies": [
+    "reply 1",
+    "reply 2",
+    "reply 3"
+   ],
+   "requests": [
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "c0a814f46d68ea3a751fc174fdf8fbb456145bc135ec9afc21fb6c28d43a84d8"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "02d07f0f8680f9f386842fa2c2a1cc64b93c24de589a98b03b514b7727607eba"
+    },
+    {
+     "head": "<task>\nYou are the Response Generation component in a conver",
+     "messages": 2,
+     "sha256": "43af30860885840b394fd5fe29cfac996aef1cc2abbd9f1b95ec4419451fa2f7"
+    }
+   ],
+   "results": [
+    [
+     "add",
+     "success",
+     true,
+     "5",
+     1,
+     null
+    ],
+    [
+     "peek",
+     "success",
+     true,
+     "peeked x",
+     8,
+     null
+    ],
+    [
+     "boom",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: boom text",
+     30,
+     "boom text"
+    ],
+    [
+     "big",
+     "success",
+     true,
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     2000,
+     null
+    ],
+    [
+     "nope",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool 'nope' not fou",
+     54,
+     "Tool 'nope' not found in registry"
+    ],
+    [
+     "add",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool requires param",
+     156,
+     "Tool requires parameters: ['a', 'b']. Model sent keys ['zzz'] which do not match. Provide values keyed by the expected parameter names."
+    ],
+    [
+     "add",
+     "success",
+     true,
+     "5",
+     1,
+     null
+    ],
+    [
+     "peek",
+     "success",
+     true,
+     "peeked x",
+     8,
+     null
+    ],
+    [
+     "boom",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: boom text",
+     30,
+     "boom text"
+    ],
+    [
+     "big",
+     "success",
+     true,
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     2000,
+     null
+    ],
+    [
+     "nope",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool 'nope' not fou",
+     54,
+     "Tool 'nope' not found in registry"
+    ],
+    [
+     "add",
+     "failed",
+     false,
+     "[TOOL FAILED] Error: Tool requires param",
+     156,
+     "Tool requires parameters: ['a', 'b']. Model sent keys ['zzz'] which do not match. Provide values keyed by the expected parameter names."
+    ]
+   ],
+   "snapshot": {
+    "context_data": {
+     "tools_ran": 12
+    },
+    "conversation_history": [
+     {
+      "system": "reply 1"
+     },
+     {
+      "user": "go"
+     },
+     {
+      "system": "reply 2"
+     },
+     {
+      "user": "again"
+     },
+     {
+      "system": "reply 3"
+     }
+    ],
+    "conversation_summary": null,
+    "current_state": "chat",
+    "fsm_id": "fsm_Tools_de994a4c",
+    "metadata": {},
+    "stack_depth": 1,
+    "working_memory": null
+   },
+   "state": "chat",
+   "usage": {
+    "by_kind": {
+     "generate": {
+      "calls": 3,
+      "completion_tokens": 0,
+      "errors": 0,
+      "prompt_tokens": 0,
+      "total_tokens": 0,
+      "usage_missing": 3
+     }
+    },
+    "calls": 3,
+    "completion_tokens": 0,
+    "errors": 0,
+    "prompt_tokens": 0,
+    "total_tokens": 0,
+    "usage_missing": 3
+   }
+  }
+ }
+}
