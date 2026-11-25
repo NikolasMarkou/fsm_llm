@@ -28,7 +28,12 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.engine.kinds.requests import ChildView
-from fsm_llm.synthesis import FSMSynthesizer, SynthesisPolicy, SynthesizeExecutor
+from fsm_llm.synthesis import (
+    FSMSynthesizer,
+    SynthesisPolicy,
+    SynthesizeExecutor,
+    executor_trace,
+)
 from fsm_llm.synthesis import executor as executor_module
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
@@ -306,7 +311,7 @@ class TestTheTraceIsValueFree:
             def evaluate_transitions(self, *args: Any, **kwargs: Any) -> Any:
                 raise RuntimeError(CANARIES[2])
 
-        monkeypatch.setattr(executor_module, "TransitionEvaluator", Broken)
+        monkeypatch.setattr(executor_trace, "TransitionEvaluator", Broken)
         rig = make_rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
 
         rig.run(20)
@@ -320,7 +325,7 @@ class TestTheTraceIsValueFree:
         def boom(*args: Any, **kwargs: Any) -> Any:
             raise AssertionError("read without a sink")
 
-        monkeypatch.setattr(executor_module, "TransitionEvaluator", boom)
+        monkeypatch.setattr(executor_trace, "TransitionEvaluator", boom)
         quiet = make_rig(valid_fsm, extraction={}, policy=SynthesisPolicy(max_turns=2))
         quiet.executor._sink = None  # the same executor, with no sink
 

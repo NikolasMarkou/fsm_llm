@@ -1202,6 +1202,7 @@
     "fsm_llm.synthesis.dryrun",
     "fsm_llm.synthesis.exceptions",
     "fsm_llm.synthesis.executor",
+    "fsm_llm.synthesis.executor_trace",
     "fsm_llm.synthesis.gates",
     "fsm_llm.synthesis.library",
     "fsm_llm.synthesis.patch",

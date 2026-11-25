@@ -62,7 +62,6 @@ from fsm_llm.aio import acall, run_sync
 from fsm_llm.core.codes import Reason
 from fsm_llm.core.definitions import (
     DataExtractionResponse,
-    FSMContext,
     FSMDefinition,
     FSMError,
     FSMInstance,
@@ -72,7 +71,6 @@ from fsm_llm.core.definitions import (
     fsm_id_of,
 )
 from fsm_llm.core.expressions import is_missing
-from fsm_llm.core.transition_evaluator import TransitionEvaluator
 from fsm_llm.engine.kinds.base import StateExecutor
 from fsm_llm.engine.kinds.call import (
     commit_arrival,
@@ -81,7 +79,6 @@ from fsm_llm.engine.kinds.call import (
     write_call_request,
 )
 from fsm_llm.engine.kinds.requests import (
-    ChildView,
     PopContext,
     PushContext,
     PushPlan,
@@ -105,21 +102,18 @@ from .constants import (
     STATUS_ABORTED,
     STATUS_FAILED,
     STATUS_OK,
-    TRACE_KIND_OTHER,
-    TRACE_KINDS,
 )
 from .exceptions import LibraryError, SynthesisError
+from .executor_trace import TraceEmitters
 from .library import stored_goal
 from .policy import needs_approval
 from .procedures import (
     _result,
     _round_codes,
-    _round_string,
     reason_of,
     runnable_reason,
 )
 from .synthesizer import FSMSynthesizer, Procedure
-from .traces import gate_reads
 
 #: Procedures this executor obtained that are kept to be pushed (the lookup key is the digest of
 #: the record); past it the oldest is dropped and a later push finds it in the library, or not.
@@ -160,7 +154,7 @@ def _bounded(table: dict[Any, Any], key: Any, value: Any, cap: int) -> None:
 # `BaseException` in Pass 1 (a cancel or an interrupt during `obtain` writes no record and counts
 # no run; a cancel also rolls the turn back whole) and do NOT import `engine.api`, `engine.turn` or the manager.
 # Everything the executor needs of the stack arrives as a plain value (`engine/kinds/requests`).
-class SynthesizeExecutor(StateExecutor):
+class SynthesizeExecutor(TraceEmitters, StateExecutor):
     """The synthesize kind: Pass 1 obtains and requests, settle pushes and pops (see the module
     docstring for the contract)."""
 
@@ -666,80 +660,3 @@ class SynthesizeExecutor(StateExecutor):
             reason=record.get("reason"),
             step=None if run.converse else run.traced,
         )
-
-    # --- the trace -----------------------------------------------------------------------
-
-    def _trace_steps(self, conv: str, run: _Run, child: ChildView) -> None:
-        """Trace the turns the engine counted on the child since the last event: one ``stepped``
-        event carries the engine's lifetime count (turns run by hand count, and several turns
-        between two settle rounds are one event); nothing is counted here."""
-        taken = child.steps
-        if taken is None or taken <= run.traced:
-            return
-        run.traced = taken
-        self._emit(
-            "stepped",
-            conv,
-            digest=run.procedure.digest,
-            step=taken,
-            **self._view(run, child),
-        )
-
-    def _view(
-        self, run: _Run, child: ChildView, *, outcome: bool = False
-    ) -> dict[str, Any]:
-        """Value-free facts about the child for a trace event: its ``state``, the declared names
-        present (``keys``), ``name:type`` for those an edge gate reads (``kinds``, types from
-        ``TRACE_KINDS``) and, with ``outcome``, what the evaluator makes of its edges now. ``{}``
-        without a sink, and on any failure (one WARNING): a trace never changes a run."""
-        if self._sink is None:
-            return {}
-        try:
-            definition, config, data = run.procedure.definition, run.config, child.data
-            gated = gate_reads(definition.states.values())
-            seen = sorted(
-                key
-                for key in gated | {*config.inputs, *config.return_keys}
-                if not is_missing(data, key)
-            )
-            kinds = (
-                f"{key}:{TRACE_KINDS.get(type(data[key]), TRACE_KIND_OTHER)}"
-                for key in seen
-                if key in gated
-            )
-            view = {
-                "state": child.state_id,
-                "keys": ",".join(seen),
-                "kinds": ",".join(kinds),
-            }
-            if outcome:
-                found = TransitionEvaluator().evaluate_transitions(
-                    definition.states[child.state_id], FSMContext(data=dict(data))
-                )
-                view["outcome"] = found.result_type.value
-            return view
-        except Exception as e:
-            logger.warning(f"could not read the child for a trace: {type(e).__name__}")
-            return {}
-
-    def _emit_obtained(self, conv: str, procedure: Procedure) -> None:
-        self._emit(
-            "obtained",
-            conv,
-            digest=procedure.digest,
-            version=procedure.record.version if procedure.record else None,
-            source=procedure.source,
-            rounds=_round_string(procedure.rounds),
-            seconds=procedure.seconds,
-            calls=procedure.usage.calls,
-            prompt_tokens=procedure.usage.prompt_tokens,
-            completion_tokens=procedure.usage.completion_tokens,
-        )
-
-    def _emit(self, event: str, conv: str, **fields: Any) -> None:
-        if self._sink is None:
-            return
-        try:
-            self._sink(event, {"conv": conv, **fields})
-        except Exception as e:
-            logger.warning(f"trace_sink raised {type(e).__name__} on {event!r}")
