@@ -11,6 +11,7 @@ import asyncio
 import uuid
 from typing import Any
 
+from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.logging import logger
 from fsm_llm.workflows import (
     WorkflowEngine,
@@ -34,7 +35,7 @@ from ..definitions import (
 )
 from .managed import ManagedWorkflow, _new_instance_id
 from .surface import _InstanceSurface
-from .workflow_presets import _WORKFLOW_PRESETS
+from .workflow_presets import build_preset, load_preset_registry
 
 
 def _status_str(status: Any) -> str:
@@ -45,21 +46,30 @@ def _status_str(status: Any) -> str:
 class WorkflowsMixin(_InstanceSurface):
     """Launching workflow engines and driving their runs."""
 
+    # DECISION plan-2026-11-25T195353-7d9c0955/D-011
+    # The preset registry loads ONCE, lazily, off the loop (the launch route and the list route run
+    # this in a worker thread), under the leaf `_catalog_lock` that is never held with `_lock`; a load
+    # that raises assigns nothing, so the next call retries. Do NOT load in `__init__`, on the loop
+    # thread or under `_lock`, and match `preset_id` EXACTLY (no strip, no lower, no alias).
+    def _preset_registry(self) -> ExecutableRegistry:
+        with self._catalog_lock:
+            if self._workflow_registry is None:
+                self._workflow_registry = load_preset_registry()
+            return self._workflow_registry
+
     def get_workflow_presets(self) -> list[dict[str, str]]:
         """List built-in workflow presets available for launch."""
+        registry = self._preset_registry()
         presets: list[dict[str, str]] = []
-        for preset_id in sorted(_WORKFLOW_PRESETS):
-            try:
-                definition = _WORKFLOW_PRESETS[preset_id]()
-                presets.append(
-                    {
-                        "id": preset_id,
-                        "name": definition.name,
-                        "description": definition.description,
-                    }
-                )
-            except Exception as e:  # pragma: no cover - defensive
-                logger.debug(f"Failed to build workflow preset {preset_id}: {e}")
+        for executable in registry.list(kind="workflow"):
+            definition = build_preset(registry, executable.id)
+            presets.append(
+                {
+                    "id": executable.id,
+                    "name": definition.name,
+                    "description": definition.description,
+                }
+            )
         return presets
 
     def launch_workflow(
@@ -74,29 +84,30 @@ class WorkflowsMixin(_InstanceSurface):
         preset's definition registered, with ``workflow_id`` set. Callers start an
         instance via :meth:`start_workflow_instance`.
 
-        Arbitrary ``definition_json`` is intentionally unsupported (see
-        DECISION plan_2026-05-29_0c00a594/D-002 [STALE]).
+        Arbitrary ``definition_json`` is intentionally unsupported: the presets are
+        the documents of the package directory (D-011 of plan 7d9c0955).
         """
+        registry = self._preset_registry()
+        listed = sorted(e.id for e in registry.list(kind="workflow"))
+        available = ", ".join(listed)
         if definition_json is not None and preset_id is None:
             raise ValueError(
                 "Custom workflow JSON is not supported via the dashboard; "
                 "choose a built-in workflow preset instead. "
-                f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
+                f"Available: {available}"
             )
         if preset_id is None:
             raise ValueError(
-                "A workflow preset_id is required. "
-                f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
+                f"A workflow preset_id is required. Available: {available}"
             )
-        if preset_id not in _WORKFLOW_PRESETS:
+        if preset_id not in listed:
             raise ValueError(
-                f"Unknown workflow preset: {preset_id}. "
-                f"Available: {', '.join(sorted(_WORKFLOW_PRESETS))}"
+                f"Unknown workflow preset: {preset_id}. Available: {available}"
             )
 
         instance_id = _new_instance_id()
         engine = WorkflowEngine()
-        definition = _WORKFLOW_PRESETS[preset_id]()
+        definition = build_preset(registry, preset_id)
         engine.register_workflow(definition)
 
         managed = ManagedWorkflow(

@@ -176,7 +176,7 @@ include-package-data = false
 
 [tool.setuptools.package-data]
 fsm_llm = ["py.typed"]
-"fsm_llm.monitor" = ["static/**/*", "templates/*"]
+"fsm_llm.monitor" = ["static/**/*", "templates/*", "workflows/*.json"]
 "fsm_llm.core.definitions" = ["schemas/*.json"]
 "fsm_llm.reasoning" = ["strategies/*.json"]
 "fsm_llm.agents" = ["patterns/*.json"]

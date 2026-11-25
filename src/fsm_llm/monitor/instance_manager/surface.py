@@ -38,6 +38,7 @@ class _InstanceSurface:
         _ended_usage: LLMUsage | None
         _catalog_lock: threading.Lock
         _executables: ExecutableRegistry | None
+        _workflow_registry: ExecutableRegistry | None
         _agent_rows: list[dict[str, Any]] | None
 
         @property

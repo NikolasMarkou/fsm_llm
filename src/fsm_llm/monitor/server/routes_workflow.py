@@ -25,7 +25,8 @@ from .support import _GATED, _LLM_OPERATION_TIMEOUT, _bounded, _raise_http
 async def api_workflow_presets() -> dict[str, list[dict[str, str]]]:
     """List built-in workflow presets available for launch."""
     mgr = get_manager()
-    return {"workflows": mgr.get_workflow_presets()}
+    # the first call loads the preset documents: a worker thread, never the loop
+    return {"workflows": await asyncio.to_thread(mgr.get_workflow_presets)}
 
 
 @app.post("/api/workflow/launch", dependencies=_GATED)

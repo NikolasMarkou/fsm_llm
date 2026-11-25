@@ -1219,6 +1219,16 @@
       "delta": 1,
       "reason": "plan-2026-11-25T195353-7d9c0955 step 6: new anchor token D-010 at engine/executables/registry.py (a workflow is a delegated target and never a frame)",
       "token": "plan-2026-11-25T195353-7d9c0955/D-010"
+    },
+    {
+      "delta": 2,
+      "reason": "plan 7d9c0955 step 7 (D-011, P-f): the presets of the dashboard are workflow documents; the [STALE] anchor plan 0c00a594 D-002 (no JSON to workflow loader, so presets are Python) leaves workflow_presets.py and the launch_workflow docstring of workflow.py, superseded by the loader and the adapter of this plan; the D-011 anchor is added once in workflow_presets.py (load_preset_registry) and once in workflow.py (_preset_registry), its ANCHORS line stays beside the D-002 one",
+      "token": "plan-2026-11-25T195353-7d9c0955/D-011"
+    },
+    {
+      "delta": -2,
+      "reason": "plan 7d9c0955 step 7 (D-011, P-f): the presets of the dashboard are workflow documents; the [STALE] anchor plan 0c00a594 D-002 (no JSON to workflow loader, so presets are Python) leaves workflow_presets.py and the launch_workflow docstring of workflow.py, superseded by the loader and the adapter of this plan; the D-011 anchor is added once in workflow_presets.py (load_preset_registry) and once in workflow.py (_preset_registry), its ANCHORS line stays beside the D-002 one",
+      "token": "plan_2026-05-29_0c00a594/D-002"
     }
   ]
 }

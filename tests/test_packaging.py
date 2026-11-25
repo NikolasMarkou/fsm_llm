@@ -334,7 +334,7 @@ class TestMonitorPackageData:
         }
         wanted = {
             path
-            for sub in ("static", "templates")
+            for sub in ("static", "templates", "workflows")
             for path in (monitor / sub).rglob("*")
             if path.is_file()
         }
@@ -342,6 +342,8 @@ class TestMonitorPackageData:
         # glob would not cover.
         static = monitor / "static"
         assert any(p.parent != static for p in static.rglob("*") if p.is_file())
+        # and the workflow preset documents (plan 7d9c0955 step 7) are there to be covered
+        assert len(list((monitor / "workflows").glob("*.json"))) == 2
         missing = sorted(str(p.relative_to(monitor)) for p in wanted - covered)
         assert not missing, f"monitor files not covered by package-data: {missing}"
 
@@ -933,6 +935,7 @@ _WHEEL_DATA_GLOBS = (
     "py.typed",
     "monitor/static/**/*",
     "monitor/templates/*",
+    "monitor/workflows/*.json",
     "core/definitions/schemas/*.json",
     "reasoning/strategies/*.json",
     "agents/patterns/*.json",

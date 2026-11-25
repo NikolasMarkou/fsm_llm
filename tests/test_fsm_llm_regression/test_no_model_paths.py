@@ -342,9 +342,7 @@ def _monitor_construction(tmp_path: Path) -> None:
 
 
 def _workflow_presets() -> list[str]:
-    from fsm_llm.monitor.instance_manager import workflow_presets
-
-    return list(workflow_presets._WORKFLOW_PRESETS)
+    return [p["id"] for p in InstanceManager().get_workflow_presets()]
 
 
 def _synthesis_synthesizer_injected(tmp_path: Path) -> None:

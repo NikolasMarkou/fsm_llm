@@ -1797,6 +1797,7 @@ _OLD_MEMBERS = frozenset(
         "_make_room",
         "_mark_conversation_ended",
         "_new_collector",
+        "_preset_registry",
         "_record_event",
         "_register_instance",
         "_resolve_fsm_data",
@@ -1874,7 +1875,9 @@ class TestInstanceManagerPackageLayout:
         assert set(_MODULE_OF) | {"ManagedInstance"} <= set(namespace)
         for private in (
             "_MonitorHandler",
-            "_WORKFLOW_PRESETS",
+            "build_preset",
+            "load_preset_registry",
+            "preset_callables",
             "_build_context_capture_handlers",
             "_new_instance_id",
             "_pending_tasks",
@@ -1939,12 +1942,12 @@ class TestInstanceManagerPackageLayout:
         assert (inst.instance_id, inst.label, inst.status) == ("i1", "L", "running")
         assert inst.to_info().instance_type == "agent"
 
-    def test_the_tables_the_mixins_read_are_the_ones_of_their_modules(self):
+    def test_the_functions_the_mixins_read_are_the_ones_of_their_modules(self):
         from fsm_llm.monitor.instance_manager import workflow, workflow_presets
 
-        assert workflow.WorkflowsMixin.launch_workflow.__globals__[
-            "_WORKFLOW_PRESETS"
-        ] is (workflow_presets._WORKFLOW_PRESETS)
+        reads = workflow.WorkflowsMixin.launch_workflow.__globals__
+        assert reads["build_preset"] is workflow_presets.build_preset
+        assert reads["load_preset_registry"] is (workflow_presets.load_preset_registry)
 
     def test_a_patch_of_the_logger_aims_at_the_module_that_logs(self):
         with pytest.raises(AttributeError):
@@ -1957,11 +1960,14 @@ class TestInstanceManagerPackageLayout:
         )
 
     def test_every_decision_anchor_sits_with_the_code_it_constrains(self):
-        # token -> module -> count (the launch docstring of `workflow` names
-        # the preset anchor of `workflow_presets` once)
+        # token -> module -> count (the preset registry loader and the manager read
+        # that loads it carry one anchor each, plan 7d9c0955 D-011)
         expected = {
             "plan-2026-11-25T145435-659c07c3/D-009": {"agent": 1},
-            "plan_2026-05-29_0c00a594/D-002": {"workflow_presets": 1, "workflow": 1},
+            "plan-2026-11-25T195353-7d9c0955/D-011": {
+                "workflow_presets": 1,
+                "workflow": 1,
+            },
             "plan_2026-05-29_0c00a594/D-003": {"agent": 2, "manager": 1},
             "plan-2026-07-20T040150-876e7164/D-003": {"snapshots": 1},
             "plan-2026-09-12T065608-089d0ec7/D-007": {"lifecycle": 1},
@@ -2005,7 +2011,8 @@ class TestInstanceManagerPackageLayout:
         assert {n: m for n, m in defined.items() if len(m) > 1} == {}
         for name, module in {
             "_HANDLER_STATES": "handlers",
-            "_WORKFLOW_PRESETS": "workflow_presets",
+            "preset_callables": "workflow_presets",
+            "load_preset_registry": "workflow_presets",
             "_new_instance_id": "managed",
             "_pending_tasks": "lifecycle",
             "_status_str": "workflow",

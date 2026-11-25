@@ -21,6 +21,7 @@ renamed, a step added, the threshold changed): the record is in the plan's progr
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -32,8 +33,8 @@ from tests.test_fsm_llm_monitor import workflow_preset_corpus as corpus
 GOLDEN_PATH = (
     Path(__file__).resolve().parents[1] / "fixtures" / ("workflow_preset_golden.json")
 )
-#: Which halves of the fixture the tree must equal (step 7 of the plan flips both to "document").
-EXPECTED = {"engine": "engine_runs", "monitor": "monitor"}
+#: Which halves of the fixture the tree must equal: the presets are documents since step 7.
+EXPECTED = {"engine": "document_runs", "monitor": "document_monitor"}
 
 
 @pytest.fixture(scope="module")
@@ -151,3 +152,39 @@ def test_the_launched_runs_equal_the_expected_half(
     assert sorted(current_monitor["launches"]) == sorted(expected)
     for key, launch in current_monitor["launches"].items():
         assert launch == expected[key], key
+
+
+def with_the_two_deltas(base_run: dict[str, Any]) -> dict[str, Any]:
+    """A BASE engine run with exactly the two named deltas applied, and nothing else."""
+    run = copy.deepcopy(base_run)
+    for entry in run["history"]:
+        if entry[2] == "Reached terminal step 'finish'":
+            entry[2] = "Auto-transitioned to "
+    for name, data in run["hooks"]:
+        if name == "step_completed" and data["step_id"] == "finish":
+            assert data["next_step_id"] is None
+            data["next_step_id"] = ""
+    return run
+
+
+@pytest.mark.parametrize("preset", ["demo_branching", "demo_linear"])
+def test_the_tree_is_base_plus_exactly_the_two_deltas(
+    preset: str, golden: dict[str, Any], current_runs: dict[str, Any]
+) -> None:
+    """The BASE half plus the two named deltas is the tree: a third difference fails here."""
+    for label, _ in corpus.AMOUNTS:
+        base = golden["engine_runs"][preset][label]
+        moved = with_the_two_deltas(base)
+        if base["status"] == "completed":
+            assert moved != base, (preset, label)  # the deltas are not vacuous
+        assert current_runs[preset][label] == moved, (preset, label)
+
+
+def test_the_http_presets_bytes_are_the_base_bytes(
+    golden: dict[str, Any], current_monitor: dict[str, Any]
+) -> None:
+    """The presets route answers the bytes of a8ad5d31, not only the document half."""
+    assert current_monitor["http_presets"] == golden["monitor"]["http_presets"]
+    assert current_monitor["presets"] == golden["monitor"]["presets"]
+    assert current_monitor["refused"] == golden["monitor"]["refused"]
+    assert current_monitor["http_refused"] == golden["monitor"]["http_refused"]

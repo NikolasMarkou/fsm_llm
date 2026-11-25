@@ -88,6 +88,7 @@ class InstanceManager(
         # The registry the agent rows come from (D-007 of plan 659c07c3): attached, else loaded lazily
         self._catalog_lock = threading.Lock()
         self._executables: ExecutableRegistry | None = None
+        self._workflow_registry: ExecutableRegistry | None = None
         self._agent_rows: list[dict[str, Any]] | None = None
 
         # Custom dashboard configuration from MonitorBuilder

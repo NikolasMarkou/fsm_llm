@@ -1,0 +1,49 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "workflow",
+  "id": "demo_linear",
+  "name": "Demo: Linear Pipeline",
+  "description": "Two automatic processing steps followed by a terminal step.",
+  "requires": {
+    "tools": "none",
+    "callables": [
+      "ingest",
+      "process"
+    ]
+  },
+  "lifecycle": "draft",
+  "body": {
+    "initial_step_id": "ingest",
+    "steps": {
+      "ingest": {
+        "step_id": "ingest",
+        "name": "Ingest",
+        "description": "",
+        "timeout_seconds": null,
+        "next_step_id": "process",
+        "error_step_id": null,
+        "type": "AutoStep",
+        "action": "ingest"
+      },
+      "process": {
+        "step_id": "process",
+        "name": "Process",
+        "description": "",
+        "timeout_seconds": null,
+        "next_step_id": "finish",
+        "error_step_id": null,
+        "type": "AutoStep",
+        "action": "process"
+      },
+      "finish": {
+        "step_id": "finish",
+        "name": "Finish",
+        "description": "",
+        "timeout_seconds": null,
+        "next_step_id": "",
+        "error_step_id": null,
+        "type": "AutoStep"
+      }
+    }
+  }
+}

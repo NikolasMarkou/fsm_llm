@@ -1,111 +1,80 @@
-"""The built-in workflow presets of the dashboard (plan d454fd62 step 93; the old ``monitor/instance_manager.py``, same dotted path).
+"""The workflow presets of the dashboard (plan 7d9c0955 step 7; the old ``monitor/instance_manager.py``, same dotted path).
 
-``_TerminalStep`` (the no-op last step), the two preset builders and ``_WORKFLOW_PRESETS``, the registry the
-launch route and ``get_workflow_presets`` read. Presets use only pure steps (auto and condition), so they run
-with no model and no API. Each registry call builds a fresh ``WorkflowDefinition``. Imports no other module of
-the package.
+A preset is a ``workflow`` document of the package directory ``monitor/workflows/`` and nothing
+else; the named callables its steps use are the monitor's own (``preset_callables()``). Presets use
+only pure steps (auto and condition), so they run with no model and no API.
+
+Interface contract: ``load_preset_registry() -> ExecutableRegistry`` reads the directory and raises
+``RuntimeError`` (it assigns nothing) when a document is refused or the directory serves no
+workflow, and the ``WorkflowValidationError`` of a document that does not build against
+``preset_callables()``; ``build_preset(registry, preset_id)`` returns a FRESH ``WorkflowDefinition`` per
+call (the registry's ``ExecutableNotFoundError`` for an id it lacks). Imports no other module of the
+package.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from importlib import resources
+from pathlib import Path
+from typing import Any, cast
 
-from fsm_llm.workflows import (
-    WorkflowDefinition,
-    WorkflowStep,
-    WorkflowStepResult,
-    auto_step,
-    condition_step,
-    create_workflow,
-)
+from fsm_llm.core.names import NameRegistry
+from fsm_llm.engine.executables import ExecutableRegistry
+from fsm_llm.workflows import WorkflowDefinition
+from fsm_llm.workflows.constants import CALLABLES_NAMESPACE
+from fsm_llm.workflows.executable import WorkflowExecutable  # registers the kind
 
 
-# DECISION plan_2026-05-29_0c00a594/D-002 [STALE]: the dashboard exposes a small set of
-# built-in, DSL-built workflow presets rather than accepting arbitrary
-# `definition_json`. WorkflowDefinition.steps are WorkflowStep ABC subclasses
-# carrying Python callables; there is no JSON->workflow loader, so arbitrary
-# user JSON cannot be turned into a runnable workflow. Presets use only pure
-# steps (auto/condition) so they run deterministically with no external LLM/API.
-class _TerminalStep(WorkflowStep):
-    """No-op terminal step (no outgoing transition) for monitor demo presets.
+def ingest(context: dict[str, Any]) -> dict[str, Any]:
+    return {"ingested": True}
 
-    A step whose result carries no ``next_step_id`` and which references no
-    other state is treated as terminal by ``WorkflowDefinition`` and drives
-    the instance to COMPLETED.
-    """
 
-    async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
-        return WorkflowStepResult.success_result(
-            message=f"Reached terminal step '{self.step_id}'"
+def process(context: dict[str, Any]) -> dict[str, Any]:
+    return {"processed": True}
+
+
+def amount_is_high(context: dict[str, Any]) -> bool:
+    return float(context.get("amount", 0) or 0) >= 1000
+
+
+def mark_high(context: dict[str, Any]) -> dict[str, Any]:
+    return {"tier": "high"}
+
+
+def mark_low(context: dict[str, Any]) -> dict[str, Any]:
+    return {"tier": "low"}
+
+
+def preset_callables() -> NameRegistry[Any]:
+    """The five functions a preset document names, in a registry built per call (never shared)."""
+    registry: NameRegistry[Any] = NameRegistry(CALLABLES_NAMESPACE)
+    for function in (ingest, process, amount_is_high, mark_high, mark_low):
+        registry.register(function.__name__, function)
+    return registry
+
+
+# DECISION plan-2026-11-25T195353-7d9c0955/D-011
+# The dashboard offers only the workflow documents of its OWN package directory, built from the
+# monitor's named callables; a request never names a file, a callable or a step. A load that fails
+# raises and the caller assigns nothing, so the next call retries. Do NOT accept a document or a
+# path from a request, serve a user directory as presets, or load this on the loop thread, in
+# `__init__` or under `_lock` (the caller holds the leaf `_catalog_lock`).
+def load_preset_registry() -> ExecutableRegistry:
+    """A private registry over ``monitor/workflows/`` (see the module docstring)."""
+    directory = Path(str(resources.files("fsm_llm.monitor").joinpath("workflows")))
+    registry = ExecutableRegistry([directory])
+    report = registry.reload()
+    if report.failed or report.collisions or not registry.list(kind="workflow"):
+        raise RuntimeError(
+            f"the workflow presets of {directory.name!r} did not load: "
+            f"{sorted(report.failed) or sorted(report.collisions) or 'no workflow'}"
         )
+    for executable in registry.list(kind="workflow"):
+        build_preset(registry, executable.id)
+    return registry
 
 
-def _preset_linear() -> WorkflowDefinition:
-    """Linear pipeline: ingest -> process -> finish (auto-completes on launch)."""
-    wf = create_workflow(
-        "demo_linear",
-        "Demo: Linear Pipeline",
-        "Two automatic processing steps followed by a terminal step.",
-    )
-    wf.with_initial_step(
-        auto_step(
-            "ingest",
-            "Ingest",
-            next_step_id="process",
-            action=lambda ctx: {"ingested": True},
-        )
-    )
-    wf.with_step(
-        auto_step(
-            "process",
-            "Process",
-            next_step_id="finish",
-            action=lambda ctx: {"processed": True},
-        )
-    )
-    wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
-    return wf
-
-
-def _preset_branching() -> WorkflowDefinition:
-    """Conditional branch on the initial-context ``amount`` value."""
-    wf = create_workflow(
-        "demo_branching",
-        "Demo: Conditional Branch",
-        "Routes to a high/low path based on the 'amount' context value.",
-    )
-    wf.with_initial_step(
-        condition_step(
-            "route",
-            "Route by amount",
-            condition=lambda ctx: float(ctx.get("amount", 0) or 0) >= 1000,
-            true_step_id="high_path",
-            false_step_id="low_path",
-        )
-    )
-    wf.with_step(
-        auto_step(
-            "high_path",
-            "High Path",
-            next_step_id="finish",
-            action=lambda ctx: {"tier": "high"},
-        )
-    )
-    wf.with_step(
-        auto_step(
-            "low_path",
-            "Low Path",
-            next_step_id="finish",
-            action=lambda ctx: {"tier": "low"},
-        )
-    )
-    wf.with_step(_TerminalStep(step_id="finish", name="Finish"))
-    return wf
-
-
-# Registry of preset builders. Each call returns a fresh WorkflowDefinition so
-# concurrent launches never share mutable instance state.
-_WORKFLOW_PRESETS: dict[str, Any] = {
-    "demo_linear": _preset_linear,
-    "demo_branching": _preset_branching,
-}
+def build_preset(registry: ExecutableRegistry, preset_id: str) -> WorkflowDefinition:
+    """A fresh definition of one preset, so concurrent launches never share instance state."""
+    executable = cast(WorkflowExecutable, registry.get(preset_id))
+    return executable.build_definition(preset_callables())

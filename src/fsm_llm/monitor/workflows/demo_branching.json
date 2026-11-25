@@ -1,0 +1,61 @@
+{
+  "schema": "fsm-llm/executable",
+  "kind": "workflow",
+  "id": "demo_branching",
+  "name": "Demo: Conditional Branch",
+  "description": "Routes to a high/low path based on the 'amount' context value.",
+  "requires": {
+    "tools": "none",
+    "callables": [
+      "amount_is_high",
+      "mark_high",
+      "mark_low"
+    ]
+  },
+  "lifecycle": "draft",
+  "body": {
+    "initial_step_id": "route",
+    "steps": {
+      "route": {
+        "step_id": "route",
+        "name": "Route by amount",
+        "description": "",
+        "timeout_seconds": null,
+        "true_step_id": "high_path",
+        "false_step_id": "low_path",
+        "error_step_id": null,
+        "type": "ConditionStep",
+        "condition": "amount_is_high"
+      },
+      "high_path": {
+        "step_id": "high_path",
+        "name": "High Path",
+        "description": "",
+        "timeout_seconds": null,
+        "next_step_id": "finish",
+        "error_step_id": null,
+        "type": "AutoStep",
+        "action": "mark_high"
+      },
+      "low_path": {
+        "step_id": "low_path",
+        "name": "Low Path",
+        "description": "",
+        "timeout_seconds": null,
+        "next_step_id": "finish",
+        "error_step_id": null,
+        "type": "AutoStep",
+        "action": "mark_low"
+      },
+      "finish": {
+        "step_id": "finish",
+        "name": "Finish",
+        "description": "",
+        "timeout_seconds": null,
+        "next_step_id": "",
+        "error_step_id": null,
+        "type": "AutoStep"
+      }
+    }
+  }
+}

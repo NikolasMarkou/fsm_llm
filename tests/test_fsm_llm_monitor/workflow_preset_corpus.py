@@ -16,8 +16,10 @@ step an ``AutoStep(next_step_id="")``, which is what a preset document builds). 
 lists what differs between the two, and nothing else may: step 7 of the plan moves the presets
 into documents and must equal the ``document_*`` halves.
 
-``preset_definitions()`` is the one place that names where the preset definitions come from: step 7
-retargets that single function.
+``preset_definitions()`` is the one place that names where the preset definitions come from. At
+step 1 it read ``_WORKFLOW_PRESETS`` (the fixture was written by that form against the archive of
+``a8ad5d31``); step 7 retargeted it to the registry of preset documents. The fixture is never
+written again from the tree.
 """
 
 from __future__ import annotations
@@ -59,10 +61,17 @@ _ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{3,4}(?:-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 
 def preset_definitions() -> dict[str, Callable[[], WorkflowDefinition]]:
-    """The preset id to a builder of a fresh definition (the seam step 7 retargets)."""
-    from fsm_llm.monitor.instance_manager.workflow_presets import _WORKFLOW_PRESETS
+    """The preset id to a builder of a fresh definition, read from the preset documents."""
+    from fsm_llm.monitor.instance_manager.workflow_presets import (
+        build_preset,
+        load_preset_registry,
+    )
 
-    return dict(_WORKFLOW_PRESETS)
+    registry = load_preset_registry()
+    return {
+        e.id: (lambda i=e.id: build_preset(registry, i))
+        for e in registry.list(kind="workflow")
+    }
 
 
 def document_equivalent(build: Callable[[], WorkflowDefinition]) -> WorkflowDefinition:
