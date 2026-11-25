@@ -79,11 +79,9 @@ layers =
 ignore_imports =
     # retired by: roadmap 6.6 and P7.6 (one shared simulator: `synthesis.Simulator` moves to
     # `simulation/`, and G6b and repair admission use it, so they stop reading the `eval` case
-    # driver, its config and its statistics; D-016 a).
+    # driver and its config; the statistics already live in `simulation.stats`; D-016 a).
     fsm_llm.synthesis.simulation -> fsm_llm.eval.cases
     fsm_llm.synthesis.simulation -> fsm_llm.eval.config
-    fsm_llm.synthesis.simulation -> fsm_llm.eval.stats
-    fsm_llm.synthesis.repair -> fsm_llm.eval.stats
     # permanent (D-016 c): `ReasoningReactAgent` is the agents pattern built on the reasoning
     # engine, and no roadmap row retires the edge; it is reported to the user as a decision.
     fsm_llm.agents.reasoning_react -> fsm_llm.reasoning

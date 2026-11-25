@@ -19,6 +19,8 @@ Install:
 
 from __future__ import annotations
 
+from fsm_llm.simulation.stats import fisher_exact_two_sided, pass_rate, wilson_ci
+
 # Version info — imported via __version__.py to stay in sync
 from .__version__ import __version__
 from .cases import (
@@ -58,7 +60,6 @@ from .records import (
     write_json,
 )
 from .scoring import classify_result
-from .stats import fisher_exact_two_sided, pass_rate, wilson_ci
 
 __all__ = [
     "__version__",

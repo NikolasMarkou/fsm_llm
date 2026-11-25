@@ -2022,6 +2022,10 @@ fsm_llm.reasoning.ValidationResult class(TimestampedModel)
   property validation_summary
 fsm_llm.reasoning.get_available_reasoning_types def(*, registry: ExecutableRegistry | None = None) -> dict[str, str]
 # fsm_llm.simulation
+fsm_llm.simulation.below_percent def(k: int, n: int, percent: float) -> bool
+fsm_llm.simulation.fisher_exact_two_sided def(k1: int, n1: int, k2: int, n2: int) -> float
+fsm_llm.simulation.pass_rate def(k: int, n: int) -> dict[str, Any]
+fsm_llm.simulation.wilson_ci def(k: int, n: int, z: float = 1.96) -> tuple[float, float]
 # fsm_llm.synthesis
 fsm_llm.synthesis.CompileResult class
   def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = ()) -> None

@@ -31,6 +31,7 @@ from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface, resolve_model
+from fsm_llm.simulation.stats import pass_rate
 
 from ._pool import run_interruptible
 from .config import EvalConfig, load_config, merge_config
@@ -42,7 +43,6 @@ from .constants import (
 )
 from .exceptions import EvalConfigError, EvalDatasetError
 from .records import append_row, git_short_hash, open_run_dir, utc_now, write_json
-from .stats import pass_rate
 
 #: Builds a fresh LLM interface for one trial (offline tests, custom providers).
 LLMInterfaceFactory = Callable[[], LLMInterface]

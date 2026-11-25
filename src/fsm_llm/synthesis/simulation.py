@@ -44,10 +44,10 @@ from fsm_llm.eval.cases import (
     run_case_trial,
 )
 from fsm_llm.eval.config import EvalConfig
-from fsm_llm.eval.stats import pass_rate
 from fsm_llm.llm import LLMInterface, implements_complete
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.llm.purpose import purpose_scope
+from fsm_llm.simulation.stats import pass_rate
 
 from .constants import (
     ABORT_CONTEXT_KEY,
@@ -93,7 +93,7 @@ class SimulationReport:
     ``findings`` are ``GateFinding(gate="G6b")`` (empty on a pass: ``passed``).
     ``scenarios`` are the accepted generated ones as ``{"kind", "turns"}`` (the
     replay set), ``generated`` how many of them ran, ``happy`` and ``overall``
-    ``eval.stats.pass_rate`` dicts over the trials that finished, ``calls`` the
+    ``simulation.stats.pass_rate`` dicts over the trials that finished, ``calls`` the
     interface's call count during the run.
     """
 

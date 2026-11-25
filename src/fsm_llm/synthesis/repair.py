@@ -32,10 +32,10 @@ from fsm_llm.core.definitions import (
     FSMDefinition,
     LLMResponseError,
 )
-from fsm_llm.eval.stats import pass_rate
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.llm.purpose import purpose_scope
+from fsm_llm.simulation.stats import pass_rate
 
 from .constants import (
     ABORT_STATE_ID,
@@ -148,7 +148,7 @@ class PromotionResult:
         return self.code == "promote"
 
     def rates(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        """``(parent, child)`` as ``eval.stats.pass_rate`` dicts (Wilson CIs)."""
+        """``(parent, child)`` as ``simulation.stats.pass_rate`` dicts (Wilson CIs)."""
         n = self.trials * len(self.parent_passes)
         return pass_rate(sum(self.parent_passes), n), pass_rate(
             sum(self.child_passes), n

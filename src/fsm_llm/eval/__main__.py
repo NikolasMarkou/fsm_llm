@@ -40,6 +40,7 @@ from fsm_llm.constants import (
 )
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.llm import resolve_model
+from fsm_llm.simulation.stats import below_percent
 
 from .cases import TrialResult, create_run_dir, load_cases, run_cases
 from .config import EvalConfig, load_config, merge_config
@@ -52,7 +53,6 @@ from .examples import (
     score_totals,
 )
 from .exceptions import EvalError
-from .stats import below_percent
 
 __all__ = ["main_cli", "run"]
 

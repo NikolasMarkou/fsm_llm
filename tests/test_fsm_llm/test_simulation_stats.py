@@ -1,11 +1,11 @@
-"""Tests for fsm_llm.eval.stats: Wilson interval, Fisher exact, pass_rate."""
+"""Tests for fsm_llm.simulation.stats: Wilson interval, Fisher exact, pass_rate."""
 
 from __future__ import annotations
 
 import pytest
 
-from fsm_llm.eval import fisher_exact_two_sided, pass_rate, wilson_ci
-from fsm_llm.eval.stats import below_percent
+from fsm_llm.simulation import fisher_exact_two_sided, pass_rate, wilson_ci
+from fsm_llm.simulation.stats import below_percent
 
 
 class TestWilsonCI:
