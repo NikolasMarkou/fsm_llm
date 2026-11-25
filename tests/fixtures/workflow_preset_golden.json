@@ -1,0 +1,5365 @@
+{
+  "base": "a8ad5d31",
+  "document_monitor": {
+    "http_launch_linear": [
+      200,
+      {
+        "active_workflows": 0,
+        "agent_type": "",
+        "conversation_count": 0,
+        "instance_type": "workflow",
+        "label": "L",
+        "source": "demo_linear",
+        "status": "completed",
+        "task": ""
+      }
+    ],
+    "http_presets": [
+      200,
+      "{\"workflows\":[{\"id\":\"demo_branching\",\"name\":\"Demo: Conditional Branch\",\"description\":\"Routes to a high/low path based on the 'amount' context value.\"},{\"id\":\"demo_linear\",\"name\":\"Demo: Linear Pipeline\",\"description\":\"Two automatic processing steps followed by a terminal step.\"}]}"
+    ],
+    "http_refused": [
+      [
+        {},
+        400,
+        "{\"detail\":\"A workflow preset_id is required. Available: demo_branching, demo_linear\"}"
+      ],
+      [
+        {
+          "preset_id": "nope"
+        },
+        400,
+        "{\"detail\":\"Unknown workflow preset: nope. Available: demo_branching, demo_linear\"}"
+      ],
+      [
+        {
+          "definition_json": {
+            "a": 1
+          }
+        },
+        400,
+        "{\"detail\":\"Custom workflow JSON is not supported via the dashboard; choose a built-in workflow preset instead. Available: demo_branching, demo_linear\"}"
+      ]
+    ],
+    "launches": {
+      "demo_branching/amount_10": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "route",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "low_path",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_branching",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 10,
+              "condition_result": false,
+              "tier": "low"
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "condition_result": false
+                },
+                "error": null,
+                "message": "Condition evaluated to False, transitioning to low_path",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "tier": "low"
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "low_path"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Auto-transitioned to ",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 10,
+            "condition_result": false,
+            "tier": "low"
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "condition_result": false
+              },
+              "error": null,
+              "message": "Condition evaluated to False, transitioning to low_path",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "tier": "low"
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "low_path"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Auto-transitioned to ",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_branching/amount_5000": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "route",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "high_path",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_branching",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 5000,
+              "condition_result": true,
+              "tier": "high"
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "condition_result": true
+                },
+                "error": null,
+                "message": "Condition evaluated to True, transitioning to high_path",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "tier": "high"
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "high_path"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Auto-transitioned to ",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 5000,
+            "condition_result": true,
+            "tier": "high"
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "condition_result": true
+              },
+              "error": null,
+              "message": "Condition evaluated to True, transitioning to high_path",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "tier": "high"
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "high_path"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Auto-transitioned to ",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_branching/no_context": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "route",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "low_path",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_branching",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "condition_result": false,
+              "tier": "low"
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "condition_result": false
+                },
+                "error": null,
+                "message": "Condition evaluated to False, transitioning to low_path",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "tier": "low"
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "low_path"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Auto-transitioned to ",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "condition_result": false,
+            "tier": "low"
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "condition_result": false
+              },
+              "error": null,
+              "message": "Condition evaluated to False, transitioning to low_path",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "tier": "low"
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "low_path"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Auto-transitioned to ",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_linear/amount_10": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "ingest",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "process",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_linear",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 10,
+              "ingested": true,
+              "processed": true
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "ingested": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to process",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "processed": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "process"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Auto-transitioned to ",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 10,
+            "ingested": true,
+            "processed": true
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "ingested": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to process",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "processed": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "process"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Auto-transitioned to ",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_linear/amount_5000": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "ingest",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "process",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_linear",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 5000,
+              "ingested": true,
+              "processed": true
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "ingested": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to process",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "processed": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "process"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Auto-transitioned to ",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 5000,
+            "ingested": true,
+            "processed": true
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "ingested": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to process",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "processed": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "process"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Auto-transitioned to ",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_linear/no_context": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "ingest",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "process",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_linear",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "ingested": true,
+              "processed": true
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "ingested": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to process",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "processed": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "process"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Auto-transitioned to ",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "ingested": true,
+            "processed": true
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "ingested": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to process",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "processed": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "process"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Auto-transitioned to ",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      }
+    },
+    "presets": [
+      {
+        "description": "Routes to a high/low path based on the 'amount' context value.",
+        "id": "demo_branching",
+        "name": "Demo: Conditional Branch"
+      },
+      {
+        "description": "Two automatic processing steps followed by a terminal step.",
+        "id": "demo_linear",
+        "name": "Demo: Linear Pipeline"
+      }
+    ],
+    "refused": [
+      [
+        {
+          "preset_id": "nope"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: nope. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": null
+        },
+        [
+          "ValueError",
+          "A workflow preset_id is required. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "definition_json": {
+            "a": 1
+          }
+        },
+        [
+          "ValueError",
+          "Custom workflow JSON is not supported via the dashboard; choose a built-in workflow preset instead. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": " demo_linear"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset:  demo_linear. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": "demo_linear "
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: demo_linear . Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": "Demo_Linear"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: Demo_Linear. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": "DEMO_LINEAR"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: DEMO_LINEAR. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": ""
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: . Available: demo_branching, demo_linear"
+        ]
+      ]
+    ]
+  },
+  "document_runs": {
+    "demo_branching": {
+      "0": {
+        "context": {
+          "amount": 0,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "1000": {
+        "context": {
+          "amount": 1000,
+          "condition_result": true,
+          "tier": "high"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to True, transitioning to high_path"
+          ],
+          [
+            "high_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "high_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "high_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "high_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "999": {
+        "context": {
+          "amount": 999,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "absent": {
+        "context": {
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "none": {
+        "context": {
+          "amount": null,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_1500": {
+        "context": {
+          "amount": "1500",
+          "condition_result": true,
+          "tier": "high"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to True, transitioning to high_path"
+          ],
+          [
+            "high_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "high_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "high_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "high_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_abc": {
+        "context": {
+          "amount": "abc"
+        },
+        "error": "Step 'route': Condition evaluation failed: could not convert string to float: 'abc'",
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluation failed: could not convert string to float: 'abc'"
+          ],
+          [
+            "route",
+            "failed",
+            "Status changed to failed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": "could not convert string to float: 'abc'",
+              "next_step_id": null,
+              "step_id": "route",
+              "success": false
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": "Step 'route': Condition evaluation failed: could not convert string to float: 'abc'",
+              "status": "failed"
+            }
+          ]
+        ],
+        "status": "failed"
+      },
+      "true": {
+        "context": {
+          "amount": true,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      }
+    },
+    "demo_linear": {
+      "0": {
+        "context": {
+          "amount": 0,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "1000": {
+        "context": {
+          "amount": 1000,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "999": {
+        "context": {
+          "amount": 999,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "absent": {
+        "context": {
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "none": {
+        "context": {
+          "amount": null,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_1500": {
+        "context": {
+          "amount": "1500",
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_abc": {
+        "context": {
+          "amount": "abc",
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "true": {
+        "context": {
+          "amount": true,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Auto-transitioned to "
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "",
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  "engine_runs": {
+    "demo_branching": {
+      "0": {
+        "context": {
+          "amount": 0,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "1000": {
+        "context": {
+          "amount": 1000,
+          "condition_result": true,
+          "tier": "high"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to True, transitioning to high_path"
+          ],
+          [
+            "high_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "high_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "high_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "high_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "999": {
+        "context": {
+          "amount": 999,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "absent": {
+        "context": {
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "none": {
+        "context": {
+          "amount": null,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_1500": {
+        "context": {
+          "amount": "1500",
+          "condition_result": true,
+          "tier": "high"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to True, transitioning to high_path"
+          ],
+          [
+            "high_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "high_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "high_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "high_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_abc": {
+        "context": {
+          "amount": "abc"
+        },
+        "error": "Step 'route': Condition evaluation failed: could not convert string to float: 'abc'",
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluation failed: could not convert string to float: 'abc'"
+          ],
+          [
+            "route",
+            "failed",
+            "Status changed to failed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": "could not convert string to float: 'abc'",
+              "next_step_id": null,
+              "step_id": "route",
+              "success": false
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": "Step 'route': Condition evaluation failed: could not convert string to float: 'abc'",
+              "status": "failed"
+            }
+          ]
+        ],
+        "status": "failed"
+      },
+      "true": {
+        "context": {
+          "amount": true,
+          "condition_result": false,
+          "tier": "low"
+        },
+        "error": null,
+        "history": [
+          [
+            "route",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "route",
+            "running",
+            "Condition evaluated to False, transitioning to low_path"
+          ],
+          [
+            "low_path",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "route"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "low_path",
+              "step_id": "route",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "low_path"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "low_path",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      }
+    },
+    "demo_linear": {
+      "0": {
+        "context": {
+          "amount": 0,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "1000": {
+        "context": {
+          "amount": 1000,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "999": {
+        "context": {
+          "amount": 999,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "absent": {
+        "context": {
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "none": {
+        "context": {
+          "amount": null,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_1500": {
+        "context": {
+          "amount": "1500",
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "str_abc": {
+        "context": {
+          "amount": "abc",
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      },
+      "true": {
+        "context": {
+          "amount": true,
+          "ingested": true,
+          "processed": true
+        },
+        "error": null,
+        "history": [
+          [
+            "ingest",
+            "running",
+            "Status changed to running"
+          ],
+          [
+            "ingest",
+            "running",
+            "Auto-transitioned to process"
+          ],
+          [
+            "process",
+            "running",
+            "Auto-transitioned to finish"
+          ],
+          [
+            "finish",
+            "running",
+            "Reached terminal step 'finish'"
+          ],
+          [
+            "finish",
+            "completed",
+            "Status changed to completed"
+          ]
+        ],
+        "hooks": [
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "running"
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "ingest"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "process",
+              "step_id": "ingest",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "process"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": "finish",
+              "step_id": "process",
+              "success": true
+            }
+          ],
+          [
+            "step_started",
+            {
+              "step_id": "finish"
+            }
+          ],
+          [
+            "step_completed",
+            {
+              "error": null,
+              "next_step_id": null,
+              "step_id": "finish",
+              "success": true
+            }
+          ],
+          [
+            "status_changed",
+            {
+              "error": null,
+              "status": "completed"
+            }
+          ]
+        ],
+        "status": "completed"
+      }
+    }
+  },
+  "monitor": {
+    "http_launch_linear": [
+      200,
+      {
+        "active_workflows": 0,
+        "agent_type": "",
+        "conversation_count": 0,
+        "instance_type": "workflow",
+        "label": "L",
+        "source": "demo_linear",
+        "status": "completed",
+        "task": ""
+      }
+    ],
+    "http_presets": [
+      200,
+      "{\"workflows\":[{\"id\":\"demo_branching\",\"name\":\"Demo: Conditional Branch\",\"description\":\"Routes to a high/low path based on the 'amount' context value.\"},{\"id\":\"demo_linear\",\"name\":\"Demo: Linear Pipeline\",\"description\":\"Two automatic processing steps followed by a terminal step.\"}]}"
+    ],
+    "http_refused": [
+      [
+        {},
+        400,
+        "{\"detail\":\"A workflow preset_id is required. Available: demo_branching, demo_linear\"}"
+      ],
+      [
+        {
+          "preset_id": "nope"
+        },
+        400,
+        "{\"detail\":\"Unknown workflow preset: nope. Available: demo_branching, demo_linear\"}"
+      ],
+      [
+        {
+          "definition_json": {
+            "a": 1
+          }
+        },
+        400,
+        "{\"detail\":\"Custom workflow JSON is not supported via the dashboard; choose a built-in workflow preset instead. Available: demo_branching, demo_linear\"}"
+      ]
+    ],
+    "launches": {
+      "demo_branching/amount_10": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "route",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "low_path",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_branching",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 10,
+              "condition_result": false,
+              "tier": "low"
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "condition_result": false
+                },
+                "error": null,
+                "message": "Condition evaluated to False, transitioning to low_path",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "tier": "low"
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "low_path"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Reached terminal step 'finish'",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 10,
+            "condition_result": false,
+            "tier": "low"
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "condition_result": false
+              },
+              "error": null,
+              "message": "Condition evaluated to False, transitioning to low_path",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "tier": "low"
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "low_path"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Reached terminal step 'finish'",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_branching/amount_5000": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "route",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "high_path",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_branching",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 5000,
+              "condition_result": true,
+              "tier": "high"
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "condition_result": true
+                },
+                "error": null,
+                "message": "Condition evaluated to True, transitioning to high_path",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "tier": "high"
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "high_path"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Reached terminal step 'finish'",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 5000,
+            "condition_result": true,
+            "tier": "high"
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "condition_result": true
+              },
+              "error": null,
+              "message": "Condition evaluated to True, transitioning to high_path",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "tier": "high"
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "high_path"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Reached terminal step 'finish'",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_branching/no_context": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "route",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "low_path",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_branching",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "condition_result": false,
+              "tier": "low"
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "condition_result": false
+                },
+                "error": null,
+                "message": "Condition evaluated to False, transitioning to low_path",
+                "step_id": "route"
+              },
+              {
+                "data": {
+                  "tier": "low"
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "low_path"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Reached terminal step 'finish'",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "condition_result": false,
+            "tier": "low"
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "condition_result": false
+              },
+              "error": null,
+              "message": "Condition evaluated to False, transitioning to low_path",
+              "step_id": "route"
+            },
+            {
+              "data": {
+                "tier": "low"
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "low_path"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Reached terminal step 'finish'",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_linear/amount_10": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "ingest",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "process",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_linear",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 10,
+              "ingested": true,
+              "processed": true
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "ingested": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to process",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "processed": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "process"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Reached terminal step 'finish'",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 10,
+            "ingested": true,
+            "processed": true
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "ingested": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to process",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "processed": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "process"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Reached terminal step 'finish'",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_linear/amount_5000": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "ingest",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "process",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_linear",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "amount": 5000,
+              "ingested": true,
+              "processed": true
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "ingested": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to process",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "processed": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "process"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Reached terminal step 'finish'",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "amount": 5000,
+            "ingested": true,
+            "processed": true
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "ingested": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to process",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "processed": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "process"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Reached terminal step 'finish'",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      },
+      "demo_linear/no_context": {
+        "events": [
+          [
+            "workflow_started",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "ingest",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "process",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_advanced",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "step_id": "finish",
+              "success": true,
+              "workflow_instance_id": "<id>"
+            }
+          ],
+          [
+            "workflow_completed",
+            "INFO",
+            {
+              "instance_id": "<id>",
+              "workflow_instance_id": "<id>"
+            }
+          ]
+        ],
+        "info": {
+          "active_workflows": 0,
+          "agent_type": "",
+          "conversation_count": 0,
+          "instance_type": "workflow",
+          "label": "L",
+          "source": "demo_linear",
+          "status": "completed",
+          "task": ""
+        },
+        "instances": [
+          {
+            "context": {
+              "ingested": true,
+              "processed": true
+            },
+            "current_step": "finish",
+            "history": [
+              {
+                "data": {
+                  "error": null,
+                  "status": "running"
+                },
+                "error": null,
+                "message": "Status changed to running",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "ingested": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to process",
+                "step_id": "ingest"
+              },
+              {
+                "data": {
+                  "processed": true
+                },
+                "error": null,
+                "message": "Auto-transitioned to finish",
+                "step_id": "process"
+              },
+              {
+                "data": {},
+                "error": null,
+                "message": "Reached terminal step 'finish'",
+                "step_id": "finish"
+              },
+              {
+                "data": {
+                  "error": null,
+                  "status": "completed"
+                },
+                "error": null,
+                "message": "Status changed to completed",
+                "step_id": "finish"
+              }
+            ],
+            "status": "completed",
+            "workflow_instance_id": "<id>"
+          }
+        ],
+        "status": {
+          "context": {
+            "ingested": true,
+            "processed": true
+          },
+          "current_step": "finish",
+          "history": [
+            {
+              "data": {
+                "error": null,
+                "status": "running"
+              },
+              "error": null,
+              "message": "Status changed to running",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "ingested": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to process",
+              "step_id": "ingest"
+            },
+            {
+              "data": {
+                "processed": true
+              },
+              "error": null,
+              "message": "Auto-transitioned to finish",
+              "step_id": "process"
+            },
+            {
+              "data": {},
+              "error": null,
+              "message": "Reached terminal step 'finish'",
+              "step_id": "finish"
+            },
+            {
+              "data": {
+                "error": null,
+                "status": "completed"
+              },
+              "error": null,
+              "message": "Status changed to completed",
+              "step_id": "finish"
+            }
+          ],
+          "status": "completed",
+          "workflow_instance_id": "<id>"
+        }
+      }
+    },
+    "presets": [
+      {
+        "description": "Routes to a high/low path based on the 'amount' context value.",
+        "id": "demo_branching",
+        "name": "Demo: Conditional Branch"
+      },
+      {
+        "description": "Two automatic processing steps followed by a terminal step.",
+        "id": "demo_linear",
+        "name": "Demo: Linear Pipeline"
+      }
+    ],
+    "refused": [
+      [
+        {
+          "preset_id": "nope"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: nope. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": null
+        },
+        [
+          "ValueError",
+          "A workflow preset_id is required. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "definition_json": {
+            "a": 1
+          }
+        },
+        [
+          "ValueError",
+          "Custom workflow JSON is not supported via the dashboard; choose a built-in workflow preset instead. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": " demo_linear"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset:  demo_linear. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": "demo_linear "
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: demo_linear . Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": "Demo_Linear"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: Demo_Linear. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": "DEMO_LINEAR"
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: DEMO_LINEAR. Available: demo_branching, demo_linear"
+        ]
+      ],
+      [
+        {
+          "preset_id": ""
+        },
+        [
+          "ValueError",
+          "Unknown workflow preset: . Available: demo_branching, demo_linear"
+        ]
+      ]
+    ]
+  },
+  "named_deltas": [
+    [
+      "engine_runs",
+      "history.*.*",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "engine_runs",
+      "hooks.*.*.next_step_id",
+      "null",
+      "\"\""
+    ],
+    [
+      "monitor",
+      "launches.demo_branching/amount_10.instances.*.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_branching/amount_10.status.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_branching/amount_5000.instances.*.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_branching/amount_5000.status.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_branching/no_context.instances.*.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_branching/no_context.status.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_linear/amount_10.instances.*.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_linear/amount_10.status.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_linear/amount_5000.instances.*.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_linear/amount_5000.status.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_linear/no_context.instances.*.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ],
+    [
+      "monitor",
+      "launches.demo_linear/no_context.status.history.*.message",
+      "\"Reached terminal step 'finish'\"",
+      "\"Auto-transitioned to \""
+    ]
+  ]
+}
