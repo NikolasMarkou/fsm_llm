@@ -416,14 +416,14 @@ class TestActivityItem:
             item_id="agent-456",
             item_type="agent_task",
             instance_id="agent-456",
-            label="ReactAgent-abc",
+            label="react-abc",
             status="running",
             current_step="iter 3/10",
-            detail="ReactAgent",
+            detail="react",
             message_count=3,
         )
         assert item.item_type == "agent_task"
-        assert item.detail == "ReactAgent"
+        assert item.detail == "react"
 
     def test_create_workflow_instance(self):
         item = ActivityItem(

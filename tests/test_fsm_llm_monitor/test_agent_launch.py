@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -409,3 +410,67 @@ class TestTheWire:
         assert resp.status_code == 400
         assert "model" in resp.json()["detail"].lower()
         assert agent_mod.create_agent.calls == []
+
+
+_RETIRED = (
+    "_AGENT_CLASSES",
+    "_TOOL_BASED_AGENTS",
+    "TOOL_BASED_AGENTS",
+    "AGENT_TYPE_MAP",
+)
+_CODE_SUFFIXES = {".py", ".js", ".mjs", ".html", ".json", ".css"}
+
+
+class TestTheRetiredTablesAreGoneFromSource:
+    """Plan 659c07c3 step 7: no file under ``src/fsm_llm`` names a retired launch table.
+
+    A word-bound scan of every code and data file (a hit in a comment counts) plus an AST scan
+    of every module (a name, an attribute, an import alias or a defined function or class), so
+    a table that comes back under its old name, in any language of the package, is red.
+    """
+
+    _SRC = Path(__file__).parent.parent.parent / "src" / "fsm_llm"
+
+    def _files(self):
+        files = [
+            p
+            for p in self._SRC.rglob("*")
+            if p.suffix in _CODE_SUFFIXES and "__pycache__" not in p.parts
+        ]
+        assert len(files) > 100
+        return files
+
+    def test_no_code_or_data_file_names_a_retired_table(self):
+        pattern = re.compile(r"\b(?:" + "|".join(_RETIRED) + r")\b")
+        hits = [
+            f"{p.relative_to(self._SRC).as_posix()}: {m.group(0)}"
+            for p in self._files()
+            for m in pattern.finditer(p.read_text(encoding="utf-8"))
+        ]
+        assert hits == []
+
+    def test_no_module_binds_a_retired_name(self):
+        bound: list[str] = []
+        for path in self._files():
+            if path.suffix != ".py":
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                names: list[str] = []
+                if isinstance(node, ast.Name):
+                    names = [node.id]
+                elif isinstance(node, ast.Attribute):
+                    names = [node.attr]
+                elif isinstance(node, ast.alias):
+                    names = [node.name, node.asname or ""]
+                elif isinstance(
+                    node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+                ):
+                    names = [node.name]
+                bound += [f"{path.name}: {n}" for n in names if n in _RETIRED]
+        assert bound == []
+
+    def test_the_agent_half_of_flows_json_is_gone(self):
+        flows = json.loads(
+            (self._SRC / "monitor" / "static" / "flows.json").read_text("utf-8")
+        )
+        assert list(flows) == ["workflows"]
