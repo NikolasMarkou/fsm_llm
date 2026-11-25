@@ -291,10 +291,10 @@ class TestInstanceInfo:
             instance_type="agent",
             label="MyAgent",
             status="completed",
-            agent_type="ReactAgent",
+            agent_type="react",
         )
         assert info.label == "MyAgent"
-        assert info.agent_type == "ReactAgent"
+        assert info.agent_type == "react"
         assert info.status == "completed"
 
 
@@ -334,9 +334,11 @@ class TestRequestModels:
         from fsm_llm.monitor.definitions import LaunchAgentRequest
 
         req = LaunchAgentRequest(task="Do something")
-        assert req.agent_type == "ReactAgent"
+        assert req.agent_type == "react"
         assert req.max_iterations == 10
         assert req.tools == []
+        with pytest.raises(ValueError):
+            LaunchAgentRequest(task="x", agent_type="x" * 65)
 
     def test_workflow_advance_request(self):
         from fsm_llm.monitor.definitions import WorkflowAdvanceRequest

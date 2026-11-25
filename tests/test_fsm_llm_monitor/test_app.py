@@ -1116,7 +1116,7 @@ class TestServerHygieneAndWorkflow:
     def test_disabled_agent_returns_400(self):
         resp = self.client.post(
             "/api/agent/launch",
-            json={"agent_type": "EvaluatorOptimizerAgent", "task": "x"},
+            json={"agent_type": "evaluator_optimizer", "task": "x"},
         )
         assert resp.status_code == 400
         assert "Unknown agent type" in resp.json()["detail"]
@@ -1261,7 +1261,7 @@ class TestApiKeyGate:
             ("delete", "/api/instances/nonexistent", None),
             ("post", "/api/fsm/launch", {"preset_id": "does-not-exist"}),
             ("post", "/api/workflow/launch", {"preset_id": "does-not-exist"}),
-            ("post", "/api/agent/launch", {"agent_type": "ReactAgent", "task": "x"}),
+            ("post", "/api/agent/launch", {"agent_type": "react", "task": "x"}),
             ("post", "/api/builder/start", {}),
             ("post", "/api/builder/send", {"session_id": "x", "message": "x"}),
             ("delete", "/api/builder/nonexistent", None),

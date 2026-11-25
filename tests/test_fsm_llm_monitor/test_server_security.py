@@ -243,6 +243,7 @@ class TestRequestBounds:
             {"task": "x", "max_iterations": 10_000},
             {"task": "x", "timeout_seconds": 0},
             {"task": ""},
+            {"task": "x", "agent_type": "x" * 65},
         ],
     )
     def test_agent_launch_bounds(self, body):

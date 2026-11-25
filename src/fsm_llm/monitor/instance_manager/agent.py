@@ -2,9 +2,8 @@
 
 ``AgentsMixin``: ``launch_agent`` (a daemon thread per agent), the capacity check, the body of the thread, the
 events read from the finished run, ``cancel_agent``, ``get_agent_status`` and ``get_agent_result``; with the
-launchable classes (``_AGENT_CLASSES``, ``_TOOL_BASED_AGENTS``, D-001), the rows of the executable
-registry (``agent_types``, the launchable rule), the stub tool registry and the two readers of an
-``AgentResult``. The method bodies are the old ones, moved.
+rows of the executable registry (``agent_types``, the launchable rule), the stub tool registry and the
+two readers of an ``AgentResult``. An agent is launched by executable id through ``create_agent``.
 """
 
 from __future__ import annotations
@@ -13,20 +12,11 @@ import copy
 import threading
 from typing import Any
 
-from fsm_llm.agents import (
-    ADaPTAgent,
-    AgentConfig,
-    DebateAgent,
-    PlanExecuteAgent,
-    ReactAgent,
-    ReflexionAgent,
-    REWOOAgent,
-    SelfConsistencyAgent,
-    ToolRegistry,
-)
+from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent
 from fsm_llm.core.definitions.executable import Capability
 from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.llm import resolve_model
+from fsm_llm.text import capped_line
 
 from ..collector import redact_context
 from ..constants import (
@@ -51,38 +41,11 @@ from .handlers import _build_context_capture_handlers, _build_monitor_handlers
 from .managed import ManagedAgent, _new_instance_id
 from .surface import _InstanceSurface
 
-# DECISION plan_2026-05-29_0c00a594/D-001 [STALE]: EvaluatorOptimizerAgent and
-# MakerCheckerAgent are intentionally NOT launchable from the dashboard.
-# Their constructors require arguments that cannot be supplied from a web
-# form (a Python `evaluation_fn` callable / maker+checker instruction strings),
-# so launching them always raised TypeError. They remain importable as library
-# classes and in flows.json for visualization. Do not re-add here without also
-# wiring a way to supply their required constructor arguments.
-_AGENT_CLASSES: dict[str, type] = {
-    "ReactAgent": ReactAgent,
-    "ReflexionAgent": ReflexionAgent,
-    "PlanExecuteAgent": PlanExecuteAgent,
-    "REWOOAgent": REWOOAgent,
-    "ADaPTAgent": ADaPTAgent,
-    "DebateAgent": DebateAgent,
-    "SelfConsistencyAgent": SelfConsistencyAgent,
-}
 # DECISION plan-2026-11-19T025425-51fde95b/D-058
 # OrchestratorAgent is NOT launchable: without a `worker_factory` (a Python
 # callable) every subtask is a placeholder with success False, so a dashboard run
 # always ends `failed`. Do NOT re-add it without a monitor worker factory that
 # runs a real sub-agent and a scripted end-to-end row that asserts `success`.
-
-# Agent types that require a ToolRegistry
-_TOOL_BASED_AGENTS = {
-    "ReactAgent",
-    "ReflexionAgent",
-    "PlanExecuteAgent",
-    "REWOOAgent",
-    "ADaPTAgent",
-}
-
-
 # DECISION plan-2026-11-25T145435-659c07c3/D-006
 # The launchable agents are rows of the executable registry chosen by ONE rule (kind `pattern`,
 # inputs `["task"]`, callables a subset of {tools}, not CONVERSATIONAL, not in the deny set; D-058
@@ -190,9 +153,14 @@ class AgentsMixin(_InstanceSurface):
                 self._executables = registry
             return copy.deepcopy(self._agent_rows)
 
+    # DECISION plan-2026-11-25T145435-659c07c3/D-009
+    # The id is matched EXACTLY against the launchable rows (`create_agent` strips and lowercases, so a
+    # raw id is never forwarded) and `create_agent` gets only config, handlers, registry and, when due,
+    # tools: no hitl, no initial_context, no llm_interface (no approver, no flagged stub, no grant).
+    # Do NOT keep a class table or an alias for a class name, or echo the id outside `capped_line`.
     def launch_agent(
         self,
-        agent_type: str = "ReactAgent",
+        agent_type: str = "react",
         task: str = "",
         tools_config: list[StubToolConfig] | None = None,
         model: str | None = None,
@@ -201,21 +169,25 @@ class AgentsMixin(_InstanceSurface):
         label: str = "",
     ) -> ManagedAgent:
         """Launch an agent in a background thread."""
-        if agent_type not in _AGENT_CLASSES:
+        rows = [r for r in self.agent_types() if r["launchable"]]
+        row = next((r for r in rows if r["id"] == agent_type), None)
+        if row is None:
             raise ValueError(
-                f"Unknown agent type: {agent_type}. "
-                f"Available: {', '.join(sorted(_AGENT_CLASSES))}"
+                f"Unknown agent type: {capped_line(agent_type, 64)}. "
+                f"Available: {', '.join(r['id'] for r in rows)}"
             )
 
-        needs_tools = agent_type in _TOOL_BASED_AGENTS
-        if needs_tools and not tools_config:
+        tools = tools_config or [
+            StubToolConfig(name=n, description=n) for n in row["tool_names"]
+        ]
+        if row["needs_tools"] and not tools:
             raise ValueError(
                 f"{agent_type} requires at least one tool to be configured"
             )
         self._check_agent_capacity()
 
         instance_id = _new_instance_id()
-        registry = _stub_registry(tools_config or []) if needs_tools else None
+        registry = _stub_registry(tools) if row["takes_tools"] and tools else None
         collector = self._new_collector()
         config = AgentConfig(
             model=resolve_model(model),
@@ -272,7 +244,7 @@ class AgentsMixin(_InstanceSurface):
         self,
         managed: ManagedAgent,
         config: AgentConfig,
-        registry: ToolRegistry | None,
+        tools: ToolRegistry | None,
         handlers: list[Any],
     ) -> None:
         """Body of the agent's background thread."""
@@ -282,10 +254,14 @@ class AgentsMixin(_InstanceSurface):
                     managed.status = "cancelled"
                 return
 
-            kwargs: dict[str, Any] = {"config": config, "handlers": handlers}
-            if registry is not None:
-                kwargs["tools"] = registry
-            agent = _AGENT_CLASSES[managed.agent_type](**kwargs)
+            kwargs: dict[str, Any] = {
+                "config": config,
+                "handlers": handlers,
+                "registry": self._executables,
+            }
+            if tools is not None:
+                kwargs["tools"] = tools
+            agent = create_agent(managed.agent_type, **kwargs)
             result = agent.run(managed.task)
 
             with self._lock:

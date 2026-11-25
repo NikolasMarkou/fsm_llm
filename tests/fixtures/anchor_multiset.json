@@ -1184,6 +1184,16 @@
       "delta": 1,
       "reason": "plan 659c07c3 step 3: new anchors D-006 (the launchable rule) and D-007 (the registry loads once, lazily, off the loop) in monitor/instance_manager/agent.py",
       "token": "plan-2026-11-25T145435-659c07c3/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 659c07c3 step 4: new anchor D-009 (launch by exact id, the create_agent kwargs set) in monitor/instance_manager/agent.py; the [STALE] anchor plan 0c00a594 D-001 (EvaluatorOptimizer and MakerChecker not launchable) leaves with _AGENT_CLASSES, replaced by the launchable rule of D-006 (this plan); D-058 of plan 51fde95b moved to sit with the one deny set _NOT_LAUNCHABLE, count unchanged",
+      "token": "plan-2026-11-25T145435-659c07c3/D-009"
+    },
+    {
+      "delta": -1,
+      "reason": "plan 659c07c3 step 4: new anchor D-009 (launch by exact id, the create_agent kwargs set) in monitor/instance_manager/agent.py; the [STALE] anchor plan 0c00a594 D-001 (EvaluatorOptimizer and MakerChecker not launchable) leaves with _AGENT_CLASSES, replaced by the launchable rule of D-006 (this plan); D-058 of plan 51fde95b moved to sit with the one deny set _NOT_LAUNCHABLE, count unchanged",
+      "token": "plan_2026-05-29_0c00a594/D-001"
     }
   ]
 }

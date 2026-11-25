@@ -115,7 +115,7 @@ class ManagedAgent(_ManagedBase):
     def __init__(
         self,
         instance_id: str,
-        agent_type: str = "ReactAgent",
+        agent_type: str = "react",
         task: str = "",
         label: str = "",
         max_iterations: int = DEFAULT_AGENT_MAX_ITERATIONS,

@@ -22,7 +22,6 @@ from fsm_llm.monitor.constants import (
     MAX_AGENT_TIMEOUT_SECONDS,
     MAX_BUILDER_TOKENS,
 )
-from fsm_llm.monitor.instance_manager import agent as agent_mod
 from fsm_llm.monitor.server import app, configure, routes_builder
 from tests.test_fsm_llm_monitor.support import _manager
 
@@ -56,8 +55,8 @@ def _js_map(source: str, name: str) -> dict[str, str]:
 
 
 class TestTheLaunchableAgentTypesAreOneList:
-    """13.2: ``/api/capabilities`` lists ``_AGENT_CLASSES``; the JS type map, the launch
-    form and the builder's type enum agree with it."""
+    """13.2: ``/api/capabilities`` lists the launchable ids; the JS type map and the
+    builder's type enum agree with the registry."""
 
     def _builder_js(self) -> str:
         return (_MONITOR / "static" / "pages" / "builder.js").read_text(
@@ -78,9 +77,10 @@ class TestTheLaunchableAgentTypesAreOneList:
         assert set(mapping) == AgentArtifactBuilder.VALID_AGENT_TYPES
         assert all(hasattr(agents_pkg, cls) for cls in mapping.values())
 
-    def test_every_launchable_class_is_a_type_the_builder_can_emit(self):
-        mapping = _js_map(self._builder_js(), "AGENT_TYPE_MAP")
-        assert set(agent_mod._AGENT_CLASSES) <= set(mapping.values())
+    def test_every_type_the_builder_can_emit_is_a_registry_id(self):
+        """The Builder only offers a type that names an executable of the registry."""
+        ids = {r["id"] for r in _manager().agent_types()}
+        assert AgentArtifactBuilder.VALID_AGENT_TYPES <= ids
 
     def test_an_orchestrator_artifact_is_buildable_but_not_listed_as_launchable(self):
         """D-058: the map still translates the Builder type; ``agent_types`` decides launch."""
@@ -89,14 +89,6 @@ class TestTheLaunchableAgentTypesAreOneList:
         configure(manager=_manager())
         listed = TestClient(app).get("/api/capabilities").json()["agent_types"]
         assert "orchestrator" not in listed
-
-    def test_the_launch_form_offers_exactly_the_launchable_classes(self):
-        select = re.search(
-            r'<select id="launch-agent-type"[^>]*>(.*?)</select>', _html(), re.S
-        )
-        assert select is not None
-        options = re.findall(r'<option value="(\w+)"', select.group(1))
-        assert sorted(options) == sorted(agent_mod._AGENT_CLASSES)
 
 
 class _FakeBuilderAgent:

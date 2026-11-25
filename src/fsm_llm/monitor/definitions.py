@@ -287,7 +287,7 @@ class StubToolConfig(BaseModel):
 class LaunchAgentRequest(BaseModel):
     """Request to launch an agent."""
 
-    agent_type: str = "ReactAgent"
+    agent_type: str = Field("react", max_length=64)  # an executable id
     task: str = Field(..., min_length=1, max_length=MAX_TASK_LENGTH)
     model: str | None = None  # None or blank: env LLM_MODEL, else HTTP 400
     max_iterations: int = Field(

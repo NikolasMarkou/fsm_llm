@@ -70,9 +70,9 @@ class TestManagedClasses:
         assert inst.instance_type == "agent"
 
     def test_managed_agent_to_info(self):
-        inst = ManagedAgent(instance_id="ag1", agent_type="ReactAgent", task="do stuff")
+        inst = ManagedAgent(instance_id="ag1", agent_type="react", task="do stuff")
         info = inst.to_info()
-        assert info.agent_type == "ReactAgent"
+        assert info.agent_type == "react"
         assert info.status == "running"
 
 
@@ -462,7 +462,7 @@ class TestInstanceManagerListFilter:
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
 
-        agent = ManagedAgent(instance_id="ag1", agent_type="ReactAgent")
+        agent = ManagedAgent(instance_id="ag1", agent_type="react")
         fsm = ManagedFSM(instance_id="f1", api=MagicMock())
         with mgr._lock:
             mgr._instances["ag1"] = agent
@@ -618,7 +618,7 @@ class TestActivitySnapshots:
 
         agent = ManagedAgent(
             instance_id="agent-1",
-            agent_type="ReactAgent",
+            agent_type="react",
             task="test task",
             label="Test Agent",
         )
@@ -635,14 +635,14 @@ class TestActivitySnapshots:
         agent_items = [i for i in items if i.item_type == "agent_task"]
         assert len(agent_items) == 1
         assert agent_items[0].item_id == "agent-1"
-        assert agent_items[0].detail == "ReactAgent"
+        assert agent_items[0].detail == "react"
         assert agent_items[0].label == "Test Agent"
 
     def test_metrics_include_active_agents(self):
         mgr = InstanceManager()
         mgr.global_collector.cleanup()
 
-        agent = ManagedAgent(instance_id="a1", agent_type="ReactAgent", task="t")
+        agent = ManagedAgent(instance_id="a1", agent_type="react", task="t")
         agent.status = "running"
 
         from fsm_llm.monitor.collector import EventCollector
@@ -913,7 +913,8 @@ class TestWorkflowPresets:
 
 
 class TestDisabledAgentTypes:
-    """EvaluatorOptimizer/MakerChecker are not launchable (plan Step 3, D-001)."""
+    """A type that a form cannot supply (a Python object, two strings, a chain) or that
+    cannot work is not launchable: the rule of D-006 of plan 659c07c3 decides, never a table."""
 
     def _make_manager(self) -> InstanceManager:
         mgr = InstanceManager(config=MonitorConfig())
@@ -925,14 +926,14 @@ class TestDisabledAgentTypes:
 
         mgr = self._make_manager()
         with pytest.raises(ValueError, match="Unknown agent type"):
-            mgr.launch_agent(agent_type="EvaluatorOptimizerAgent", task="x")
+            mgr.launch_agent(agent_type="evaluator_optimizer", task="x")
 
     def test_maker_checker_not_launchable(self):
         import pytest
 
         mgr = self._make_manager()
         with pytest.raises(ValueError, match="Unknown agent type"):
-            mgr.launch_agent(agent_type="MakerCheckerAgent", task="x")
+            mgr.launch_agent(agent_type="maker_checker", task="x")
 
     def test_orchestrator_not_launchable(self):
         """D-058 of plan 51fde95b: with no worker_factory every subtask is a
@@ -941,17 +942,7 @@ class TestDisabledAgentTypes:
 
         mgr = self._make_manager()
         with pytest.raises(ValueError, match="Unknown agent type"):
-            mgr.launch_agent(agent_type="OrchestratorAgent", task="x")
-
-    def test_supported_agent_types(self):
-        from fsm_llm.monitor.instance_manager.agent import _AGENT_CLASSES
-
-        assert "EvaluatorOptimizerAgent" not in _AGENT_CLASSES
-        assert "MakerCheckerAgent" not in _AGENT_CLASSES
-        assert "OrchestratorAgent" not in _AGENT_CLASSES
-        # core types still present
-        assert "ReactAgent" in _AGENT_CLASSES
-        assert "DebateAgent" in _AGENT_CLASSES
+            mgr.launch_agent(agent_type="orchestrator", task="x")
 
 
 class TestAgentConcurrencyHardening:
@@ -1027,7 +1018,6 @@ class TestStubToolExecution:
 
         pytest.importorskip("fsm_llm.agents")
         from fsm_llm.monitor.definitions import StubToolConfig
-        from fsm_llm.monitor.instance_manager import agent as agent_mod
         from fsm_llm.tools import ToolCall
 
         captured: dict = {}
@@ -1041,11 +1031,11 @@ class TestStubToolExecution:
                 done.set()
                 raise RuntimeError("stop after capture")
 
-        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _CapturingAgent)
+        _patch_agent(monkeypatch, _CapturingAgent)
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
         mgr.launch_agent(
-            agent_type="ReactAgent",
+            agent_type="react",
             task="x",
             tools_config=[
                 StubToolConfig(name="lookup", description="d", stub_response="STUB")
@@ -1058,51 +1048,6 @@ class TestStubToolExecution:
             result = registry.execute(ToolCall(tool_name="lookup", parameters=params))
             assert result.success, (params, result.error)
             assert result.result == "STUB"
-
-
-class TestLaunchConstructsEveryAgentClass:
-    """plan-2026-09-29T103145-06a5ec0a D-003: agent constructors reject a
-    ``tools=`` they cannot use. The monitor passes ``tools`` only to tool-based
-    classes, so every launchable class must still construct with the monitor's
-    ``config``/``handlers``(/``tools``) kwargs, even when the request carries a
-    tools config for a tool-less class."""
-
-    def test_every_class_constructs_through_launch(self, monkeypatch):
-        import pytest
-
-        from fsm_llm.monitor.definitions import StubToolConfig
-        from fsm_llm.monitor.instance_manager import agent as agent_mod
-
-        if not agent_mod._AGENT_CLASSES:
-            pytest.skip("fsm_llm.agents not importable")
-        assert len(agent_mod._AGENT_CLASSES) == 7  # no OrchestratorAgent (D-058)
-
-        constructed: dict[str, threading.Event] = {}
-        for name, real_cls in list(agent_mod._AGENT_CLASSES.items()):
-            event = threading.Event()
-            constructed[name] = event
-
-            def _run(self, task, _event=event):
-                _event.set()
-                raise RuntimeError("stop after construction")
-
-            monkeypatch.setitem(
-                agent_mod._AGENT_CLASSES, name, type(name, (real_cls,), {"run": _run})
-            )
-
-        mgr = InstanceManager(config=MonitorConfig())
-        mgr.global_collector.cleanup()
-        launched = {}
-        for name in constructed:
-            launched[name] = mgr.launch_agent(
-                agent_type=name,
-                task="x",
-                tools_config=[
-                    StubToolConfig(name="lookup", description="d", stub_response="S")
-                ],
-            )
-        for name, event in constructed.items():
-            assert event.wait(5), f"{name} did not construct: {launched[name].error}"
 
 
 # should_terminate is grounded only by the tool observation, so the scripted
@@ -1178,20 +1123,14 @@ class TestAgentRunEventsOnTheCoreLoop:
         from fsm_llm.testing import PromptGroundedLLM
 
         llm = PromptGroundedLLM(facts=_REACT_FACTS, default_response=_REACT_ANSWER)
-        real_cls = agent_mod._AGENT_CLASSES["ReactAgent"]
-
-        def _init(self, **kwargs):
-            real_cls.__init__(self, llm_interface=llm, **kwargs)
-
-        monkeypatch.setitem(
-            agent_mod._AGENT_CLASSES,
-            "ReactAgent",
-            type("ReactAgent", (real_cls,), {"__init__": _init}),
+        real = agent_mod.create_agent
+        monkeypatch.setattr(
+            agent_mod, "create_agent", lambda p, **kw: real(p, llm_interface=llm, **kw)
         )
         mgr = InstanceManager(config=MonitorConfig())
         mgr.global_collector.cleanup()
         managed = mgr.launch_agent(
-            agent_type="ReactAgent",
+            agent_type="react",
             task=_REACT_TASK,
             tools_config=[
                 StubToolConfig(
@@ -1643,6 +1582,11 @@ class TestWorkflowTracking:
 _STUB = StubToolConfig(name="lookup", description="d", stub_response="R")
 
 
+def _patch_agent(monkeypatch, cls) -> None:
+    """The monitor builds ``cls`` (a double taking the launch kwargs) for every id."""
+    monkeypatch.setattr(agent_mod, "create_agent", lambda pattern, **kw: cls(**kw))
+
+
 def _finished_fsm(mgr: InstanceManager, instance_id: str = "old") -> ManagedFSM:
     inst = ManagedFSM(instance_id=instance_id, api=MagicMock())
     inst.status = "completed"
@@ -1689,7 +1633,7 @@ class TestFailedLaunchKeepsFinishedInstance:
         assert [i.instance_id for i in mgr.list_instances()] == ["old"]
 
     def test_a_valid_launch_still_evicts_the_oldest_finished(self, monkeypatch):
-        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _QuickAgent)
+        _patch_agent(monkeypatch, _QuickAgent)
         mgr = _manager(max_instances=1)
         _finished_fsm(mgr)
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
@@ -1760,7 +1704,7 @@ class TestInstanceEventFeed:
     """F-MI-10: an instance's own collector sees its lifecycle events."""
 
     def test_agent_events_reach_the_instance_collector(self, monkeypatch):
-        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _QuickAgent)
+        _patch_agent(monkeypatch, _QuickAgent)
         mgr = _manager()
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
         managed.thread.join(5)
@@ -1795,7 +1739,7 @@ class TestCloseTearsDownEveryInstanceType:
 
     def test_close_sets_the_agent_cancel_flag(self, monkeypatch):
         _BlockingAgent.release.clear()
-        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _BlockingAgent)
+        _patch_agent(monkeypatch, _BlockingAgent)
         mgr = _manager()
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
         try:
@@ -1938,7 +1882,6 @@ class TestInstanceManagerPackageLayout:
         exec(f"from {_PACKAGE} import *", namespace)
         assert set(_MODULE_OF) | {"ManagedInstance"} <= set(namespace)
         for private in (
-            "_AGENT_CLASSES",
             "_MonitorHandler",
             "_WORKFLOW_PRESETS",
             "_build_context_capture_handlers",
@@ -2006,14 +1949,8 @@ class TestInstanceManagerPackageLayout:
         assert inst.to_info().instance_type == "agent"
 
     def test_the_tables_the_mixins_read_are_the_ones_of_their_modules(self):
-        from fsm_llm.monitor.instance_manager import agent, workflow, workflow_presets
+        from fsm_llm.monitor.instance_manager import workflow, workflow_presets
 
-        assert agent.AgentsMixin.launch_agent.__globals__["_AGENT_CLASSES"] is (
-            agent._AGENT_CLASSES
-        )
-        assert agent.AgentsMixin._run_agent.__globals__["_AGENT_CLASSES"] is (
-            agent._AGENT_CLASSES
-        )
         assert workflow.WorkflowsMixin.launch_workflow.__globals__[
             "_WORKFLOW_PRESETS"
         ] is (workflow_presets._WORKFLOW_PRESETS)
@@ -2032,7 +1969,7 @@ class TestInstanceManagerPackageLayout:
         # token -> module -> count (the launch docstring of `workflow` names
         # the preset anchor of `workflow_presets` once)
         expected = {
-            "plan_2026-05-29_0c00a594/D-001": {"agent": 1},
+            "plan-2026-11-25T145435-659c07c3/D-009": {"agent": 1},
             "plan_2026-05-29_0c00a594/D-002": {"workflow_presets": 1, "workflow": 1},
             "plan_2026-05-29_0c00a594/D-003": {"agent": 2, "manager": 1},
             "plan-2026-07-20T040150-876e7164/D-003": {"snapshots": 1},
@@ -2076,7 +2013,6 @@ class TestInstanceManagerPackageLayout:
                     defined.setdefault(name, []).append(path.stem)
         assert {n: m for n, m in defined.items() if len(m) > 1} == {}
         for name, module in {
-            "_AGENT_CLASSES": "agent",
             "_HANDLER_STATES": "handlers",
             "_WORKFLOW_PRESETS": "workflow_presets",
             "_new_instance_id": "managed",
@@ -2262,7 +2198,7 @@ class TestInstanceManagerEdgesOfTheSplit:
             def __init__(self, **kwargs):
                 configs.append(kwargs["config"])
 
-        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _Probe)
+        _patch_agent(monkeypatch, _Probe)
         monkeypatch.setenv("LLM_MODEL", "ollama_chat/from-env")
         mgr = _manager()
         first = mgr.launch_agent(task="t", tools_config=[_STUB], model="")
@@ -2295,7 +2231,7 @@ class TestInstanceManagerEdgesOfTheSplit:
             agent.thread.join(5)
 
     def test_the_agent_limit_is_reached_at_exactly_the_maximum(self, monkeypatch):
-        monkeypatch.setitem(agent_mod._AGENT_CLASSES, "ReactAgent", _QuickAgent)
+        _patch_agent(monkeypatch, _QuickAgent)
         mgr = _manager(max_running_agents=2)
         for name in ("a1", "a2"):
             mgr._instances[name] = ManagedAgent(name)
