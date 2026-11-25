@@ -34,11 +34,7 @@ GOLDEN = json.loads(
 DRAWABLE = sorted(i for i, cell in GOLDEN.items() if cell["graph"] is not None)
 URL = "/api/agent/visualize"
 
-
-@pytest.fixture(autouse=True)
-def _reset_app():
-    yield
-    configure(manager=InstanceManager())
+pytestmark = pytest.mark.usefixtures("reset_app")
 
 
 def _client() -> TestClient:

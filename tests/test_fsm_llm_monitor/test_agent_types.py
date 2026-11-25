@@ -1,6 +1,6 @@
 """Plan 659c07c3 step 3: the monitor lists agents from the executable registry (roadmap E4.2 and E4.3).
 
-One rule (``_launchable``) picks the launchable rows (15 ids at this commit, user files included), the
+One rule (``_launchable``) picks the launchable rows (the ids of ``LAUNCHABLE``, user files included), the
 registry loads once, lazily, off the event loop, under a leaf lock never held with the manager lock,
 ``GET /api/agent/types`` is open (launch stays gated) and ``fsm-llm-monitor --executables DIR`` loads
 a directory with the one-warning-per-file rule. Doubles only: no model, no network.
@@ -68,11 +68,7 @@ ROW_FIELDS = {
 }
 _LOAD = "fsm_llm.engine.executables.registry.ExecutableRegistry.load_sources"
 
-
-@pytest.fixture(autouse=True)
-def _reset_app():
-    yield
-    configure(manager=InstanceManager())
+pytestmark = pytest.mark.usefixtures("reset_app")
 
 
 def _doc(doc_id: str, base: str) -> dict[str, Any]:
@@ -174,7 +170,7 @@ class TestTheLaunchableRule:
         assert agent_mod._launchable(executable) is expected
 
     def test_the_registry_filter_is_not_the_rule(self):
-        # ``registry.list(launchable=True)`` excludes every tools pattern (7 ids)
+        # ``registry.list(launchable=True)`` excludes every tools pattern
         registry = ExecutableRegistry()
         registry.load_sources()
         wrong = {e.id for e in registry.list(kind="pattern", launchable=True)}

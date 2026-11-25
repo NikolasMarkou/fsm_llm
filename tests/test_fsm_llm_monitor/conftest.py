@@ -4,6 +4,19 @@ from __future__ import annotations
 
 import pytest
 
+from fsm_llm.monitor.instance_manager import InstanceManager
+from fsm_llm.monitor.server import configure
+
+
+@pytest.fixture
+def reset_app():
+    """After the test, put a fresh manager behind the server app (``configure`` rebinds module state).
+
+    Opt in with ``pytestmark = pytest.mark.usefixtures("reset_app")``.
+    """
+    yield
+    configure(manager=InstanceManager())
+
 
 @pytest.fixture(autouse=True)
 def _clear_monitor_api_key_env(monkeypatch: pytest.MonkeyPatch) -> None:

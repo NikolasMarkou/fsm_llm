@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fsm_llm.monitor.definitions import MonitorConfig
 from fsm_llm.monitor.instance_manager import InstanceManager
 
@@ -10,6 +12,18 @@ def _manager(**config) -> InstanceManager:
     mgr = InstanceManager(config=MonitorConfig(**config))
     mgr.global_collector.cleanup()
     return mgr
+
+
+class QuickAgent:
+    """The agent a ``create_agent`` double hands back: runs at once, no model (the launch kwargs are ignored)."""
+
+    def __init__(self, **kwargs):
+        pass
+
+    def run(self, task):
+        return SimpleNamespace(
+            success=True, answer="done", trace=None, final_context={}
+        )
 
 
 def server_package_modules() -> list:

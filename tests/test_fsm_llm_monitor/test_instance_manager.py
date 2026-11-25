@@ -30,7 +30,7 @@ from fsm_llm.monitor.instance_manager import (
     snapshot_from_api,
 )
 from fsm_llm.monitor.instance_manager import agent as agent_mod
-from tests.test_fsm_llm_monitor.support import _manager
+from tests.test_fsm_llm_monitor.support import QuickAgent, _manager
 
 
 class TestManagedClasses:
@@ -1594,16 +1594,6 @@ def _finished_fsm(mgr: InstanceManager, instance_id: str = "old") -> ManagedFSM:
     return inst
 
 
-class _QuickAgent:
-    def __init__(self, **kwargs):
-        pass
-
-    def run(self, task):
-        return SimpleNamespace(
-            success=True, answer="done", trace=None, final_context={}
-        )
-
-
 class _BlockingAgent:
     release = threading.Event()
 
@@ -1633,7 +1623,7 @@ class TestFailedLaunchKeepsFinishedInstance:
         assert [i.instance_id for i in mgr.list_instances()] == ["old"]
 
     def test_a_valid_launch_still_evicts_the_oldest_finished(self, monkeypatch):
-        _patch_agent(monkeypatch, _QuickAgent)
+        _patch_agent(monkeypatch, QuickAgent)
         mgr = _manager(max_instances=1)
         _finished_fsm(mgr)
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
@@ -1704,7 +1694,7 @@ class TestInstanceEventFeed:
     """F-MI-10: an instance's own collector sees its lifecycle events."""
 
     def test_agent_events_reach_the_instance_collector(self, monkeypatch):
-        _patch_agent(monkeypatch, _QuickAgent)
+        _patch_agent(monkeypatch, QuickAgent)
         mgr = _manager()
         managed = mgr.launch_agent(task="t", tools_config=[_STUB])
         managed.thread.join(5)
@@ -2195,7 +2185,7 @@ class TestInstanceManagerEdgesOfTheSplit:
     def test_an_agent_launch_resolves_its_model_the_same_way(self, monkeypatch):
         configs: list[Any] = []
 
-        class _Probe(_QuickAgent):
+        class _Probe(QuickAgent):
             def __init__(self, **kwargs):
                 configs.append(kwargs["config"])
 
@@ -2232,7 +2222,7 @@ class TestInstanceManagerEdgesOfTheSplit:
             agent.thread.join(5)
 
     def test_the_agent_limit_is_reached_at_exactly_the_maximum(self, monkeypatch):
-        _patch_agent(monkeypatch, _QuickAgent)
+        _patch_agent(monkeypatch, QuickAgent)
         mgr = _manager(max_running_agents=2)
         for name in ("a1", "a2"):
             mgr._instances[name] = ManagedAgent(name)

@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from fsm_llm.agents.meta_builders import AgentArtifactBuilder
 from fsm_llm.monitor.server import app, configure
 from tests.test_fsm_llm_monitor.support import _manager
+from tests.test_fsm_llm_monitor.test_agent_types import LAUNCHABLE
 
 _MONITOR = Path(__file__).parent.parent.parent / "src" / "fsm_llm" / "monitor"
 _OLD_NAMES = re.compile(
@@ -106,7 +107,7 @@ class TestEveryOfferedIdAnswers:
     ):
         client, rows = self._rows()
         drawable = [r["id"] for r in rows if r["drawable"]]
-        assert "react" in drawable and len(drawable) >= 17
+        assert set(LAUNCHABLE) <= set(drawable)  # every launchable id draws
         for agent_id in drawable:
             got = client.get("/api/agent/visualize", params={"agent_type": agent_id})
             assert got.status_code == 200, agent_id
@@ -129,7 +130,7 @@ class TestEveryOfferedIdAnswers:
     def test_every_launchable_id_is_one_the_launch_select_can_group(self):
         _, rows = self._rows()
         launchable = [r for r in rows if r["launchable"]]
-        assert len(launchable) == 15
+        assert sorted(r["id"] for r in launchable) == sorted(LAUNCHABLE)
         assert all(isinstance(r["needs_tools"], bool) for r in launchable)
 
 

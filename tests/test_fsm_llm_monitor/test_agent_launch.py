@@ -13,7 +13,6 @@ import json
 import re
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -29,7 +28,7 @@ from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.instance_manager import agent as agent_mod
 from fsm_llm.monitor.server import app, configure
 from tests.test_fsm_llm_agents import agent_preview_cells as cells
-from tests.test_fsm_llm_monitor.support import _manager
+from tests.test_fsm_llm_monitor.support import QuickAgent, _manager
 from tests.test_fsm_llm_monitor.test_agent_types import LAUNCHABLE, NOT_LAUNCHABLE
 
 _STUB = StubToolConfig(name="lookup", description="A stub.", stub_response="R")
@@ -48,15 +47,6 @@ def _model(monkeypatch):
     configure(manager=InstanceManager())
 
 
-class _Quick:
-    """The agent a spy hands back: runs at once, no model."""
-
-    def run(self, task):
-        return SimpleNamespace(
-            success=True, answer="done", trace=None, final_context={}
-        )
-
-
 class _Spy:
     """Stands in for ``create_agent`` of the agent module and records every call."""
 
@@ -65,7 +55,7 @@ class _Spy:
 
     def __call__(self, pattern, **kwargs):
         self.calls.append((pattern, kwargs))
-        return _Quick()
+        return QuickAgent()
 
 
 def _spy(monkeypatch) -> _Spy:
@@ -95,7 +85,7 @@ class TestParityWithTheOldTable:
         def make(pattern, **kwargs):
             agent = real(pattern, llm_interface=cells._llm(), **kwargs)
             built.append(agent)
-            return _Quick()
+            return QuickAgent()
 
         monkeypatch.setattr(agent_mod, "create_agent", make)
         mgr = _manager()
@@ -320,7 +310,7 @@ class TestUserFiles:
 
         def make(pattern, **kwargs):
             built.append(real(pattern, **kwargs))
-            return _Quick()
+            return QuickAgent()
 
         monkeypatch.setattr(agent_mod, "create_agent", make)
         mgr = _manager()
@@ -355,6 +345,26 @@ class TestTheWire:
         with pytest.raises(ValueError):
             LaunchAgentRequest(task="x", agent_type="x" * 65)
         assert LaunchAgentRequest(task="x", agent_type="x" * 64)
+
+    def test_the_python_default_id_is_one_value_in_every_place_that_spells_it(self):
+        """``react`` is written in four signatures (and once in ``state.js``, pinned by
+        ``test_agent_selects``); they are one default, so one of them cannot drift."""
+        import inspect
+
+        from fsm_llm.monitor.instance_manager.managed import ManagedAgent
+        from fsm_llm.monitor.server import routes_visualize
+
+        defaults = {
+            "request": LaunchAgentRequest.model_fields["agent_type"].default,
+            "managed": inspect.signature(ManagedAgent).parameters["agent_type"].default,
+            "launch": inspect.signature(InstanceManager.launch_agent)
+            .parameters["agent_type"]
+            .default,
+            "draw": inspect.signature(routes_visualize.api_agent_visualize)
+            .parameters["agent_type"]
+            .default,
+        }
+        assert set(defaults.values()) == {"react"}, defaults
 
     def test_launch_answers_the_id_and_every_list_carries_it(self, monkeypatch):
         client, mgr = self._client(monkeypatch)
