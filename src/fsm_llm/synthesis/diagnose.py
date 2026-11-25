@@ -26,6 +26,8 @@ from .constants import (
     CODE_ABANDONMENT,
     CODE_CYCLE,
     CODE_EXTRACTION_MISS,
+    CODE_INTENT_OUT_OF_SCOPE,
+    CODE_MALFORMED_EXTRACTION,
     CODE_NOT_PROCEDURE_FAULT,
     CODE_PATH_TOO_LONG,
     CODE_RETURN_KEYS_MISSING,
@@ -84,10 +86,31 @@ def _blocked(t: RunTrace, ctx: _Ctx) -> tuple[str, set[str]] | None:
     return state.id, gate_reads([state])
 
 
+def _observed(t: RunTrace, entries: tuple[tuple[Any, ...], ...], ctx: _Ctx) -> set[str]:
+    """Names seen in the stuck state at least ``dwell_threshold`` times ("" for an
+    entry with no name). The reader already dropped tainted windows."""
+    seen: dict[str, int] = {}
+    for e in entries:
+        if e[0] == t.stuck:
+            name = e[1] if len(e) == 3 else ""
+            seen[name] = seen.get(name, 0) + e[-1]
+    return {k for k, n in seen.items() if n >= ctx.policy.dwell_threshold}
+
+
+def _malformed_extraction(t: RunTrace, ctx: _Ctx) -> Any:
+    return (t.stuck, ()) if t.stuck and _observed(t, t.bad_extractions, ctx) else None
+
+
+def _intent_out_of_scope(t: RunTrace, ctx: _Ctx) -> Any:
+    fields = _observed(t, t.scopes, ctx) if t.outcome == "blocked" else None
+    return (t.stuck, tuple(sorted(fields))) if t.stuck and fields else None
+
+
 def _extraction_miss(t: RunTrace, ctx: _Ctx) -> Any:
     found = _blocked(t, ctx)
-    missing = found and sorted(found[1] - set(t.keys))
-    return (found[0], tuple(missing)) if found and missing else None
+    seen = found and _observed(t, t.misses, ctx) - set(t.keys)
+    missing = seen or (found and found[1] - set(t.keys))
+    return (found[0], tuple(sorted(missing))) if found and missing else None
 
 
 def _type_mismatch(t: RunTrace, ctx: _Ctx) -> Any:
@@ -147,10 +170,16 @@ def _return_keys_missing(t: RunTrace, ctx: _Ctx) -> Any:
     return (t.states[-1] if t.states else "", missing)
 
 
-#: The rule table, in the fixed order of D-038 (first match per trace wins).
-#: ``not-procedure-fault`` is decided before it and the cross-trace
-#: abandonment rule after it, both in ``diagnose``.
+# DECISION plan-2026-11-25T074601-c720601d/D-016
+# The order of D-038 of plan 2cefeb61 is amended: observed rules first (a failed
+# extraction also makes a miss, a fallback intent sets the key), the old order after.
+# Observed rules read the STUCK state only, at ``dwell_threshold``. Do NOT read the log,
+# ``source`` or a clock here, or move a rule above the outage precheck.
+#: The rule table (first match per trace wins). ``not-procedure-fault`` is decided
+#: before it and the cross-trace abandonment rule after it, both in ``diagnose``.
 RULES: tuple[tuple[str, Callable[[RunTrace, _Ctx], Any]], ...] = (
+    (CODE_MALFORMED_EXTRACTION, _malformed_extraction),
+    (CODE_INTENT_OUT_OF_SCOPE, _intent_out_of_scope),
     (CODE_EXTRACTION_MISS, _extraction_miss),
     (CODE_TYPE_MISMATCH, _type_mismatch),
     (CODE_VALUE_GATE_UNMET, _value_gate_unmet),
@@ -171,9 +200,9 @@ def diagnose(
     """Classify *traces* of a procedure into ``Diagnosis`` values.
 
     Interface contract: pure and deterministic (no model, clock or IO); the
-    order of *traces* never matters. A trace whose status is ``ok`` or whose
-    reason is not in ``PROCEDURE_FAULT_REASONS`` is ``not-procedure-fault``
-    (state "", no keys) and never a basis for a patch; a fault trace no rule
+    order of *traces* never matters. A trace whose status is ``ok``, whose
+    reason is not in ``PROCEDURE_FAULT_REASONS`` or that recorded a provider failure
+    (any code) is ``not-procedure-fault`` (state "", no keys) and never a basis for a patch; a fault trace no rule
     explains yields nothing. ``return_keys`` names the procedure's return keys
     for ``return-keys-missing`` (the traces do not hold them). The result is
     sorted by (runs descending, state, code). It never raises for a trace
@@ -189,7 +218,8 @@ def diagnose(
         found[(code, state)] = (n + runs, names | set(keys))
 
     for t in traces:
-        if t.status == STATUS_OK or t.reason not in PROCEDURE_FAULT_REASONS:
+        outage = any(n > 0 for _, n in t.failures)  # any code, even an unknown one
+        if t.status == STATUS_OK or outage or t.reason not in PROCEDURE_FAULT_REASONS:
             add(CODE_NOT_PROCEDURE_FAULT, "", ())
             continue
         for code, rule in RULES:

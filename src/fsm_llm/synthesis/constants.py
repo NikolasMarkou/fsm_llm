@@ -62,6 +62,8 @@ REASONS = (
 # --- Diagnosis (D-050): the fixed vocabulary of ``diagnose``, in rule order ---
 (
     CODE_NOT_PROCEDURE_FAULT,
+    CODE_MALFORMED_EXTRACTION,
+    CODE_INTENT_OUT_OF_SCOPE,
     CODE_EXTRACTION_MISS,
     CODE_TYPE_MISMATCH,
     CODE_VALUE_GATE_UNMET,
@@ -72,6 +74,8 @@ REASONS = (
     CODE_ABANDONMENT,
 ) = DIAGNOSIS_CODES = (
     "not-procedure-fault",
+    "malformed-extraction",
+    "intent-out-of-scope",
     "extraction-miss",
     "type-mismatch",
     "value-gate-unmet",

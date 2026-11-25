@@ -1164,6 +1164,11 @@
       "delta": 1,
       "reason": "plan c720601d D-012: new anchor on runtime/signals.py frame_signals (the signals reader rule)",
       "token": "plan-2026-11-25T074601-c720601d/D-012"
+    },
+    {
+      "delta": 1,
+      "reason": "plan c720601d step 9: new anchor D-016 in synthesis/diagnose.py (the amended rule order and the outage precheck)",
+      "token": "plan-2026-11-25T074601-c720601d/D-016"
     }
   ]
 }

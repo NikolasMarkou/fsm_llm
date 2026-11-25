@@ -13,7 +13,9 @@ from typing import Any, ClassVar
 
 import pytest
 
+from fsm_llm.core.codes import LlmFailureCode
 from fsm_llm.core.definitions import FSMDefinition
+from fsm_llm.runtime.signals import frame_signals
 from fsm_llm.synthesis import Diagnosis, RunTrace, SynthesisPolicy, diagnose
 from fsm_llm.synthesis.constants import (
     DIAGNOSIS_CODES,
@@ -323,6 +325,8 @@ class TestRuleOrder:
     two rules swapped must answer differently."""
 
     ORDER = (
+        "malformed-extraction",
+        "intent-out-of-scope",
         "extraction-miss",
         "type-mismatch",
         "value-gate-unmet",
@@ -334,10 +338,20 @@ class TestRuleOrder:
     )
 
     def test_the_table_is_the_fixed_order(self):
-        assert tuple(code for code, _ in diagnose_module.RULES) == self.ORDER[:7]
+        assert tuple(code for code, _ in diagnose_module.RULES) == self.ORDER[:9]
         assert DIAGNOSIS_CODES == (NPF, *self.ORDER)
 
     OVERLAPS: ClassVar[list[Any]] = [
+        (  # a failed extraction also makes a miss: the extraction rule comes first
+            "malformed-extraction",
+            "extraction-miss",
+            _t(bad_extractions=(("ask", 3),)),
+        ),
+        (  # a fallback intent sets the key, so the gate rule would blame the value
+            "intent-out-of-scope",
+            "value-gate-unmet",
+            _t(keys=("age",), kinds=(("age", "int"),), scopes=(("ask", "mood", 3),)),
+        ),
         (  # nick is absent and age has the wrong type: the miss comes first
             "extraction-miss",
             "type-mismatch",
@@ -414,3 +428,120 @@ class TestShape:
         text = Path(diagnose_module.__file__).read_text(encoding="utf-8")
         for banned in ("import time", "import random", "open(", "import os", "logger"):
             assert banned not in text
+
+
+_EVIDENCE: dict[str, Any] = {
+    "bad_extractions": (("ask", 3),),
+    "misses": (("ask", "age", 3),),
+    "scopes": (("ask", "mood", 3),),
+}
+
+
+class TestOutagePrecheck:
+    """A recorded failure code or a foreign reason is never a procedure fault, with clean
+    evidence in the same trace (plan c720601d D-016)."""
+
+    @pytest.mark.parametrize("code", sorted(c.value for c in set(LlmFailureCode)))
+    @pytest.mark.parametrize("status", [STATUS_ABORTED, STATUS_FAILED])
+    def test_every_failure_code_is_an_outage(self, code, status):
+        t = _t(status=status, failures=((code, 1),), **_EVIDENCE)
+        assert _codes([t]) == [(NPF, "")]
+
+    def test_an_unknown_code_fails_closed(self):
+        t = _t(failures=(("made_up", 2),), **_EVIDENCE)
+        assert t.failures == (("unknown", 2),)
+        assert _codes([t]) == [(NPF, "")]
+
+    def test_the_same_evidence_with_no_failure_is_a_fault(self):
+        assert _codes([_t(**_EVIDENCE)]) == [("malformed-extraction", "ask")]
+
+    @pytest.mark.parametrize(
+        "reason",
+        [r for r in REASONS if r not in ("budget_spent", "return_keys_missing")],
+    )
+    def test_a_foreign_reason_with_clean_evidence_is_not_a_fault(self, reason):
+        assert _codes([_t(reason=reason, **_EVIDENCE)]) == [(NPF, "")]
+
+    def test_an_outage_trace_does_not_hide_a_fault_trace(self):
+        got = _codes([_t(failures=(("timeout", 1),), **_EVIDENCE), _t(**_EVIDENCE)])
+        assert sorted(got) == [("malformed-extraction", "ask"), (NPF, "")]
+
+
+class TestObservedRules:
+    def test_malformed_extraction_needs_the_dwell_threshold(self):
+        assert _codes([_t(bad_extractions=(("ask", 3),))]) == [
+            ("malformed-extraction", "ask")
+        ]
+        below = _t(bad_extractions=(("ask", 2),))
+        assert _codes([below]) == [("extraction-miss", "ask")]  # the old inference
+        lower = SynthesisPolicy(dwell_threshold=2)
+        assert _codes([below], policy=lower) == [("malformed-extraction", "ask")]
+
+    def test_malformed_extraction_has_no_keys(self):
+        got = diagnose([_t(bad_extractions=(("ask", 9),))], DEFINITION, POLICY)
+        assert [(d.code, d.keys) for d in got] == [("malformed-extraction", ())]
+
+    def test_evidence_from_another_state_is_not_accepted(self):
+        for field in (
+            {"bad_extractions": (("rate", 9),)},
+            {"scopes": (("rate", "mood", 9),)},
+            {"misses": (("rate", "anything", 9),)},
+        ):
+            got = diagnose([_t(**field)], DEFINITION, POLICY)
+            assert [(d.code, d.keys) for d in got] == [("extraction-miss", ("age",))]
+
+    def test_out_of_scope_names_the_fields_in_the_stuck_state_only(self):
+        t = _t(scopes=(("ask", "mood", 3), ("ask", "zed", 1), ("rate", "tone", 9)))
+        got = diagnose([t], DEFINITION, POLICY)
+        assert [(d.code, d.state, d.keys) for d in got] == [
+            ("intent-out-of-scope", "ask", ("mood",))
+        ]
+
+    def test_out_of_scope_below_the_threshold_or_not_blocked_is_not_it(self):
+        assert _codes([_t(scopes=(("ask", "mood", 2),))]) == [
+            ("extraction-miss", "ask")
+        ]
+        t = _t(scopes=(("ask", "mood", 3),), outcome="ambiguous")
+        assert "intent-out-of-scope" not in [c for c, _ in _codes([t])]
+
+    def test_observed_miss_keys_replace_the_inferred_ones(self):
+        t = _t(misses=(("ask", "anything", 3), ("ask", "zed", 1)))
+        got = diagnose([t], DEFINITION, POLICY)
+        assert [(d.code, d.keys) for d in got] == [("extraction-miss", ("anything",))]
+
+    def test_observed_miss_of_a_key_the_run_ended_with_is_dropped(self):
+        t = _t(keys=("anything",), misses=(("ask", "anything", 5),))
+        got = diagnose([t], DEFINITION, POLICY)
+        assert [(d.code, d.keys) for d in got] == [("extraction-miss", ("age",))]
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {},
+            {"misses": (("ask", "anything", 2),)},
+            {"misses": (("rate", "score", 7),)},
+            {"failures": (), "scopes": (("ask", "mood", 1),)},
+        ],
+    )
+    def test_no_evidence_gives_the_old_result_byte_for_byte(self, extra):
+        old = diagnose([_t()], DEFINITION, POLICY)
+        assert diagnose([_t(**extra)], DEFINITION, POLICY) == old
+
+    def test_a_tainted_window_never_reaches_a_trace_or_a_rule(self):
+        def ev(seq, kind, **kw):
+            return {"seq": seq, "frame": 1, "type": kind, **kw}
+
+        miss = ev(2, "extraction/miss", state="ask", keys=["anything"])
+        window = [ev(1, "turn/start", state="ask", source="user")]
+        window += [miss, ev(3, "provider/error", failure_code="timeout")]
+        window += [ev(4, "turn/end", outcome="committed")]
+        sig = frame_signals(window, 1)
+        assert sig.misses == () and sig.failures == (("timeout", 1),)
+        t = _t(failures=sig.failures, misses=sig.misses)
+        assert _codes([t]) == [(NPF, "")]
+
+    def test_diagnose_and_the_reader_name_no_source(self):
+        for mod in (diagnose_module, sys.modules["fsm_llm.runtime.signals"]):
+            text = Path(mod.__file__).read_text(encoding="utf-8")
+            assert '"source"' not in text and "'source'" not in text
+            assert ".source" not in text
