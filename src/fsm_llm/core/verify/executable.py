@@ -9,6 +9,10 @@ contract, WARNINGS only, so a built-in is never refused by a finding), ``[names]
 completion tool names against ``requires.tools``, and every required name through an injected
 resolver) and ``[model]`` (V7, only for ``origin="model"``). V6 (strict mode) is not built.
 
+A ``workflow`` document (plan 7d9c0955 D-006) takes its own rules, read from the BODY and never from
+a claim: names, placeholders, the host-bound fields and, for a model, a closed list of step types
+(``core.verify.executable_workflow``); V2 for it runs in the workflows adapter.
+
 A ``pattern`` document (plan a555dcfe D-012) takes the same sequence over INSTANCES: V2 checks the
 default instance (every option at its default, every variant unselected) and the instance with
 every variant applied once, each as an FSM body, and a template with a required option (no default)
@@ -100,6 +104,8 @@ from .executable_pattern import (
     pattern_names,
 )
 from .executable_pattern import model_problems as pattern_model_problems
+from .executable_workflow import model_problems as workflow_model_problems
+from .executable_workflow import workflow_findings
 from .flow import analyze_data_flow, analyze_liveness
 from .result import FSMValidationResult
 from .validator import FSMValidator
@@ -296,10 +302,14 @@ def load_executable(
             note("schema", "error", line)
         return finish(None)
     if isinstance(envelope, WorkflowEnvelope):
-        # Fail closed until the workflow verifier exists (plan 7d9c0955, step 3); nothing below
-        # may read `body.fsm`, which a workflow does not have.
-        note("schema", "error", "a workflow document has no verifier in this build")
-        return finish(None)
+        # a workflow has no `body.fsm`: its own rules, read from the steps (D-006)
+        for tag, severity, text in workflow_findings(envelope, resolver):
+            note(tag, severity, text)
+        for line in (
+            workflow_model_problems(envelope, allow) if origin == "model" else ()
+        ):
+            note("model", "error", line)
+        return finish(envelope)
 
     written = envelope
     if isinstance(envelope, PatternEnvelope) and envelope.body.extends is not None:

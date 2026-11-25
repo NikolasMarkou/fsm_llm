@@ -549,20 +549,19 @@ class TestTheSchemaAndTheVerifierGuard:
 
     @pytest.mark.parametrize("origin", ["operator", "model"])
     @pytest.mark.parametrize("name", sorted(corpus.workflow_documents()))
-    def test_load_executable_fails_closed_until_the_workflow_verifier_exists(
+    def test_load_executable_runs_the_workflow_verifier_and_never_reads_an_fsm_body(
         self, origin, name
     ):
-        # rewritten at step 3, which builds the verifier: V1 passes, nothing past it may read
-        # `body.fsm` (a workflow has none) and nothing may load unchecked.
+        # rewritten at step 3 (the verifier exists): a workflow has no `body.fsm`, so the load
+        # sequence takes its own branch and returns the envelope as parsed (invariant 2).
+        doc = corpus.workflow_documents()[name]
+
         envelope, result = load_executable(
-            corpus.workflow_documents()[name], origin=origin, allow={}
+            doc, origin=origin, allow={"callables": doc["requires"]["callables"]}
         )
 
-        assert envelope is None
-        assert not result.is_valid
-        assert result.errors == [
-            "[schema] a workflow document has no verifier in this build"
-        ]
+        assert isinstance(envelope, ex.WorkflowEnvelope)
+        assert result.is_valid and result.errors == []
 
     def test_a_hostile_model_origin_workflow_never_loads(self):
         hostile = _doc(

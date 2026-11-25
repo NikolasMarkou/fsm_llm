@@ -1199,6 +1199,11 @@
       "delta": 1,
       "reason": "plan 7d9c0955 step 2 adds the anchor of D-005 (the workflow body is data, the names live in core once) above WorkflowBody in core/definitions/executable_workflow.py",
       "token": "plan-2026-11-25T195353-7d9c0955/D-005"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 7d9c0955 step 3: the new anchor token plan-2026-11-25T195353-7d9c0955/D-006 in core/verify/executable_workflow.py (P-b: V3 and V7 read the body, closed step-type list)",
+      "token": "plan-2026-11-25T195353-7d9c0955/D-006"
     }
   ]
 }
