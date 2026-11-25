@@ -54,7 +54,7 @@ class TestVisualizeWithoutManager:
     @pytest.mark.parametrize(
         "url",
         [
-            "/api/agent/visualize?agent_type=ReactAgent",
+            "/api/agent/visualize?agent_type=react",
             "/api/workflow/visualize?workflow_id=order_processing",
         ],
     )
@@ -67,8 +67,8 @@ class TestVisualizeWithoutManager:
 
     def test_visualize_payload_carries_no_server_layout(self):
         client, _ = _client()
-        data = client.get("/api/agent/visualize?agent_type=ReactAgent").json()
-        assert set(data) == {"info", "nodes", "edges"}
+        data = client.get("/api/agent/visualize?agent_type=react").json()
+        assert set(data) == {"fsm", "nodes", "edges"}
         assert all("x" not in n and "y" not in n for n in data["nodes"])
         wf = client.get("/api/workflow/visualize?workflow_id=order_processing").json()
         assert set(wf) == {"info", "nodes", "edges"}
@@ -358,7 +358,7 @@ assert mgr._resolve_fsm_data(preset, None) == expected
 assert routes_visualize._read_preset_json(preset) == expected
 scanned = routes_visualize._scan_fsm_presets()["fsm"]
 assert not [p for p in scanned if p.get("parse_error")], scanned
-assert application._load_flows()["agents"]
+assert application._load_flows()["workflows"]
 print("OK")
 """
 

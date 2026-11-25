@@ -1818,6 +1818,7 @@ _OLD_MEMBERS = frozenset(
         "_validate_workflow_instance_id",
         "_workflow_hook",
         "advance_workflow",
+        "agent_preview",
         "agent_types",
         "attach_api",
         "attach_event_log",

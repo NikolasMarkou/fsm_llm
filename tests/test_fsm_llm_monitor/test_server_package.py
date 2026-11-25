@@ -122,13 +122,13 @@ class TestStaticAndTemplateDirectories:
         flows = facade.get_flows()
         expected = json.loads((MONITOR / "static" / "flows.json").read_text("utf-8"))
         assert flows == expected
-        assert flows["agents"] and flows["workflows"]
+        assert list(flows) == ["workflows"] and flows["workflows"]
         assert application._load_flows() == expected
 
     def test_configure_loads_the_flows_from_the_real_file(self):
         _client()
-        assert facade.get_flows()["agents"]
-        resp = TestClient(facade.app).get("/api/agent/visualize?agent_type=ReactAgent")
+        assert facade.get_flows()["workflows"]
+        resp = TestClient(facade.app).get("/api/agent/visualize?agent_type=react")
         assert resp.status_code == 200
         assert resp.json()["nodes"]
 

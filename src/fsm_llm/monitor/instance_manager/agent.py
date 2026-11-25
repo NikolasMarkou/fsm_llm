@@ -153,6 +153,12 @@ class AgentsMixin(_InstanceSurface):
                 self._executables = registry
             return copy.deepcopy(self._agent_rows)
 
+    def agent_preview(self, agent_type: str) -> dict[str, Any] | None:
+        """A fresh FSM dict to draw for a listed id, ``None`` when it has no preview; ``KeyError`` when not listed."""
+        if all(row["id"] != agent_type for row in self.agent_types()):
+            raise KeyError(agent_type)
+        return _preview(self._executables.get(agent_type))  # type: ignore[union-attr]
+
     # DECISION plan-2026-11-25T145435-659c07c3/D-009
     # The id is matched EXACTLY against the launchable rows (`create_agent` strips and lowercases, so a
     # raw id is never forwarded) and `create_agent` gets only config, handlers, registry and, when due,

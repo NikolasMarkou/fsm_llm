@@ -1,5 +1,5 @@
-"""Routes: FSM visualization, FSM presets, and the agent and workflow pattern flows
-(``flows.json``)."""
+"""Routes: FSM visualization, FSM presets, the agent preview graphs and the workflow
+pattern flows (``flows.json``)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from fsm_llm.logging import logger
 from ..constants import VIZ_EDGE_LABEL_CHARS
 from ..definitions import FSMSnapshot, StateInfo, TransitionInfo
 from ..instance_manager import find_examples_dir, load_preset_json, read_json_file
-from .application import app, get_flows
+from .application import app, get_flows, get_manager
 from .support import _json_body
 
 # Preset cache: (result, timestamp). Presets rarely change; avoid re-scanning disk.
@@ -260,24 +260,19 @@ async def api_preset_fsm(preset_id: str) -> dict[str, Any]:
     return _read_preset_json(preset_id)
 
 
-# --- REST API: Pattern Visualization (from flows.json) ---
+# --- REST API: Pattern Visualization (agents by executable id, workflows from flows.json) ---
 
 
 @app.get("/api/agent/visualize")
-async def api_agent_visualize(agent_type: str = "ReactAgent") -> dict[str, Any]:
-    """Return visualization data for an agent pattern flow."""
-    flow = get_flows().get("agents", {}).get(agent_type)
-    if flow is None:
-        raise HTTPException(status_code=404, detail=f"unknown agent type: {agent_type}")
-    return {
-        "info": {
-            "name": agent_type,
-            "description": flow["description"],
-            "state_count": len(flow["nodes"]),
-        },
-        "nodes": flow["nodes"],
-        "edges": flow["edges"],
-    }
+async def api_agent_visualize(agent_type: str = "react") -> dict[str, Any]:
+    """Draw a listed agent id from its preview FSM through ``_fsm_viz_or_400`` (404 otherwise, id never echoed)."""
+    try:
+        preview = await asyncio.to_thread(get_manager().agent_preview, agent_type)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown agent type") from None
+    if preview is None:
+        raise HTTPException(status_code=404, detail="no preview for this agent type")
+    return _fsm_viz_or_400(preview)
 
 
 @app.get("/api/workflow/visualize")

@@ -291,12 +291,12 @@ _flows: dict[str, Any] = {}
 
 
 def _load_flows() -> dict[str, Any]:
-    """Load agent/workflow flow definitions from the JSON data file."""
+    """Load the workflow flow definitions from the JSON data file."""
     flows_path = STATIC_DIR / "flows.json"
     if flows_path.exists():
         result: dict[str, Any] = read_json_file(flows_path)
         return result
-    return {"agents": {}, "workflows": {}}
+    return {"workflows": {}}
 
 
 def configure(
@@ -404,7 +404,7 @@ def get_manager() -> InstanceManager:
 
 
 def get_flows() -> dict[str, Any]:
-    """The agent and workflow pattern flows, loaded on first use (an embedder
+    """The workflow pattern flows, loaded on first use (an embedder
     running ``uvicorn ...server:app`` never calls ``configure()``)."""
     global _flows
     if not _flows:

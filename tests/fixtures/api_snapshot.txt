@@ -1786,6 +1786,7 @@ fsm_llm.monitor.InstanceInfo class(BaseModel)
 fsm_llm.monitor.InstanceManager class
   def __init__(self, config: MonitorConfig | None = None) -> None
   def advance_workflow(self, instance_id: str, wf_instance_id: str, user_input: str = '') -> bool
+  def agent_preview(self, agent_type: str) -> dict[str, Any] | None
   def agent_types(self) -> list[dict[str, Any]]
   def attach_api(self, api: API) -> None
   def attach_event_log(self, log: EventLog) -> None

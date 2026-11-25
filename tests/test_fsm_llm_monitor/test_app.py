@@ -141,12 +141,13 @@ class TestWebServer:
         assert "detail" in data
 
     def test_api_agent_visualize(self):
-        resp = self.client.get("/api/agent/visualize?agent_type=ReactAgent")
+        resp = self.client.get("/api/agent/visualize?agent_type=react")
         assert resp.status_code == 200
         data = resp.json()
         assert "nodes" in data
         assert "edges" in data
         assert len(data["nodes"]) == 3  # think, act, conclude
+        assert len(data["edges"]) == 4  # the real FSM (the hand drawing had 3)
 
     def test_api_agent_visualize_unknown(self):
         resp = self.client.get("/api/agent/visualize?agent_type=FakeAgent")
@@ -241,9 +242,7 @@ class TestWebServer:
         resp = self.client.get("/static/flows.json")
         assert resp.status_code == 200
         data = resp.json()
-        assert "agents" in data
-        assert "workflows" in data
-        assert "ReactAgent" in data["agents"]
+        assert "agents" not in data
         assert "order_processing" in data["workflows"]
 
 
