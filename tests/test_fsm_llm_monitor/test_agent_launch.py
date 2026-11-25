@@ -277,7 +277,12 @@ class TestTheIdIsMatchedExactly:
             if isinstance(node, ast.ImportFrom) and node.module == "fsm_llm.agents"
             for alias in node.names
         }
-        assert named == {"AgentConfig", "ToolRegistry", "create_agent"}
+        assert named == {
+            "AgentConfig",
+            "ToolDefinition",
+            "ToolRegistry",
+            "create_agent",
+        }
 
 
 class TestTheModelIsResolvedFirst:
@@ -328,6 +333,66 @@ class TestUserFiles:
         mgr.attach_executables(registry)
         with pytest.raises(ValueError, match="Unknown agent type"):
             mgr.launch_agent(agent_type="my_eval", task="t", tools_config=[_STUB])
+        assert spy.calls == []
+
+    def _named(self, tmp_path, names, doc_id="named"):
+        """A react file under *doc_id* whose ``requires.tools`` is the list *names*."""
+        doc = pf.load_document("react")
+        doc["id"] = doc_id
+        doc["requires"]["tools"] = names
+        (tmp_path / f"{doc_id}.json").write_text(json.dumps(doc), encoding="utf-8")
+        builtins = [*builtin_executables(), *preset_executables()]
+        return load_directory_registry(tmp_path, builtins, prog="t")  # type: ignore[arg-type]
+
+    def _tool_names_of(self, tmp_path, monkeypatch, tools):
+        """Launch the file naming ``search`` with the form *tools*; the tools the agent got."""
+        real = agent_mod.create_agent
+        got: list[Any] = []
+
+        def make(pattern, **kwargs):
+            real(pattern, **kwargs)  # the real construction checks the named tools
+            got.append(kwargs.get("tools"))
+            return QuickAgent()
+
+        monkeypatch.setattr(agent_mod, "create_agent", make)
+        mgr = _manager()
+        mgr.attach_executables(self._named(tmp_path, ["search"]))
+        managed = _launch(mgr, "named", model="stub/double", tools_config=tools)
+        assert managed.error is None and managed.status == "completed"
+        return got[0]
+
+    def test_a_file_that_names_a_tool_gets_its_stub_alone_and_beside_a_form_tool(
+        self, tmp_path, monkeypatch
+    ):
+        """Review of plan 659c07c3 (probe4): the form tools REPLACED the stubs of the named tools,
+        so a file naming ``search`` failed as soon as the user added one tool."""
+        alone = self._tool_names_of(tmp_path, monkeypatch, [])
+        assert alone.tool_names == ["search"]
+        beside = self._tool_names_of(tmp_path, monkeypatch, [_STUB])
+        assert sorted(beside.tool_names) == ["lookup", "search"]
+
+    def test_a_form_tool_of_the_same_name_wins_over_the_stub(
+        self, tmp_path, monkeypatch
+    ):
+        own = StubToolConfig(name="search", description="mine", stub_response="MINE")
+        registry = self._tool_names_of(tmp_path, monkeypatch, [own])
+        assert registry.tool_names == ["search"]
+        assert registry.get("search").description == "mine"
+        assert registry.get("search").execute_fn() == "MINE"
+
+    @pytest.mark.parametrize("name", ["web search", "x" * 100, "<b>hi</b>"])
+    def test_a_file_that_names_a_bad_tool_is_listed_and_not_launchable(
+        self, name, tmp_path, monkeypatch
+    ):
+        """The names pass the envelope but fail the tool-name rule: such a row could never launch,
+        and its 400 was a pydantic dump that echoed the document text."""
+        spy = _spy(monkeypatch)
+        mgr = _manager()
+        mgr.attach_executables(self._named(tmp_path, [name]))
+        (row,) = [r for r in mgr.agent_types() if r["id"] == "named"]
+        assert row["launchable"] is False and row["tool_names"] == [name]
+        with pytest.raises(ValueError, match="Unknown agent type"):
+            mgr.launch_agent(agent_type="named", task="t")
         assert spy.calls == []
 
     def test_a_case_only_shadow_of_a_builtin_never_launches_a_different_definition(

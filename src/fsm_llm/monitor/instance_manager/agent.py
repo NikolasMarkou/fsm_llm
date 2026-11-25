@@ -12,7 +12,7 @@ import copy
 import threading
 from typing import Any
 
-from fsm_llm.agents import AgentConfig, ToolRegistry, create_agent
+from fsm_llm.agents import AgentConfig, ToolDefinition, ToolRegistry, create_agent
 from fsm_llm.core.definitions.executable import Capability
 from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.llm import resolve_model
@@ -73,18 +73,28 @@ def _preview(executable: Any) -> dict[str, Any] | None:
         return None
 
 
+def _tool_name_ok(name: str) -> bool:
+    """Whether ``ToolDefinition`` (the one tool-name rule) takes *name*; a row naming others cannot launch."""
+    try:
+        ToolDefinition(name=name, description=name)
+    except ValueError:
+        return False
+    return True
+
+
 def _agent_row(executable: Any) -> dict[str, Any]:
     """One row of ``agent_types``: flags and tool names, never a text of the document."""
     needs = "tools" in executable.requires.callables
     tools = executable.requires.tools
+    names = list(tools) if isinstance(tools, list) else []
     return {
         "id": executable.id,
         "name": executable.id,
-        "launchable": _launchable(executable),
+        "launchable": _launchable(executable) and all(map(_tool_name_ok, names)),
         "needs_tools": needs,
         "takes_tools": needs
         or "tools" in getattr(executable, "optional_callables", ()),
-        "tool_names": list(tools) if isinstance(tools, list) else [],
+        "tool_names": names,
         "drawable": _preview(executable) is not None,
     }
 
@@ -189,9 +199,10 @@ class AgentsMixin(_InstanceSurface):
                 f"Available: {', '.join(r['id'] for r in rows)}"
             )
 
-        tools = tools_config or [
-            StubToolConfig(name=n, description=n) for n in row["tool_names"]
-        ]
+        # the stub of each tool the file names, then the form tools (one of the same name wins)
+        by_name = {n: StubToolConfig(name=n, description=n) for n in row["tool_names"]}
+        by_name.update({t.name: t for t in tools_config or []})
+        tools = list(by_name.values())
         if row["needs_tools"] and not tools:
             raise ValueError(
                 f"{agent_type} requires at least one tool to be configured"
