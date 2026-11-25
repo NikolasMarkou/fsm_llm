@@ -58,7 +58,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fsm_llm.agents import create_agent
+from fsm_llm.agents import create_agent, fsm_definitions
 from fsm_llm.agents.definitions import (
     AgentConfig,
     MetaBuilderResult,
@@ -77,11 +77,11 @@ from fsm_llm.core.definitions.executable import (
     PatternEnvelope,
     Requires,
 )
-from fsm_llm.core.definitions.executable_instance import identity_of
+from fsm_llm.core.definitions.executable_instance import identity_of, instantiate_body
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
-from fsm_llm.engine.executables.namespaces import PATTERN_AGENTS
+from fsm_llm.engine.executables.namespaces import GENERATORS, PATTERN_AGENTS
 from fsm_llm.tools import ToolRegistry, registry_from
 
 __all__ = [
@@ -210,6 +210,33 @@ class PatternExecutable(CodeBackedExecutable):
         )
         self.template_identity = identity_of(envelope).template_identity or ""
         self.lifecycle = envelope.lifecycle
+
+    # DECISION plan-2026-11-25T145435-659c07c3/D-005
+    # A preview is a fresh FSM dict and nothing else: no agent, model, handler, `HumanInTheLoop`,
+    # event log or caller text (no argument; a variable is the fixed string `<name>`). The one stub
+    # tool is never flagged and never run. Do NOT build the real agent to draw it, take a task, or
+    # return a half graph (a file that cannot instantiate raises its typed error).
+    def preview_definition(self) -> dict[str, Any] | None:
+        """The FSM an agent of this pattern runs, as a fresh dict; ``None`` for swarm (no FSM)."""
+        if self.envelope is not None:
+            names = self.envelope.variables
+            return instantiate_body(
+                self.envelope,
+                None,
+                variables={name: f"<{name}>" for name in names},
+                generators=GENERATORS.get,
+            )
+        stub = ToolRegistry().register_function(
+            lambda: "", name="lookup", description="A stub tool."
+        )
+        build = {
+            "adapt": fsm_definitions.build_adapt_fsm,
+            "self_consistency": fsm_definitions.build_self_consistency_fsm,
+            "meta_builder": fsm_definitions.build_meta_builder_fsm,
+            "parallel_react": lambda: fsm_definitions.build_parallel_react_fsm(stub),
+            "reasoning_react": lambda: fsm_definitions.build_react_fsm(stub),
+        }.get(self.pattern)
+        return build() if build else None
 
     # DECISION plan-2026-11-20T055240-ace7a8c8/D-061
     # An executable NEVER supplies an approval grant: the host's `hitl` object passes through

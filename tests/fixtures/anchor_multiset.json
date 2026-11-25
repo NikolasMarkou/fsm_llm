@@ -1169,6 +1169,11 @@
       "delta": 1,
       "reason": "plan c720601d step 9: new anchor D-016 in synthesis/diagnose.py (the amended rule order and the outage precheck)",
       "token": "plan-2026-11-25T074601-c720601d/D-016"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 659c07c3 step 2: new anchor D-005 on PatternExecutable.preview_definition",
+      "token": "plan-2026-11-25T145435-659c07c3/D-005"
     }
   ]
 }
