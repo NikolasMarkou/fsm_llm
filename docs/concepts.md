@@ -63,7 +63,6 @@ flowchart TD
     eval[fsm_llm.eval] --> core
     synthesis[fsm_llm.synthesis] --> core
     synthesis --> agents
-    synthesis --> eval
     testing[fsm_llm.testing] --> core
 ```
 

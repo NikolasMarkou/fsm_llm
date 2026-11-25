@@ -487,6 +487,8 @@ SKILL_CATALOG_END = "[end of untrusted skill catalog]"
 # `[`: the agent sanitizer prints the real tags that way, so a forged closing tag
 # or end line in a description would look the same in the prompt. See D-041.
 SKILL_DEFANG = str.maketrans("[]<>", "()\u2039\u203a")
+# The default cap of `text.safe_text` (one model-authored line in a finding or a prompt).
+SAFE_TEXT_CHARS = 300
 # The one line shown to a model or CLI reader when a load was stopped (a spent
 # limit or deadline). `{codes}` takes issue CODES only, never messages or paths.
 SKILL_INCOMPLETE_NOTE = (

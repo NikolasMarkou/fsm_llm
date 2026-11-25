@@ -16,13 +16,13 @@ from typing import Any
 import pytest
 
 from fsm_llm.core.definitions import CompletionResponse, FSMDefinition, LLMResponseError
+from fsm_llm.simulation import Simulator
 from fsm_llm.synthesis import (
     Diagnosis,
     FSMLibrary,
     FSMSynthesizer,
     PromotionResult,
     RunTrace,
-    Simulator,
     SynthesisError,
     SynthesisPolicy,
     TraceRecorder,
@@ -32,6 +32,7 @@ from fsm_llm.synthesis import (
     run_gates,
     strip_abort,
 )
+from fsm_llm.synthesis import repair as repair_module
 from fsm_llm.synthesis.constants import DIAGNOSIS_CODES, PROMOTION_CODES
 from fsm_llm.synthesis.gates import GATES
 from fsm_llm.synthesis.prompts import (
@@ -462,11 +463,11 @@ class TestSeededDefect:
         assert rig.search()[0] == child
 
     def test_a_parent_deprecated_by_another_writer_is_a_result_not_an_exception(
-        self, tmp_path
+        self, tmp_path, monkeypatch
     ):
         """The child is already on disk when the retire finds the parent gone."""
         rig = Rig(tmp_path)
-        real = rig.sim.replay
+        real = repair_module.replay_g6b
 
         def replay(*a: Any, **k: Any) -> Any:
             out = real(*a, **k)
@@ -474,7 +475,7 @@ class TestSeededDefect:
                 rig.lib.deprecate(rig.parent)  # a concurrent promotion of a sibling
             return out
 
-        rig.sim.replay = replay  # type: ignore[method-assign]
+        monkeypatch.setattr(repair_module, "replay_g6b", replay)
         res = rig.repair(replay_scripts=[SCRIPT], write=True)
 
         assert res.code == "promote" and res.written and res.deprecated
@@ -611,7 +612,7 @@ class TestNotPromoted:
 
     def test_a_spent_replay_bound_is_not_a_partial_verdict(self, tmp_path, monkeypatch):
         rig = Rig(tmp_path)
-        monkeypatch.setattr(rig.sim, "replay", lambda *a, **k: None)
+        monkeypatch.setattr(repair_module, "replay_g6b", lambda *a, **k: None)
         before = rig.tree()
         res = rig.repair(write=True)
         assert res.code == "replay-incomplete" and rig.tree() == before

@@ -56,9 +56,6 @@ PACKAGE_OWN_IGNORES = {
 # Edge -> how it ends. A new line is a new debt: it needs a row that retires it or a written
 # reason, and an entry here, in the same commit.
 NAMED_DEBTS = {
-    # D-016 a: the G6b simulator reads the eval case driver and its config
-    "fsm_llm.synthesis.simulation -> fsm_llm.eval.cases": "retired by: roadmap 6.6 and P7.6",
-    "fsm_llm.synthesis.simulation -> fsm_llm.eval.config": "retired by: roadmap 6.6 and P7.6",
     # D-016 c: no roadmap row retires it; reported to the user for a decision
     "fsm_llm.agents.reasoning_react -> fsm_llm.reasoning": "permanent",
     # D-033, D-042: the engine's one module on OKF

@@ -22,11 +22,11 @@ from fsm_llm.core.definitions import (
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.eval.cases import ConversationCase, Expectations, run_case_trial
 from fsm_llm.eval.config import EvalConfig
+from fsm_llm.simulation import Simulator
 from fsm_llm.synthesis import (
     FSMSynthesizer,
     Procedure,
     SimulationReport,
-    Simulator,
     SynthesisError,
     SynthesisPolicy,
     SynthesizeExecutor,
@@ -34,7 +34,7 @@ from fsm_llm.synthesis import (
     run_gates,
 )
 from fsm_llm.synthesis.procedures import reason_of
-from fsm_llm.synthesis.simulation import happy_path
+from fsm_llm.synthesis.simulation import happy_path, replay_g6b, run_g6b
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import (
     ScriptedRunnerLLM,
@@ -80,7 +80,8 @@ def _run(
     writer = writer if writer is not None else ScriptedLLM([_reply(*_four())])
     kw = {} if clock is None else {"clock": clock}
     sim = Simulator(llm, writer, **kw)
-    report = sim.run(
+    report = run_g6b(
+        sim,
         _injected() if fsm is None else fsm,
         goal=GOAL,
         inputs=("topic",),
@@ -588,7 +589,7 @@ class TestFlakiness:
 
 
 class TestReplay:
-    """``Simulator.replay``: a fixed script set, passes per scenario, no writer."""
+    """``replay_g6b``: a fixed script set, passes per scenario, no writer."""
 
     SCRIPTS = (
         {"kind": "happy", "turns": ["my answer is 42"]},
@@ -600,7 +601,8 @@ class TestReplay:
         writer = ScriptedLLM([])  # a replay never calls the writer
         kw = {} if clock is None else {"clock": clock}
         sim = Simulator(llm, writer, **kw)
-        out = sim.replay(
+        out = replay_g6b(
+            sim,
             _injected(),
             self.SCRIPTS,
             inputs=("topic",),

@@ -29,11 +29,11 @@ from fsm_llm.core.definitions import (
     LLMUsage,
 )
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
+from fsm_llm.simulation import Simulator
 from fsm_llm.synthesis import (
     FSMLibrary,
     GateReport,
     LibraryError,
-    Simulator,
     SynthesisError,
     SynthesisPolicy,
     SynthesisRefusedError,
@@ -55,6 +55,7 @@ from fsm_llm.synthesis.prompts import (
     system_prompt,
 )
 from fsm_llm.synthesis.reply import _judge, _repair_brackets, normalise_extraction
+from fsm_llm.synthesis.simulation import run_g6b
 from fsm_llm.synthesis.synthesizer import (
     CompileResult,
     FSMSynthesizer,
@@ -1735,6 +1736,11 @@ class _NoWriter(ScriptedLLM):
 def _happy(data: dict[str, Any], keys: tuple[str, ...], policy: Any = None) -> Any:
     policy = policy or SynthesisPolicy()
     definition = run_gates(data, policy, return_keys=keys).definition
-    return Simulator(ByTurn(), _NoWriter()).run(
-        definition, goal="g", inputs=(), return_keys=keys, policy=policy
+    return run_g6b(
+        Simulator(ByTurn(), _NoWriter()),
+        definition,
+        goal="g",
+        inputs=(),
+        return_keys=keys,
+        policy=policy,
     )

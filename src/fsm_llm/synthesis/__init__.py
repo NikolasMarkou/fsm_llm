@@ -8,7 +8,7 @@ model runs it as a pushed child of a host conversation.
 
 So far: the exception hierarchy, the shared constants, the policy (limits, the
 G5 gate and abort injection), the library, the gate composition (G1 to G5, the
-G6a dead-edge gate and the G6b ``Simulator``), the compile and repair loop,
+G6a dead-edge gate and the G6b function ``run_g6b``), the compile and repair loop,
 ``RunTrace`` and ``TraceRecorder``, ``diagnose`` over run traces,
 ``apply_patch`` (an RFC 6902 subset), ``propose_patch`` and
 ``repair_procedure``, ``obtain`` with the approval gate, the
@@ -50,7 +50,7 @@ from .policy import (
 )
 from .repair import PromotionResult, propose_patch, repair_procedure
 from .results import synthesis_run_result
-from .simulation import SimulationReport, Simulator
+from .simulation import SimulationReport, run_g6b
 from .synthesizer import (
     CompileResult,
     FSMSynthesizer,
@@ -78,7 +78,6 @@ __all__ = [
     "PromotionResult",
     "RunTrace",
     "SimulationReport",
-    "Simulator",
     "SynthesisError",
     "SynthesisPolicy",
     "SynthesisRefusedError",
@@ -95,6 +94,7 @@ __all__ = [
     "propose_patch",
     "repair_procedure",
     "reviewer_from_hitl",
+    "run_g6b",
     "run_gates",
     "strip_abort",
     "synthesis_run_result",

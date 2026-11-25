@@ -22,9 +22,10 @@ from collections.abc import Sequence
 from typing import Any
 
 from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS
+from fsm_llm.text import safe_text
 
 from .constants import PROCEDURE_UNTRUSTED_LABEL
-from .gates import GateReport, safe_text
+from .gates import GateReport
 from .policy import SynthesisPolicy
 
 GOAL_CHARS = 2000  # characters of the goal the strong model sees

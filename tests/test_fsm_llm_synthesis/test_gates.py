@@ -21,10 +21,10 @@ from fsm_llm.synthesis.gates import (
     GateFinding,
     GateReport,
     run_gates,
-    safe_text,
     verify_stored,
 )
 from fsm_llm.synthesis.policy import SynthesisPolicy, inject_abort
+from fsm_llm.text import safe_text
 
 POLICY = SynthesisPolicy()
 RET = ("answer",)

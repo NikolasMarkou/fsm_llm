@@ -56,6 +56,8 @@ from fsm_llm.llm.purpose import purpose_scope
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
 from fsm_llm.policy import HumanInTheLoop
+from fsm_llm.simulation import Simulator
+from fsm_llm.text import safe_text
 from fsm_llm.tools import ToolCall
 
 from .constants import (
@@ -73,7 +75,6 @@ from .exceptions import LibraryError, SynthesisError, SynthesisRefusedError
 from .gates import (
     GATES,
     GateReport,
-    safe_text,
     simulated,
     verify_stored,
 )
@@ -81,7 +82,7 @@ from .library import FSMLibrary, LibraryRecord, digest_of
 from .policy import SynthesisPolicy, needs_approval, strip_abort
 from .prompts import compile_messages, repair_message
 from .reply import _judge
-from .simulation import SimulationReport, Simulator
+from .simulation import SimulationReport, run_g6b
 
 _NO_REPLY = "(no reply)"  # the assistant turn echoed for a reply with no text
 _MERMAID_CHARS = 4000  # the diagram shown to a reviewer
@@ -398,9 +399,9 @@ class FSMSynthesizer:
             if report.definition is not None and report.injected is not None:
                 if self.simulator is not None:
                     runs += 1
-                    simulation = await acall(
+                    simulation = await aoffload(
+                        run_g6b,
                         self.simulator,
-                        "run",
                         report.definition,
                         goal=goal,
                         inputs=ins,

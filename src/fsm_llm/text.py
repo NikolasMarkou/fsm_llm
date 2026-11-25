@@ -9,6 +9,9 @@ helpers began):
       tab becomes one space unless ``multiline`` keeps ``\\n`` and ``\\t``.
     - ``capped_line(value, cap=OKF_SUMMARY_FIELD_CHARS)`` -> ``str``: stripped,
       trimmed, capped one-line text; ``""`` for a non-string.
+    - ``safe_text(text, cap=SAFE_TEXT_CHARS)`` -> ``str``: ``capped_line`` with ``[ ] < >``
+      defanged by ``SKILL_DEFANG``, so the text can spell no fence or tag; the one
+      defang of model-authored text (``synthesis`` and ``simulation`` both use it).
     - ``capped_issues(issues, cap, stops, kind)`` -> the list capped at *cap*, one
       ``kind`` info ``issues-truncated`` for the rest (``ValueError`` on an
       unknown severity).
@@ -29,7 +32,7 @@ from collections.abc import Callable, Container
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from .constants import OKF_SUMMARY_FIELD_CHARS
+from .constants import OKF_SUMMARY_FIELD_CHARS, SAFE_TEXT_CHARS, SKILL_DEFANG
 
 if TYPE_CHECKING:
     from . import frontmatter as _fm
@@ -39,6 +42,7 @@ __all__ = [
     "capped_line",
     "capped_note",
     "iso_utc",
+    "safe_text",
     "strip_unsafe_text",
     "text_page",
 ]
@@ -80,6 +84,18 @@ def strip_unsafe_text(text: str, *, multiline: bool = False) -> str:
 def capped_line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
     """Control-stripped, trimmed, capped one-line text; ``""`` for a non-string."""
     return strip_unsafe_text(value).strip()[:cap] if isinstance(value, str) else ""
+
+
+# DECISION plan-2026-11-25T074601-c720601d/D-007
+# ONE defang (this function) and ONE fence (``synthesis.prompts._fence``) in every state
+# of the tree. Model-authored or caller text reaches a model only through them. Do NOT
+# write a second defang in ``simulation`` or ``synthesis``, and do NOT make ``simulation``
+# import the fence from ``synthesis`` (the layer forbids it): the caller hands the writer
+# its text READY-FENCED.
+def safe_text(text: str, cap: int = SAFE_TEXT_CHARS) -> str:
+    """``text`` as one safe line: control-stripped, cut at ``cap`` characters and
+    ``[ ] < >`` defanged. ``""`` for a non-string."""
+    return capped_line(text, cap).translate(SKILL_DEFANG)
 
 
 def capped_issues(

@@ -22,10 +22,10 @@ from fsm_llm.core.definitions import (
     LLMUsage,
 )
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.simulation import Simulator
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
-    Simulator,
     SynthesisPolicy,
     create_procedure_tools,
     digest_of,

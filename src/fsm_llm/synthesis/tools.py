@@ -32,6 +32,7 @@ from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface
 from fsm_llm.logging import logger
 from fsm_llm.runtime.usage import watch_provider_errors
+from fsm_llm.text import safe_text
 from fsm_llm.tools import ToolAnnotations, ToolRegistry, require_int_limit
 from fsm_llm.tools.constants import OBSERVATION_ENTRY, Defaults
 
@@ -47,7 +48,7 @@ from .constants import (
     REASON_RETURN_KEYS_MISSING,
 )
 from .exceptions import LibraryError, SynthesisError
-from .gates import safe_text, verify_stored
+from .gates import verify_stored
 from .procedures import _no_errors, reason_of, runnable_reason
 from .synthesizer import FSMSynthesizer
 

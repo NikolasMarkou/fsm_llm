@@ -14,14 +14,10 @@ from typing import Any
 import pytest
 
 from fsm_llm.core.definitions import FieldExtractionResponse, FSMDefinition
-from fsm_llm.synthesis import (
-    Simulator,
-    SynthesisPolicy,
-    inject_abort,
-    run_gates,
-    simulation,
-)
+from fsm_llm.simulation import Simulator
+from fsm_llm.synthesis import SynthesisPolicy, inject_abort, run_gates, simulation
 from fsm_llm.synthesis.dryrun import edge_witnesses
+from fsm_llm.synthesis.simulation import run_g6b
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm_synthesis.conftest import ByTurn, ScriptedRunnerLLM
 
@@ -116,8 +112,13 @@ def _simulate(
     policy = SynthesisPolicy(**limits)
     definition = _compiled(fsm, returns, inputs)
     llm = llm or ByTurn()
-    report = Simulator(llm, writer or NoWriter()).run(
-        definition, goal="g", inputs=inputs, return_keys=returns, policy=policy
+    report = run_g6b(
+        Simulator(llm, writer or NoWriter()),
+        definition,
+        goal="g",
+        inputs=inputs,
+        return_keys=returns,
+        policy=policy,
     )
     return report, llm
 
@@ -464,7 +465,8 @@ class TestTheCallBoundHoldsInsideATrial:
     def test_a_trial_stops_between_turns_once_the_bound_is_spent(self):
         llm = Mute()
         policy = SynthesisPolicy(max_simulation_calls=30)
-        report = Simulator(llm, NoWriter()).run(
+        report = run_g6b(
+            Simulator(llm, NoWriter()),
             FSMDefinition(**self._wide()),
             goal="g",
             inputs=(),

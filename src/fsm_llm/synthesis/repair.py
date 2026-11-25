@@ -35,7 +35,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.llm import LLMInterface
 from fsm_llm.llm.json_extraction import extract_json_from_text
 from fsm_llm.llm.purpose import purpose_scope
-from fsm_llm.simulation.stats import pass_rate
+from fsm_llm.simulation import Simulator, pass_rate
 
 from .constants import (
     ABORT_STATE_ID,
@@ -59,7 +59,7 @@ from .library import FSMLibrary, digest_of
 from .patch import apply_patch
 from .policy import SynthesisPolicy, strip_abort
 from .prompts import patch_messages
-from .simulation import Simulator
+from .simulation import replay_g6b, run_g6b
 from .synthesizer import CompileResult, FSMSynthesizer
 
 
@@ -272,15 +272,21 @@ def repair_procedure(
     except SynthesisRefusedError:
         return stop("approval-refused", child)
     try:
-        sim = simulator.run(
-            report.definition, goal=goal, inputs=inputs, return_keys=keys, policy=policy
+        sim = run_g6b(
+            simulator,
+            report.definition,
+            goal=goal,
+            inputs=inputs,
+            return_keys=keys,
+            policy=policy,
         )
     except SynthesisError:  # every trial errored: an outage, not a verdict
         return stop("simulation-failed", child)
     if not sim.passed:
         return stop("simulation-failed", child)
     replays = [
-        simulator.replay(
+        replay_g6b(
+            simulator,
             d,
             scripts,
             inputs=inputs,

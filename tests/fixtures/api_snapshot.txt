@@ -2022,10 +2022,22 @@ fsm_llm.reasoning.ValidationResult class(TimestampedModel)
   property validation_summary
 fsm_llm.reasoning.get_available_reasoning_types def(*, registry: ExecutableRegistry | None = None) -> dict[str, str]
 # fsm_llm.simulation
+fsm_llm.simulation.Budget class
+  def __init__(self, meter: Callable[[], int], clock: Callable[[], float], max_seconds: float, max_calls: int, start: float, calls0: int) -> None
+  def calls(self) -> int
+  def spent(self) -> bool
+fsm_llm.simulation.Simulator class
+  def __init__(self, executor: LLMInterface, judge: LLMInterface | None = None, *, clock: Callable[[], float] = monotonic) -> None
+  def budget(self, max_seconds: float, max_calls: int) -> Budget
+  def trial(self, fsm: FSMDefinition | dict[str, Any], initial_context: Mapping[str, Any], turns: Sequence[str], *, budget: Budget) -> Trial | None
+fsm_llm.simulation.Trial class
+  def __init__(self, responses: list[str] = <factory>, visited_states: list[str] = <factory>, turns_sent: int = 0, final_state: str | None = None, context: dict[str, Any] = <factory>, ended: bool = False, error: str | None = None, close_error: str | None = None, duration: float = 0.0) -> None
 fsm_llm.simulation.below_percent def(k: int, n: int, percent: float) -> bool
 fsm_llm.simulation.fisher_exact_two_sided def(k1: int, n1: int, k2: int, n2: int) -> float
 fsm_llm.simulation.pass_rate def(k: int, n: int) -> dict[str, Any]
+fsm_llm.simulation.play def(make_api: Callable[[], API], initial_context: Mapping[str, Any], turns: Sequence[str], *, stop: Callable[[], bool] | None = None) -> Trial
 fsm_llm.simulation.wilson_ci def(k: int, n: int, z: float = 1.96) -> tuple[float, float]
+fsm_llm.simulation.write_scenarios def(llm: LLMInterface, *, system: str, user: str, kinds: Collection[str], max_scenarios: int, max_turns: int, turn_chars: int, max_tokens: int) -> list[dict[str, Any]]
 # fsm_llm.synthesis
 fsm_llm.synthesis.CompileResult class
   def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = ()) -> None
@@ -2098,10 +2110,6 @@ fsm_llm.synthesis.SimulationReport class
   def __init__(self, findings: tuple[GateFinding, ...], scenarios: tuple[dict[str, Any], ...], overall: dict[str, Any], happy: dict[str, Any], generated: int, calls: int) -> None
   property passed
   def repair_text(self, cap: int = 2000) -> str
-fsm_llm.synthesis.Simulator class
-  def __init__(self, llm: LLMInterface, scenario_llm: LLMInterface | None = None, *, clock: Callable[[], float] = monotonic) -> None
-  def replay(self, definition: FSMDefinition | dict[str, Any], scenarios: Sequence[dict[str, Any]], *, inputs: Sequence[str], return_keys: Sequence[str], trials: int, policy: SynthesisPolicy) -> list[int] | None
-  def run(self, definition: FSMDefinition | dict[str, Any], *, goal: str, inputs: Sequence[str], return_keys: Sequence[str], policy: SynthesisPolicy) -> SimulationReport
 fsm_llm.synthesis.SynthesisError class(FSMError)
 fsm_llm.synthesis.SynthesisPolicy class
   def __init__(self, max_states: int = 12, max_transitions_per_state: int = 6, max_fields_per_state: int = 10, max_text_chars: int = 600, max_synthesis_depth: int = 1, max_repair_rounds: int = 3, max_turns: int = 40, max_compile_tokens: int = 8192, max_synthesis_seconds: int = 300, max_sim_turns: int = 12, sim_trials: int = 2, max_simulation_seconds: int = 300, max_simulation_calls: int = 400, max_simulation_rounds: int = 2, dwell_threshold: int = 3, repair_min_failures: int = 3, max_patch_ops: int = 12, max_patch_chars: int = 8000, replay_trials: int = 2, max_repairs_per_lineage: int = 3, min_pass_rate: float = 0.5, reuse_min_score: float = 0.8, trust_after_successes: int | None = None, allowed_tools: frozenset[str] = {}, require_approval: bool = False, require_simulation: bool = False, allow_classification: bool = False) -> None
@@ -2132,6 +2140,7 @@ fsm_llm.synthesis.needs_approval def(data: object, policy: SynthesisPolicy) -> b
 fsm_llm.synthesis.propose_patch def(diagnoses: Sequence[Diagnosis], definition: dict[str, Any], policy: SynthesisPolicy, llm: LLMInterface) -> list[dict[str, Any]]
 fsm_llm.synthesis.repair_procedure def(parent_digest: str, ops: Sequence[dict[str, Any]], *, library: FSMLibrary, synthesizer: FSMSynthesizer, simulator: Simulator, replay_scripts: Sequence[dict[str, Any]] | None = None, write: bool = False) -> PromotionResult
 fsm_llm.synthesis.reviewer_from_hitl def(hitl: HumanInTheLoop) -> Callable[[ProcedureApprovalRequest], bool]
+fsm_llm.synthesis.run_g6b def(simulator: Simulator, definition: FSMDefinition | dict[str, Any], *, goal: str, inputs: Sequence[str], return_keys: Sequence[str], policy: SynthesisPolicy) -> SimulationReport
 fsm_llm.synthesis.run_gates def(data: Any, policy: SynthesisPolicy, *, inputs: Iterable[str] = (), return_keys: Iterable[str] = ()) -> GateReport
 fsm_llm.synthesis.strip_abort def(data: object) -> dict[str, Any] | None
 fsm_llm.synthesis.synthesis_run_result def(result: Mapping[str, Any]) -> RunResult

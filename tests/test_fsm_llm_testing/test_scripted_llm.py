@@ -442,7 +442,7 @@ class TestUsage:
         assert llm.usage() == LLMUsage()
 
     def test_the_synthesis_simulator_accepts_the_double(self) -> None:
-        from fsm_llm.synthesis.simulation import Simulator
+        from fsm_llm.simulation import Simulator
 
         Simulator(ScriptedLLM(["x"]))
 

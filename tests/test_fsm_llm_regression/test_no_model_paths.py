@@ -65,9 +65,9 @@ from fsm_llm.llm import interface_model, resolve_model
 from fsm_llm.monitor import InstanceManager
 from fsm_llm.monitor.definitions import StubToolConfig
 from fsm_llm.reasoning import ReasoningEngine
+from fsm_llm.simulation import Simulator
 from fsm_llm.synthesis import (
     FSMSynthesizer,
-    Simulator,
     SynthesizeExecutor,
     create_procedure_tools,
 )

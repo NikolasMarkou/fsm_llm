@@ -1144,6 +1144,16 @@
       "delta": 1,
       "reason": "step 13.2: the D-016 anchor of engine/events.py aend_turn is replaced by D-019, which supersedes it (a cancel on the end write of a committed turn raises instead of being swallowed)",
       "token": "plan-2026-11-24T193347-3f4530d3/D-019"
+    },
+    {
+      "delta": 1,
+      "reason": "plan c720601d step 5: two new anchors, D-006 (the Simulator package contract and interface rule, simulation/simulator.py) and D-007 (one defang, one fence, text.py safe_text); D-060 of plan 2cefeb61 moved with _trial to Simulator.trial and D-047 stays in synthesis/simulation.py (the token counts did not change)",
+      "token": "plan-2026-11-25T074601-c720601d/D-006"
+    },
+    {
+      "delta": 1,
+      "reason": "plan c720601d step 5: two new anchors, D-006 (the Simulator package contract and interface rule, simulation/simulator.py) and D-007 (one defang, one fence, text.py safe_text); D-060 of plan 2cefeb61 moved with _trial to Simulator.trial and D-047 stays in synthesis/simulation.py (the token counts did not change)",
+      "token": "plan-2026-11-25T074601-c720601d/D-007"
     }
   ]
 }

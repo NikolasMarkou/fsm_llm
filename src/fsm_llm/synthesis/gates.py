@@ -25,11 +25,12 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS, SKILL_DEFANG
+from fsm_llm.constants import ALLOWED_JSONLOGIC_OPERATIONS, SAFE_TEXT_CHARS
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.core.verify.flow import analyze_data_flow, analyze_liveness
 from fsm_llm.okf import capped_line
+from fsm_llm.text import safe_text
 
 from .constants import GATE_SIMULATION
 from .dryrun import analyze_dryrun
@@ -47,7 +48,7 @@ def simulated(gates_passed: object) -> bool:
 
 #: Schema findings kept per compile, and characters kept of each.
 _MAX_SCHEMA_FINDINGS = 20
-_MESSAGE_CHARS = 300
+_MESSAGE_CHARS = SAFE_TEXT_CHARS
 
 
 @dataclass(frozen=True)
@@ -128,13 +129,6 @@ class GateReport:
             lines.append(line)
             used += len(line) + 1
         return "\n".join(lines)[:cap]
-
-
-def safe_text(text: str, cap: int = _MESSAGE_CHARS) -> str:
-    """Model-authored ``text`` as one safe line: control-stripped, cut at
-    ``cap`` characters and ``[ ] < >`` defanged (so it can spell no fence or
-    tag). ``""`` for a non-string. Used by ``repair_text`` and the G6b turns."""
-    return capped_line(text, cap).translate(SKILL_DEFANG)
 
 
 # DECISION plan-2026-11-10T194139-2cefeb61/D-099

@@ -31,6 +31,7 @@ from fsm_llm.synthesis import (
     SynthesisPolicy,
     SynthesisRefusedError,
 )
+from fsm_llm.synthesis import synthesizer as synthesizer_module
 from fsm_llm.synthesis.synthesizer import FSMSynthesizer
 from fsm_llm.testing import ScriptedLLM
 
@@ -236,32 +237,36 @@ class TestCompile:
         assert llm.cancelled == 1  # a real cancel at the model await
 
 
-class _Sim:
-    """A simulator double that records the thread of ``run`` and passes."""
-
-    def __init__(self) -> None:
-        self.threads: list[int] = []
-
-    def run(self, definition, **kwargs):
-        self.threads.append(threading.get_ident())
-        return SimpleNamespace(passed=True, findings=(), scenarios=[])
-
-
 class TestTheSimulatorHop:
+    """``run_g6b`` is reached through ``aoffload``: a worker in async mode, inline in sync."""
+
+    @staticmethod
+    def _spy(monkeypatch) -> list[int]:
+        threads: list[int] = []
+
+        def fake(simulator, definition, **kwargs):
+            threads.append(threading.get_ident())
+            return SimpleNamespace(passed=True, findings=(), scenarios=[])
+
+        monkeypatch.setattr(synthesizer_module, "run_g6b", fake)
+        return threads
+
     async def test_async_mode_runs_the_simulator_on_a_worker_thread(
-        self, valid_fsm
+        self, valid_fsm, monkeypatch
     ) -> None:
-        sim = _Sim()
-        synth, _ = _synth([_text(valid_fsm)], simulator=sim)
+        threads = self._spy(monkeypatch)
+        synth, _ = _synth([_text(valid_fsm)], simulator=object())
         result = await synth.acompile("g", return_keys=RET)
         assert result.simulation is not None
-        assert sim.threads and sim.threads[0] != threading.get_ident()
+        assert threads and threads[0] != threading.get_ident()
 
-    def test_sync_mode_runs_it_inline_on_the_caller_thread(self, valid_fsm) -> None:
-        sim = _Sim()
-        synth, _ = _synth([_text(valid_fsm)], simulator=sim)
+    def test_sync_mode_runs_it_inline_on_the_caller_thread(
+        self, valid_fsm, monkeypatch
+    ) -> None:
+        threads = self._spy(monkeypatch)
+        synth, _ = _synth([_text(valid_fsm)], simulator=object())
         synth.compile("g", return_keys=RET)
-        assert sim.threads == [threading.get_ident()]
+        assert threads == [threading.get_ident()]
 
 
 def _reviewer(seen: list[Any], verdict: Any = True):
