@@ -1651,7 +1651,6 @@ fsm_llm.eval.append_row def(path: Path, row: dict[str, Any]) -> None
 fsm_llm.eval.check_expectations def(expect: Expectations, trial: TrialResult) -> list[str]
 fsm_llm.eval.classify_result def(result: ExampleResult) -> tuple[int, list[str]]
 fsm_llm.eval.discover_examples def(config: EvalConfig) -> list[ExampleTarget]
-fsm_llm.eval.fisher_exact_two_sided def(k1: int, n1: int, k2: int, n2: int) -> float
 fsm_llm.eval.get_timeout def(name: str, category: str, default: int, example_timeouts: Mapping[str, int] = {'advanced/e_commerce': 300, 'reasoning/math_tutor': 300, 'agents/reflexion': 240, 'agents/debate': 360, 'agents/evaluator_optimizer': 360, 'agents/orchestrator': 360, 'agents/adapt': 240, 'agents/memory_agent': 360, 'agents/concurrent_react': 240, 'agents/agent_as_tool': 360, 'agents/structured_output': 240, 'agents/react_hitl_combined': 240, 'agents/skill_loader': 240, 'agents/orchestrator_specialist': 360, 'agents/hierarchical_orchestrator': 360, 'agents/pipeline_review': 360, 'agents/adapt_with_memory': 360, 'agents/react_structured_pipeline': 360, 'agents/multi_debate_panel': 360, 'agents/reflexion_code_gen': 240, 'agents/agent_memory_chain': 360, 'agents/debate_with_tools': 240, 'agents/eval_opt_structured': 360, 'agents/legal_document_review': 360, 'agents/investment_portfolio': 360, 'agents/security_audit': 360, 'agents/medical_literature': 360, 'agents/architecture_review': 360, 'agents/supply_chain_optimizer': 360, 'agents/regulatory_compliance': 360, 'intermediate/adaptive_quiz': 300, 'meta/meta_review_loop': 240, 'meta/meta_from_spec': 240, 'meta/build_fsm': 240, 'meta/build_agent': 240, 'meta/build_workflow': 240, 'workflows/workflow_agent_loop': 360, 'workflows/loan_processing': 300, 'workflows/release_management': 360, 'workflows/customer_onboarding': 360}, category_timeouts: Mapping[str, int] = {'agents': 180, 'reasoning': 300, 'workflows': 180, 'advanced': 180, 'meta': 120}) -> int
 fsm_llm.eval.git_commit def(cwd: PathLike | None = None) -> str
 fsm_llm.eval.git_short_hash def(cwd: PathLike | None = None) -> str
@@ -2039,7 +2038,6 @@ fsm_llm.simulation.Simulator class
 fsm_llm.simulation.Trial class
   def __init__(self, responses: list[str] = <factory>, visited_states: list[str] = <factory>, turns_sent: int = 0, final_state: str | None = None, context: dict[str, Any] = <factory>, ended: bool = False, error: str | None = None, close_error: str | None = None, duration: float = 0.0) -> None
 fsm_llm.simulation.below_percent def(k: int, n: int, percent: float) -> bool
-fsm_llm.simulation.fisher_exact_two_sided def(k1: int, n1: int, k2: int, n2: int) -> float
 fsm_llm.simulation.pass_rate def(k: int, n: int) -> dict[str, Any]
 fsm_llm.simulation.play def(make_api: Callable[[], API], initial_context: Mapping[str, Any], turns: Sequence[str], *, stop: Callable[[], bool] | None = None) -> Trial
 fsm_llm.simulation.wilson_ci def(k: int, n: int, z: float = 1.96) -> tuple[float, float]

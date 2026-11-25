@@ -13,7 +13,6 @@ import ast
 import copy
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -31,15 +30,10 @@ from fsm_llm.synthesis import SynthesisPolicy
 from fsm_llm.testing import ScriptedLLM, final_reply
 from tests.test_fsm_llm.support import _state
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, good_fsm
-from tests.test_fsm_llm_synthesis.rig import make_rig
+from tests.test_fsm_llm_synthesis.rig import chat_reply, make_rig, named_error
 
 LEVELS = ("values", "shape")
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
-
-
-def _error(name: str) -> BaseException:
-    """An exception whose class carries a provider's name, so the one classifier places it."""
-    return type(name, (Exception,), {})("down")
 
 
 class _Down(ScriptedRunnerLLM):
@@ -50,7 +44,7 @@ class _Down(ScriptedRunnerLLM):
         self.name = name
 
     def extract_field(self, request: Any) -> Any:
-        raise LLMResponseError("provider down") from _error(self.name)
+        raise LLMResponseError("provider down") from named_error(self.name)
 
 
 class _DownAfterGreeting(ScriptedRunnerLLM):
@@ -61,7 +55,9 @@ class _DownAfterGreeting(ScriptedRunnerLLM):
     def generate_response(self, request: Any) -> Any:
         if self._state_of(request) == "ask":
             if self.greeted:
-                raise LLMResponseError("provider down") from _error("RateLimitError")
+                raise LLMResponseError("provider down") from named_error(
+                    "RateLimitError"
+                )
             self.greeted = True
         return super().generate_response(request)
 
@@ -174,19 +170,12 @@ class TestOutageFromTheRealLog:
         assert reads == [] and got == direct and got.errors > 0
 
 
-def _reply(text: str, finish: str = "stop") -> Any:
-    message = SimpleNamespace(content=text, tool_calls=None, role="assistant")
-    usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
-    choice = SimpleNamespace(message=message, finish_reason=finish)
-    return SimpleNamespace(choices=[choice], usage=usage, model="m")
-
-
 def _provider(extract: Any) -> Any:
     def call(**kwargs: Any) -> Any:
         system = kwargs["messages"][0]["content"] if kwargs["messages"] else ""
         if "the value of the field" in system or kwargs.get("response_format"):
             return extract
-        return _reply(json.dumps({"message": "hello", "reasoning": "r"}))
+        return chat_reply(json.dumps({"message": "hello", "reasoning": "r"}))
 
     return call
 
@@ -198,7 +187,7 @@ class TestACutReplyFromTheRealLog:
     ):
         log = EventLog(tmp_path / "ev", privacy=level)
         llm = LiteLLMInterface(model="gpt-4o", api_key="sk-unused")
-        with mock.patch(COMPLETION, _provider(_reply('{"val', "length"))):
+        with mock.patch(COMPLETION, _provider(chat_reply('{"val', "length"))):
             rig = make_rig(
                 good_fsm(),
                 cheap=llm,
@@ -245,7 +234,7 @@ def _bulk_fsm() -> dict[str, Any]:
 @pytest.mark.parametrize("level", LEVELS)
 class TestAFailedBulkExtractionFromTheRealLog:
     @pytest.mark.parametrize(
-        "reply", [_reply(""), _reply('{"extracted_data', "length")]
+        "reply", [chat_reply(""), chat_reply('{"extracted_data', "length")]
     )
     def test_an_empty_or_cut_reply_is_extraction_failed_and_no_provider_error(
         self, tmp_path: Path, level: str, reply: Any

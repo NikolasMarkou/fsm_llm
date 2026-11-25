@@ -103,7 +103,7 @@ Consuming classes in `test_context_unit.py`: `TestIndependentVocabularyKeyCorpus
 | `test_event_log_signals.py` | `runtime.signals.frame_signals` and `watch_frame_signals` (plan c720601d step 7): failures from every `provider/error`, evidence only from clean turn windows (a killed, rolled-back or tainted window gives none), no blob, `source` or `ts` read, at both privacy levels, a lost log gives empty signals |
 | `test_llm_similarity.py` | `fsm_llm.llm.similarity` (`EmbedTextsFn`, `cosine_similarity`, plan c720601d step 1b): values, the one WARNING for vectors of different length, the static `__all__`, no alias at the old `agents.semantic_tools` path |
 | `test_simulation_layering.py` | `fsm_llm.simulation` imports no consumer: the contract shape, the kernel and core lists, a planted consumer import turns it BROKEN |
-| `test_simulation_stats.py` | `fsm_llm.simulation.stats` (`wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent`), moved from `tests/test_fsm_llm_eval/test_stats.py` |
+| `test_simulation_stats.py` | `fsm_llm.simulation.stats` (`wilson_ci`, `pass_rate`, `below_percent`), moved from `tests/test_fsm_llm_eval/test_stats.py` |
 | `test_simulation_driver.py` | `simulation.play` and `Trial`: message source `simulator`, errors as data, the API closed in every case, `stop` read before every turn |
 | `test_simulation_simulator.py` | `simulation.Simulator` and `Budget`: the interface rule (one object, metered once, never closed), the bound read between turns, a stopped trial dropped |
 | `test_simulation_scenarios.py` | `simulation.write_scenarios`: the writer request bytes, defang and caps of every turn, a bad, cut or non-final reply gives `[]`, an odd scenario dropped whole |

@@ -26,16 +26,12 @@ from fsm_llm.synthesis import RunTrace, SynthesisPolicy, TraceRecorder
 from fsm_llm.synthesis import traces as traces_module
 from fsm_llm.synthesis.traces import signal_fields
 from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, good_fsm
-from tests.test_fsm_llm_synthesis.rig import REPLIES, Rig, make_rig
+from tests.test_fsm_llm_synthesis.rig import REPLIES, Rig, make_rig, named_error
 
 LEVELS = ("values", "shape")
 NEW = ("failures", "misses", "scopes", "bad_extractions")
 D1 = "a" * 64
 CANARY = "CANARY-7f3a91"
-
-
-def _error(name: str) -> BaseException:
-    return type(name, (Exception,), {})("down")
 
 
 class _Down(ScriptedRunnerLLM):
@@ -46,7 +42,7 @@ class _Down(ScriptedRunnerLLM):
         self.name = name
 
     def extract_field(self, request: Any) -> Any:
-        raise LLMResponseError("provider down") from _error(self.name)
+        raise LLMResponseError("provider down") from named_error(self.name)
 
 
 def _run(

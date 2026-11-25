@@ -10,7 +10,7 @@ from .exceptions import CODE_JUDGE_NOT_DISTINCT, SimulationError
 from .roles import Roles
 from .scenarios import write_scenarios
 from .simulator import Budget, Simulator
-from .stats import below_percent, fisher_exact_two_sided, pass_rate, wilson_ci
+from .stats import below_percent, pass_rate, wilson_ci
 
 __all__ = [
     "CODE_JUDGE_NOT_DISTINCT",
@@ -20,7 +20,6 @@ __all__ = [
     "Simulator",
     "Trial",
     "below_percent",
-    "fisher_exact_two_sided",
     "pass_rate",
     "play",
     "wilson_ci",

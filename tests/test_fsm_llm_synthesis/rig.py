@@ -26,6 +26,7 @@ import copy
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -258,3 +259,16 @@ def serve_procedure(
 ) -> None:
     """Make ``obtain`` hand back ``served`` (the compile path is tested elsewhere)."""
     monkeypatch.setattr(rig.synth, "obtain", lambda *a, **k: served)
+
+
+def named_error(name: str) -> BaseException:
+    """An exception whose class carries a provider's name, so the one classifier places it."""
+    return type(name, (Exception,), {})("down")
+
+
+def chat_reply(text: str, finish: str = "stop") -> Any:
+    """A provider reply (``choices``, ``usage``) with one assistant message and *finish*."""
+    message = SimpleNamespace(content=text, tool_calls=None, role="assistant")
+    usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    choice = SimpleNamespace(message=message, finish_reason=finish)
+    return SimpleNamespace(choices=[choice], usage=usage, model="m")

@@ -1,9 +1,10 @@
 """
 Binomial statistics for evaluation results (stdlib only, no scipy).
 
-``wilson_ci`` and ``fisher_exact_two_sided`` were moved verbatim from the
-bench helper module ``scripts/bench_common.py`` (deleted with the synthesis
-bench, plan baa37f40 D-012; see git history).
+``wilson_ci`` was moved verbatim from the bench helper module
+``scripts/bench_common.py`` (deleted with the synthesis bench, plan baa37f40
+D-012; see git history). ``fisher_exact_two_sided`` lived here until plan
+c720601d step 17 deleted it: it had no caller in ``src``.
 """
 
 from __future__ import annotations
@@ -24,21 +25,6 @@ def wilson_ci(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     center = (p + zz / (2 * n)) / denom
     half = z * math.sqrt(p * (1 - p) / n + zz / (4 * n * n)) / denom
     return (max(0.0, center - half), min(1.0, center + half))
-
-
-def fisher_exact_two_sided(k1: int, n1: int, k2: int, n2: int) -> float:
-    """Fisher exact p for [[k1,n1-k1],[k2,n2-k2]]: sum of pmf <= observed pmf."""
-    for k, n in ((k1, n1), (k2, n2)):
-        if n <= 0 or k < 0 or k > n:
-            raise ValueError(f"impossible arm: k={k}, n={n}")
-    r1, denom = k1 + k2, math.comb(n1 + n2, k1 + k2)
-
-    def pmf(a: int) -> float:
-        return math.comb(n1, a) * math.comb(n2, r1 - a) / denom
-
-    p_obs = pmf(k1)
-    span = range(max(0, r1 - n2), min(r1, n1) + 1)
-    return min(1.0, sum(pmf(a) for a in span if pmf(a) <= p_obs * (1 + 1e-9)))
 
 
 def pass_rate(k: int, n: int) -> dict[str, Any]:

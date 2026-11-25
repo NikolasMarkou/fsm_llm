@@ -83,7 +83,7 @@ The `fixtures/` package holds hand-written lists of context key names and values
 - `test_event_log_signals.py` - the signals reader of one frame of an event log: failure counts from every provider error, evidence only from clean turn windows, no blob read, both privacy levels.
 - `test_llm_similarity.py` - `EmbedTextsFn` and `cosine_similarity` in `fsm_llm.llm`: values, the one WARNING, the static surface, no alias at the old path.
 - `test_simulation_layering.py` - `fsm_llm.simulation` imports no consumer package (the contract and a planted import).
-- `test_simulation_stats.py` - Wilson interval, Fisher exact test, `pass_rate` and the exact `below_percent` check of `fsm_llm.simulation.stats`.
+- `test_simulation_stats.py` - Wilson interval, `pass_rate` and the exact `below_percent` check of `fsm_llm.simulation.stats`.
 - `test_simulation_driver.py` - the generic turn loop `play` and `Trial`.
 - `test_simulation_simulator.py` - `Simulator` and `Budget`: the interface rule and the bound rule.
 - `test_simulation_scenarios.py` - `write_scenarios`: the one writer call, parsed and cleaned.

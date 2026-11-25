@@ -1,10 +1,10 @@
-"""Tests for fsm_llm.simulation.stats: Wilson interval, Fisher exact, pass_rate."""
+"""Tests for fsm_llm.simulation.stats: Wilson interval, pass_rate, below_percent."""
 
 from __future__ import annotations
 
 import pytest
 
-from fsm_llm.simulation import fisher_exact_two_sided, pass_rate, wilson_ci
+from fsm_llm.simulation import pass_rate, wilson_ci
 from fsm_llm.simulation.stats import below_percent
 
 
@@ -32,34 +32,6 @@ class TestWilsonCI:
         lo95, hi95 = wilson_ci(10, 20)
         lo99, hi99 = wilson_ci(10, 20, z=2.576)
         assert lo99 < lo95 and hi99 > hi95
-
-
-class TestFisherExact:
-    def test_known_value_2_5_vs_0_5(self):
-        assert fisher_exact_two_sided(2, 5, 0, 5) == pytest.approx(0.4444, abs=1e-3)
-
-    def test_known_value_5_10_vs_0_10(self):
-        assert fisher_exact_two_sided(5, 10, 0, 10) == pytest.approx(
-            504 / 15504, abs=1e-4
-        )
-
-    def test_symmetric_in_arm_order(self):
-        a = fisher_exact_two_sided(32, 40, 20, 40)
-        b = fisher_exact_two_sided(20, 40, 32, 40)
-        assert a == pytest.approx(b)
-
-    def test_identical_arms_give_p_one(self):
-        assert fisher_exact_two_sided(20, 40, 20, 40) == pytest.approx(1.0)
-
-    def test_extreme_split_is_small(self):
-        assert fisher_exact_two_sided(10, 10, 0, 10) < 1e-4
-
-    @pytest.mark.parametrize(
-        "args", [(1, 2, 0, 0), (3, 2, 1, 2), (-1, 2, 1, 2), (1, 2, 3, 2)]
-    )
-    def test_impossible_arms_raise(self, args):
-        with pytest.raises(ValueError):
-            fisher_exact_two_sided(*args)
 
 
 class TestPassRate:

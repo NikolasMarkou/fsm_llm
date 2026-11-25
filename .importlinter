@@ -58,8 +58,9 @@ exclude_type_checking_imports = True
 # `memory`, `cli_support`: held by the kernel contract), the entry modules (`runner`, `__main__`) and
 # `testing` (held by the entry and testing contracts).
 # Debts, each measured by the first run of this contract on the real tree (progress.md "Step 95"):
-# three named, each with its retiring row or its permanent reason (D-016 a, b, c). Six more edges
-# the first run listed were fixed by moving a symbol down instead (D-042).
+# three named (D-016 a, b, c): a (`synthesis` to `eval`, retired by roadmap 6.6, plan c720601d) and
+# b (`synthesis` to `agents.semantic_tools`, retired by P7.4a, plan c720601d) are gone, c is
+# permanent. Six more edges the first run listed were fixed by moving a symbol down instead (D-042).
 [importlinter:contract:layers-section-5-2]
 name = Section 5.2 layers: a layer package imports only the layers below it
 type = layers

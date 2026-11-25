@@ -51,7 +51,13 @@ from tests.test_fsm_llm_synthesis.conftest import (
     good_fsm,
     stuck_fsm,
 )
-from tests.test_fsm_llm_synthesis.rig import REPLIES, Rig, make_rig
+from tests.test_fsm_llm_synthesis.rig import (
+    REPLIES,
+    Rig,
+    chat_reply,
+    make_rig,
+    named_error,
+)
 
 LEVELS = ("values", "shape")
 CANARY = "CANARY-7f3a91"
@@ -60,14 +66,9 @@ COMPLETION = "fsm_llm.llm.providers.litellm.completion"
 WRITER = "fsm_llm.runtime.log.time"
 
 
-def _error(name: str) -> BaseException:
-    """An exception whose class carries a provider's name, so the one classifier places it."""
-    return type(name, (Exception,), {})("down")
-
-
 def _down_error(name: str) -> LLMResponseError:
     error = LLMResponseError("provider down")
-    error.__cause__ = _error(name)
+    error.__cause__ = named_error(name)
     return error
 
 
@@ -110,13 +111,6 @@ class _Seeded(ScriptedRunnerLLM):
         return DataExtractionResponse(extracted_data=dict(data))
 
 
-def _reply(text: str, finish: str = "stop") -> Any:
-    message = SimpleNamespace(content=text, tool_calls=None, role="assistant")
-    usage = SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2)
-    choice = SimpleNamespace(message=message, finish_reason=finish)
-    return SimpleNamespace(choices=[choice], usage=usage, model="m")
-
-
 def _provider(extract: Any) -> Callable[..., Any]:
     """A provider whose extraction calls answer ``extract`` and whose replies are well formed."""
 
@@ -124,7 +118,7 @@ def _provider(extract: Any) -> Callable[..., Any]:
         system = kwargs["messages"][0]["content"] if kwargs["messages"] else ""
         if "the value of the field" in system or kwargs.get("response_format"):
             return extract
-        return _reply(json.dumps({"message": "hello", "reasoning": "r"}))
+        return chat_reply(json.dumps({"message": "hello", "reasoning": "r"}))
 
     return call
 
@@ -350,8 +344,8 @@ def _seed_other_state(tmp: Path, level: str) -> Outcome:
     return drive(tmp, _nick_stuck_fsm(), cheap, level, turns=7)
 
 
-EMPTY = _reply("")
-CUT = _reply('{"extracted_data', "length")
+EMPTY = chat_reply("")
+CUT = chat_reply('{"extracted_data', "length")
 ASK = "ask"
 MISS = ("extraction-miss", ASK, ("answer",))
 SEEDS: dict[str, tuple[Callable[[Path, str], Outcome], list[tuple[Any, ...]]]] = {

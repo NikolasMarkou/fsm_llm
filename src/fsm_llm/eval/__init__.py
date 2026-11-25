@@ -7,8 +7,8 @@ script, score it 0-4, write a scorecard; CLI ``fsm-llm-eval examples``),
 conversation cases (scripted multi-turn conversations against any FSM, checked
 against declared expectations over repeated trials; CLI ``fsm-llm-eval run``,
 Python ``run_dataset``),
-a layered ``EvalConfig``, binomial statistics (Wilson intervals, Fisher exact
-test), append-only result rows, and collision-safe run directories.
+a layered ``EvalConfig``, binomial statistics (Wilson intervals, pass rates; the code is
+``fsm_llm.simulation.stats``), append-only result rows, and collision-safe run directories.
 
 Import it as ``from fsm_llm import eval as fsm_eval`` or import names directly
 (``from fsm_llm.eval import wilson_ci``) to avoid shadowing the builtin.
@@ -19,7 +19,7 @@ Install:
 
 from __future__ import annotations
 
-from fsm_llm.simulation.stats import fisher_exact_two_sided, pass_rate, wilson_ci
+from fsm_llm.simulation.stats import pass_rate, wilson_ci
 
 # Version info — imported via __version__.py to stay in sync
 from .__version__ import __version__
@@ -78,7 +78,6 @@ __all__ = [
     "check_expectations",
     "classify_result",
     "discover_examples",
-    "fisher_exact_two_sided",
     "get_timeout",
     "git_commit",
     "git_short_hash",
