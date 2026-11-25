@@ -1195,6 +1195,7 @@
     "fsm_llm.runtime.stores.stack",
     "fsm_llm.runtime.usage",
     "fsm_llm.simulation",
+    "fsm_llm.simulation.driver",
     "fsm_llm.simulation.stats",
     "fsm_llm.skills",
     "fsm_llm.synthesis",

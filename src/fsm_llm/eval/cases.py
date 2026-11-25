@@ -27,10 +27,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from fsm_llm.context.filtering import redacting_json_default
-from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface, resolve_model
+from fsm_llm.simulation.driver import play
 from fsm_llm.simulation.stats import pass_rate
 
 from ._pool import run_interruptible
@@ -354,49 +354,46 @@ def run_case_trial(
         - Any exception (bad FSM, LLM down, a raising factory or check) gives a
           failed trial with ``error`` set; the API is closed in every case.
     """
-    result = TrialResult(case_id=case.id, trial=trial, passed=False)
     start = time.monotonic()
-    api: API | None = None
-    try:
+
+    def make_api() -> API:
         kwargs = _llm_kwargs(config, llm_interface_factory)
         if isinstance(case.fsm, str):
-            api = API.from_file(case.fsm, **kwargs)
-        else:
-            api = API.from_definition(case.fsm, **kwargs)
-        conv_id, greeting = api.start_conversation(dict(case.initial_context))
-        result.responses.append(greeting)
-        result.visited_states.append(api.get_current_state(conv_id))
-        for turn in case.turns:
-            if api.has_conversation_ended(conv_id) or (stop is not None and stop()):
-                break
-            with message_source(MessageSource.SIMULATOR):
-                result.responses.append(api.converse(turn, conv_id))
-            result.turns_sent += 1
-            result.visited_states.append(api.get_current_state(conv_id))
-        result.final_state = result.visited_states[-1]
-        result.context = api.get_data(conv_id)
-        result.ended = api.has_conversation_ended(conv_id)
-        result.failures = check_expectations(case.expect, result)
-        unsent = len(case.turns) - result.turns_sent
-        if unsent and case.expect.ended is None:
-            result.failures.append(
-                f"turns: conversation ended with {unsent} of {len(case.turns)} "
-                "turns unsent (declare expect.ended to allow it)"
-            )
-        for check in checks:
-            result.failures.extend(check(result))
-        result.passed = not result.failures
-    except Exception as exc:  # one trial's failure is data, never a crashed run
-        result.error = f"{type(exc).__name__}: {exc}"
+            return API.from_file(case.fsm, **kwargs)
+        return API.from_definition(case.fsm, **kwargs)
+
+    played = play(make_api, case.initial_context, case.turns, stop=stop)
+    result = TrialResult(
+        case_id=case.id,
+        trial=trial,
+        passed=False,
+        error=played.error,
+        final_state=played.final_state,
+        visited_states=played.visited_states,
+        responses=played.responses,
+        context=played.context,
+        ended=played.ended,
+        turns_sent=played.turns_sent,
+    )
+    if played.error is None:
+        try:
+            result.failures = check_expectations(case.expect, result)
+            unsent = len(case.turns) - result.turns_sent
+            if unsent and case.expect.ended is None:
+                result.failures.append(
+                    f"turns: conversation ended with {unsent} of {len(case.turns)} "
+                    "turns unsent (declare expect.ended to allow it)"
+                )
+            for check in checks:
+                result.failures.extend(check(result))
+            result.passed = not result.failures
+        except Exception as exc:  # a raising check is a trial error, not a crash
+            result.error = f"{type(exc).__name__}: {exc}"
+            result.passed = False
+    if played.close_error:
+        result.error = result.error or played.close_error
         result.passed = False
-    finally:
-        if api is not None:
-            try:
-                api.close()  # ends every active conversation of this API
-            except Exception as exc:
-                result.error = result.error or f"close failed: {exc}"
-                result.passed = False
-        result.duration = time.monotonic() - start
+    result.duration = time.monotonic() - start
     return result
 
 
