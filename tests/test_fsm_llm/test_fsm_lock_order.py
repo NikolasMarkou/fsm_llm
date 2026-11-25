@@ -456,3 +456,39 @@ class TestSettleKeepsTheOrder:
         # not vacuous: both frames' conversation locks and `_lock` were taken
         assert {name for name, _, _ in events} >= {"lock", "conv"}
         assert sum(1 for n, w, _ in events if n == "conv" and w == "acquire-nb") >= 3
+
+
+class TestNoManagerLockInALaneJob:
+    """A boundary write of the event log runs on a lane thread (plan 3f4530d3 step 8b, D7): a
+    lane job never takes ``_lock``, a ``conv_lock`` or the definition cache lock, because the
+    turn task that awaits it holds the turn's conversation lock and a job that waited for a
+    manager lock could never finish. The state blob and the request body are built on the loop
+    BEFORE the hop, so the job only writes."""
+
+    async def test_a_logged_async_conversation_takes_no_manager_lock_on_a_lane_thread(
+        self, tmp_path
+    ):
+        from fsm_llm import API
+        from fsm_llm.runtime import EventLog
+        from tests.test_fsm_llm.test_event_log_census import _chat, _llm
+
+        api = API.from_definition(
+            _chat(silent=False), llm_interface=_llm(), event_log=EventLog(tmp_path)
+        )
+        manager = api.fsm_manager
+        events: list[tuple[str, str, int]] = []
+        manager._lock = _RecLock("lock", manager._lock, events)  # type: ignore[assignment]
+        manager._fsm_cache_lock = _RecLock("cache", manager._fsm_cache_lock, events)  # type: ignore[assignment]
+        manager._conversation_locks = _Recording(manager._conversation_locks, events)  # type: ignore[assignment]
+        cid, _ = await api.astart_conversation()
+        await api.aconverse("my name is Ada", cid)
+        lanes = {
+            t.ident
+            for t in threading.enumerate()
+            if t.name.startswith("fsm-llm-log-lane")
+        }
+        assert lanes, "no lane thread ran: the row would prove nothing"
+        assert {name for name, _, _ in events} >= {"lock", "conv"}
+        assert [e for e in events if e[2] in lanes] == []
+        assert order_problems(events) == []
+        api.close()

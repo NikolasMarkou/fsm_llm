@@ -12,7 +12,7 @@ Interface contract (callers: ``pass1.py`` and ``transitions.py``):
       adds ``extracted_keys`` (the key NAMES of the extracted data, sorted, never a value) and
       ``extraction_failed``. Written around the one dispatch seam of Pass 1 only, so the
       re-extraction after a transition (``after_transition``) is not an executor event of its own.
-    - ``record_extraction`` and ``record_extraction_miss`` append ``extraction`` (``keys``, and
+    - ``arecord_extraction`` (the blob and the line ONE lane job) and ``record_extraction_miss`` append ``extraction`` (``keys``, and
       ``delta_ref`` at level ``values``) and ``extraction/miss`` (the declared keys still ``None``
       after the Pass-1 commit): best effort, never an internal-prefixed or secret-looking key.
     - ``record_transition(state, evaluation, target, *, executed)`` appends ``transition``:
@@ -44,6 +44,7 @@ from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.runtime import (
     EventType,
     RedactionKind,
+    TurnScope,
     current_scope,
     emit,
     filter_context,
@@ -70,8 +71,10 @@ def record_executor_result(state: State, response: DataExtractionResponse) -> No
         )
 
 
-def record_extraction(state: State, data: Mapping[str, Any]) -> None:
-    """Append ``extraction`` for the visible entries of *data*, minus the kind's result key."""
+async def arecord_extraction(state: State, data: Mapping[str, Any]) -> None:
+    """Append ``extraction`` for the visible entries of *data*, minus the kind's result key.
+
+    The delta is filtered here, on the loop; its blob and the line are ONE lane job."""
     scope = current_scope()
     if scope is None:
         return
@@ -80,12 +83,26 @@ def record_extraction(state: State, data: Mapping[str, Any]) -> None:
         visible = visible_entries({k: v for k, v in data.items() if k != own})
         if not visible:
             return
-        fields: dict[str, Any] = {}
-        if scope.log.stores_values:
-            fields["delta_ref"] = scope.log.put_json(
-                filter_context(visible), kind=RedactionKind.DELTA
-            )
-        emit(EventType.EXTRACTION, state=state.id, keys=sorted(visible), **fields)
+        body = filter_context(visible) if scope.log.stores_values else None
+        await scope.log.lane_call(
+            scope.root_id, _write_extraction, scope, state.id, sorted(visible), body
+        )
+
+
+def _write_extraction(
+    scope: TurnScope, state_id: str, keys: list[str], body: dict[str, Any] | None
+) -> None:
+    fields: dict[str, Any] = {}
+    if body is not None:
+        fields["delta_ref"] = scope.log.put_json(body, kind=RedactionKind.DELTA)
+    scope.log.append(
+        scope.root_id,
+        EventType.EXTRACTION,
+        frame=scope.frame,
+        state=state_id,
+        keys=keys,
+        **fields,
+    )
 
 
 def record_extraction_miss(

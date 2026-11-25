@@ -39,7 +39,7 @@ manager id of the top frame, ``stack_view(api, cid)`` the LIVE ``(depth, [(state
 (the golden view of the stack sweep; JSON turns its tuples into lists). ``stacked_start(api, log)``
 plays a root turn, a push with options and a tool exchange at frame 1 and returns the root id;
 ``stacked_finish(api, cid)`` the answer, the pop with a merge, a root turn and a second push left
-open. ``main`` with ``stacked`` as its third argument runs ``stacked_main``: role ``run`` blocks at
+open. ``main`` with ``async`` as its third argument runs ``async_main`` (a kill after the request hop of an async turn); ``main`` with ``stacked`` as its third argument runs ``stacked_main``: role ``run`` blocks at
 frame 1 inside an in-flight tool call; role ``resume <conversation_id>`` resumes that log,
 announces and holds the writer lock until its stdin is closed.
 """
@@ -375,6 +375,34 @@ def registry_main(argv: list[str]) -> None:
         api.advance(cid)  # the handler of run_tools runs the registry tool and blocks
 
 
+def async_main(argv: list[str]) -> None:
+    """The async role (plan 3f4530d3 step 8b): an ``aadvance`` whose model call blocks on the
+    loop thread AFTER the request hop, so the ``llm/request`` the parent finds was written and
+    fsynced by a lane job (the loop never wrote it). ``main`` with ``async`` as third argument."""
+    import asyncio
+
+    directory, ready = Path(argv[1]), Path(argv[2])
+    where: dict[str, str] = {}
+    llm = ChildLLM(
+        scripted_replies(),
+        block_at=0,
+        on_block=lambda: _announce(ready, conversation_id=where["cid"]),
+    )
+
+    async def run() -> None:
+        with EventLog(directory) as log:
+            api = API.from_definition(tool_fsm(), llm_interface=llm, event_log=log)
+            where["cid"], _ = await api.astart_conversation(
+                initial_context={MESSAGES: [{"role": "user", "content": QUESTION}]}
+            )
+            await api.aadvance(where["cid"])  # intake -> call_model, silent
+            await api.aadvance(
+                where["cid"]
+            )  # the model call blocks after its request hop
+
+    asyncio.run(run())
+
+
 def _announce(ready: Path, **payload: Any) -> None:
     pending = ready.with_name(ready.name + ".tmp")
     pending.write_text(
@@ -390,6 +418,8 @@ def main(argv: list[str]) -> None:
         return stacked_main(argv)
     if argv[3:4] == ["registry"]:
         return registry_main(argv)
+    if argv[3:4] == ["async"]:
+        return async_main(argv)
     directory, ready = Path(argv[1]), Path(argv[2])
     log = EventLog(directory)
     llm = ChildLLM(scripted_replies(), block_at=1)

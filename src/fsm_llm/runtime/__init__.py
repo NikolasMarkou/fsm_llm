@@ -16,7 +16,7 @@ a private name is imported from the module that defines it.
 from __future__ import annotations
 
 from .blobs import BlobStore, blob_ref
-from .calls import LlmCall, llm_call
+from .calls import LlmCall, allm_call, llm_call
 from .checkpoint import CHECKPOINT_TYPES, is_checkpoint, unresolved_tool_calls
 from .constants import LOG_FORMAT_VERSION
 from .events import (
@@ -70,6 +70,7 @@ __all__ = [
     "TurnOutcome",
     "TurnScope",
     "activate",
+    "allm_call",
     "bind",
     "blob_ref",
     "canonical_json",

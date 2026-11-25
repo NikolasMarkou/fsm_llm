@@ -824,8 +824,24 @@ class TestOneBodyPerMethod:
     def test_the_meter_and_the_observer_are_fed_only_in_the_send_family(self) -> None:
         # Plan 3f4530d3, step 1a: the family is in `send.py`, its callers in `litellm.py`.
         defs = {**_defs("litellm.py"), **_defs("send.py")}
-        family = {"_begin_send", "_failed_send", "_finished_send"}
-        fed = {"record", "record_error", "begin_send", "end_send", "fail_send"}
+        # Plan 3f4530d3, step 8b: the two that touch the observer have an async twin that
+        # awaits the observer's own async hook (`abegin_send`, `aend_send`) and nothing else.
+        family = {
+            "_begin_send",
+            "_abegin_send",
+            "_failed_send",
+            "_finished_send",
+            "_afinished_send",
+        }
+        fed = {
+            "record",
+            "record_error",
+            "begin_send",
+            "end_send",
+            "fail_send",
+            "abegin_send",
+            "aend_send",
+        }
         for name, node in defs.items():
             if name not in family:
                 assert not fed & set(_calls(node)), name
@@ -833,10 +849,14 @@ class TestOneBodyPerMethod:
             _PROVIDERS_DIR / "send.py"
         ).read_text(encoding="utf-8")
         assert all(source.count(f"def {name}(") == 1 for name in family)
-        assert source.count("meter.record(") == 1
-        for sender in ("_send", "_asend"):
+        assert source.count("meter.record(") == 2  # `_finished_send` and its async twin
+        for sender, helpers in (
+            ("_send", {"_begin_send", "_failed_send", "_finished_send"}),
+            ("_asend", {"_abegin_send", "_failed_send", "_afinished_send"}),
+        ):
             calls = _calls(defs[sender])
-            assert all(calls.count(helper) == 1 for helper in family), sender
+            assert all(calls.count(helper) == 1 for helper in helpers), sender
+            assert not (family - helpers) & set(calls), sender
 
 
 _SRC = Path(__file__).resolve().parents[2] / "src/fsm_llm"

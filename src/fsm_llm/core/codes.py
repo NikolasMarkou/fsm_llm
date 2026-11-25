@@ -192,7 +192,7 @@ class MessageSource(str, Enum):
 
 # DECISION plan-2026-11-24T193347-3f4530d3/D-012
 # The source of a message is a record on `turn/start`, never an input of a decision. Its one
-# reader is `engine/events.begin_turn`; do NOT read it in `policy/`, `handlers/`, the HITL gate or
+# reader is `engine/events.open_turn`; do NOT read it in `policy/`, `handlers/`, the HITL gate or
 # a prompt (an approval is never selected by source, and no request byte may carry it), do NOT
 # hold the scope across a `yield`, and do NOT move it to `runtime` (`testing/` may import only
 # core). See decisions.md D-012.

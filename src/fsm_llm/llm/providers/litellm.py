@@ -685,7 +685,7 @@ class LiteLLMInterface(
         # `acompletion` is a binding of this module beside `completion`, built by the same
         # `_build_call_params` and fed through the same `_begin_send`, `_failed_send` and
         # `_finished_send`. Do NOT write a second send path or count in a public method.
-        kind, meter, token = self._begin_send(call_params, call_type)
+        kind, meter, token = await self._abegin_send(call_params, call_type)
         try:
             response = await acompletion(**call_params)
         except (Exception, asyncio.CancelledError) as exc:
@@ -698,7 +698,9 @@ class LiteLLMInterface(
             # `_send`. See decisions.md D-008.
             self._failed_send(meter, kind, token, exc)
             raise
-        return self._finished_send(meter, kind, token, call_params, call_type, response)
+        return await self._afinished_send(
+            meter, kind, token, call_params, call_type, response
+        )
 
     def _supported_openai_params(self) -> list[str] | None:
         """Return litellm's supported-param list for ``self.model``, memoised.

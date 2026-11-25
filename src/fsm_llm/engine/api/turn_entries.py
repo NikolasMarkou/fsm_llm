@@ -27,9 +27,9 @@ from .budget import budget_kwargs
 from .calls import Settled, settle
 from .delegated import wait_for_run
 from .events import (
+    arecord_started,
     event_scope,
     event_stream,
-    record_started,
     start_event_id,
     start_event_scope,
 )
@@ -292,7 +292,7 @@ class TurnEntriesMixin(_ApiSurface):
                 self._last_accessed[conversation_id] = time.monotonic()
 
             if not _suppress_start:  # a restore writes its own record (restore_session)
-                record_started(self, conversation_id)
+                await arecord_started(self, conversation_id)
             return conversation_id, response
 
         except (ValueError, FSMError):

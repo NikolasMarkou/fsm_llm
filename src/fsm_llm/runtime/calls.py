@@ -29,8 +29,9 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Iterator
+from contextlib import asynccontextmanager, contextmanager
+from functools import partial
 from typing import Any
 
 from fsm_llm.llm.interface import interface_model
@@ -42,6 +43,7 @@ from fsm_llm.runtime.scope import (
     SOURCE_ENGINE,
     SOURCE_PROVIDER,
     TurnScope,
+    alog_request,
     error_fields,
     log_request,
     request_body,
@@ -61,6 +63,7 @@ class LlmCall:
         "_exhausted",
         "_logs_reply",
         "_purpose",
+        "_replying",
         "_request_seq",
         "_scope",
         "_source",
@@ -91,6 +94,7 @@ class LlmCall:
         self._done = False
         self._exhausted = False
         self._errored = False
+        self._replying = False  # an ``aresponse`` job is queued or running
 
     def _link(self) -> int | None:
         if self._request_seq is not None or self._scope is None:
@@ -111,6 +115,16 @@ class LlmCall:
             purpose=self._purpose,
             **response_fields(self._scope.log, reply, wrap=type(reply).__name__),
         )
+
+    async def aresponse(self, reply: Any) -> None:
+        """The async twin of ``response``: the reply blob and line are ONE lane job."""
+        if self._scope is None or not self._logs_reply or self._done:
+            return
+        self._replying = (
+            True  # stays set when the await is cancelled: the job still runs
+        )
+        await self._scope.log.lane_call(self._scope.root_id, self.response, reply)
+        self._replying = False
 
     def stream(self, chunks: Iterable[str]) -> Iterable[str]:
         """Yield the chunks of *chunks* and remember how the stream ended.
@@ -273,6 +287,54 @@ def llm_call(
         model=interface_model(interface),
         stream=bool(stream),
     )
+    with _recorded(scope, seq, call_type, purpose, tools_sent, stream) as call:
+        yield call
+
+
+@asynccontextmanager
+async def allm_call(
+    interface: Any, call_type: str, request: Any, *, stream: bool = False
+) -> AsyncIterator[LlmCall]:
+    """The async form of ``llm_call``: ``async with allm_call(...) as call``, then
+    ``await call.aresponse(reply)``. The request of an engine-logged call is ONE lane job (the
+    body is built on the loop first); an observed interface logs through the observer's async
+    twins, so that case is ``llm_call``'s."""
+    scope = SCOPE.get()
+    if scope is None or is_observed(interface):
+        with llm_call(interface, call_type, request, stream=stream) as call:
+            yield call
+        return
+    purpose = resolve_purpose(call_type).value
+    tools_sent = getattr(request, "tools", None) is not None
+    seq = await alog_request(
+        scope,
+        lambda: {
+            "source": SOURCE_ENGINE,
+            "request_type": type(request).__name__,
+            "request": request_body(request),
+        },
+        tools_sent=tools_sent,
+        source=SOURCE_ENGINE,
+        call_type=call_type,
+        purpose=purpose,
+        model=interface_model(interface),
+        stream=bool(stream),
+    )
+    with _recorded(scope, seq, call_type, purpose, tools_sent, stream) as call:
+        yield call
+
+
+@contextmanager
+def _recorded(
+    scope: TurnScope,
+    seq: int,
+    call_type: str,
+    purpose: str,
+    tools_sent: bool,
+    stream: bool,
+) -> Iterator[LlmCall]:
+    """Yield the ``LlmCall`` of an engine-logged request written as *seq*. A failure is written
+    inline, except behind the reply job of a cancelled ``aresponse`` (on the tree's lane)."""
     call = LlmCall(
         scope,
         seq,
@@ -294,7 +356,10 @@ def llm_call(
         # and the cancel goes on unchanged. Do NOT narrow this to `Exception` (a dangling
         # `llm/request`). A stream whose pass already ran `stream_done` (its `finally`) stays
         # `llm/response` with `abandoned`: `_failed` writes once. See decisions.md D-046.
-        call._failed(exc)
+        if call._replying:
+            scope.log.lane_after(scope.root_id, partial(call._failed, exc))
+        else:
+            call._failed(exc)
         raise
     finally:
         if token is not None:

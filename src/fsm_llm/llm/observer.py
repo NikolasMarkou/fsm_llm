@@ -17,6 +17,9 @@ Interface contract:
   is built), else a ``SendHandle``. The observer gets a NEW dict of the keys in
   ``OBSERVED_CALL_KEYS`` (the values are shared with the request: treat them read-only).
   An exception from ``RequestObserver.begin_send`` PROPAGATES: the call is not made.
+- ``abegin_send`` and ``aend_send`` are the async twins: the observer's class may define
+  ``abegin_send`` and ``aend_send`` (awaited), else its sync methods are called inline. The
+  failure hook has no twin (a plain append).
 - ``end_send(handle, response)`` and ``fail_send(handle, error)`` never raise: an observer
   error is logged as a WARNING (type name only) and the call goes on. A streamed call gets
   ``end_send`` with the iterator, never read.
@@ -96,13 +99,33 @@ def reset_observer(token: Token[RequestObserver | None]) -> None:
     _ACTIVE.reset(token)
 
 
+def _allowed(call_params: dict[str, Any]) -> dict[str, Any]:
+    return {key: call_params[key] for key in OBSERVED_CALL_KEYS if key in call_params}
+
+
 def begin_send(call_params: dict[str, Any], *, call_type: str) -> SendHandle | None:
     """Tell the active observer a request is about to be sent; propagate its refusal."""
     observer = _ACTIVE.get()
     if observer is None:
         return None
-    call = {key: call_params[key] for key in OBSERVED_CALL_KEYS if key in call_params}
-    return SendHandle(observer, observer.begin_send(call, call_type=call_type))
+    return SendHandle(
+        observer, observer.begin_send(_allowed(call_params), call_type=call_type)
+    )
+
+
+async def abegin_send(
+    call_params: dict[str, Any], *, call_type: str
+) -> SendHandle | None:
+    """The async twin of ``begin_send``: awaits the observer's ``abegin_send`` when its CLASS
+    defines one (else its sync ``begin_send``)."""
+    observer = _ACTIVE.get()
+    if observer is None:
+        return None
+    call = _allowed(call_params)
+    twin = getattr(type(observer), "abegin_send", None)
+    if twin is None:
+        return SendHandle(observer, observer.begin_send(call, call_type=call_type))
+    return SendHandle(observer, await twin(observer, call, call_type=call_type))
 
 
 def end_send(handle: SendHandle | None, response: Any) -> None:
@@ -111,6 +134,20 @@ def end_send(handle: SendHandle | None, response: Any) -> None:
         return
     try:
         handle.observer.end_send(handle.token, response)
+    except Exception as e:
+        logger.warning(f"Request observer end_send failed: {type(e).__name__}")
+
+
+async def aend_send(handle: SendHandle | None, response: Any) -> None:
+    """The async twin of ``end_send`` (the observer's ``aend_send`` when its class has one)."""
+    if handle is None:
+        return
+    try:
+        twin = getattr(type(handle.observer), "aend_send", None)
+        if twin is None:
+            handle.observer.end_send(handle.token, response)
+        else:
+            await twin(handle.observer, handle.token, response)
     except Exception as e:
         logger.warning(f"Request observer end_send failed: {type(e).__name__}")
 

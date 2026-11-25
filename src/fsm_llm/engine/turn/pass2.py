@@ -23,7 +23,7 @@ from fsm_llm.core.definitions import (
     State,
 )
 from fsm_llm.logging import logger
-from fsm_llm.runtime import llm_call
+from fsm_llm.runtime import allm_call
 
 from .records import _is_silent, _response_temperature
 from .surface import _PipelineSurface
@@ -111,7 +111,7 @@ class Pass2Mixin(_PipelineSurface):
         # signal, so a thrown Exception is deliberately treated as an ERROR (partial
         # dropped, user turn rolled back) even though the consumer may already have
         # seen chunks.  That asymmetry is intended, not an oversight.
-        with llm_call(
+        async with allm_call(
             self.llm_interface, "response_stream", request, stream=True
         ) as call:
             try:
@@ -189,11 +189,11 @@ class Pass2Mixin(_PipelineSurface):
             instance, current_state, conversation_id, None, None, False, None
         )
 
-        with llm_call(self.llm_interface, "greeting", request) as call:
+        async with allm_call(self.llm_interface, "greeting", request) as call:
             response: ResponseGenerationResponse = await acall(
                 self.llm_interface, "generate_response", request
             )
-            call.response(response)
+            await call.aresponse(response)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
         if was_cut_off(response):
@@ -248,11 +248,13 @@ class Pass2Mixin(_PipelineSurface):
             previous_state,
         )
 
-        with llm_call(self.llm_interface, "response_generation", request) as call:
+        async with allm_call(
+            self.llm_interface, "response_generation", request
+        ) as call:
             response: ResponseGenerationResponse = await acall(
                 self.llm_interface, "generate_response", request
             )
-            call.response(response)
+            await call.aresponse(response)
         instance.last_response_generation = response
         instance.context.conversation.add_system_message(response.message)
         if was_cut_off(response):

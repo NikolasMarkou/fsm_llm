@@ -803,7 +803,7 @@ class TestAFrameEndedBeforeItsRecordIsAnFsmError:
     """A5 (engine audit 2.4): ``end_conversation`` ends a frame at the manager before it drops
     the stack entry, so ``update_context`` can resolve a frame that is gone by the time its
     record is built. The producers read ``manager.instances`` without the manager lock (taking
-    ``_lock`` there would break the lock order: ``begin_turn`` runs under a ``conv_lock``), and a
+    ``_lock`` there would break the lock order: ``open_turn`` runs under a ``conv_lock``), and a
     missing frame must read as the ``FSMError`` the rest of the API raises, not a ``KeyError``."""
 
     def test_update_context_on_a_frame_that_just_ended_raises_fsm_error(
@@ -1239,17 +1239,31 @@ class TestEverySiteIsWrapped:
 
     @staticmethod
     def _inside_llm_call(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+        """True when *node* sits in the block that records it: ``async with allm_call`` inside an
+        ``async def`` (the lane hop, plan 3f4530d3 step 8b: a site cannot forget it) and
+        ``with llm_call`` inside a ``def``."""
+        function = node
+        while function in parents and not isinstance(
+            function, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            function = parents[function]
+        asynchronous = isinstance(function, ast.AsyncFunctionDef)
+        block, name = (
+            (ast.AsyncWith, "allm_call") if asynchronous else (ast.With, "llm_call")
+        )
         while node in parents:
             node = parents[node]
-            if isinstance(node, ast.With) and any(
+            if node is function:
+                return False
+            if isinstance(node, block) and any(
                 isinstance(item.context_expr, ast.Call)
-                and getattr(item.context_expr.func, "id", None) == "llm_call"
+                and getattr(item.context_expr.func, "id", None) == name
                 for item in node.items
             ):
                 return True
         return False
 
-    def test_every_model_call_of_the_engine_is_inside_an_llm_call_block(self):
+    def test_every_model_call_of_the_engine_is_inside_its_recording_block(self):
         sites = self._sites()
         unlogged = [(p.name, line) for p, line, wrapped in sites if not wrapped]
         assert unlogged == []
@@ -1288,6 +1302,31 @@ class TestEverySiteIsWrapped:
         call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call))
         parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
         assert self._inside_llm_call(call, parents) is False
+
+    def test_the_sweep_flags_the_sync_block_inside_an_async_body(self):
+        """The hop is the point: ``with llm_call`` in an ``async def`` is still unwrapped."""
+        for source, expected in [
+            (
+                "async def f(x):\n    with llm_call(x, 'a', 1) as c:\n        return x.generate_response(1)\n",
+                False,
+            ),
+            (
+                "async def f(x):\n    async with allm_call(x, 'a', 1) as c:\n        return x.generate_response(1)\n",
+                True,
+            ),
+            (
+                "def f(x):\n    async_with = 1\n    return x.generate_response(1)\n",
+                False,
+            ),
+        ]:
+            tree = ast.parse(source)
+            call = next(
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            )
+            parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+            assert self._inside_llm_call(call, parents) is expected, source
 
     def test_the_sweep_would_flag_an_unwrapped_call(self):
         tree = ast.parse("def f(x):\n    return x.generate_response(1)\n")

@@ -86,7 +86,7 @@ _RESERVED_FIELDS = frozenset(ENVELOPE_KEYS) | {LEVEL_KEY}
 def warn_on_failure(kind: EventType | str) -> Iterator[None]:
     """Run a write that comes AFTER the thing it records; an ``Exception`` is a WARNING.
 
-    Interface contract (callers: the turn scope, the stack events, ``end_turn``): the body is
+    Interface contract (callers: the turn scope, the stack events, ``aend_turn``): the body is
     one or more appends; an ``Exception`` out of it is swallowed and logged as ``event log:
     <kind> not written (<ExceptionType>)`` (the type name only, never the message), because the
     outcome it describes already happened and must not be hidden by the log. A
@@ -225,6 +225,14 @@ class EventLog:
         (inline in sync mode, FIFO per tree, a cancelled await leaves the job running).
         """
         return await self._lanes.lane_call(conversation_id, fn, *args)
+
+    def lane_after(self, conversation_id: str, fn: Callable[[], object]) -> None:
+        """Run *fn* behind the jobs already queued for the tree *conversation_id*, never waiting.
+
+        What a cancel arm uses (``Lanes.after``): its ``provider/error`` runs after the request
+        job whose await was cancelled. Inline when no lane thread ever served the tree.
+        """
+        self._lanes.after(conversation_id, fn)
 
     def has_writer(self, conversation_id: str) -> bool:
         """True while this log holds the writer (and so the lock) of *conversation_id*."""

@@ -16,9 +16,9 @@ from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 
 from .events import (
+    arecord_extraction,
     record_executor_result,
     record_executor_start,
-    record_extraction,
     record_extraction_miss,
 )
 from .records import _TurnRecord
@@ -98,7 +98,7 @@ class Pass1Mixin(_PipelineSurface):
 
             if extraction_response.extracted_data:
                 committed = extraction_response.extracted_data
-                record_extraction(source_state, committed)
+                await arecord_extraction(source_state, committed)
 
                 # DECISION plan-2026-07-19T191147-4b664252/D-005 [STALE]
                 # SHAPE (c) of three DIFFERENT partial-commit contracts in the turn pipeline.

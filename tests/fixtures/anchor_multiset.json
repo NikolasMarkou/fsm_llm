@@ -1124,6 +1124,16 @@
       "delta": 1,
       "reason": "step 8a: new anchors D-013 (runtime/lanes.py) and D-014 (runtime/stores/jsonl.py), added beside the D-011 text which stays",
       "token": "plan-2026-11-24T193347-3f4530d3/D-014"
+    },
+    {
+      "delta": 1,
+      "reason": "step 8b: new anchors D-015 (runtime/scope.py alog_request, the cancel arm of the request hop queues provider/error on the lane) and D-016 (engine/events.py aend_turn, a cancel on the end write of a committed turn is swallowed)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-015"
+    },
+    {
+      "delta": 1,
+      "reason": "step 8b: new anchors D-015 (runtime/scope.py alog_request, the cancel arm of the request hop queues provider/error on the lane) and D-016 (engine/events.py aend_turn, a cancel on the end write of a committed turn is swallowed)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-016"
     }
   ]
 }

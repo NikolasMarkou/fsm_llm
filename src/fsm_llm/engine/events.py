@@ -1,10 +1,10 @@
 """The engine's side of the event log: the state blob and the turn boundary (plan 21e6f00d).
 
-Layer ``engine``. ``FSMManager`` calls ``begin_turn`` and ``end_turn`` around every turn it
+Layer ``engine``. ``FSMManager`` calls ``open_turn``, ``abegin_turn`` and ``aend_turn`` around every turn it
 runs (``engine/fsm/turns.py``), so the pipeline bodies and their anchors are not edited; the
 ``API`` calls ``record_state`` for the records it writes out of any turn
 (``engine/api/events.py``). With no scope bound (``runtime.current_scope()`` is ``None``,
-the log is off) ``begin_turn`` is one ``ContextVar`` read and returns ``None``, and ``end_turn(None, ...)``
+the log is off) ``open_turn`` is one ``ContextVar`` read and returns ``None``, and ``aend_turn(None, ...)``
 returns at once: nothing is built, nothing is written.
 
 Interface contract:
@@ -16,16 +16,18 @@ Interface contract:
       ``provenance``, and ``internal``: the completion transcript and response format values of
       the definition's own completion states and NOTHING else (see the D-009 anchor). The
       caller holds the instance's ``conv_lock`` or owns the instance.
-    - ``begin_turn(manager, conversation_id, message) -> TurnHandle | None`` and
-      ``end_turn(handle, error_type)``: ``begin_turn`` runs with ``conv_lock`` held and BEFORE the
-      user message is added; it appends ``turn/start`` (``state_ref`` of the pre-turn state blob,
-      ``state``, ``has_user_message`` and, with a message, ``user_message_ref``) and returns the
-      handle. A failing write raises (``EventLogError``, the turn does not start). ``end_turn`` runs
-      AFTER the manager's rollback arms with the same lock held, takes no manager lock (it reads
-      the instance), and appends ``turn/end`` (``outcome`` and the ``state_ref`` of the state at
-      the end, a checkpoint). It never raises for an ``Exception``: a ``turn/end`` that cannot be
-      written is a WARNING (the poisoned writer refuses the next turn), because it runs in a
-      ``finally`` that must release the lock and must not replace the turn's own result.
+    - ``open_turn(manager, conversation_id, message) -> TurnHandle | None``, ``abegin_turn(handle)``
+      and ``aend_turn(handle, error_type)``: ``open_turn`` runs with ``conv_lock`` held, BEFORE
+      the user message is added, and builds the pre-turn state blob ON THE LOOP (it reads the live
+      instance); ``abegin_turn`` appends ``turn/start`` (``state_ref``, ``state``,
+      ``has_user_message``, ``source`` and, with a message, ``user_message_ref``) as ONE lane job.
+      A failing write raises (``EventLogError``, the turn does not start). ``aend_turn`` runs
+      AFTER the manager's rollback arms, takes no manager lock, builds the end state blob on the
+      loop and appends ``turn/end`` (``outcome`` and the ``state_ref`` at the end, a checkpoint)
+      as ONE lane job behind ``turn/start`` (nothing for a turn that did not start). It never
+      raises for an ``Exception``: a ``turn/end`` that cannot be written is a WARNING (the
+      poisoned writer refuses the next turn), because it runs in a ``finally`` that must
+      release the lock and must not replace the turn's own result.
     - Outcome (``TurnOutcome``), decided by what the manager left in memory: no error is
       ``committed``; ``KeyboardInterrupt`` and ``SystemExit`` are ``interrupted``;
       ``GeneratorExit`` (a stream closed early) is ``abandoned``; any other exception is
@@ -51,7 +53,9 @@ Interface contract:
       modules (a source scan keeps the ``API`` off the manager's tables).
     - ``record_state(manager, log, conversation_id, *, source, frame=0, root_id=None, **fields)
       -> int``: append one ``context/record`` with the state of the conversation read under ONE
-      ``conv_lock`` hold (out of any turn: ``start_conversation``). *conversation_id* is the id
+      ``conv_lock`` hold (out of any turn: ``start_conversation``). ``arecord_state`` is the one body
+      (the read stays on the loop, the blob and the line are ONE lane job) and ``record_state`` its
+      ``run_sync`` wrapper. *conversation_id* is the id
       the MANAGER knows; the event goes to the log of *root_id* (default: the same id) at
       *frame*, so a pushed frame (its own manager id, the tree's root id) can be recorded.
     - ``state_ref_of(manager, log, conversation_id) -> str``: the ``state_blob`` of the
@@ -62,7 +66,7 @@ Interface contract:
 Privacy (plan 5a6a1f80, row 1.11a): at level ``shape`` (``log.stores_values`` is False) no
 producer here STORES a blob. A turn keeps the DIGEST of its start and end state (``_ref``) so
 ``rolled_back`` and ``abandoned`` stay distinct, and the digest is never written (the log drops
-every ``*_ref``); ``begin_turn`` stores no user message, ``record_delta`` no delta. ``record_state``
+every ``*_ref``); ``abegin_turn`` stores no user message, ``record_delta`` no delta. ``record_state``
 still BUILDS the state blob at ``shape`` (``_read_state_blob`` always runs ``state_blob``, once per
 start, restore, fork or resume) to read ``current_state`` from it, and then drops it. At level
 ``values`` every blob is stored with its ``RedactionKind`` for the user's hook.
@@ -72,9 +76,12 @@ Imports ``core``, ``runtime`` and ``engine.fsm.snapshots`` only; never the pipel
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
 
+from fsm_llm.aio import run_sync
 from fsm_llm.core.codes import current_message_source
 from fsm_llm.core.definitions import FSMError
 from fsm_llm.core.state_kinds import kind_of
@@ -106,20 +113,25 @@ _KIND_KEY_FIELDS = ("messages_key", "response_format_key")
 
 
 class _TurnManager(Protocol):
-    """What ``begin_turn`` reads of the manager (``TurnsMixin`` declares both for mypy)."""
+    """What ``open_turn`` reads of the manager (``TurnsMixin`` declares both for mypy)."""
 
     instances: dict[str, FSMInstance]
 
     def get_fsm_definition(self, fsm_id: str) -> FSMDefinition: ...
 
 
-class TurnHandle(NamedTuple):
-    """What ``begin_turn`` remembers for ``end_turn`` (the same turn, the same thread)."""
+@dataclass
+class TurnHandle:
+    """What ``open_turn`` remembers for ``abegin_turn`` and ``aend_turn``; ``start_ref`` stays
+    ``None`` until ``turn/start`` is written, so a turn that did not start gets no ``turn/end``."""
 
     scope: TurnScope
     instance: FSMInstance
     definition: FSMDefinition
-    start_ref: str
+    start_blob: dict[str, Any]
+    message: str | None
+    fields: dict[str, Any]
+    start_ref: str | None = None
 
 
 def declared_internal_keys(definition: FSMDefinition) -> tuple[str, ...]:
@@ -172,7 +184,7 @@ def _instance_of(manager: _TurnManager, conversation_id: str) -> FSMInstance:
 
     ``end_conversation`` ends a frame at the manager before the ``API`` drops its stack entry, so
     a producer can name a frame that has just ended. Read through ``dict.get`` (atomic), never
-    through ``manager._lock``: ``begin_turn`` runs under a ``conv_lock`` and ``_lock`` taken under
+    through ``manager._lock``: ``open_turn`` runs under a ``conv_lock`` and ``_lock`` taken under
     one breaks the lock order (``test_fsm_lock_order.py``).
     """
     instance = manager.instances.get(conversation_id)
@@ -252,29 +264,47 @@ def _ref(log: EventLog, blob: Mapping[str, Any]) -> str:
     return log.digest_json(blob)
 
 
-def begin_turn(
+def open_turn(
     manager: _TurnManager, conversation_id: str, message: str | None
 ) -> TurnHandle | None:
-    """Append ``turn/start`` for the turn about to run; ``None`` with no scope bound."""
+    """Build what ``turn/start`` needs ON THE LOOP (it reads the live instance, which an orphan
+    lane job must never do); ``None`` with no scope bound."""
     scope = current_scope()
     if scope is None:
         return None
     instance = manager.instances[conversation_id]
     definition = manager.get_fsm_definition(instance.fsm_id)
-    start_ref = _ref(scope.log, state_blob(instance, definition))
     fields: dict[str, Any] = {
-        "state_ref": start_ref,  # at shape the digest: the log drops every *_ref
         "state": instance.current_state,
         "has_user_message": message is not None,
     }
     if message is not None:
         fields["source"] = current_message_source().value
-    if message is not None and scope.log.stores_values:
-        fields["user_message_ref"] = scope.log.put_json(
-            message, kind=RedactionKind.USER_MESSAGE
+    return TurnHandle(
+        scope, instance, definition, state_blob(instance, definition), message, fields
+    )
+
+
+def _write_start(handle: TurnHandle) -> None:
+    """Store the start state and the message, append ``turn/start`` (one lane job)."""
+    log = handle.scope.log
+    start_ref = _ref(log, handle.start_blob)
+    fields = {"state_ref": start_ref, **handle.fields}  # at shape the digest: dropped
+    if handle.message is not None and log.stores_values:
+        fields["user_message_ref"] = log.put_json(
+            handle.message, kind=RedactionKind.USER_MESSAGE
         )
-    scope.log.append(scope.root_id, EventType.TURN_START, frame=scope.frame, **fields)
-    return TurnHandle(scope, instance, definition, start_ref)
+    log.append(
+        handle.scope.root_id, EventType.TURN_START, frame=handle.scope.frame, **fields
+    )
+    handle.start_ref = start_ref
+
+
+async def abegin_turn(handle: TurnHandle | None) -> None:
+    """Append ``turn/start``: ONE lane job (the first writer open included). A failing write
+    raises (``EventLogError``) and the turn does not start."""
+    if handle is not None:
+        await handle.scope.log.lane_call(handle.scope.root_id, _write_start, handle)
 
 
 def _outcome(error: type[BaseException] | None, unchanged: bool) -> TurnOutcome:
@@ -288,21 +318,47 @@ def _outcome(error: type[BaseException] | None, unchanged: bool) -> TurnOutcome:
     return TurnOutcome.ROLLED_BACK if unchanged else TurnOutcome.ABANDONED
 
 
-def end_turn(handle: TurnHandle | None, error: type[BaseException] | None) -> None:
-    """Append ``turn/end`` for the turn that ran; a no-op for ``None``; never raises an ``Exception``."""
+def _write_end(
+    handle: TurnHandle, end_blob: dict[str, Any], error: type[BaseException] | None
+) -> None:
+    """Store the end state and append ``turn/end`` (one lane job); nothing if it never started."""
+    if handle.start_ref is None:
+        return
+    log = handle.scope.log
+    end_ref = _ref(log, end_blob)
+    outcome = _outcome(error, end_ref == handle.start_ref)
+    log.append(
+        handle.scope.root_id,
+        EventType.TURN_END,
+        frame=handle.scope.frame,
+        outcome=outcome.value,
+        state_ref=end_ref,
+    )
+
+
+async def aend_turn(
+    handle: TurnHandle | None, error: type[BaseException] | None
+) -> None:
+    """Append ``turn/end`` for the turn that ran (the end state is read here, on the loop, AFTER
+    the rollback arms; the write is ONE lane job); never raises an ``Exception``."""
     if handle is None:
         return
-    scope = handle.scope
     with warn_on_failure(EventType.TURN_END):
-        end_ref = _ref(scope.log, state_blob(handle.instance, handle.definition))
-        outcome = _outcome(error, end_ref == handle.start_ref)
-        scope.log.append(
-            scope.root_id,
-            EventType.TURN_END,
-            frame=scope.frame,
-            outcome=outcome.value,
-            state_ref=end_ref,
-        )
+        end_blob = state_blob(handle.instance, handle.definition)
+        try:
+            await handle.scope.log.lane_call(
+                handle.scope.root_id, _write_end, handle, end_blob, error
+            )
+        except asyncio.CancelledError:
+            # DECISION plan-2026-11-24T193347-3f4530d3/D-016
+            # A turn that ended WITHOUT an error has committed: a cancel that lands on this
+            # write must not turn its delivered reply into a failure (a retry would duplicate
+            # the message). The `turn/end` job still completes (FIFO, shielded), so the cancel
+            # request is consumed here. With an error the cancel propagates unchanged. Do NOT
+            # swallow it on the error path, do NOT skip the write, and do NOT shield the whole
+            # `finally` (a hung disk would pin the caller). See decisions.md D-016.
+            if error is not None:
+                raise
 
 
 def record_budget_spent(error: RunBudgetExceededError) -> None:
@@ -349,7 +405,7 @@ def state_ref_of(manager: FSMManager, log: EventLog, conversation_id: str) -> st
     )
 
 
-def record_state(
+async def arecord_state(
     manager: FSMManager,
     log: EventLog,
     conversation_id: str,
@@ -361,21 +417,51 @@ def record_state(
 ) -> int:
     """Append a ``context/record`` with the current state of *conversation_id*; return its ``seq``.
 
-    The state is read through ``_read_state_blob`` (one ``conv_lock`` hold). *source* names the
-    writer (``"start"``); *fields* are extra event fields. The event is written to the log of
-    *root_id* (the tree's root conversation id, default *conversation_id* itself, which is right
-    for a root) at *frame*: a pushed frame has its own manager id and the root's log id.
+    The state is read through ``_read_state_blob`` (one ``conv_lock`` hold) on the loop; the blob
+    and the line are ONE lane job. *source* names the writer (``"start"``); *fields* are extra
+    event fields. The event is written to the log of *root_id* (the tree's root conversation id,
+    default *conversation_id* itself, which is right for a root) at *frame*: a pushed frame has
+    its own manager id and the root's log id.
     """
+    root = conversation_id if root_id is None else root_id
     blob = _read_state_blob(manager, conversation_id)
-    refs: dict[str, Any] = {}
-    if log.stores_values:
-        refs["state_ref"] = log.put_json(blob, kind=RedactionKind.STATE)
-    return log.append(
-        conversation_id if root_id is None else root_id,
-        EventType.CONTEXT_RECORD,
-        frame=frame,
-        source=source,
-        state=blob["current_state"],
-        **refs,
-        **fields,
+
+    def write() -> int:
+        refs: dict[str, Any] = {}
+        if log.stores_values:
+            refs["state_ref"] = log.put_json(blob, kind=RedactionKind.STATE)
+        return log.append(
+            root,
+            EventType.CONTEXT_RECORD,
+            frame=frame,
+            source=source,
+            state=blob["current_state"],
+            **refs,
+            **fields,
+        )
+
+    return await log.lane_call(root, write)
+
+
+def record_state(
+    manager: FSMManager,
+    log: EventLog,
+    conversation_id: str,
+    *,
+    source: str,
+    frame: int = 0,
+    root_id: str | None = None,
+    **fields: Any,
+) -> int:
+    """The sync name of ``arecord_state`` (a ``run_sync`` wrapper: the write runs inline)."""
+    return run_sync(
+        arecord_state(
+            manager,
+            log,
+            conversation_id,
+            source=source,
+            frame=frame,
+            root_id=root_id,
+            **fields,
+        )
     )

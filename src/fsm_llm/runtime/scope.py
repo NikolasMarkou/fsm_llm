@@ -50,13 +50,16 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, NamedTuple
 
+from fsm_llm.aio import run_sync
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.core.tool_observer import install_tool_observer, reset_tool_observer
 from fsm_llm.llm.failures import classify_failure
@@ -275,6 +278,77 @@ def log_request(scope: TurnScope, build: Callable[[], Any], **fields: Any) -> in
         ) from exc
 
 
+def prebuilt(scope: TurnScope, build: Callable[[], Any]) -> Callable[[], Any]:
+    """Evaluate *build* NOW (on the loop, it reads live objects) and return a callable giving its
+    result; a failure is re-raised by that callable, so ``log_request`` makes it its one
+    ``LogWriteError``. A ``shape`` log builds nothing."""
+    if not scope.log.stores_values:
+        return build
+    try:
+        body = build()
+    except Exception as exc:
+
+        def failed(error: Exception = exc) -> Any:
+            raise error
+
+        return failed
+    return lambda: body
+
+
+async def alog_request(
+    scope: TurnScope,
+    build: Callable[[], Any],
+    *,
+    tools_sent: bool = False,
+    **fields: Any,
+) -> int:
+    """The async twin of ``log_request``: ONE lane job. *fields* hold ``source``, ``call_type``,
+    ``purpose`` (and ``stream``): a cancelled await queues the request's ``provider/error``."""
+    seen: list[int] = []
+    body = prebuilt(scope, build)
+
+    def job() -> int:
+        seq = log_request(scope, body, **fields)
+        seen.append(seq)
+        return seq
+
+    try:
+        return await scope.log.lane_call(scope.root_id, job)
+    except asyncio.CancelledError as exc:
+        # DECISION plan-2026-11-24T193347-3f4530d3/D-015
+        # The job still runs (an orphan). Its `provider/error` is queued on the SAME lane, so
+        # FIFO runs it after the request job and `seen` is final: a request is never left
+        # without its error, and nothing is awaited in the cancelled task. Do NOT shield or
+        # await a begin hop here, write the error before the job (no `request_seq`), or narrow
+        # the arm to `Exception` (D-008 of plan 51fde95b). See decisions.md D-015.
+        scope.log.lane_after(
+            scope.root_id,
+            partial(_failed_request, scope, seen, exc, tools_sent, fields),
+        )
+        raise
+
+
+def _failed_request(
+    scope: TurnScope,
+    seen: list[int],
+    error: BaseException,
+    tools_sent: bool,
+    fields: Mapping[str, Any],
+) -> None:
+    """The ``provider/error`` of a request whose await was cancelled."""
+    if seen:  # a job that failed wrote no request, so there is nothing to pair
+        write_quietly(
+            scope,
+            EventType.PROVIDER_ERROR,
+            request_seq=seen[0],
+            source=fields["source"],
+            call_type=fields["call_type"],
+            purpose=fields["purpose"],
+            **error_fields(error, tools_sent=tools_sent),
+            **({"stream": True} if fields.get("stream") else {}),
+        )
+
+
 class _ScopeObserver:
     """The ``RequestObserver`` of one scope: logs the exact provider request of ``_send``."""
 
@@ -284,27 +358,35 @@ class _ScopeObserver:
         self.last_request_seq: int | None = None
 
     def begin_send(self, call: dict[str, Any], *, call_type: str) -> object | None:
-        stream = bool(call.get("stream"))
+        return run_sync(self.abegin_send(call, call_type=call_type))
+
+    async def abegin_send(
+        self, call: dict[str, Any], *, call_type: str
+    ) -> object | None:
+        """The one body: the request is ONE lane job (``alog_request``), inline in sync mode."""
         purpose = resolve_purpose(call_type).value
-        seq = log_request(
+        stream, tools_sent = bool(call.get("stream")), call.get("tools") is not None
+        model = call.get("model")
+        seq = await alog_request(
             self._scope,
             lambda: call,
+            tools_sent=tools_sent,
             source=SOURCE_PROVIDER,
             call_type=call_type,
             purpose=purpose,
-            model=call.get("model"),
+            model=model,
             stream=stream,
         )
         self.last_request_seq = seq
-        model = call.get("model")
-        return _Pending(
-            seq,
-            call_type,
-            stream,
-            model if isinstance(model, str) else None,
-            purpose,
-            call.get("tools") is not None,
-        )
+        model = model if isinstance(model, str) else None
+        return _Pending(seq, call_type, stream, model, purpose, tools_sent)
+
+    async def aend_send(self, token: object | None, response: Any) -> None:
+        """The async twin of ``end_send``: the reply blob and line are ONE lane job."""
+        if isinstance(token, _Pending) and not token.stream:
+            await self._scope.log.lane_call(
+                self._scope.root_id, self.end_send, token, response
+            )
 
     def end_send(self, token: object | None, response: Any) -> None:
         # A stream is never read here: its one ``llm/response`` is ``LlmCall.stream_done``.

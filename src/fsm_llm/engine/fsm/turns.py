@@ -23,7 +23,12 @@ from fsm_llm.core.definitions import (
     FSMInstance,
     RunBudgetExceededError,
 )
-from fsm_llm.engine.events import begin_turn, end_turn, record_budget_spent
+from fsm_llm.engine.events import (
+    abegin_turn,
+    aend_turn,
+    open_turn,
+    record_budget_spent,
+)
 from fsm_llm.handlers import HandlerTiming
 
 from .helpers import (
@@ -255,18 +260,20 @@ class TurnsMixin:
         # a02151fe/D-014) would then have to hold in two places.
         conv_lock, ticket = _claim_turn(self, conversation_id)
         # DECISION plan-2026-11-17T100529-21e6f00d/D-008
-        # The event log's turn boundary lives HERE, not in the pipeline: `begin_turn` runs
-        # before the user message is added, `end_turn` after the except arms of
+        # The event log's turn boundary lives HERE, not in the pipeline: `abegin_turn` runs
+        # before the user message is added, `aend_turn` after the except arms of
         # `_process_message_locked` rolled back, both with `conv_lock` held and taking no
-        # manager lock. Both are no-ops with no scope bound (the log off). The error is
+        # manager lock, and each a hop to a lane thread (`open_turn` builds on the loop first,
+        # D-015 of plan 3f4530d3). Both are no-ops with no scope bound (the log off). The error is
         # captured as its TYPE by `except BaseException`, never read from `sys.exc_info()`:
         # in a `finally` that call answers with the CALLER's exception when this turn runs
-        # inside an `except` block and succeeds. `end_turn` never raises an `Exception`, so
+        # inside an `except` block and succeeds. `aend_turn` never raises an `Exception`, so
         # the release below always runs. Do NOT move this into `_run_turn` (anchored bodies).
         turn = None
         error: type[BaseException] | None = None
         try:
-            turn = begin_turn(self, conversation_id, message)
+            turn = open_turn(self, conversation_id, message)
+            await abegin_turn(turn)
             return await self._process_message_locked(
                 conversation_id, message, log, run
             )
@@ -275,7 +282,7 @@ class TurnsMixin:
             raise
         finally:
             try:
-                end_turn(turn, error)
+                await aend_turn(turn, error)
             finally:
                 _release_turn(self, conversation_id, conv_lock, ticket)
 
@@ -403,7 +410,8 @@ class TurnsMixin:
             turn = None
             error: type[BaseException] | None = None
             try:
-                turn = begin_turn(self, conversation_id, message)
+                turn = open_turn(self, conversation_id, message)
+                await abegin_turn(turn)
                 instance = self.instances[conversation_id]
                 current_state = self.resolve_state_definition(instance, conversation_id)
                 if not current_state.transitions:
@@ -452,7 +460,7 @@ class TurnsMixin:
                 raise
             finally:
                 try:
-                    end_turn(turn, error)
+                    await aend_turn(turn, error)
                 finally:
                     _release_turn(self, conversation_id, conv_lock, ticket)
 

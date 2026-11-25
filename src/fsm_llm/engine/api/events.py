@@ -22,7 +22,7 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       ``runtime.scoped_iter`` over it, or ``aio.asteps`` for an async generator (the scope is
       bound only while the stream runs a step, so a stream consumed on another thread or task
       never resets a token it did not set).
-    - ``record_started(api, conversation_id)``: appends the ``context/record`` (``source:
+    - ``arecord_started(api, conversation_id)``: appends the ``context/record`` (``source:
       "start"``) with the state after the greeting; when the log cannot be written the
       conversation is ended and the error raised, so the caller never holds an id whose every turn
       would refuse.
@@ -92,6 +92,7 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
@@ -100,7 +101,12 @@ from typing import Any, TypeVar, cast
 
 from fsm_llm.aio import asteps
 from fsm_llm.core.definitions import FSMDefinition
-from fsm_llm.engine.events import record_delta, record_state, state_ref_of
+from fsm_llm.engine.events import (
+    arecord_state,
+    record_delta,
+    record_state,
+    state_ref_of,
+)
 from fsm_llm.logging import logger
 from fsm_llm.runtime import (
     EventLog,
@@ -311,14 +317,15 @@ def record_context_update(
     record_delta(api.fsm_manager, scope, child_id, delta, source="update_context")
 
 
-def record_started(api: _ApiSurface, conversation_id: str) -> None:
-    """Append the ``start`` record of a new conversation (see the module docstring)."""
+async def arecord_started(api: _ApiSurface, conversation_id: str) -> None:
+    """Append the ``start`` record of a new conversation (the first write of a silent one)."""
     log = getattr(api, "_event_log", None)
     if log is None:
         return
     try:
-        record_state(api.fsm_manager, log, conversation_id, source="start")
-    except Exception:
+        await arecord_state(api.fsm_manager, log, conversation_id, source="start")
+    except (Exception, asyncio.CancelledError):
+        # a cancel on the record hop is a cancelled start: nothing may stay registered
         with suppress(Exception):
             api.end_conversation(conversation_id)
         raise
