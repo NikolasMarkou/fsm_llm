@@ -15,6 +15,7 @@ a trace row or a diagnosis.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
 import json
@@ -22,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 from unittest import mock
 
 import pytest
@@ -63,6 +64,7 @@ LEVELS = ("values", "shape")
 CANARY = "CANARY-7f3a91"
 NPF = "not-procedure-fault"
 COMPLETION = "fsm_llm.llm.providers.litellm.completion"
+ACOMPLETION = "fsm_llm.llm.providers.litellm.acompletion"
 WRITER = "fsm_llm.runtime.log.time"
 
 
@@ -74,9 +76,11 @@ def _down_error(name: str) -> LLMResponseError:
 
 class _Seeded(ScriptedRunnerLLM):
     """The cheap model with a seeded defect. It counts the extraction calls of ``answer`` (two
-    per turn while a gate is blocked). Up to the call ``after`` it extracts ``before``; after
-    it, it raises the outage named ``down`` when there is one and extracts ``later`` otherwise.
-    ``after=0`` is the model that is the same from its first call."""
+    per turn while a gate is blocked). It extracts ``before``; with ``later`` or ``down`` given
+    it switches after the call ``after`` (``after=0``: from the first call) to raising the
+    outage named ``down`` or extracting ``later``. With neither it never switches. ``asked``
+    is the spy: every extraction call as ``(field, the data it was answered from, the value or
+    data it returned)``, so a row proves what the seed really did."""
 
     def __init__(
         self,
@@ -94,20 +98,26 @@ class _Seeded(ScriptedRunnerLLM):
             down,
         )
         self.calls = 0
+        self.asked: list[tuple[str, dict[str, Any], Any]] = []
+
+    def _past(self) -> bool:
+        return (self.later is not None or bool(self.down)) and self.calls > self.after
 
     def extract_field(self, request: Any) -> Any:
         if request.field_name == "answer":
             self.calls += 1
-        past = self.calls > self.after
-        if past and self.down:
+        if self._past() and self.down:
             raise _down_error(self.down)
-        self.extraction_data = (self.later or {}) if past else self.before
-        return super().extract_field(request)
+        self.extraction_data = (self.later or {}) if self._past() else self.before
+        reply = super().extract_field(request)
+        self.asked.append((request.field_name, dict(self.extraction_data), reply.value))
+        return reply
 
     def extract_bulk_data(self, request: Any) -> DataExtractionResponse:
         """The re-extraction of a blocked gate: the same data the field calls would give."""
         self.call_history.append(("extract_bulk_data", request))
-        data = (self.later or {}) if self.calls > self.after else self.before
+        data = (self.later or {}) if self._past() else self.before
+        self.asked.append(("bulk", dict(data), dict(data)))
         return DataExtractionResponse(extracted_data=dict(data))
 
 
@@ -181,6 +191,8 @@ class Outcome:
     stream: list[tuple[str, dict[str, Any]]]
     definition: FSMDefinition
     policy: SynthesisPolicy
+    cheap: Any = None
+    async_calls: list[str] = dataclasses.field(default_factory=list)
 
     @property
     def codes(self) -> list[tuple[str, str, tuple[str, ...]]]:
@@ -199,8 +211,12 @@ def drive(
     provider: Any = None,
     hook: Callable[[str, Rig], None] | None = None,
     clock: Callable[[], float] | None = None,
+    use_async: bool = False,
 ) -> Outcome:
-    """Run the seeded child to its end at ``level``, fold its trace and diagnose it."""
+    """Run the seeded child to its end at ``level``, fold its trace and diagnose it. With
+    ``use_async`` the run is ``arun_until_terminal`` and the provider is patched at its async
+    binding too (``async_calls`` names what the async binding served)."""
+    async_calls: list[str] = []
     policy = SynthesisPolicy(max_turns=turns, allow_classification=classify)
     traces: list[RunTrace] = []
     recorder = TraceRecorder(traces.append)
@@ -227,6 +243,12 @@ def drive(
             stack.enter_context(mock.patch(WRITER, SimpleNamespace(time=clock)))
         if provider is not None:
             stack.enter_context(mock.patch(COMPLETION, provider))
+
+            async def aprovider(**kwargs: Any) -> Any:
+                async_calls.append(kwargs.get("model", ""))
+                return provider(**kwargs)
+
+            stack.enter_context(mock.patch(ACOMPLETION, aprovider))
         rig = make_rig(
             fsm,
             cheap=cheap,
@@ -237,13 +259,27 @@ def drive(
         )
         holder.append(rig)
         try:
-            rig.run(40)
+            if use_async:
+                asyncio.run(rig.api.arun_until_terminal(rig.conv, max_steps=40))
+            else:
+                rig.run(40)
         finally:
             log.close()
     (trace,) = traces
     definition = FSMDefinition.model_validate(fsm)
     got = diagnose([trace], definition, policy, return_keys=("answer",))
-    return Outcome(trace, got, rig, reads, tmp_path / "ev", stream, definition, policy)
+    return Outcome(
+        trace,
+        got,
+        rig,
+        reads,
+        tmp_path / "ev",
+        stream,
+        definition,
+        policy,
+        cheap,
+        async_calls,
+    )
 
 
 def _bulk_fsm(gate: str | None = None) -> dict[str, Any]:
@@ -377,6 +413,25 @@ SEEDS: dict[str, tuple[Callable[[Path, str], Outcome], list[tuple[Any, ...]]]] =
 }
 
 
+def _answered(cheap: _Seeded, data: dict[str, Any], value: Any) -> bool:
+    """Whether some extraction of ``answer`` was answered from ``data`` and gave ``value``."""
+    return ("answer", data, value) in cheap.asked
+
+
+# what the extractor of each seeded model was really asked and gave (the spy of ``_Seeded``)
+SPIED: dict[str, Callable[[_Seeded], bool]] = {
+    "rate_limited": lambda c: c.asked == [] and c.calls >= 3,  # it never answered
+    "mixed": lambda c: _answered(c, {"town": "x"}, None) and c.calls > 6,
+    "resolving": lambda c: (
+        _answered(c, {}, None) and _answered(c, {"answer": "42"}, "42")
+    ),
+    "late_wrong_value": lambda c: (
+        _answered(c, {}, None) and _answered(c, {"answer": "42"}, "42")
+    ),
+    "other_state": lambda c: _answered(c, {"answer": "42"}, "42"),
+}
+
+
 def _all_events(outcome: Outcome) -> list[dict[str, Any]]:
     log = EventLog(outcome.log_dir)
     try:
@@ -409,6 +464,8 @@ class TestEverySeededDefectIsDiagnosed:
         assert (
             outcome.rig.api.get_stack_depth(outcome.rig.conv) == 1
         )  # the child popped
+        if name in SPIED:
+            assert SPIED[name](outcome.cheap), outcome.cheap.asked
         if name == "resolving":
             assert outcome.trace.status == "ok"
         else:
@@ -539,7 +596,14 @@ class TestAMissIsObservedNotInferred:
     ):
         outcome = SEEDS[name][0](tmp_path, level)
 
+        # the spy proves the seed: the extractor was asked for ``answer`` from this very data
+        # (not from an empty dict) and gave nothing back (the review's probe p11)
+        seeded = {"wrong_key": {"town": "x"}, "null": {"answer": None}}[name]
+        asked = outcome.cheap.asked
+        assert len(asked) >= 6 and {field for field, _, _ in asked} == {"answer"}
+        assert all(data == seeded and value is None for _, data, value in asked)
         assert outcome.trace.misses == ((ASK, "answer", 3),)
+        assert "answer" not in outcome.trace.keys
         assert outcome.codes == [MISS]
 
     def test_evidence_of_another_state_is_no_evidence_for_the_stuck_one(
@@ -759,9 +823,35 @@ class TestALostReaderLeavesTheNewRulesInert:
         assert [d.code for d in outcome.diagnoses] == [NPF]
 
 
+def _gate_never() -> dict[str, Any]:
+    """good_fsm whose edge wants the value ``never``: a value the user gave leaves it stuck."""
+    fsm = good_fsm()
+    fsm["states"]["ask"]["transitions"][0]["conditions"][0]["logic"] = {
+        "==": [{"var": "answer"}, "never"]
+    }
+    return fsm
+
+
 @pytest.mark.parametrize("level", LEVELS)
 class TestNoValueReachesATraceOrADiagnosis:
-    def test_the_canary_of_a_user_value_and_a_caller_input_is_nowhere(
+    """Three ways a user value is in a run: a caller input, a value under a key nobody reads (the
+    extractor is handed it and the pipeline never keeps it) and a value extracted under the
+    declared key (it IS in the run). The spy proves each entered; none reaches a trace row, a
+    diagnosis or the event stream, and only a values log holds the ones that did enter."""
+
+    @staticmethod
+    def _nowhere(outcome: Outcome) -> list[Path]:
+        rows = json.dumps(outcome.trace.to_row())
+        assert CANARY not in rows
+        assert CANARY not in repr(outcome.diagnoses)
+        assert outcome.stream and CANARY not in repr(outcome.stream)
+        root = outcome.log_dir
+        for path in root.rglob("*.jsonl"):
+            assert CANARY not in path.read_text(encoding="utf-8")
+        files = [p for p in root.rglob("*") if p.is_file()]
+        return [p for p in files if CANARY.encode() in p.read_bytes()]
+
+    def test_a_caller_input_is_nowhere_in_a_trace_and_in_a_values_log_only(
         self, tmp_path: Path, level: str
     ):
         outcome = drive(
@@ -773,16 +863,83 @@ class TestNoValueReachesATraceOrADiagnosis:
         )
 
         assert outcome.codes == [MISS] and outcome.trace.misses
-        rows = json.dumps(outcome.trace.to_row())
-        assert CANARY not in rows
-        assert CANARY not in repr(outcome.diagnoses)
-        assert outcome.stream and CANARY not in repr(outcome.stream)
-        files = [p for p in (tmp_path / "ev").rglob("*") if p.is_file()]
-        holding = [p for p in files if CANARY.encode() in p.read_bytes()]
-        for path in (tmp_path / "ev").rglob("*.jsonl"):
-            assert CANARY not in path.read_text(encoding="utf-8")
-        # the value did enter the run: a values log holds it in a blob, a shape log nowhere
-        assert bool(holding) == (level == "values")
+        assert _answered(outcome.cheap, {"town": CANARY}, None)
+        assert bool(self._nowhere(outcome)) == (level == "values")
+
+    def test_a_value_under_a_wrong_key_is_handed_to_the_extractor_and_kept_nowhere(
+        self, tmp_path: Path, level: str
+    ):
+        outcome = drive(tmp_path, good_fsm(), _Seeded({"town": CANARY}), level)
+
+        assert outcome.codes == [MISS]
+        assert _answered(
+            outcome.cheap, {"town": CANARY}, None
+        )  # the spy: it was handed
+        assert self._nowhere(outcome) == []  # no pipeline step kept it, at either level
+
+    def test_a_value_extracted_under_the_declared_key_is_in_a_values_log_only(
+        self, tmp_path: Path, level: str
+    ):
+        outcome = drive(tmp_path, _gate_never(), _Seeded({"answer": CANARY}), level)
+
+        assert outcome.codes == [("value-gate-unmet", ASK, ("answer",))]
+        assert _answered(outcome.cheap, {"answer": CANARY}, CANARY)  # it was extracted
+        assert "answer" in outcome.trace.keys  # and the run holds it
+        assert bool(self._nowhere(outcome)) == (level == "values")
+
+
+@pytest.mark.parametrize("level", LEVELS)
+class TestTheAsyncRunLoopGivesTheSameCodesAndDiagnosis:
+    """Review blind spot: nothing pinned the signals path through ``arun_until_terminal``. The
+    outage seeds and the bad-reply seeds run again through the async loop; the trace and the
+    diagnosis are the sync ones, and the async provider binding really served the call."""
+
+    ASYNC: ClassVar[dict[str, Callable[[Path, str], Outcome]]] = {
+        "rate_limited": lambda tmp, level: drive(
+            tmp, good_fsm(), _Seeded(down="RateLimitError"), level, use_async=True
+        ),
+        "timeout": lambda tmp, level: drive(
+            tmp, good_fsm(), _Seeded(down="Timeout"), level, use_async=True
+        ),
+        "empty": lambda tmp, level: drive(
+            tmp,
+            _bulk_fsm(),
+            _provider_llm(),
+            level,
+            provider=_provider(EMPTY),
+            use_async=True,
+        ),
+        "cut": lambda tmp, level: drive(
+            tmp,
+            _bulk_fsm("42"),
+            _provider_llm(),
+            level,
+            provider=_provider(CUT),
+            use_async=True,
+        ),
+        "wrong_key": lambda tmp, level: drive(
+            tmp, good_fsm(), _Seeded({"town": "x"}), level, use_async=True
+        ),
+    }
+
+    @pytest.mark.parametrize("name", list(ASYNC))
+    def test_the_async_loop_leaves_the_trace_and_the_diagnosis_of_the_sync_one(
+        self, tmp_path: Path, level: str, name: str
+    ):
+        asynchronous = self.ASYNC[name](tmp_path / "a", level)
+        synchronous = SEEDS[name][0](tmp_path / "s", level)
+
+        assert asynchronous.codes == SEEDS[name][1]
+        assert asynchronous.trace == synchronous.trace
+        assert asynchronous.diagnoses == synchronous.diagnoses
+        assert asynchronous.reads == []
+        if name in ("empty", "cut"):
+            assert asynchronous.async_calls and not synchronous.async_calls
+        else:
+            assert (asynchronous.cheap.asked, asynchronous.cheap.calls) == (
+                synchronous.cheap.asked,
+                synchronous.cheap.calls,
+            )
 
 
 def _retrace(outcome: Outcome, events: list[dict[str, Any]]) -> RunTrace:
