@@ -337,8 +337,9 @@ class TestRequestModels:
         assert req.agent_type == "react"
         assert req.max_iterations == 10
         assert req.tools == []
-        with pytest.raises(ValueError):
-            LaunchAgentRequest(task="x", agent_type="x" * 65)
+        # no pydantic bound on the id (its 422 echoes the input): the launch refuses a long id with a
+        # 400 (test_agent_launch: test_a_long_id_is_http_400_and_the_whole_id_is_never_echoed)
+        assert LaunchAgentRequest(task="x", agent_type="x" * 65).agent_type == "x" * 65
 
     def test_workflow_advance_request(self):
         from fsm_llm.monitor.definitions import WorkflowAdvanceRequest

@@ -195,7 +195,9 @@ export function intVal(id, fallback) {
 
 /**
  * Fill a select from agent type rows in groups `[{label, rows}]` (a falsy label means no optgroup).
- * Options are built with createElement and textContent only, never markup from server data. Keeps the
+ * Options are built with createElement and textContent only, never markup from server data (pinned by
+ * test_agent_selects.py::test_the_scripts_set_option_text_with_textcontent_only: do not use innerHTML here,
+ * `populateToolTemplates` does for author data). Keeps the
  * current value when it is still offered, else `preferred`, else the first option; no rows at all
  * leaves one disabled option reading `emptyText`.
  */

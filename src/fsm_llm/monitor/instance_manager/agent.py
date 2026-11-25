@@ -16,6 +16,7 @@ from fsm_llm.agents import AgentConfig, ToolDefinition, ToolRegistry, create_age
 from fsm_llm.core.definitions.executable import Capability
 from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.llm import resolve_model
+from fsm_llm.logging import logger
 from fsm_llm.text import capped_line
 
 from ..collector import redact_context
@@ -46,6 +47,8 @@ from .surface import _InstanceSurface
 # callable) every subtask is a placeholder with success False, so a dashboard run
 # always ends `failed`. Do NOT re-add it without a monitor worker factory that
 # runs a real sub-agent and a scripted end-to-end row that asserts `success`.
+# The set names the BUILT-IN id only: a user copy of orchestrator under another id is operator
+# input and launches or fails by its own contract (review of plan 659c07c3, concern 6).
 # DECISION plan-2026-11-25T145435-659c07c3/D-006
 # The launchable agents are rows of the executable registry chosen by ONE rule (kind `pattern`,
 # inputs `["task"]`, callables a subset of {tools}, not CONVERSATIONAL, not in the deny set; D-058
@@ -69,7 +72,8 @@ def _preview(executable: Any) -> dict[str, Any] | None:
     """The FSM to draw, or ``None`` (no ``preview_definition``, swarm, a file that needs options)."""
     try:
         return getattr(executable, "preview_definition", lambda: None)()
-    except Exception:
+    except Exception as error:
+        logger.debug(f"preview of {executable.id!r} failed: {type(error).__name__}")
         return None
 
 
@@ -195,7 +199,7 @@ class AgentsMixin(_InstanceSurface):
         row = next((r for r in rows if r["id"] == agent_type), None)
         if row is None:
             raise ValueError(
-                f"Unknown agent type: {capped_line(agent_type, 64)}. "
+                f"Unknown agent type: {capped_line(agent_type, 64)!r}. "
                 f"Available: {', '.join(r['id'] for r in rows)}"
             )
 

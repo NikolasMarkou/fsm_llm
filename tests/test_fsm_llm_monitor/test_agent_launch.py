@@ -418,11 +418,11 @@ class TestTheWire:
         configure(manager=mgr)
         return TestClient(app), mgr
 
-    def test_the_request_defaults_to_react_and_bounds_the_id(self):
+    def test_the_request_defaults_to_react_and_takes_any_id_as_text(self):
         assert LaunchAgentRequest(task="x").agent_type == "react"
-        with pytest.raises(ValueError):
-            LaunchAgentRequest(task="x", agent_type="x" * 65)
-        assert LaunchAgentRequest(task="x", agent_type="x" * 64)
+        # no pydantic bound: its 422 echoes the raw id; the exact-match 400 of ``launch_agent`` refuses
+        # a long id (``test_a_long_id_is_http_400_and_the_whole_id_is_never_echoed``)
+        assert LaunchAgentRequest(task="x", agent_type="x" * 65).agent_type == "x" * 65
 
     def test_the_python_default_id_is_one_value_in_every_place_that_spells_it(self):
         """``react`` is written in four signatures (and once in ``state.js``, pinned by
@@ -481,12 +481,24 @@ class TestTheWire:
         assert "Unknown agent type" in resp.json()["detail"]
         assert "react" in resp.json()["detail"].split("Available:")[1]
 
-    def test_an_id_over_64_characters_is_http_422(self, monkeypatch):
+    @pytest.mark.parametrize("length", [65, 5000])
+    def test_a_long_id_is_http_400_and_the_whole_id_is_never_echoed(
+        self, length, monkeypatch
+    ):
+        """Was a pydantic 422 (``max_length`` 64) whose body echoed the raw id in ``input``."""
         client, _ = self._client(monkeypatch)
+        hostile = "<b>" + "x" * length
         resp = client.post(
-            "/api/agent/launch", json={"agent_type": "x" * 65, "task": "t"}
+            "/api/agent/launch", json={"agent_type": hostile, "task": "t"}
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 400
+        assert "Unknown agent type" in resp.json()["detail"]
+        assert "x" * 65 not in resp.text
+
+    def test_the_refusal_quotes_the_stripped_id_so_it_cannot_read_as_a_listed_one(self):
+        with pytest.raises(ValueError) as info:
+            _manager().launch_agent(agent_type="React\x07", task="t")
+        assert str(info.value).startswith("Unknown agent type: 'React'. Available: ")
 
     def test_no_model_is_http_400_and_builds_nothing(self, monkeypatch):
         monkeypatch.delenv("LLM_MODEL", raising=False)

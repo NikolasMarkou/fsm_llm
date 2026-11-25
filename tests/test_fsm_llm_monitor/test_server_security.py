@@ -243,12 +243,20 @@ class TestRequestBounds:
             {"task": "x", "max_iterations": 10_000},
             {"task": "x", "timeout_seconds": 0},
             {"task": ""},
-            {"task": "x", "agent_type": "x" * 65},
         ],
     )
     def test_agent_launch_bounds(self, body):
         client = _client()
         assert client.post("/api/agent/launch", json=body).status_code == 422
+
+    def test_a_long_agent_type_is_refused_with_a_400_that_does_not_echo_it(self):
+        """The id bound is the exact-match 400: a pydantic 422 would carry the raw id in ``input``."""
+        client = _client()
+        resp = client.post(
+            "/api/agent/launch", json={"task": "x", "agent_type": "<i>" + "x" * 65}
+        )
+        assert resp.status_code == 400
+        assert "x" * 65 not in resp.text
 
     def test_message_length_bound(self):
         client = _client()

@@ -370,6 +370,18 @@ class TestTheRegistryLoadsOnceAndOffTheLoop:
                 mgr.agent_types()
         assert _ids(mgr.agent_types(), launchable=True) == LAUNCHABLE
 
+    def test_a_load_that_keeps_raising_is_a_500_whose_body_has_no_exception_text(self):
+        """Review of plan 659c07c3 (blind spot): ``/api/capabilities`` can now fail, and the load is
+        retried on every request with no backoff (a stated limit, not fixed); the body stays fixed."""
+        configure(manager=_manager())
+        client = TestClient(app, raise_server_exceptions=False)
+        with mock.patch(_LOAD, side_effect=RuntimeError("SECRET-boom-text")) as load:
+            first = client.get("/api/capabilities")
+            second = client.get("/api/agent/types")
+        assert (first.status_code, second.status_code) == (500, 500)
+        assert "SECRET" not in first.text + second.text
+        assert load.call_count == 2  # retried each time: no backoff
+
     def test_capabilities_and_types_load_off_the_loop_thread(self):
         mgr = _manager()
         configure(manager=mgr)
@@ -382,6 +394,29 @@ class TestTheRegistryLoadsOnceAndOffTheLoop:
             assert client.get("/api/capabilities").status_code == 200
         assert seen["calls"] == 2
         assert seen["on_loop"] == [False, False]
+
+
+class TestAPreviewThatRaisesLeavesATrace:
+    def test_the_draw_failure_is_one_debug_line_with_the_id_and_the_error_type(self):
+        """Review of plan 659c07c3 (concern 8): ``_preview`` swallowed every exception silently."""
+        from loguru import logger
+
+        class Boom:
+            id = "boom"
+
+            def preview_definition(self):
+                raise KeyError("DOCUMENT-TEXT")
+
+        lines: list[str] = []
+        logger.enable("fsm_llm")
+        sink = logger.add(lines.append, level="DEBUG", format="{message}")
+        try:
+            assert agent_mod._preview(Boom()) is None
+        finally:
+            logger.remove(sink)
+            logger.disable("fsm_llm")
+        (line,) = [ln for ln in lines if "boom" in ln]
+        assert "KeyError" in line and "DOCUMENT-TEXT" not in line
 
 
 class TestTheRoutes:

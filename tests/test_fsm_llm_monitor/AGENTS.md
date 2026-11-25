@@ -66,7 +66,7 @@ HTTP routes and statuses (`test_app.py`, `test_server_security.py`):
 - `POST /api/fsm/load` and `POST /api/fsm/visualize` with non-JSON body: 400. Unknown conversation, instance, agent, builder session: 404. `GET /api/workflow/{id}/status` without the `workflow_instance_id` query parameter: 400. `DELETE /api/builder/{id}` for an unknown id: 200 with `deleted: false`.
 - Preset traversal (`/api/preset/fsm/../../etc/passwd`): 400 or 404. `validate_preset_id` raises `ValueError` for `../`, absolute and escaping ids, `FileNotFoundError` for a missing file.
 - Unexpected internal error: 500 with detail exactly `"Internal server error"`.
-- `POST /api/agent/launch` with `evaluator_optimizer` (an id that is not launchable) or with a class name such as `ReactAgent`: 400 "Unknown agent type" with the launchable ids; an id over 64 characters: 422.
+- `POST /api/agent/launch` with `evaluator_optimizer` (an id that is not launchable) or with a class name such as `ReactAgent`: 400 "Unknown agent type" with the launchable ids; an id of 65 or 5000 characters: the same 400, the whole id never echoed (`test_a_long_id_is_http_400_and_the_whole_id_is_never_echoed`; the refusal quotes the stripped id with `!r`).
 - Error mapping: `ConversationBusyError` -> 409, `MonitorCapacityError` -> 429, `NotImplementedError` -> 501, unknown FSM preset on launch -> 404, `POST /api/fsm/launch` with `{}` -> 400.
 - Request bounds (422): config `refresh_interval: 0`, `max_events: -1`, `log_level: "LOUD"`; agent launch `max_iterations` 0 or 10,000, `timeout_seconds: 0`, empty `task`; converse `message` over 10,000 chars.
 - Cross-origin POST (Origin `http://evil.example`): 403. Foreign `Host`: 400. A body of about 1.1 MB (`b"{" + b" " * 1_100_000 + b"}"`): 413. Responses carry CSP with `frame-ancestors 'none'` and `x-content-type-options: nosniff`.
@@ -115,7 +115,7 @@ CLI: `_browser_url("0.0.0.0" or "::", port)` -> `http://127.0.0.1:<port>`, `"::1
 
 ## Data shapes
 
-Models (`test_definitions.py`): defaults for `MonitorConfig` (`refresh_interval=1.0`, `max_events=1000`, `max_log_lines=5000`, `log_level="INFO"`, `show_internal_keys=False`, `auto_scroll_logs=True`), `LaunchFSMRequest` (temperature 0.5), `LaunchAgentRequest` (`ReactAgent`, 10 iterations), `DashboardConfig` (30 s refresh, 24 h retention), `StubToolConfig` stub response; `BuilderStartRequest` temperature within 0.0..2.0 and `max_tokens >= 1`; `ApplyDashboardRequest` must not exist. Invalid `MonitorConfig` values (0, negative, NaN, inf, unknown level) raise `ValueError`; `log_level` is upper-cased.
+Models (`test_definitions.py`): defaults for `MonitorConfig` (`refresh_interval=1.0`, `max_events=1000`, `max_log_lines=5000`, `log_level="INFO"`, `show_internal_keys=False`, `auto_scroll_logs=True`), `LaunchFSMRequest` (temperature 0.5), `LaunchAgentRequest` (`react`, 10 iterations, no bound on the id), `DashboardConfig` (30 s refresh, 24 h retention), `StubToolConfig` stub response; `BuilderStartRequest` temperature within 0.0..2.0 and `max_tokens >= 1`; `ApplyDashboardRequest` must not exist. Invalid `MonitorConfig` values (0, negative, NaN, inf, unknown level) raise `ValueError`; `log_level` is upper-cased.
 
 Other models constructed and dumped in `test_definitions.py`: `MonitorEvent`, `LogRecord`, `MetricSnapshot`, `ConversationSnapshot`, `StateInfo`, `TransitionInfo`, `FSMSnapshot`, `InstanceInfo` (UTC `created_at`), `ActivityItem`, plus helpers `normalize_message_history` and `model_to_dict`.
 
