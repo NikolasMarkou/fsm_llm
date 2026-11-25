@@ -11,6 +11,7 @@ Part of the package (plan ace7a8c8 step 26; the type tag in a serialized workflo
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from pydantic import Field, field_validator, model_validator
@@ -25,7 +26,7 @@ from ..constants import CALLABLES_NAMESPACE
 from ..exceptions import WorkflowStepError
 from ..models import WorkflowStepResult
 from .base import WorkflowStep
-from .helpers import _error_text
+from .helpers import _RUN_CONTEXT, _error_text
 
 
 class ExecutableStep(WorkflowStep):
@@ -121,7 +122,11 @@ class ExecutableStep(WorkflowStep):
             _refuse_internal_keys(self.returns)
             executable = self.registry.get(self.target)
             needed = list(executable.requires.callables)
-            if needed and self.callables is None:
+            parent = _RUN_CONTEXT.get()
+            callables = self.callables
+            if callables is None and parent is not None:
+                callables = parent.callables
+            if needed and callables is None:
                 raise WorkflowStepError(
                     f"executable {self.target!r} needs the callables {needed} and this step "
                     "names no callables registry",
@@ -132,10 +137,15 @@ class ExecutableStep(WorkflowStep):
                 for name, key in self.inputs.items()
                 if key in context
             }
-            run_context = RunContext(
-                callables=self.callables,
-                max_steps=self.max_steps,
-                max_seconds=self.max_seconds,
+            steps, seconds = self.max_steps, self.max_seconds
+            # a limit above the parent's makes derive raise: no clamp (O-4)
+            run_context = dataclasses.replace(
+                RunContext(max_steps=steps, max_seconds=seconds)
+                if parent is None
+                else parent.derive(
+                    parent=self.step_id, max_steps=steps, max_seconds=seconds
+                ),
+                callables=callables,
             )
             result = await self._with_timeout(
                 executable.arun(inputs, context=run_context)

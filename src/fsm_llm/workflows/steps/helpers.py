@@ -13,9 +13,13 @@ import asyncio
 import contextvars
 import functools
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import Executor
-from typing import Any
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fsm_llm.engine.context import RunContext
 
 #: Executor used for synchronous user callables. The engine sets it for the
 #: duration of a step when it was constructed with ``executor=...``; ``None``
@@ -23,6 +27,25 @@ from typing import Any
 _STEP_EXECUTOR: contextvars.ContextVar[Executor | None] = contextvars.ContextVar(
     "fsm_llm_workflows_step_executor", default=None
 )
+
+# DECISION plan-2026-11-25T195353-7d9c0955/D-007
+# The run context of the run that owns a step, read only by `ExecutableStep` (it derives its child from
+# it) and set only through `run_context_scope`, which resets in `finally`. Do NOT build a bare
+# RunContext in the step when it is set, give the child a fresh CancelToken, set it anywhere else,
+# or widen a limit past the parent's (derive raises, no clamp).
+_RUN_CONTEXT: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar(
+    "fsm_llm_workflows_run_context", default=None
+)
+
+
+@contextmanager
+def run_context_scope(context: RunContext) -> Iterator[None]:
+    """Make ``context`` the parent of every ``ExecutableStep`` run inside the block."""
+    token = _RUN_CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _RUN_CONTEXT.reset(token)
 
 
 def _is_async_callable(fn: Any) -> bool:

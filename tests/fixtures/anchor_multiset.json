@@ -1204,6 +1204,11 @@
       "delta": 1,
       "reason": "plan 7d9c0955 step 3: the new anchor token plan-2026-11-25T195353-7d9c0955/D-006 in core/verify/executable_workflow.py (P-b: V3 and V7 read the body, closed step-type list)",
       "token": "plan-2026-11-25T195353-7d9c0955/D-006"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 7d9c0955 D-007 (step 4): new anchor in workflows/steps/helpers.py for the run context ContextVar inherited by ExecutableStep",
+      "token": "plan-2026-11-25T195353-7d9c0955/D-007"
     }
   ]
 }
