@@ -76,7 +76,6 @@ Imports ``core``, ``runtime`` and ``engine.fsm.snapshots`` only; never the pipel
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -345,20 +344,18 @@ async def aend_turn(
         return
     with warn_on_failure(EventType.TURN_END):
         end_blob = state_blob(handle.instance, handle.definition)
-        try:
-            await handle.scope.log.lane_call(
-                handle.scope.root_id, _write_end, handle, end_blob, error
-            )
-        except asyncio.CancelledError:
-            # DECISION plan-2026-11-24T193347-3f4530d3/D-016
-            # A turn that ended WITHOUT an error has committed: a cancel that lands on this
-            # write must not turn its delivered reply into a failure (a retry would duplicate
-            # the message). The `turn/end` job still completes (FIFO, shielded), so the cancel
-            # request is consumed here. With an error the cancel propagates unchanged. Do NOT
-            # swallow it on the error path, do NOT skip the write, and do NOT shield the whole
-            # `finally` (a hung disk would pin the caller). See decisions.md D-016.
-            if error is not None:
-                raise
+        # DECISION plan-2026-11-24T193347-3f4530d3/D-019
+        # [SUPERSEDES D-016 of this plan] A cancel that lands on this write RAISES, with or
+        # without a turn error: the turn stays committed, the `turn/end` job still completes
+        # (FIFO, shielded await) and the caller gets no reply, the rule of every cancel after
+        # the commit point (`_settle_after`, D-026 of plan baa37f40). Do NOT swallow it (the
+        # cancel was lost for the rest of a run: `cancelling()` stayed 1, a run loop took six
+        # more steps, a `TaskGroup` or `asyncio.timeout` never saw it, and the reply preceded
+        # the durable `turn/end`), do NOT absorb and re-raise it later (a cancel pending
+        # across a reply), and do NOT shield the whole `finally` (a hung disk pins the caller).
+        await handle.scope.log.lane_call(
+            handle.scope.root_id, _write_end, handle, end_blob, error
+        )
 
 
 def record_budget_spent(error: RunBudgetExceededError) -> None:

@@ -7,7 +7,9 @@ k in 1..N the lane job of the k-th hop is PARKED on an ``Event``, the turn task 
 it waits there, and the job is then released. The rows assert what the cancel left: the state of
 the conversation, the log (a rolled-back turn, no request without its end, ``turn/end`` after
 ``turn/start``), the gate, a working second turn and that the orphan job RAN after the cancel.
-The last hop (``turn/end`` of a committed turn) is the one place a cancel is consumed (D-016).
+The last hop (``turn/end`` of a committed turn) raises the cancel too: the turn stays committed and
+the caller gets no reply (D-019; D-016 absorbed it, and the cancel was then lost for the rest of a
+run).
 Nothing reads a clock: a wait on a thread is an ``Event`` with a cap that only ends a hang.
 """
 
@@ -25,12 +27,14 @@ from unittest import mock
 import pytest
 
 from fsm_llm import API
-from fsm_llm.core.definitions import FSMError
+from fsm_llm.core.definitions import FSMDefinition, FSMError
+from fsm_llm.engine import events as engine_events
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.runtime import EventLog, LogWriteError
 from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import fold_session, read_events
 from fsm_llm.runtime.stores.jsonl import JsonlWriter
+from fsm_llm.testing import ScriptedLLM
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import event_log_child as child
 from tests.test_fsm_llm import kind_corpus as kc
@@ -139,7 +143,7 @@ class TestTheSweepOfTheHops:
         """Kills: a hop with no cancel arm (a request with no ``provider/error``), a lane job
         cancelled with its await (the orphan never ran), a ``turn/end`` that is not queued
         behind ``turn/start``, a gate that stays held, a rollback that misses an orphan write,
-        and the end hop turning a delivered reply into a cancel (D-016)."""
+        and an end hop that absorbs the cancel (D-019)."""
         message = _SCENARIOS["plain"].turns[0]
         n, expected = await _turn_hops(tmp_path)
         assert n >= 8, n  # begin, requests, replies, the extraction blob, end
@@ -160,8 +164,8 @@ class TestTheSweepOfTheHops:
                     assert _seen(api, cid) == before, f"k={k}"
                     self._the_log_shows_a_rolled_back_turn(api, before)
                     assert await api.aconverse(message, cid) == expected, f"k={k}"
-                else:  # the end write of a committed turn: the cancel is consumed (D-016)
-                    assert task.result() == expected, f"k={k}"
+                else:  # the end write of a committed turn: the cancel raises, the turn stays (D-019)
+                    assert task.cancelled(), f"k={k}"
                     ends = [e for e in _events(api) if e["type"] == "turn/end"]
                     assert [e["outcome"] for e in ends][-1] == "committed"
                     assert _seen(api, cid)["state"] != before["state"]
@@ -265,8 +269,12 @@ class TestTheSweepOfTheObserverHops:
                     assert _seen(api, cid) == before, f"k={k}"
                     TestTheSweepOfTheHops._the_log_shows_a_rolled_back_turn(api, before)
                     assert await api.aconverse(message, cid) == expected, f"k={k}"
-                else:
-                    assert task.result() == expected, f"k={k}"
+                else:  # the end write of a committed turn: the cancel raises (D-019)
+                    assert task.cancelled(), f"k={k}"
+                    ends = [
+                        e["outcome"] for e in _events(api) if e["type"] == "turn/end"
+                    ]
+                    assert ends[-1] == "committed" and _seen(api, cid) != before
             api.close()
 
 
@@ -608,4 +616,163 @@ class TestAnEndedLoggedConversationHoldsNoWriter:
             assert again.open_existing(cid) >= 1  # the lock is free
         finally:
             again.close()
+        api.close()
+
+
+def _chain(length: int = 8) -> FSMDefinition:
+    """``s0 -> s1 -> ... `` of silent states: a run loop takes one turn (one ``turn/end``) per step."""
+    states: dict[str, Any] = {}
+    for i in range(length):
+        state: dict[str, Any] = {
+            "id": f"s{i}",
+            "description": f"s{i}",
+            "purpose": "p",
+            "response_instructions": "",
+        }
+        if i < length - 1:
+            state["transitions"] = [
+                {
+                    "target_state": f"s{i + 1}",
+                    "description": "go",
+                    "priority": 1,
+                    "conditions": [{"description": "always", "logic": {"==": [1, 1]}}],
+                }
+            ]
+        states[f"s{i}"] = state
+    return FSMDefinition(
+        name="Chain", description="chain", initial_state="s0", states=states
+    )
+
+
+class _EndParks:
+    """Parks the ``at``-th ``turn/end`` job (``engine.events._write_end``) on an Event, on its
+    lane thread; every other job runs as written."""
+
+    def __init__(self, at: int) -> None:
+        self.at, self.calls = at, 0
+        self.entered, self.gate = threading.Event(), threading.Event()
+
+    @contextmanager
+    def installed(self):
+        real = engine_events._write_end
+        parks = self
+
+        def parked(handle: Any, blob: Any, error: Any) -> Any:
+            parks.calls += 1
+            if parks.calls == parks.at:
+                parks.entered.set()
+                parks.gate.wait(CAP_SECONDS)
+            return real(handle, blob, error)
+
+        with mock.patch.object(engine_events, "_write_end", parked):
+            yield self
+
+
+async def _chain_api(root: Path) -> tuple[API, str]:
+    api = API.from_definition(
+        _chain(), llm_interface=ScriptedLLM(responses={}), event_log=EventLog(root)
+    )
+    cid, _ = await api.astart_conversation()
+    return api, cid
+
+
+class TestACancelOnTheEndWriteOfACommittedTurn:
+    """Review 2 of plan 3f4530d3 (D-019 supersedes D-016): a cancel that lands on the ``turn/end``
+    write of a committed turn is raised, never absorbed. The probe was a chain of silent states
+    under ``arun_until_terminal``: the run took six more steps after the cancel, ``cancelling()``
+    stayed 1, and a ``TaskGroup`` or ``timeout`` around it never saw its cancel."""
+
+    async def test_a_cancel_on_the_second_end_write_stops_the_run_loop_at_once(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: an end hop that swallows the cancel (the run finished at ``s7``)."""
+        parks = _EndParks(2)
+        with parks.installed():
+            api, cid = await _chain_api(tmp_path / "log")
+            task = asyncio.ensure_future(api.arun_until_terminal(cid, max_steps=50))
+            try:
+                assert await asyncio.to_thread(parks.entered.wait, CAP_SECONDS)
+                task.cancel()
+                await asyncio.sleep(0)
+            finally:
+                parks.gate.set()
+            await asyncio.wait({task}, timeout=CAP_SECONDS)
+            await _barrier(api.event_log, cid)
+        assert task.cancelled() and task.cancelling() >= 1
+        assert (
+            api.get_current_state(cid) == "s2"
+        )  # the committed turn stays, nothing more ran
+        ends = [e["outcome"] for e in _events(api, cid) if e["type"] == "turn/end"]
+        assert ends == ["committed", "committed"]  # the parked job still wrote its line
+        api.close()
+
+    async def test_a_task_group_whose_sibling_fails_stops_the_run_at_the_end_write(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: an absorbed cancel under a ``TaskGroup`` (the body kept running to ``s7``)."""
+        parks = _EndParks(2)
+        with parks.installed():
+            api, cid = await _chain_api(tmp_path / "log")
+
+            async def sibling() -> None:
+                assert await asyncio.to_thread(parks.entered.wait, CAP_SECONDS)
+                raise ValueError("sibling failed")
+
+            try:
+                with pytest.raises(ExceptionGroup) as raised:
+                    async with asyncio.TaskGroup() as group:
+                        group.create_task(sibling())
+                        await api.arun_until_terminal(cid, max_steps=50)
+            finally:
+                parks.gate.set()
+            await _barrier(api.event_log, cid)
+        assert raised.group_contains(ValueError)
+        assert api.get_current_state(cid) == "s2"
+        api.close()
+
+    async def test_a_timeout_that_fires_on_the_end_write_raises_timeout_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: an absorbed cancel under ``asyncio.timeout`` (the block ended normally)."""
+        parks = _EndParks(2)
+        with parks.installed():
+            api, cid = await _chain_api(tmp_path / "log")
+            loop = asyncio.get_running_loop()
+            try:
+                with pytest.raises(TimeoutError):
+                    async with asyncio.timeout(None) as scope:
+
+                        async def expire() -> None:
+                            assert await asyncio.to_thread(
+                                parks.entered.wait, CAP_SECONDS
+                            )
+                            scope.reschedule(loop.time())
+
+                        trip = asyncio.ensure_future(expire())
+                        await api.arun_until_terminal(cid, max_steps=50)
+            finally:
+                parks.gate.set()
+            await trip
+            await _barrier(api.event_log, cid)
+        assert api.get_current_state(cid) == "s2"
+        api.close()
+
+    async def test_the_reply_comes_only_after_the_turn_end_is_written(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: an end write that is queued and not awaited (the reply, and so a kill, could
+        come before the checkpoint of the turn the caller already holds)."""
+        order: list[str] = []
+        real = engine_events._write_end
+
+        def spying(handle: Any, blob: Any, error: Any) -> Any:
+            threading.Event().wait(0.02)  # the job is slower than the caller
+            real(handle, blob, error)
+            order.append("turn/end written")
+
+        with mock.patch.object(engine_events, "_write_end", spying):
+            api, _, cid = await _prepare("plain", 0, tmp_path / "log")
+            await api.aconverse(_SCENARIOS["plain"].turns[0], cid)
+            order.append("reply")
+        assert order == ["turn/end written", "reply"]
         api.close()

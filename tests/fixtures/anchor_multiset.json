@@ -1134,6 +1134,16 @@
       "delta": 1,
       "reason": "step 8b: new anchors D-015 (runtime/scope.py alog_request, the cancel arm of the request hop queues provider/error on the lane) and D-016 (engine/events.py aend_turn, a cancel on the end write of a committed turn is swallowed)",
       "token": "plan-2026-11-24T193347-3f4530d3/D-016"
+    },
+    {
+      "delta": -1,
+      "reason": "step 13.2: the D-016 anchor of engine/events.py aend_turn is replaced by D-019, which supersedes it (a cancel on the end write of a committed turn raises instead of being swallowed)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-016"
+    },
+    {
+      "delta": 1,
+      "reason": "step 13.2: the D-016 anchor of engine/events.py aend_turn is replaced by D-019, which supersedes it (a cancel on the end write of a committed turn raises instead of being swallowed)",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-019"
     }
   ]
 }
