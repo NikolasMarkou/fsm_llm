@@ -33,10 +33,10 @@ import json
 import os
 import threading
 import time
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.logging import logger
@@ -59,6 +59,7 @@ from fsm_llm.runtime.events import (
     check_depth,
     to_jsonable,
 )
+from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.privacy import (
     PrivacyLevel,
     RedactionHook,
@@ -73,6 +74,8 @@ from fsm_llm.runtime.stores.jsonl import (
     check_conversation_id,
     read_events,
 )
+
+_T = TypeVar("_T")
 
 #: Envelope keys the caller never supplies as a field: the log assigns them (the level marker
 #: too: a producer cannot say its own event is a ``values`` one).
@@ -190,6 +193,7 @@ class EventLog:
         self._guard = threading.Lock()  # leaf lock: the table of writers only
         self._writers: dict[str, JsonlWriter] = {}
         self._closed = False
+        self._lanes = Lanes()  # no thread starts until the first lane_call
 
     @property
     def privacy(self) -> PrivacyLevel:
@@ -211,6 +215,16 @@ class EventLog:
                 writer = JsonlWriter(self._logs / f"{conversation_id}{LOG_SUFFIX}")
                 self._writers[conversation_id] = writer
             return writer
+
+    async def lane_call(
+        self, conversation_id: str, fn: Callable[..., _T], /, *args: Any
+    ) -> _T:
+        """Run one boundary write on the lane thread of the tree *conversation_id* (the ROOT id).
+
+        ``fn(*args)`` is today's sync function, unchanged; see ``runtime.lanes.Lanes.lane_call``
+        (inline in sync mode, FIFO per tree, a cancelled await leaves the job running).
+        """
+        return await self._lanes.lane_call(conversation_id, fn, *args)
 
     def has_writer(self, conversation_id: str) -> bool:
         """True while this log holds the writer (and so the lock) of *conversation_id*."""
@@ -678,20 +692,30 @@ class EventLog:
     def release(self, conversation_id: str) -> None:
         """Close and forget the writer of one id (a finished tree); a later append reopens it.
 
-        This is also the recovery of a poisoned writer (see the class contract).
+        This is also the recovery of a poisoned writer (see the class contract). While a lane
+        thread serves this tree the release runs on it, behind the jobs already queued (so each
+        meets the writer it was queued against) and returns before the writer is closed.
         """
+        self._lanes.after(conversation_id, lambda: self._release_now(conversation_id))
+
+    def _release_now(self, conversation_id: str) -> None:
         with self._guard:
             writer = self._writers.pop(conversation_id, None)
         if writer is not None:
             writer.close()
 
     def close(self) -> None:
-        """Close every writer and refuse later appends. Idempotent; the files stay."""
+        """Close every writer and refuse later appends. Idempotent; the files stay.
+
+        A writer is closed behind the jobs already queued on its lane (a job in flight
+        finishes first) and the lane threads end once those ran; ``close`` does not wait.
+        """
         with self._guard:
             self._closed = True
-            writers, self._writers = list(self._writers.values()), {}
-        for writer in writers:
-            writer.close()
+            writers, self._writers = list(self._writers.items()), {}
+        for conversation_id, writer in writers:
+            self._lanes.after(conversation_id, writer.close)
+        self._lanes.shutdown()
 
     def __enter__(self) -> EventLog:
         return self

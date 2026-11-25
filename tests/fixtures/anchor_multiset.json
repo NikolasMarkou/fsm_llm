@@ -1114,6 +1114,16 @@
       "delta": 1,
       "reason": "plan 3f4530d3 step 7: new anchor D-012 on message_source in core/codes.py (row 1.17)",
       "token": "plan-2026-11-24T193347-3f4530d3/D-012"
+    },
+    {
+      "delta": 1,
+      "reason": "step 8a: new anchors D-013 (runtime/lanes.py) and D-014 (runtime/stores/jsonl.py), added beside the D-011 text which stays",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-013"
+    },
+    {
+      "delta": 1,
+      "reason": "step 8a: new anchors D-013 (runtime/lanes.py) and D-014 (runtime/stores/jsonl.py), added beside the D-011 text which stays",
+      "token": "plan-2026-11-24T193347-3f4530d3/D-014"
     }
   ]
 }

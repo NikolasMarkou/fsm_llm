@@ -67,3 +67,7 @@ MAX_SESSION_FILE_BYTES = 32 * 1024 * 1024
 #: reply held no usage), in the order of ``fsm_llm.llm.usage.usage_counts``. Integers only: a
 #: count is never text, so it is safe at any privacy level.
 USAGE_TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
+
+#: The lane threads one ``EventLog`` starts at most (``runtime.lanes``); a root conversation id
+#: always maps to the same lane, so the jobs of one tree run in the order they were queued.
+LANE_COUNT = 4

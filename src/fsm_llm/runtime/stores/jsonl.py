@@ -302,6 +302,9 @@ class JsonlWriter:
             )
         self.conversation_id = check_conversation_id(name[: -len(LOG_SUFFIX)])
         self._guard = threading.Lock()
+        self._sync_guard = (
+            threading.Lock()
+        )  # held across an fsync; order: _sync_guard, _guard
         self._fd = -1
         self._lock_fd = -1
         self._seq = 0
@@ -393,6 +396,14 @@ class JsonlWriter:
     # _write of its concatenated lines), looped only over a short write; a partial line may
     # exist only as a torn tail, cut by the next lock holder, so any interrupted write
     # poisons this writer. See D-011 and D-012.
+    # DECISION plan-2026-11-24T193347-3f4530d3/D-014
+    # The line and its seq are written under `_guard`; the fsync of a checkpoint runs AFTER it,
+    # under `_sync_guard`, so an inline append on the event loop never waits for a disk that a
+    # lane thread is flushing. Do NOT fsync before the write or return before the fsync (a
+    # checkpoint is acknowledged only when durable), do NOT swallow a failed fsync (it poisons
+    # the writer and the append raises: the call the checkpoint protects must not run), do NOT
+    # take `_sync_guard` while holding `_guard` (order: `_sync_guard`, then `_guard`), and do NOT
+    # close a descriptor outside both locks. See decisions.md D-014.
     def append_many(
         self, events: Sequence[Mapping[str, Any]], *, checkpoint: bool = False
     ) -> list[int]:
@@ -427,15 +438,33 @@ class JsonlWriter:
                         raise OSError(errno.EIO, "write made no progress")
                     view = view[written:]
                 self._seq = seqs[-1]
-                if checkpoint:
-                    _fsync(self._fd)
                 self._failure = None
             except OSError as exc:
                 self._failure = f"{type(exc).__name__} {exc.strerror or exc.errno}"
                 raise LogWriteError(
                     f"append to {self.path.name} failed: {self._failure}"
                 ) from exc
-            return seqs
+        if checkpoint:
+            self._flush()
+        return seqs
+
+    def _flush(self) -> None:
+        """fsync the log file (outside ``_guard``); a failure poisons the writer and raises."""
+        with self._sync_guard:
+            fd = self._fd
+            if fd < 0:
+                raise LogWriteError(f"log {self.path.name} is closed")
+            try:
+                _fsync(fd)
+            except BaseException as exc:
+                detail = getattr(exc, "strerror", None) or getattr(exc, "errno", None)
+                with self._guard:
+                    self._failure = f"{type(exc).__name__} {detail}"
+                if isinstance(exc, OSError):
+                    raise LogWriteError(
+                        f"append to {self.path.name} failed: {self._failure}"
+                    ) from exc
+                raise
 
     def append(self, event: Mapping[str, Any], *, checkpoint: bool = False) -> int:
         """Append *event* as the next line and return its ``seq``; fsync when *checkpoint*."""
@@ -443,7 +472,7 @@ class JsonlWriter:
 
     def close(self) -> None:
         """Release the log fd and the lock. Safe to call twice and after a failed open."""
-        with self._guard:
+        with self._sync_guard, self._guard:
             fd, lock_fd = self._fd, self._lock_fd
             self._fd = self._lock_fd = -1
         if fd >= 0:
