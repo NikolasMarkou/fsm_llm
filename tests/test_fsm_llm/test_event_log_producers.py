@@ -1173,9 +1173,9 @@ class TestThePrivacyOfTheRequestBlob:
             assert secret not in text
 
     def test_a_request_dump_redacts_secret_named_entries_only(self, log: EventLog):
-        from fsm_llm.runtime.scope import _request_body
+        from fsm_llm.runtime.scope import request_body
 
-        body = _request_body(
+        body = request_body(
             SimpleNamespace(
                 model_dump=lambda mode: {
                     "system_prompt": "Hello",

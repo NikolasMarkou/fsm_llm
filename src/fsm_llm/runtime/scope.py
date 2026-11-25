@@ -22,27 +22,8 @@ Interface contract (callers: ``engine`` in steps 7 and 8, tests):
     - ``scoped_iter(scope, iterator)``: a generator that binds *scope* around each ``next()``
       of *iterator* and around its ``close()``, and yields OUTSIDE the binding, so a stream
       consumed on another thread or context never resets a token it did not set.
-    - ``llm_call(interface, call_type, request, *, stream=False)``: wraps one model call of the
-      engine, ``with llm_call(llm, "completion", request) as call: reply = ...;
-      call.response(reply)``. A stream (``stream=True``) reads its chunks through
-      ``call.stream(chunks)`` (``call.astream(chunks)`` for an async generator, which also
-      guards the call that opens the stream: it runs on the first step) and calls ``call.stream_done(joined_text)`` in its ``finally``
-      (``abandoned`` is read from how the chunks ended, or given). An observed interface
-      (``is_observed``) is logged by the observer, so the call only adds the joined reply of a
-      stream (and a mid-stream error). Any other interface (a double, a mock, a custom class, a
-      wrapper) is logged here: the ``llm/request`` checkpoint BEFORE the call, ``llm/response``
-      after, ``provider/error`` when an ``Exception`` escapes or the call is cancelled
-      (``asyncio.CancelledError``, raised again; D-008) (a stream that raised writes no
-      ``llm/response``; a non-``Exception`` abort such as ``KeyboardInterrupt`` or ``SystemExit``
-      mid-stream is no outage: it writes ``llm/response`` with ``abandoned`` and no
-      ``provider/error``, and the turn ends ``interrupted``). The inner observer is switched
-      off for the call (for a stream, per chunk), so a wrapper around a ``LiteLLMInterface`` is
-      not logged twice. The request blob
-      of an engine call is redacted (``redact_context``: secret-looking context entries of the
-      request object become ``<redacted>``). A request that cannot be logged raises
-      ``LogWriteError`` and the call is
-      not made (fail closed, invariant 4); a failing ``llm/response`` or ``provider/error``
-      write is a WARNING, never an error that hides the model's own outcome.
+    - ``llm_call`` and ``LlmCall`` (one engine model call) live in ``runtime.calls``; the
+      request observer here logs the exact provider request of a ``LiteLLMInterface``.
     - Event fields: ``llm/request`` ``source`` (``"provider"`` or ``"engine"``), ``call_type``,
       ``purpose`` (a ``Purpose`` value, also on ``llm/response`` and ``provider/error``: the
       ``llm.purpose`` scope, else the one the call type implies), ``model``, ``stream``, ``prompt_ref`` (a blob: the allow-listed provider input, or
@@ -69,9 +50,8 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 
 from __future__ import annotations
 
-import asyncio
 import uuid
-from collections.abc import AsyncGenerator, Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -80,8 +60,7 @@ from typing import Any, NamedTuple
 from fsm_llm.core.redaction import redact_context
 from fsm_llm.core.tool_observer import install_tool_observer, reset_tool_observer
 from fsm_llm.llm.failures import classify_failure
-from fsm_llm.llm.interface import interface_model
-from fsm_llm.llm.observer import install_observer, is_observed, reset_observer
+from fsm_llm.llm.observer import install_observer, reset_observer
 from fsm_llm.llm.parsing import _finish_reason
 from fsm_llm.llm.purpose import resolve_purpose
 from fsm_llm.llm.usage import usage_counts
@@ -91,7 +70,7 @@ from fsm_llm.runtime.events import EventType, LogWriteError, to_jsonable
 from fsm_llm.runtime.log import EventLog, warn_on_failure
 from fsm_llm.runtime.privacy import RedactionKind
 
-_SCOPE: ContextVar[TurnScope | None] = ContextVar("fsm_llm_turn_scope", default=None)
+SCOPE: ContextVar[TurnScope | None] = ContextVar("fsm_llm_turn_scope", default=None)
 
 SOURCE_PROVIDER = "provider"
 SOURCE_ENGINE = "engine"
@@ -125,13 +104,13 @@ class TurnScope:
 
 def current_scope() -> TurnScope | None:
     """Return the scope bound in this context, or ``None``."""
-    return _SCOPE.get()
+    return SCOPE.get()
 
 
 @contextmanager
 def activate(scope: TurnScope) -> Iterator[TurnScope]:
     """Bind *scope* and its request observer for the ``with`` body, then reset both."""
-    scope_token = _SCOPE.set(scope)
+    scope_token = SCOPE.set(scope)
     observer_token = install_observer(scope.observer)
     tool_token = install_tool_observer(scope.tool_observer)
     try:
@@ -139,7 +118,7 @@ def activate(scope: TurnScope) -> Iterator[TurnScope]:
     finally:
         reset_tool_observer(tool_token)
         reset_observer(observer_token)
-        _SCOPE.reset(scope_token)
+        SCOPE.reset(scope_token)
 
 
 def bind(
@@ -151,7 +130,7 @@ def bind(
 
 def emit(type: EventType | str, **fields: Any) -> int | None:
     """Append one event under the current scope and return its ``seq`` (``None`` without one)."""
-    scope = _SCOPE.get()
+    scope = SCOPE.get()
     if scope is None:
         return None
     return scope.log.append(scope.root_id, type, frame=scope.frame, **fields)
@@ -175,7 +154,7 @@ def scoped_iter(scope: TurnScope, iterator: Iterable[Any]) -> Iterator[Any]:
                 close()
 
 
-def _write_quietly(scope: TurnScope, kind: EventType, **fields: Any) -> None:
+def write_quietly(scope: TurnScope, kind: EventType, **fields: Any) -> None:
     """Append an after-the-call event; a failure is a WARNING (``warn_on_failure``)."""
     with warn_on_failure(kind):
         scope.log.append(scope.root_id, kind, frame=scope.frame, **fields)
@@ -191,7 +170,7 @@ def _dump(value: Any) -> Any:
     it guards behaves as it does with the log off. ``to_jsonable`` cuts only below
     ``MAX_PAYLOAD_DEPTH + 1``, so a value that is really too deep still reaches ``put_json``
     deeper than its limit and is refused, never recorded cut. A dump that fails either way
-    raises (``_log_request`` turns that into the deliberate refusal).
+    raises (``log_request`` turns that into the deliberate refusal).
     """
     dump = getattr(value, "model_dump", None)
     if not callable(dump):
@@ -203,7 +182,7 @@ def _dump(value: Any) -> Any:
     return to_jsonable(dumped, max_depth=MAX_PAYLOAD_DEPTH + 1)
 
 
-def _request_body(request: Any) -> Any:
+def request_body(request: Any) -> Any:
     """The JSON form of an engine request with secret-looking entries redacted.
 
     A request object carries raw context mappings (``FieldExtractionRequest.context``) beside
@@ -215,7 +194,7 @@ def _request_body(request: Any) -> Any:
     return redact_context(body) if isinstance(body, dict) else body
 
 
-def _response_fields(
+def response_fields(
     log: EventLog, response: Any, *, wrap: str | None
 ) -> dict[str, Any]:
     """The ``response_ref`` and ``finish_reason`` fields of a reply, or ``unrecorded: true``.
@@ -262,7 +241,7 @@ def _usage_fields(response: Any, model: str | None) -> dict[str, Any]:
     return fields
 
 
-def _error_fields(error: BaseException, *, tools_sent: bool) -> dict[str, Any]:
+def error_fields(error: BaseException, *, tools_sent: bool) -> dict[str, Any]:
     """``error_type`` (a class name), ``failure_code`` and an integer ``status_code``; never text."""
     fields: dict[str, Any] = {
         "error_type": type(error).__name__,
@@ -274,7 +253,7 @@ def _error_fields(error: BaseException, *, tools_sent: bool) -> dict[str, Any]:
     return fields
 
 
-def _log_request(scope: TurnScope, build: Callable[[], Any], **fields: Any) -> int:
+def log_request(scope: TurnScope, build: Callable[[], Any], **fields: Any) -> int:
     """Build the request blob, write it and the ``llm/request`` checkpoint; fail closed.
 
     EVERY failure (a request that cannot be dumped, a blob or an append that cannot be
@@ -307,7 +286,7 @@ class _ScopeObserver:
     def begin_send(self, call: dict[str, Any], *, call_type: str) -> object | None:
         stream = bool(call.get("stream"))
         purpose = resolve_purpose(call_type).value
-        seq = _log_request(
+        seq = log_request(
             self._scope,
             lambda: call,
             source=SOURCE_PROVIDER,
@@ -332,14 +311,14 @@ class _ScopeObserver:
         if not isinstance(token, _Pending) or token.stream:
             return
         scope = self._scope
-        _write_quietly(
+        write_quietly(
             scope,
             EventType.LLM_RESPONSE,
             request_seq=token.request_seq,
             source=SOURCE_PROVIDER,
             call_type=token.call_type,
             purpose=token.purpose,
-            **_response_fields(scope.log, response, wrap=None),
+            **response_fields(scope.log, response, wrap=None),
             **_usage_fields(response, token.model),
         )
 
@@ -348,14 +327,14 @@ class _ScopeObserver:
         # `provider/error` (as `end_send` leaves its one reply to `stream_done`).
         if not isinstance(token, _Pending) or token.stream:
             return
-        _write_quietly(
+        write_quietly(
             self._scope,
             EventType.PROVIDER_ERROR,
             request_seq=token.request_seq,
             source=SOURCE_PROVIDER,
             call_type=token.call_type,
             purpose=token.purpose,
-            **_error_fields(error, tools_sent=token.tools_sent),
+            **error_fields(error, tools_sent=token.tools_sent),
         )
 
 
@@ -455,254 +434,3 @@ class _ToolObserver:
             reason=reason,
             **extra,
         )
-
-
-class LlmCall:
-    """The recorder ``llm_call`` yields (see the module docstring). An internal helper, not
-    public API and not for construction."""
-
-    __slots__ = (
-        "_call_type",
-        "_done",
-        "_errored",
-        "_exhausted",
-        "_logs_reply",
-        "_purpose",
-        "_request_seq",
-        "_scope",
-        "_source",
-        "_stream",
-        "_tools_sent",
-    )
-
-    def __init__(
-        self,
-        scope: TurnScope | None,
-        request_seq: int | None,
-        call_type: str,
-        source: str,
-        *,
-        logs_reply: bool,
-        stream: bool = False,
-        purpose: str = "",
-        tools_sent: bool = False,
-    ) -> None:
-        self._purpose = purpose
-        self._tools_sent = tools_sent
-        self._scope = scope
-        self._request_seq = request_seq
-        self._call_type = call_type
-        self._source = source
-        self._logs_reply = logs_reply
-        self._stream = stream
-        self._done = False
-        self._exhausted = False
-        self._errored = False
-
-    def _link(self) -> int | None:
-        if self._request_seq is not None or self._scope is None:
-            return self._request_seq
-        return self._scope.observer.last_request_seq
-
-    def response(self, reply: Any) -> None:
-        """Record the reply of a non-streamed call (once; a no-op when the observer did)."""
-        if self._scope is None or not self._logs_reply or self._done:
-            return
-        self._done = True
-        _write_quietly(
-            self._scope,
-            EventType.LLM_RESPONSE,
-            request_seq=self._request_seq,
-            source=self._source,
-            call_type=self._call_type,
-            purpose=self._purpose,
-            **_response_fields(self._scope.log, reply, wrap=type(reply).__name__),
-        )
-
-    def stream(self, chunks: Iterable[str]) -> Iterable[str]:
-        """Yield the chunks of *chunks* and remember how the stream ended.
-
-        An engine-logged call switches the inner request observer off only WHILE each chunk
-        is being produced (never across a ``yield``), so a stream consumed on another thread
-        or context never resets a token it did not set, and a wrapper around a
-        ``LiteLLMInterface`` is still not logged twice. With no scope the stream is returned
-        as it is.
-        """
-        if self._scope is None:
-            return chunks
-        return self._produce(chunks)
-
-    def astream(self, chunks: AsyncGenerator[str, None]) -> AsyncGenerator[str, None]:
-        """The async form of ``stream``: the same bookkeeping over an async generator.
-
-        An engine-logged call switches the inner request observer off only WHILE a chunk is
-        awaited (a ``ContextVar`` set and reset inside one step, never across a ``yield``).
-        With no scope *chunks* is returned as it is.
-        """
-        if self._scope is None:
-            return chunks
-        return self._aproduce(chunks)
-
-    async def _aproduce(
-        self, chunks: AsyncGenerator[str, None]
-    ) -> AsyncGenerator[str, None]:
-        suppress = self._source == SOURCE_ENGINE
-        try:
-            while True:
-                token = install_observer(None) if suppress else None
-                try:
-                    chunk = await chunks.__anext__()
-                except StopAsyncIteration:
-                    self._exhausted = True
-                    return
-                except Exception:
-                    self._errored = True
-                    raise
-                finally:
-                    if token is not None:
-                        reset_observer(token)
-                yield chunk
-        finally:
-            await chunks.aclose()
-
-    def _produce(self, chunks: Iterable[str]) -> Iterator[str]:
-        suppress = self._source == SOURCE_ENGINE
-        inner = iter(chunks)
-        try:
-            while True:
-                token = install_observer(None) if suppress else None
-                try:
-                    chunk = next(inner)
-                except StopIteration:
-                    self._exhausted = True
-                    return
-                except Exception:
-                    self._errored = True
-                    raise
-                finally:
-                    if token is not None:
-                        reset_observer(token)
-                yield chunk
-        finally:
-            # a reader that stops early closes the provider stream now, not when the last
-            # reference to it goes (a wrapper may keep one), as `scoped_iter` does
-            close = getattr(inner, "close", None)
-            if close is not None:
-                close()
-
-    def stream_done(self, text: str, *, abandoned: bool | None = None) -> None:
-        """Record the joined reply of a streamed call (once), and whether the reader gave up.
-
-        *abandoned* ``None`` (the default) is read from ``stream``: abandoned unless the
-        chunks ran out. A stream that raised writes no ``llm/response`` here: its
-        ``provider/error`` is the outcome (``llm_call`` writes it when the error escapes).
-        """
-        if self._scope is None or self._done or self._errored:
-            return
-        self._done = True
-        if abandoned is None:
-            abandoned = not self._exhausted
-        body = {"source": self._source, "response_type": "stream", "text": text}
-        fields = _response_fields(self._scope.log, body, wrap=None)
-        _write_quietly(
-            self._scope,
-            EventType.LLM_RESPONSE,
-            request_seq=self._link(),
-            source=self._source,
-            call_type=self._call_type,
-            purpose=self._purpose,
-            stream=True,
-            abandoned=bool(abandoned),
-            **fields,
-        )
-
-    def _failed(self, error: BaseException) -> None:
-        if self._scope is None or self._done:
-            return
-        self._done = True
-        _write_quietly(
-            self._scope,
-            EventType.PROVIDER_ERROR,
-            request_seq=self._link(),
-            source=self._source,
-            call_type=self._call_type,
-            purpose=self._purpose,
-            **_error_fields(error, tools_sent=self._tools_sent),
-            **({"stream": True} if self._stream else {}),
-        )
-
-
-_NO_CALL = LlmCall(None, None, "", "", logs_reply=False)
-
-
-@contextmanager
-def llm_call(
-    interface: Any, call_type: str, request: Any, *, stream: bool = False
-) -> Iterator[LlmCall]:
-    """Wrap one engine model call so the log holds its request and outcome (see the module docstring)."""
-    scope = _SCOPE.get()
-    if scope is None:
-        yield _NO_CALL
-        return
-    purpose = resolve_purpose(call_type).value
-    tools_sent = getattr(request, "tools", None) is not None
-    if is_observed(interface):
-        # an earlier call of this scope must not be the link of a stream that never sends
-        scope.observer.last_request_seq = None
-        observed = LlmCall(
-            scope,
-            None,
-            call_type,
-            SOURCE_PROVIDER,
-            logs_reply=False,
-            stream=stream,
-            purpose=purpose,
-            tools_sent=tools_sent,
-        )
-        try:
-            yield observed
-        except Exception as exc:
-            # `_send` logs the error of a non-streamed call; a stream fails while it is read.
-            if stream:
-                observed._failed(exc)
-            raise
-        return
-    seq = _log_request(
-        scope,
-        lambda: {
-            "source": SOURCE_ENGINE,
-            "request_type": type(request).__name__,
-            "request": _request_body(request),
-        },
-        source=SOURCE_ENGINE,
-        call_type=call_type,
-        purpose=purpose,
-        model=interface_model(interface),
-        stream=bool(stream),
-    )
-    call = LlmCall(
-        scope,
-        seq,
-        call_type,
-        SOURCE_ENGINE,
-        logs_reply=True,
-        stream=bool(stream),
-        purpose=purpose,
-        tools_sent=tools_sent,
-    )
-    # An inner LiteLLMInterface (a wrapper) must not log the call a second time. A stream
-    # is read after this block yields, so `LlmCall.stream` switches the observer off per chunk.
-    token = None if stream else install_observer(None)
-    try:
-        yield call
-    except (Exception, asyncio.CancelledError) as exc:
-        # DECISION plan-2026-11-19T025425-51fde95b/D-008: the same rule as `_asend`. A cancelled
-        # call was already requested (and may be billed), so the log gets its `provider/error`
-        # and the cancel goes on unchanged. Do NOT narrow this to `Exception` (a dangling
-        # `llm/request`). A stream whose pass already ran `stream_done` (its `finally`) stays
-        # `llm/response` with `abandoned`: `_failed` writes once. See decisions.md D-046.
-        call._failed(exc)
-        raise
-    finally:
-        if token is not None:
-            reset_observer(token)

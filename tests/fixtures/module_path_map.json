@@ -1179,6 +1179,7 @@
     "fsm_llm.runner",
     "fsm_llm.runtime",
     "fsm_llm.runtime.blobs",
+    "fsm_llm.runtime.calls",
     "fsm_llm.runtime.checkpoint",
     "fsm_llm.runtime.constants",
     "fsm_llm.runtime.events",

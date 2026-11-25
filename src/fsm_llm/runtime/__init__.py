@@ -16,6 +16,7 @@ a private name is imported from the module that defines it.
 from __future__ import annotations
 
 from .blobs import BlobStore, blob_ref
+from .calls import LlmCall, llm_call
 from .checkpoint import CHECKPOINT_TYPES, is_checkpoint, unresolved_tool_calls
 from .constants import LOG_FORMAT_VERSION
 from .events import (
@@ -40,13 +41,11 @@ from .log import EventLog, warn_on_failure
 from .privacy import PrivacyLevel, RedactionKind
 from .retention import PruneReport
 from .scope import (
-    LlmCall,
     TurnScope,
     activate,
     bind,
     current_scope,
     emit,
-    llm_call,
     scoped_iter,
 )
 
