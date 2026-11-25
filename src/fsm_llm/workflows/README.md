@@ -29,10 +29,11 @@ The step types are: automatic (run a function, move on), API call, condition (ye
 ## Files
 
 - `engine/` - `WorkflowEngine`: starts and drives instances, delivers events, runs timers and deadlines, cancels, cleans up, calls hooks. Also `Timer`. A package since step 91 of plan d454fd62: `engine.py` (the shell), the mixins `status`, `lifecycle`, `driver`, `events`, `timers`, `resources` and `queries`, `helpers` and `surface`.
-- `steps/` - a package: `base.py` (the `WorkflowStep` base class), `helpers.py` (the step executor and the user-callable call), and the step classes by group: `routing.py`, `calls.py`, `waits.py`, `conversation.py`, `agent.py`, `executable.py`, `composite.py`.
+- `steps/` - a package: `base.py` (the `WorkflowStep` base class), `helpers.py` (the step executor, the run context an `ExecutableStep` inherits and the user-callable call), and the step classes by group: `routing.py`, `calls.py`, `waits.py`, `conversation.py`, `agent.py`, `executable.py`, `composite.py`.
 - `dsl.py` - short factory functions (`create_workflow`, `auto_step`, `condition_step`, ...; `agent_step`, `retry_step` and `switch_step` live in `step_factories.py`), `WorkflowBuilder` (`add_step`, `set_initial_step`, `add_metadata`; `build()` always validates, returns a fresh definition and raises `BuildError` chained from the workflow error), and pattern helpers that register a set of steps without wiring them together.
 - `definitions.py` - `WorkflowDefinition` with validation (targets exist, all steps reachable, no loop that never pauses). `serialize(callables=)` writes a definition with its functions and objects as registered names.
 - `loader.py` - `load_workflow(document, *, objects, step_classes=None)`: reads such a document back (a step `type` resolves only through the step-class table, a name only through the `callables` registry you pass, nothing is imported).
+- `executable.py` - `WorkflowExecutable`, the adapter that runs a `workflow` executable document (imported by name; see below).
 - `step_factories.py` - `agent_step`, `retry_step`, `switch_step` and `executable_step`.
 - `models.py` - statuses, events, step results, instances, history entries, event listeners, wait settings.
 - `dependency_resolver.py` - `DependencyResolver`: sorts steps with declared dependencies into "waves" that could run in parallel. A standalone helper; the engine does not use it.
@@ -118,7 +119,26 @@ document = wf.serialize(callables=objects)          # a plain dict, ready for js
 assert load_workflow(document, objects=objects) == wf
 ```
 
-`registry` is an `ExecutableRegistry` you built and loaded (see the executables guide). The step has no model of its own: an FSM-body executable takes `LLM_MODEL`. `load_workflow` reports every failure of a document in one `WorkflowValidationError`. `ConversationStep`, an `AgentStep` whose agent has its own `async def arun` and an `LLMStep` over a real interface are awaited on the loop.
+`registry` is an `ExecutableRegistry` you built and loaded (see the executables guide). The step has no model of its own: an FSM-body executable takes `LLM_MODEL`, unless the workflow itself runs as an executable (below), where the child shares the run's model, event log, cancel token and registry. `load_workflow` reports every failure of a document in one `WorkflowValidationError`. `ConversationStep`, an `AgentStep` whose agent has its own `async def arun` and an `LLMStep` over a real interface are awaited on the loop.
+
+### Run a workflow as an executable
+
+A workflow can also be a JSON document of kind `workflow` that a registry serves by id, like an agent pattern: `{initial_step_id, steps}` with every function, agent or interface written as a registered name, and the names listed in `requires.callables`. The document never holds code, and it never carries the `registry` and `callables` of an `executable_step` (the host binds them when the document runs). Import `fsm_llm.workflows.executable` to register the kind; `import fsm_llm.workflows` alone does not.
+
+```python
+import fsm_llm.workflows.executable  # registers the kind
+from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.executables import ExecutableRegistry
+
+registry = ExecutableRegistry()
+registry.add_document(document)                   # a dict of kind "workflow"
+result = registry.get("route_by_amount").run(
+    {"amount": 5000}, context=RunContext(callables=objects),
+)
+result.status, result.outputs, result.identity
+```
+
+`run` is `asyncio.run` of `arun` and refuses inside a running event loop (await `arun` there). The result is `ok`, `failed` or `aborted` (`budget_spent` for `max_steps` and `max_seconds` of the context, `cancelled` for its token); `outputs` are the declared `contract.outputs` only. A document with a step that waits (`WaitEventStep`, `TimerStep`) is refused when the registry loads it, because no instance is persisted yet. The format, its checks and the closed list of steps a model may write are in `docs/executables.md`; the dashboard's two presets, `demo_linear` and `demo_branching`, are such documents under `src/fsm_llm/monitor/workflows/`.
 
 Installing the `workflows` extra (`pip install "llm-fsm[workflows]"`) adds no packages beyond core `llm-fsm`.
 

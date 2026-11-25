@@ -28,6 +28,9 @@ Async tests need no decorator: the repository's `pyproject.toml` sets `asyncio_m
 - `test_engine_lifecycle.py` - the engine's lifecycle and resources: instance ids, `max_seconds` deadlines, loops and the step budget, release of timers and listeners on cancel and close, definition pinning, hooks and the engine API, silent logging by default (a subprocess), failures raised by steps, async `aggregation_function`, the announced first RUNNING, per-instance locking, terminal-status guards, float timeouts, the package layout of `engine/`.
 - `test_wait_events.py` - waits and timers: event isolation between instances, correlation keys and targeted events, wait timeouts, re-waits, timer keys and re-arming, timers on finished instances, completing from a wait, listener cleanup.
 - `test_removed_keywords.py` - a removed keyword spelling (`error_state=`, `timeout=`, `default_state=`, `timeout_state=`, `next_state=`, `workflow_timeout=`) raises a `ValidationError` on the pydantic workflow models and the new spelling works.
+- `test_workflow_executable.py` - the adapter that runs a `workflow` document as an executable: registration, identities, the result table (sync and async), budgets, cancel, the refusal of pausing steps and the engine closed on every path.
+- `test_executable_context.py` - the run context an `ExecutableStep` inherits from the adapter (model, event log, cancel token, registry, narrowed limits) and its reset.
+- `test_serialize_golden.py`, `golden_corpus.py` - the bytes of `serialize()` and the loader round trip against a golden written before the workflow kind existed.
 - `__init__.py` - empty package marker.
 
 ## How to use it

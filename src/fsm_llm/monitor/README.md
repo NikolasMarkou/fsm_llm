@@ -42,7 +42,8 @@ flowchart LR
 - `constants.py` - event type names, defaults and limits, hook name and priority.
 - `exceptions.py` - `MonitorError` and its subclasses.
 - `__init__.py`, `__version__.py` - public exports, version (shared with `fsm_llm`).
-- `static/` - the browser app: `app.js` (boot, navigation, click routing), `style.css` (dark theme), `flows.json` (hand-drawn graphs of the workflows for the Visualizer; agent graphs are drawn from the registry), and the `pages/`, `services/`, `utils/` module folders.
+- `static/` - the browser app: `app.js` (boot, navigation, click routing), `style.css` (dark theme), `flows.json` (five hand-drawn illustrative workflow graphs for the Visualizer, none of them a launchable preset; agent graphs are drawn from the registry), and the `pages/`, `services/`, `utils/` module folders.
+- `workflows/` - `demo_linear.json` and `demo_branching.json`, the two workflow presets as `workflow` executable documents (package data); the named functions their steps use are in `instance_manager/workflow_presets.py`.
 - `templates/index.html` - the single HTML page. It holds the markup for every screen (Dashboard, Control Center, Visualizer, Logs, Builder, Settings), the launch dialog, the API key dialog, and the mobile nav, and loads `/static/style.css` and `/static/app.js`.
 
 ## How to use it
@@ -106,7 +107,7 @@ fsm-llm-monitor --api-key secret
 - The server only answers requests whose Host header is `localhost`, `127.0.0.1`, or `::1` by default, refuses state-changing requests from other web origins, and caps request bodies at 1 MiB. Binding to another address with `--host` adds it to the Host list (a wildcard such as `0.0.0.0` turns the Host check off); doing so without an API key prints a warning.
 - FSM presets are read from the repository's `examples/` folder (the `basic`, `intermediate`, `advanced`, `classification` and `reasoning` categories). In an installed wheel without that folder, the preset list is empty.
 - An agent is launched by executable id. The launch and Visualizer selects list what `GET /api/agent/types` returns: the `pattern` executables whose only input is `task`, that need at most tools and are not conversational (every built-in pattern except `evaluator_optimizer`, `maker_checker`, `prompt_chain`, `swarm`, `meta_builder`, `orchestrator` and `reasoning.solve`). `fsm-llm-monitor --executables DIR` adds your own pattern files that meet the same rule. A pattern that needs tools (the form says which) needs at least one; tools are stubs that return a fixed text you type in. At most 8 agents run at once and 200 instances exist at once by default.
-- Workflows are limited to the built-in demos (`demo_linear`, `demo_branching`). Pasted workflow JSON is rejected, and workflows made in the Builder cannot be launched.
+- Workflows are limited to the two built-in demos (`demo_linear`, `demo_branching`), which are `workflow` documents in `monitor/workflows/` read through a registry of the monitor's own. Pasted workflow JSON is rejected, a workflow file of `--executables DIR` is not offered, and workflows made in the Builder cannot be launched.
 - Cancelling an agent sets a flag, but an agent run cannot be interrupted mid-flight. Destroying it waits 1.5 seconds and then leaves the thread running.
 - Secret-looking context values are always hidden. Internal keys (prefixes `_`, `system_`, `internal_`, `__`) are hidden unless `show_internal_keys` is turned on in Settings.
 - The workflow graphs in `static/flows.json` are drawn by hand and can drift from the real workflow code. An agent graph is the pattern's file machine with `<name>` placeholders (`native_fc` draws five states where a default run builds three), and `swarm` and `reasoning.solve` have no graph.
