@@ -1194,6 +1194,11 @@
       "delta": -1,
       "reason": "plan 659c07c3 step 4: new anchor D-009 (launch by exact id, the create_agent kwargs set) in monitor/instance_manager/agent.py; the [STALE] anchor plan 0c00a594 D-001 (EvaluatorOptimizer and MakerChecker not launchable) leaves with _AGENT_CLASSES, replaced by the launchable rule of D-006 (this plan); D-058 of plan 51fde95b moved to sit with the one deny set _NOT_LAUNCHABLE, count unchanged",
       "token": "plan_2026-05-29_0c00a594/D-001"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 7d9c0955 step 2 adds the anchor of D-005 (the workflow body is data, the names live in core once) above WorkflowBody in core/definitions/executable_workflow.py",
+      "token": "plan-2026-11-25T195353-7d9c0955/D-005"
     }
   ]
 }

@@ -6,6 +6,11 @@ an envelope into an ``FSMDefinition`` (``instantiate_envelope``, ``rebuild_insta
 models, the errors, ``parse_executable`` and ``scan_placeholders`` (the envelope validator reads
 it) stay in ``executable.py``, which this module imports; the reverse import never happens.
 
+A ``workflow`` envelope (plan 7d9c0955 D-005) has no FSM to instantiate: ``instantiate_envelope`` and
+``rebuild_instance`` refuse it with one ``InstantiationError`` (its adapter builds the definition),
+and ``identity_of`` hashes an instance given for it AS WRITTEN (``canonical_digest`` of its JSON
+tree), never through the FSM loader, so a body can never be read as an FSM.
+
 A ``pattern`` envelope (plan a555dcfe D-011) instantiates through ``instantiate_body(envelope,
 options=None, *, variants=(), variables=None) -> dict``: a fresh FSM DICT (so key order is
 observable), built from the variants the caller selected (declaration order), the options (given,
@@ -58,6 +63,7 @@ from .executable_pattern import (
     fill_holes,
     resolve_options,
 )
+from .executable_workflow import WorkflowBody
 from .fsm import FSMDefinition, definition_digest
 from .limits import nests_deeper_than
 
@@ -151,9 +157,10 @@ def identity_of(
 
     The instance identity of an FSM body is ``definition_digest`` of its ``FSMDefinition``
     whether the caller holds the definition or a dict that loads as one (D-054: one instance, one
-    identity, so a log keyed by either form matches). Only a mapping that does not load as an FSM
-    (the workflow body) is hashed as written by ``canonical_digest``; ``None`` when no instance is
-    given. Never raises on a mapping.
+    identity, so a log keyed by either form matches). For a workflow template the instance is
+    always hashed as written by ``canonical_digest`` of its JSON tree (D-005), as is any other
+    mapping that does not load as an FSM; ``None`` when no instance is given. Raises
+    ``ExecutableDocumentError`` only for a tree nested past ``MAX_DOCUMENT_DEPTH``.
     """
     # DECISION plan-2026-11-20T055240-ace7a8c8/D-056: pydantic dumps only the shallow header;
     # `metadata` and `body.fsm` (free-form `dict[str, Any]`) go through `_json_tree`. Do NOT dump
@@ -164,16 +171,26 @@ def identity_of(
         mode="json",
         by_alias=True,
         exclude_defaults=True,
-        exclude={"metadata": True, "body": {"fsm": True, "variants": True}},
+        exclude={
+            "metadata": True,
+            "body": {"fsm": True, "variants": True, "steps": True},
+        },
     )
     body = dump.setdefault("body", {})
-    if template.body.fsm is not None:  # a pattern with a generator has none
+    if isinstance(template.body, WorkflowBody):  # step documents, hashed as a tree
+        body["steps"] = _json_tree(template.body.steps)
+    elif template.body.fsm is not None:  # a pattern with a generator has none
         body["fsm"] = _json_tree(template.body.fsm)
     if isinstance(template.body, PatternBody) and template.body.variants:
         body["variants"] = _json_tree(template.body.variants)
     if template.metadata:
         dump["metadata"] = _json_tree(template.metadata)
-    digest = None if instance is None else _instance_digest(instance)
+    if instance is None:
+        digest = None
+    elif isinstance(template.body, WorkflowBody):  # never tried as an FSM (D-005)
+        digest = canonical_digest(_json_tree(instance))
+    else:
+        digest = _instance_digest(instance)
     return Identity(template_identity=canonical_digest(dump), instance_identity=digest)
 
 
@@ -364,6 +381,12 @@ def _pattern_instance(
     return filled, record
 
 
+def _refuse_workflow(envelope: ExecutableEnvelope) -> None:
+    """A workflow has no FSM to instantiate: its adapter builds the definition (D-005)."""
+    if isinstance(envelope.body, WorkflowBody):
+        raise InstantiationError("a workflow is instantiated by its adapter")
+
+
 def instantiate_body(
     envelope: ExecutableEnvelope,
     options: Mapping[str, Any] | None = None,
@@ -394,7 +417,9 @@ def instantiate_envelope(
     """The FSM body of *envelope* with its variables filled, and the instantiation record.
 
     A pattern also takes *options* and *variants* (see ``instantiate_body``) and records both.
+    A workflow is refused (``InstantiationError``).
     """
+    _refuse_workflow(envelope)
     if isinstance(envelope.body, PatternBody):
         filled, record = _pattern_instance(
             envelope, options, variables, variants, generators
@@ -422,6 +447,7 @@ def rebuild_instance(
     generators: GeneratorLookup | None = None,
 ) -> FSMDefinition:
     """Re-instantiate from a logged *record*; the digest must equal the logged identity."""
+    _refuse_workflow(envelope)
     if (
         not isinstance(record, Mapping)
         or set(record) - {"options", "variables", "variants"}

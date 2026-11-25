@@ -40,14 +40,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from fsm_llm.core.definitions.executable_workflow import NAMED_OBJECT_FIELDS
 from fsm_llm.core.names import NameRegistry
 
 from . import steps as _steps
-from .definitions import (
-    _NAMED_OBJECT_FIELDS,
-    WorkflowDefinition,
-    check_callables_registry,
-)
+from .definitions import WorkflowDefinition, check_callables_registry
 from .exceptions import WorkflowValidationError
 from .steps import ConversationStep, ParallelStep, RetryStep, WorkflowStep
 
@@ -146,7 +143,7 @@ class _Builder:
         self, cls: type[WorkflowStep], fields: dict[str, Any], where: str
     ) -> bool:
         ok = True
-        for field in sorted(_NAMED_OBJECT_FIELDS & set(cls.model_fields)):
+        for field in sorted(NAMED_OBJECT_FIELDS & set(cls.model_fields)):
             if fields.get(field) is None:
                 continue
             name = fields[field]

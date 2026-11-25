@@ -10,7 +10,9 @@ bytes, whether the round trip is equal, and the two tables of named-object field
 tree to it, so a field, a type tag, a key order or a table entry that moves is a red row.
 
 ``tables()`` is the one place that names where the two tables of named-object fields live: step 2
-of the plan moves them to core, and this function is the single line to retarget then.
+of the plan moved them to ``fsm_llm.core.definitions.executable_workflow`` (the BASE archive that
+wrote the golden has them in ``fsm_llm.workflows.definitions`` under private names, so the
+function falls back to that location there: the corpus stays runnable on BASE for the mutant proofs).
 """
 
 from __future__ import annotations
@@ -60,14 +62,19 @@ def _noop(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def tables() -> dict[str, list[str]]:
-    """The two tables of named-object fields, sorted (the seam step 2 retargets)."""
-    from fsm_llm.workflows import definitions
+    """The two tables of named-object fields, sorted (the seam step 2 retargeted)."""
+    try:
+        from fsm_llm.core.definitions import executable_workflow as home
 
+        named, excluded = home.NAMED_OBJECT_FIELDS, home.STEP_CALLABLE_EXCLUDE_FIELDS
+    except ImportError:  # the BASE archive: private names in workflows.definitions
+        from fsm_llm.workflows import definitions as old
+
+        named = old._NAMED_OBJECT_FIELDS
+        excluded = old._STEP_CALLABLE_EXCLUDE_FIELDS
     return {
-        "named_object_fields": sorted(definitions._NAMED_OBJECT_FIELDS),
-        "step_callable_exclude_fields": sorted(
-            definitions._STEP_CALLABLE_EXCLUDE_FIELDS
-        ),
+        "named_object_fields": sorted(named),
+        "step_callable_exclude_fields": sorted(excluded),
     }
 
 

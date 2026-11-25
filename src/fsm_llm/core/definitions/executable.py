@@ -4,9 +4,9 @@ An executable is a header (``schema``, ``schema_version``, ``kind``, ``id``, ``v
 ``name``, ``description``, ``contract``, ``requires``, ``capabilities``, ``lifecycle``,
 ``variables``, ``metadata``) and a ``body`` that the ``kind`` discriminates: ``fsm`` (``{fsm}``),
 ``strategy`` (``{fsm, strategy}``), ``procedure`` (``{fsm, provenance}``) and ``pattern`` (the
-template body of ``executable_pattern``: holes, variants, options, a run block). ``workflow`` is
-refused by name until its adapter exists. ``FSMDefinition`` and ``State`` gain
-no field: ``body.fsm`` is the FSM dict, checked by the body loader (V2, ``core.verify.executable``)
+template body of ``executable_pattern``: holes, variants, options, a run block) and ``workflow``
+(the step documents of ``executable_workflow``, run by the workflows adapter). ``FSMDefinition`` and
+``State`` gain no field: ``body.fsm`` is the FSM dict, checked by the body loader (V2, ``core.verify.executable``)
 and loaded exactly as ``API`` loads it by ``instantiate_envelope``.
 
 Two identities (roadmap C11): the TEMPLATE identity is ``canonical_digest`` of the envelope's
@@ -24,7 +24,7 @@ Interface contract:
 
 - ``parse_executable(data) -> ExecutableEnvelope``: V1. Raises ``ExecutableDocumentError`` (its
   ``problems`` are one line per refusal) for a non-mapping, a document nested deeper than
-  ``MAX_DOCUMENT_DEPTH``, a ``kind`` not built yet, or any model error. Never raises anything else.
+  ``MAX_DOCUMENT_DEPTH``, an unknown ``kind``, or any model error. Never raises anything else.
 - ``instantiate_envelope(envelope, *, options=None, variables=None) -> (FSMDefinition, record)`` (in
   ``executable_instance``):
   ``{{name}}`` placeholders of DECLARED variables are replaced in the string leaves of
@@ -67,6 +67,7 @@ from fsm_llm.text import capped_line
 
 from .errors import FSMError
 from .executable_pattern import PATTERN_FIELD_VERSIONS, PatternBody
+from .executable_workflow import WORKFLOW_FIELD_VERSIONS, WorkflowBody
 from .limits import (
     EXECUTABLE_ID_MAX_LENGTH,
     EXECUTABLE_ID_PATTERN,
@@ -100,6 +101,8 @@ __all__ = [
     "StrategyBody",
     "StrategyDecl",
     "StrategyEnvelope",
+    "WorkflowBody",
+    "WorkflowEnvelope",
     "executable_json_schema",
     "newer_envelope_fields",
     "parse_executable",
@@ -125,7 +128,7 @@ _PROBLEM_PART_CHARS = 60
 #: The shipped JSON Schema, generated from the models (package data).
 SCHEMA_PATH = Path(__file__).with_name("schemas") / "executable.schema.json"
 
-_KINDS = ("fsm", "strategy", "procedure", "pattern")
+_KINDS = ("fsm", "strategy", "procedure", "pattern", "workflow")
 _PLACEHOLDER = re.compile(r"\{\{([a-z][a-z0-9_]*)\}\}")
 _MAX_ITEMS = EXECUTABLE_MAX_ITEMS
 _Name = Annotated[str, Field(min_length=1, max_length=EXECUTABLE_NAME_MAX_LENGTH)]
@@ -338,9 +341,28 @@ class PatternEnvelope(ExecutableEnvelope):
     body: PatternBody  # type: ignore[assignment]
 
 
+class WorkflowEnvelope(ExecutableEnvelope):
+    """A workflow: its body is step documents (``executable_workflow``), run by its adapter."""
+
+    kind: Literal["workflow"]
+    body: WorkflowBody  # type: ignore[assignment]
+
+    @model_validator(mode="after")
+    def _no_variables(self) -> Self:
+        if self.variables:
+            raise ValueError(
+                "a workflow takes no variables: no placeholder reaches a step"
+            )
+        return self
+
+
 #: The union V1 parses: one class per kind, discriminated on the header field ``kind``.
 ExecutableDocument = Annotated[
-    FsmEnvelope | StrategyEnvelope | ProcedureEnvelope | PatternEnvelope,
+    FsmEnvelope
+    | StrategyEnvelope
+    | ProcedureEnvelope
+    | PatternEnvelope
+    | WorkflowEnvelope,
     Field(discriminator="kind"),
 ]
 _ADAPTER: TypeAdapter[ExecutableEnvelope] = TypeAdapter(ExecutableDocument)
@@ -375,13 +397,6 @@ def parse_executable(data: object) -> ExecutableEnvelope:
             "an executable document must be a JSON object",
             problems=("document: must be a JSON object",),
         )
-    kind = data.get("kind")
-    if kind == "workflow":
-        line = (
-            f"kind: {kind!r} is not supported by this version "
-            f"(known kinds: {', '.join(_KINDS)})"
-        )
-        raise ExecutableDocumentError(line, problems=(line,))
     try:
         if nests_deeper_than(data, MAX_DOCUMENT_DEPTH):
             raise RecursionError
@@ -413,6 +428,7 @@ _ENVELOPE_TABLE: dict[str, dict[str, str]] = {
     "StrategyDecl": {"1.0": "aliases results solution_key"},
     "ProcedureBody": {"1.0": "provenance"},
     **PATTERN_FIELD_VERSIONS,
+    **WORKFLOW_FIELD_VERSIONS,
 }
 
 #: "Model.field" -> the envelope version that introduced it. A kind class inherits the entries

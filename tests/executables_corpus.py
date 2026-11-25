@@ -343,6 +343,76 @@ def wrap(case: str, raw: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
+def workflow_documents() -> dict[str, dict[str, Any]]:
+    """Two ``workflow`` envelope documents (plan 7d9c0955): the shapes of the two monitor presets.
+
+    Built through the DSL and ``serialize(callables=)`` so the step documents are what a real
+    definition writes: a linear pipeline and a conditional branch, each ending in an
+    ``AutoStep(next_step_id="")``. ``requires.callables`` names what the body uses.
+    """
+    from fsm_llm.core.names import NameRegistry
+    from fsm_llm.workflows import auto_step, condition_step, create_workflow
+
+    calls: dict[str, Any] = {
+        "ingest": lambda context: {"ingested": True},
+        "process": lambda context: {"processed": True},
+        "amount_is_high": lambda context: float(context.get("amount", 0) or 0) >= 1000,
+        "mark_high": lambda context: {"tier": "high"},
+        "mark_low": lambda context: {"tier": "low"},
+    }
+    registry: NameRegistry[Any] = NameRegistry("callables")
+    for name, call in calls.items():
+        registry.register(name, call)
+    linear = create_workflow("demo_linear", "Demo: Linear Pipeline", "Two steps.")
+    linear.with_initial_step(
+        auto_step("ingest", "Ingest", next_step_id="process", action=calls["ingest"])
+    )
+    linear.with_step(
+        auto_step("process", "Process", next_step_id="finish", action=calls["process"])
+    )
+    linear.with_step(auto_step("finish", "Finish", next_step_id=""))
+    branching = create_workflow("demo_branching", "Demo: Branch", "High or low.")
+    branching.with_initial_step(
+        condition_step(
+            "route",
+            "Route",
+            condition=calls["amount_is_high"],
+            true_step_id="high_path",
+            false_step_id="low_path",
+        )
+    )
+    for step_id, tier in (("high_path", "mark_high"), ("low_path", "mark_low")):
+        branching.with_step(
+            auto_step(step_id, step_id, next_step_id="finish", action=calls[tier])
+        )
+    branching.with_step(auto_step("finish", "Finish", next_step_id=""))
+    documents = {}
+    for definition in (linear, branching):
+        dump = definition.serialize(callables=registry)
+        used = sorted(
+            {
+                value
+                for step in dump["steps"].values()
+                for key, value in step.items()
+                if key in ("action", "condition")
+            }
+        )
+        documents[definition.workflow_id] = {
+            "schema": "fsm-llm/executable",
+            "kind": "workflow",
+            "id": definition.workflow_id,
+            "name": definition.name,
+            "description": definition.description,
+            "requires": {"tools": "none", "callables": used},
+            "lifecycle": "draft",
+            "body": {
+                "initial_step_id": dump["initial_step_id"],
+                "steps": dump["steps"],
+            },
+        }
+    return documents
+
+
 def write_all() -> None:
     """Regenerate every fixture, the index and the shipped schema; delete a fixture no case owns."""
     from fsm_llm.core.definitions.executable import SCHEMA_PATH, schema_text

@@ -219,13 +219,22 @@ class TestPerKindRefusals:
         data["body"]["strategy"] = {"solution_key": "answer"}
         _refused(data)
 
-    def test_a_kind_not_built_yet_is_refused_by_name(self):
-        problems = _refused(_doc(kind="workflow")).problems
+    def test_a_workflow_parses_as_its_own_kind_and_an_fsm_body_is_not_its_body(self):
+        # was: the kind was refused by name until its adapter existed (plan 7d9c0955 step 2).
+        # Invariant kept: a body must be the body of ITS kind, and a kind outside the registry
+        # is refused (the bogus row below), so a document never loads as another kind's body.
+        steps = {"a": {"type": "AutoStep", "step_id": "a", "next_step_id": ""}}
+        document = _doc(kind="workflow")
+        document["body"] = {"initial_step_id": "a", "steps": steps}
+        envelope = ex.parse_executable(document)
 
-        assert problems == (
-            "kind: 'workflow' is not supported by this version "
-            "(known kinds: fsm, strategy, procedure, pattern)",
-        )
+        assert isinstance(envelope, ex.WorkflowEnvelope)
+        assert envelope.kind == "workflow"
+        assert envelope.body.steps == steps
+        assert _refused(
+            _doc(kind="workflow")
+        ).problems  # an FSM body is no workflow body
+        assert _refused(_doc(kind="bogus")).problems
 
     def test_an_unknown_kind_an_unknown_key_and_a_wrong_schema_are_refused(self):
         _refused(_doc(kind="bogus"))
@@ -598,6 +607,7 @@ class TestSchemaVersion:
             ex.StrategyEnvelope,
             ex.ProcedureEnvelope,
             ex.PatternEnvelope,
+            ex.WorkflowEnvelope,
         ):
             walk(cls)
 
@@ -801,13 +811,14 @@ class TestTheShippedSchema:
     def test_it_has_the_discriminated_union_and_no_identity(self):
         schema = ex.executable_json_schema()
 
-        assert len(schema["oneOf"]) == 4
+        assert len(schema["oneOf"]) == 5
         assert schema["discriminator"]["propertyName"] == "kind"
         assert set(schema["discriminator"]["mapping"]) == {
             "fsm",
             "strategy",
             "procedure",
             "pattern",
+            "workflow",
         }
         defs = schema["$defs"]
         for branch in (
@@ -815,6 +826,7 @@ class TestTheShippedSchema:
             "StrategyEnvelope",
             "ProcedureEnvelope",
             "PatternEnvelope",
+            "WorkflowEnvelope",
         ):
             assert "schema" in defs[branch]["properties"]
             assert "schema_" not in defs[branch]["properties"]

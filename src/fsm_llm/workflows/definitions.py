@@ -10,6 +10,10 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from fsm_llm.core.definitions import reachable_from
+from fsm_llm.core.definitions.executable_workflow import (
+    NAMED_OBJECT_FIELDS,
+    STEP_CALLABLE_EXCLUDE_FIELDS,
+)
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.logging import logger
 
@@ -27,31 +31,6 @@ from .steps import (
 )
 
 # --------------------------------------------------------------
-
-# The callable/object fields no step's serialized form can carry (functions
-# are not JSON-serializable and have no meaningful round-trip representation).
-# Shared by `_serialize_step` and every recursive call site below it so the
-# exclusion set is defined exactly once.
-_STEP_CALLABLE_EXCLUDE_FIELDS = frozenset(
-    {
-        "action",
-        "api_function",
-        "condition",
-        "aggregation_function",
-        "llm_interface",
-    }
-)
-
-
-# The fields a document names instead of holding: the five callable fields above plus the
-# step's agent and an ``ExecutableStep``'s ``registry`` and ``callables`` (``Field(exclude=True)``, so the
-# default dump never carried them). Read by the
-# naming path of ``serialize(callables=)`` and by ``loader.load_workflow``: one table.
-_NAMED_OBJECT_FIELDS = _STEP_CALLABLE_EXCLUDE_FIELDS | {
-    "agent",
-    "registry",
-    "callables",
-}
 
 
 def check_callables_registry(registry: object) -> NameRegistry[Any]:
@@ -81,14 +60,14 @@ def _name_step_objects(
 ) -> None:
     """Write the registered name of each object field of ``step`` into ``step_dict``.
 
-    A field is an object field when it is one of ``_NAMED_OBJECT_FIELDS`` or holds a callable
+    A field is an object field when it is one of ``NAMED_OBJECT_FIELDS`` or holds a callable
     (a custom step's own). ``None`` stays absent, as in the default path. An object the registry
     cannot name, and a value no JSON document can carry, raise ``WorkflowDefinitionError``
     naming the step and the field: nothing is dropped silently.
     """
     for field in type(step).model_fields:
         value = getattr(step, field, None)
-        if value is None or not (field in _NAMED_OBJECT_FIELDS or callable(value)):
+        if value is None or not (field in NAMED_OBJECT_FIELDS or callable(value)):
             continue
         name = callables.name_of(value)
         if name is None:
@@ -116,7 +95,7 @@ def _serialize_step(
 
     Interface contract: takes any ``WorkflowStep`` instance; returns a
     JSON-safe ``dict`` with a ``"type"`` key set to the step's class name and
-    the 5 known callable fields (`_STEP_CALLABLE_EXCLUDE_FIELDS`) stripped.
+    the 5 known callable fields (`STEP_CALLABLE_EXCLUDE_FIELDS`) stripped.
     Nested steps are handled recursively so no caller needs its own
     per-step-type dump logic:
     - ``RetryStep.step`` is declared ``Field(exclude=True)`` at the pydantic
@@ -137,7 +116,7 @@ def _serialize_step(
     ``RetryStep.referenced_step_ids``.
     Failure mode: none without ``callables``; with it ``WorkflowDefinitionError``.
     """
-    step_dict = step.model_dump(exclude=set(_STEP_CALLABLE_EXCLUDE_FIELDS))
+    step_dict = step.model_dump(exclude=set(STEP_CALLABLE_EXCLUDE_FIELDS))
     # Custom steps may carry other callable fields; never emit a function.
     step_dict = {k: v for k, v in step_dict.items() if not callable(v)}
     step_dict["type"] = step.__class__.__name__

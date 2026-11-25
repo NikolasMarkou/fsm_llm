@@ -1374,6 +1374,135 @@
       ],
       "title": "StrategyEnvelope",
       "type": "object"
+    },
+    "WorkflowBody": {
+      "additionalProperties": false,
+      "description": "``{initial_step_id, steps}``: the steps of a workflow as ``serialize(callables=)`` writes them.",
+      "properties": {
+        "initial_step_id": {
+          "description": "The key of the first step",
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Initial Step Id",
+          "type": "string"
+        },
+        "steps": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "step id -> step document ({type, ...fields}); checked by the adapter",
+          "maxProperties": 500,
+          "minProperties": 1,
+          "propertyNames": {
+            "maxLength": 128,
+            "minLength": 1
+          },
+          "title": "Steps",
+          "type": "object"
+        }
+      },
+      "required": [
+        "initial_step_id",
+        "steps"
+      ],
+      "title": "WorkflowBody",
+      "type": "object"
+    },
+    "WorkflowEnvelope": {
+      "additionalProperties": false,
+      "description": "A workflow: its body is step documents (``executable_workflow``), run by its adapter.",
+      "properties": {
+        "body": {
+          "$ref": "#/$defs/WorkflowBody"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "maxItems": 256,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "contract": {
+          "$ref": "#/$defs/Contract"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Description",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "workflow",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "draft"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Name",
+          "type": "string"
+        },
+        "requires": {
+          "$ref": "#/$defs/Requires"
+        },
+        "schema": {
+          "const": "fsm-llm/executable",
+          "description": "The envelope format id",
+          "title": "Schema",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "1.0",
+          "description": "The envelope format version (not the FSM definition version)",
+          "pattern": "^[0-9]+\\.[0-9]+$",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "variables": {
+          "description": "Operator-filled {{name}} placeholders; never a caller's input",
+          "items": {
+            "maxLength": 64,
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Variables",
+          "type": "array"
+        },
+        "version": {
+          "default": "1",
+          "description": "Author's label",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "id",
+        "body"
+      ],
+      "title": "WorkflowEnvelope",
+      "type": "object"
     }
   },
   "discriminator": {
@@ -1381,7 +1510,8 @@
       "fsm": "#/$defs/FsmEnvelope",
       "pattern": "#/$defs/PatternEnvelope",
       "procedure": "#/$defs/ProcedureEnvelope",
-      "strategy": "#/$defs/StrategyEnvelope"
+      "strategy": "#/$defs/StrategyEnvelope",
+      "workflow": "#/$defs/WorkflowEnvelope"
     },
     "propertyName": "kind"
   },
@@ -1397,6 +1527,9 @@
     },
     {
       "$ref": "#/$defs/PatternEnvelope"
+    },
+    {
+      "$ref": "#/$defs/WorkflowEnvelope"
     }
   ]
 }

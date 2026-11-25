@@ -199,13 +199,13 @@ class TestAPatternDocumentParses:
         ):
             _refused(_doc(**over))
 
-    def test_workflow_is_still_refused_by_name(self):
+    def test_a_pattern_body_is_refused_under_the_workflow_kind(self):
+        # was: `workflow` was refused by name (plan 7d9c0955 step 2). Invariant kept: the body
+        # shape follows the kind, so a pattern template never loads as a workflow body.
         problems = _refused({**_doc(), "kind": "workflow"}).problems
 
-        assert problems == (
-            "kind: 'workflow' is not supported by this version "
-            "(known kinds: fsm, strategy, procedure, pattern)",
-        )
+        assert problems
+        assert all(line.startswith("body") for line in problems), problems
 
 
 class TestHolesAreWholeValues:
@@ -777,7 +777,7 @@ class TestTheShippedSchemaNamesThePattern:
     def test_the_schema_has_the_pattern_branch_and_the_hole_text(self):
         schema = ex.executable_json_schema()
 
-        assert len(schema["oneOf"]) == 4
+        assert len(schema["oneOf"]) == 5
         assert "pattern" in schema["discriminator"]["mapping"]
         body = schema["$defs"]["PatternBody"]
         assert set(body["properties"]) == {

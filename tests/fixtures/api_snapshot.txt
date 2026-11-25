@@ -933,7 +933,7 @@ fsm_llm.core.definitions.executable.Contract class(BaseModel)
 fsm_llm.core.definitions.executable.ENVELOPE_FIELD_VERSIONS dict
 fsm_llm.core.definitions.executable.ENVELOPE_SCHEMA_VERSION_DEFAULT = '1.0'
 fsm_llm.core.definitions.executable.ENVELOPE_SCHEMA_VERSION_OLDEST = '1.0'
-fsm_llm.core.definitions.executable.ExecutableDocument alias Annotated[FsmEnvelope | StrategyEnvelope | ProcedureEnvelope | PatternEnvelope, FieldInfo(annotation=NoneType, required=True, discriminator='kind')]
+fsm_llm.core.definitions.executable.ExecutableDocument alias Annotated[FsmEnvelope | StrategyEnvelope | ProcedureEnvelope | PatternEnvelope | WorkflowEnvelope, FieldInfo(annotation=NoneType, required=True, discriminator='kind')]
 fsm_llm.core.definitions.executable.ExecutableDocumentError class(ExecutableError, ValueError)
   def __init__(self, message: str, *, problems: Sequence[str] = (), details: dict[str, Any] | None = None)
 fsm_llm.core.definitions.executable.ExecutableEnvelope class(BaseModel)
@@ -1042,6 +1042,24 @@ fsm_llm.core.definitions.executable.StrategyEnvelope class(ExecutableEnvelope)
   field lifecycle: Lifecycle = Lifecycle.DRAFT
   field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
   field body: StrategyBody required
+  field metadata: dict[str, Any] = factory
+fsm_llm.core.definitions.executable.WorkflowBody class(BaseModel)
+  field initial_step_id: str required
+  field steps: dict[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MinLen(min_length=1), MaxLen(max_length=128)])], dict[str, Any]] required
+fsm_llm.core.definitions.executable.WorkflowEnvelope class(ExecutableEnvelope)
+  field schema_: Literal['fsm-llm/executable'] required
+  field schema_version: str = '1.0'
+  field kind: Literal['workflow'] required
+  field id: str required
+  field version: str = '1'
+  field name: str = ''
+  field description: str = ''
+  field contract: Contract = factory
+  field requires: Requires = factory
+  field capabilities: list[Capability] = factory
+  field lifecycle: Lifecycle = Lifecycle.DRAFT
+  field variables: list[Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=64), _PydanticGeneralMetadata(pattern='^[a-z][a-z0-9_]*$')])]] = factory
+  field body: WorkflowBody required
   field metadata: dict[str, Any] = factory
 fsm_llm.core.definitions.executable.executable_json_schema def() -> dict[str, Any]
 fsm_llm.core.definitions.executable.newer_envelope_fields def(envelope: ExecutableEnvelope) -> tuple[SchemaFinding, ...]

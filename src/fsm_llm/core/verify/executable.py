@@ -79,6 +79,7 @@ from fsm_llm.core.definitions.executable import (
     ExecutableDocumentError,
     ExecutableEnvelope,
     PatternEnvelope,
+    WorkflowEnvelope,
     parse_executable,
     scan_placeholders,
 )
@@ -293,6 +294,11 @@ def load_executable(
     except ExecutableDocumentError as error:
         for line in error.problems:
             note("schema", "error", line)
+        return finish(None)
+    if isinstance(envelope, WorkflowEnvelope):
+        # Fail closed until the workflow verifier exists (plan 7d9c0955, step 3); nothing below
+        # may read `body.fsm`, which a workflow does not have.
+        note("schema", "error", "a workflow document has no verifier in this build")
         return finish(None)
 
     written = envelope
