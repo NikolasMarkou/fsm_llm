@@ -447,6 +447,45 @@ class TestWhatRunsWhere:
         assert all(idents == {loop} for idents in where.values()), dict(where)
         api.close()
 
+    async def test_the_redaction_hook_runs_on_a_lane_thread_in_async_mode(
+        self, tmp_path: Path
+    ) -> None:
+        """The hook runs inside ``put_json``, which is inside the job: a hook that blocks
+        holds a lane, never the loop, and it must be pure and thread safe (the docs say so).
+        Kills: a blob put on the loop (the hook seen on the loop thread)."""
+        loop = threading.get_ident()
+        seen: set[int] = set()
+
+        def hook(kind: object, value: Any) -> Any:
+            seen.add(threading.get_ident())
+            return value
+
+        api = API.from_definition(
+            _chat(silent=False),
+            llm_interface=_llm(),
+            event_log=EventLog(tmp_path / "a", redact=hook),
+        )
+        cid, _ = await api.astart_conversation()
+        await api.aconverse("my name is Ada", cid)
+        api.close()
+        assert seen and loop not in seen, (loop, seen)
+
+        seen.clear()
+        other = API.from_definition(
+            _chat(silent=False),
+            llm_interface=_llm(),
+            event_log=EventLog(tmp_path / "s", redact=hook),
+        )
+
+        def drive() -> int:
+            sid, _ = other.start_conversation()
+            other.converse("my name is Ada", sid)
+            return threading.get_ident()
+
+        caller = await asyncio.to_thread(drive)
+        other.close()
+        assert seen == {caller}, (caller, seen)
+
     async def test_with_the_log_off_no_lane_is_touched(self) -> None:
         async def refuse(*args: Any, **kwargs: Any) -> Any:
             raise AssertionError("a lane hop with the log off")

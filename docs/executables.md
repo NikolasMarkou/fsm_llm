@@ -338,7 +338,7 @@ A directory of pattern files, and `create_agent(id, registry=)` for a file a reg
 
 The package `pyproject.toml` declares no entry point for either group yet, so a source is registered by an explicit `EXECUTABLE_SOURCES.register(name, factory)` call, and `load_sources()` finds only the packages the process has imported. An entry point installed after the process started is not seen until it restarts. `ExecutableRegistry(kinds=..., sources=...)` takes registries of its own.
 
-The event vocabulary of the event log declares `run/start`, `run/end` and `executable/resolve` (`fsm_llm.runtime.EventType`). Only `settle` writes the first two, for a delegated `call` (see the `call` targets section below); nothing writes `executable/resolve`, a run through `run` adds no event of its own, and the registry logs nothing. Nothing reads them back, so a pin that a restart could rebuild from the log waits for that reader.
+The event vocabulary of the event log declares `run/start`, `run/end` and `executable/resolve` (`fsm_llm.runtime.EventType`). Only `settle` writes the first two, for a delegated `call` (see the `call` targets section below); the `call` executor writes `executable/resolve` (the target id, the mode and the two identities) when a target resolves, with the log on; a run through `run` adds no event of its own, and the registry logs nothing (`ExecutableRegistry.resolve` writes no event). Nothing reads them back, so a pin that a restart could rebuild from the log waits for that reader.
 
 ## Built-in executables
 

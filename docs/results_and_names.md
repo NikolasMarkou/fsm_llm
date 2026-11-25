@@ -14,8 +14,18 @@ Four small pieces of the core that every part of the library builds on: the clos
 | `Reason` | `inputs_missing`, `return_keys_missing`, `provider_error`, `library_error`, `compile_failed`, `push_failed`, `approval_required`, `approval_denied`, `reviewer_error`, `depth_refused`, `completion_unsupported`, `lifecycle_too_low`, `not_simulated`, `budget_spent`, `unexpected_error`, `needs_user_input`, `cancelled`, `unknown_target`, `run_lost` |
 | `Lifecycle` | `draft`, `verified`, `trusted`, `deprecated`, `builtin` |
 | `MessageSource` | `user`, `run`, `remote_client`, `simulator` |
+| `Purpose` | `extract`, `classify`, `tie_break`, `reply`, `complete`, `compile`, `simulate`, `judge`, `summarize` |
+| `LlmFailureCode` | `timeout`, `rate_limited`, `auth`, `context_overflow`, `content_refused`, `malformed_response`, `transport`, `http_error`, `cancelled`, `unknown` |
+| `ToolErrorCode` | `unknown_tool`, `invalid_args`, `execution_failed`, `timeout`, `denied`, `sandbox_violation` |
 
-`Reason.CANCELLED` is a run stopped from outside: its status is `aborted`. `Lifecycle.BUILTIN` marks something that ships in code. Both `Lifecycle` and `MessageSource` are claims or labels, never authorization, and `MessageSource` is vocabulary only: no event or run input records it yet. In a message use `.value`, not an f-string of a member, because the formatting of a `str` Enum differs between Python versions.
+`Reason.CANCELLED` is a run stopped from outside: its status is `aborted`. `Lifecycle.BUILTIN` marks something that ships in code. Both `Lifecycle` and `MessageSource` are claims or labels, never authorization. In a message use `.value`, not an f-string of a member, because the formatting of a `str` Enum differs between Python versions.
+
+The last three rows are the labels of the event log (see the Event Log section of the [API reference](api_reference.md)); they are records, and no code decides on them:
+
+- `MessageSource` is written on `turn/start` of a turn that has a user message (`user` unless the caller wrapped its `converse` call in `fsm_llm.core.codes.message_source(...)`) and on `run/start`. Nothing reads it back: no prompt carries it, no approval path selects by it, and a message-free `advance` writes none.
+- `Purpose` is written on `llm/request`, `llm/response` and `provider/error`. It comes from the context manager `fsm_llm.llm.purpose.purpose_scope`, or is implied by the call type when no scope is set, and it is never a field of a request, so it changes no byte sent to a provider. `tie_break` is the classifier call that settles an AMBIGUOUS transition; the same call type through `classification_extractions` is `classify`. An embedding call is not logged and has no purpose.
+- `LlmFailureCode` is written on `provider/error` as `failure_code`, mapped from the exception class by `fsm_llm.llm.failures.classify_failure` (never from message text, except the one existing marker of a garbled tool call). `http_error` is any other HTTP status of 400 or more, and the number stays in the event's `status_code`. `unknown` is the fallback of the mapper.
+- `ToolErrorCode` is written on `tool/result` as `error_code` and carried by `ToolResult.error_code`. `denied` and `sandbox_violation` are members that no producer writes yet (a denial writes only `approval/outcome`, and `sandbox_violation` waits for the sandbox seam of roadmap rows 4.2 and 4.3).
 
 `fsm_llm.core.results` defines what a run reports:
 
