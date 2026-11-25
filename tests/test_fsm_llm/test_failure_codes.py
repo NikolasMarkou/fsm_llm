@@ -92,6 +92,39 @@ class TestRealLitellmClasses:
         assert _code(_real("APIConnectionError")) is LlmFailureCode.TRANSPORT
 
 
+class TestRawHttpxErrors:
+    """Review 7 of plan 3f4530d3: litellm usually wraps a transport failure, but a raw httpx error
+    that reaches the mapper is still a transport failure or a timeout, never ``unknown``."""
+
+    @pytest.mark.parametrize(
+        ("name", "code"),
+        [
+            ("ConnectError", LlmFailureCode.TRANSPORT),
+            ("ReadError", LlmFailureCode.TRANSPORT),
+            ("WriteError", LlmFailureCode.TRANSPORT),
+            ("CloseError", LlmFailureCode.TRANSPORT),
+            ("RemoteProtocolError", LlmFailureCode.TRANSPORT),
+            ("LocalProtocolError", LlmFailureCode.TRANSPORT),
+            ("ProxyError", LlmFailureCode.TRANSPORT),
+            ("ConnectTimeout", LlmFailureCode.TIMEOUT),
+            ("ReadTimeout", LlmFailureCode.TIMEOUT),
+            ("WriteTimeout", LlmFailureCode.TIMEOUT),
+            ("PoolTimeout", LlmFailureCode.TIMEOUT),
+        ],
+    )
+    def test_each_real_httpx_class_maps_to_its_code(
+        self, name: str, code: LlmFailureCode
+    ) -> None:
+        """Kills: a mapper that knows only litellm's classes (these were ``unknown``) and one that
+        puts an httpx timeout in the transport bucket (the timeout names come first)."""
+        assert _code(getattr(httpx, name)("down")) is code
+
+    def test_a_raw_httpx_error_under_a_wrapper_maps_through_its_cause(self) -> None:
+        wrapper = LLMResponseError("Failed to generate response")
+        wrapper.__cause__ = httpx.ConnectError("refused")
+        assert _code(wrapper) is LlmFailureCode.TRANSPORT
+
+
 class TestOrderAndFallbacks:
     def test_the_marker_runs_before_the_class_names(self) -> None:
         # Ollama's garbled tool call arrives as a plain `APIConnectionError`

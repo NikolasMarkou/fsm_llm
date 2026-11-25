@@ -40,7 +40,18 @@ _BY_CLASS_NAME: tuple[tuple[LlmFailureCode, frozenset[str]], ...] = (
     ),
     (
         LlmFailureCode.TRANSPORT,
-        frozenset({"APIConnectionError", "ConnectionError", "OSError"}),
+        # httpx and httpcore (a raw transport error that no provider library wrapped); their
+        # timeouts are matched above, so `ReadTimeout` and `PoolTimeout` stay `timeout`
+        frozenset(
+            {
+                "APIConnectionError",
+                "ConnectionError",
+                "OSError",
+                "TransportError",
+                "NetworkError",
+                "ProtocolError",
+            }
+        ),
     ),
 )
 

@@ -37,7 +37,7 @@ from fsm_llm.tools import (
     ToolRegistry,
     ToolResult,
 )
-from fsm_llm.tools.constants import Defaults
+from fsm_llm.tools.constants import Defaults, ErrorMessages
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import event_log_child as child
 from tests.test_fsm_llm.event_log_support import (
@@ -258,6 +258,35 @@ class TestTheOrderIsTheCheckpointRule:
         finally:
             reset_tool_observer(token)
         assert not result.success and ran == []
+
+    def test_a_refused_tool_call_write_tells_the_model_a_fixed_text_not_the_log_error(
+        self,
+    ):
+        """Review 6 of plan 3f4530d3. Kills: ``str(error)`` of the log in the failed result (the
+        model saw the log file name and the operating system text: ``append to <id>.jsonl failed:
+        OSError No space left on device``)."""
+        ran: list[int] = []
+
+        class _Refuses:
+            def begin_tool(self, **_: Any) -> object:
+                raise LogWriteError(
+                    "append to 9f1c-conv.jsonl failed: OSError No space left"
+                )
+
+            def end_tool(self, token: object, **_: Any) -> None:
+                raise AssertionError("no call was begun")
+
+        registry = _registry(charge=lambda n: ran.append(n) or "x")
+        token = install_tool_observer(_Refuses())  # type: ignore[arg-type]
+        try:
+            result = registry.execute(_call("charge", n=1))
+        finally:
+            reset_tool_observer(token)
+        assert ran == [] and not result.success
+        for leak in ("jsonl", "9f1c", "OSError", "space"):
+            assert leak not in (result.error or ""), result.error
+        assert result.error == ErrorMessages.TOOL_NOT_LOGGED.format(name="charge")
+        assert result.error_code is ToolErrorCode.EXECUTION_FAILED
 
     def test_a_failing_result_write_never_hides_the_tool_outcome(self, log: EventLog):
         registry = _registry(add=_add)

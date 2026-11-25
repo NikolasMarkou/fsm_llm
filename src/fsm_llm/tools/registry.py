@@ -360,12 +360,24 @@ class ToolRegistry:
             # out (a timeout is `unknown`, never `failed`); the worker thread never writes.
             # An unregistered name and a cache hit log nothing, a retry is its own call. Do NOT
             # import the log here (D-005), move the hook after the body, or let it raise out.
-            handle = begin_tool(
-                tool.name,
-                tool_call.parameters,
-                side_effecting=tool.annotations.read_only is not True,
-                gated=gated,
-            )
+            try:
+                handle = begin_tool(
+                    tool.name,
+                    tool_call.parameters,
+                    side_effecting=tool.annotations.read_only is not True,
+                    gated=gated,
+                )
+            except (
+                Exception
+            ) as log_error:  # the model sees a fixed text, never the log's
+                logger.warning(
+                    f"tool call of {tool.name!r} not logged "
+                    f"({type(log_error).__name__}); the tool was not run"
+                )
+                raise ToolExecutionError(
+                    ErrorMessages.TOOL_NOT_LOGGED.format(name=tool.name),
+                    tool_name=tool.name,
+                ) from log_error
             if tool.timeout_seconds is None:
                 result = self._invoke_tool_fn(fn, tool_call.parameters, schema_props)
             else:

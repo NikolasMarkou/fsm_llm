@@ -138,6 +138,9 @@ class ErrorMessages(metaclass=MirroredConstants):
 
     TOOL_NOT_FOUND = "Tool '{name}' not found in registry"
     TOOL_EXECUTION_FAILED = "Tool '{name}' execution failed: {error}"
+    TOOL_NOT_LOGGED = (
+        "Tool '{name}' was not run: the event log could not record the call"
+    )
     TOOL_TIMED_OUT = (
         "Tool '{name}' timed out after {timeout} s; its outcome is unknown: it "
         "may still be running and its side effects may still happen. Do not "

@@ -19,6 +19,7 @@ import json
 import threading
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -549,10 +550,28 @@ class TestFsyncOutsideTheGuard:
             jsonl, "_fsync", lambda fd: (entered.set(), release.wait(CAP_SECONDS))[1]
         )
         writer = JsonlWriter(tmp_path / "logs" / "root.jsonl")
+        attempts: list[int] = []
+
+        class _Watched:
+            """The sync guard, noting each thread that reaches for it."""
+
+            def __init__(self, lock: Any) -> None:
+                self._lock = lock
+
+            def __enter__(self) -> Any:
+                attempts.append(threading.get_ident())
+                return self._lock.__enter__()
+
+            def __exit__(self, *exc_info: Any) -> Any:
+                return self._lock.__exit__(*exc_info)
+
+        writer._sync_guard = _Watched(writer._sync_guard)
         _thread, out = _run_in_thread(lambda: writer.append(_event(1), checkpoint=True))
         assert entered.wait(CAP_SECONDS)
         closer, _ = _run_in_thread(writer.close)
-        assert writer._fd >= 0  # the descriptor is not closed under an fsync
+        # the closer has reached the guard the fsync holds (no sleep, no guess): it is blocked there
+        _until(lambda: len(attempts) == 2, "the closer to reach the sync guard")
+        assert closer.is_alive() and writer._fd >= 0  # not closed under an fsync
         release.set()
         _until(
             lambda: out == [1] and not closer.is_alive(), "append and close to finish"
