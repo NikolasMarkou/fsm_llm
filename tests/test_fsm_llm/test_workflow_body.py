@@ -552,8 +552,8 @@ class TestTheSchemaAndTheVerifierGuard:
     def test_load_executable_runs_the_workflow_verifier_and_never_reads_an_fsm_body(
         self, origin, name
     ):
-        # rewritten at step 3 (the verifier exists): a workflow has no `body.fsm`, so the load
-        # sequence takes its own branch and returns the envelope as parsed (invariant 2).
+        # a workflow has no `body.fsm`, so the load sequence takes its own branch and returns
+        # the envelope as parsed (invariant 2).
         doc = corpus.workflow_documents()[name]
 
         envelope, result = load_executable(

@@ -458,7 +458,7 @@ class TestV7TheClosedStepList:
         assert "\x1b" not in line and len(line) < 300
 
     def test_an_off_list_tag_is_capped_and_stripped(self):
-        tag = "Evil" + "x" * 40  # V1 bounds a tag to 64 characters of [A-Za-z0-9_]
+        tag = "Evil" + "x" * 40  # long, but a tag V1 reads
         line = _one_model_line(_wf({"a": _step(tag)}), "has type")
 
         assert len(line) < 200

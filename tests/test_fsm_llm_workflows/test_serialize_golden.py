@@ -4,10 +4,10 @@
 against a ``git archive`` of the parent commit ``a8ad5d31``, never against the tree. The rows
 compare the tree to it: the bytes of ``serialize()`` and ``serialize(callables=)`` (key order
 included), the round trip through ``load_workflow``, and the key sets of the two tables of
-named-object fields. Invariant 8 of the plan: ``load(serialize(w)) == w`` stays true for every
+named-object fields. Invariant: ``load(serialize(w)) == w`` stays true for every
 serializable definition, and the format of a document that is already written does not change.
 The comparer was proven able to FAIL under four planted mutants (a field dropped, a type tag
-renamed, keys sorted, a table entry removed): the record is in the plan's progress file.
+renamed, keys sorted, a table entry removed).
 """
 
 from __future__ import annotations

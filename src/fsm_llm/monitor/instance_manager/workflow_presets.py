@@ -1,4 +1,4 @@
-"""The workflow presets of the dashboard (plan 7d9c0955 step 7; the old ``monitor/instance_manager.py``, same dotted path).
+"""The workflow presets of the dashboard (plan 7d9c0955 D-011).
 
 A preset is a ``workflow`` document of the package directory ``monitor/workflows/`` and nothing
 else; the named callables its steps use are the monitor's own (``preset_callables()``). Presets use

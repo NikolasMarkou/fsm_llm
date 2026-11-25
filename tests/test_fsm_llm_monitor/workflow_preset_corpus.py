@@ -1,4 +1,4 @@
-"""The corpus and the snapshot of differential G2 (plan 7d9c0955 step 1). Not collected.
+"""The corpus and the snapshot of differential G2 (plan 7d9c0955). Not collected.
 
 ``snapshot()`` runs the two launchable workflow presets (``demo_linear``, ``demo_branching``)
 through a ``WorkflowEngine`` for eight values of ``amount`` and records, per run: the final status,
@@ -9,17 +9,15 @@ preset and initial context, the instance info, status, instance list and the mon
 launched run (ids and timestamps scrubbed).
 
 ``tests/fixtures/workflow_preset_golden.json`` was written from a ``git archive`` of the parent
-commit ``a8ad5d31`` by a script outside the repository (its path is in the plan's progress file).
+commit ``a8ad5d31`` by a script outside the repository.
 It holds ``engine_runs`` and ``monitor`` (the presets as they are at BASE, their last step a
 ``_TerminalStep``) and ``document_runs`` and ``document_monitor`` (the same presets with the last
 step an ``AutoStep(next_step_id="")``, which is what a preset document builds). ``named_deltas``
-lists what differs between the two, and nothing else may: step 7 of the plan moves the presets
-into documents and must equal the ``document_*`` halves.
+lists what differs between the two, and nothing else may: the presets are documents and must
+equal the ``document_*`` halves.
 
-``preset_definitions()`` is the one place that names where the preset definitions come from. At
-step 1 it read ``_WORKFLOW_PRESETS`` (the fixture was written by that form against the archive of
-``a8ad5d31``); step 7 retargeted it to the registry of preset documents. The fixture is never
-written again from the tree.
+``preset_definitions()`` is the one place that names where the preset definitions come from: the
+registry of preset documents. The fixture is never written again from the tree.
 """
 
 from __future__ import annotations

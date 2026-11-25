@@ -398,7 +398,7 @@ def registered_kinds_after(module: str) -> list[str]:
 
 class TestImportWorkflowsRegistersNothing:
     """`import fsm_llm.workflows` loads no executable module and registers no kind (plan 7d9c0955
-    step 5, D-004): the cost of the namespaces import (+42 ms measured at step 1) is paid only by a
+    D-004): the cost of the namespaces import is paid only by a
     host that imports `fsm_llm.workflows.executable` by name, which registers the `workflow` kind."""
 
     def test_the_package_import_loads_only_the_body_and_the_step(self) -> None:

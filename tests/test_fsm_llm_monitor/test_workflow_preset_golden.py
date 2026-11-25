@@ -12,11 +12,11 @@ become documents their last step is ``AutoStep(next_step_id="")`` where ``_Termi
 no next step. That moves two values and nothing else: the ``next_step_id`` of the ``finish``
 ``step_completed`` hook (``None`` to ``""``) and the message of the ``finish`` history entry
 (``"Reached terminal step 'finish'"`` to ``"Auto-transitioned to "``), the second visible on the
-wire in ``/status`` and ``/instances``. Step 7 of the plan switches ``EXPECTED`` to the
-``document_*`` halves; the rows that pin the deltas stay.
+wire in ``/status`` and ``/instances``. ``EXPECTED`` names the ``document_*`` halves; the rows
+that pin the deltas stay.
 
 The comparer was proven able to FAIL under four planted mutants (a branch inverted, a context key
-renamed, a step added, the threshold changed): the record is in the plan's progress file.
+renamed, a step added, the threshold changed).
 """
 
 from __future__ import annotations

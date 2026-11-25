@@ -33,7 +33,7 @@ from tests.test_fsm_llm_workflows.support import (
 
 
 def _every_tag_steps() -> dict[str, Any]:
-    """The 11 built-in step classes of ``every_step_workflow`` plus an ``ExecutableStep``, as a body."""
+    """Every built-in step class of ``every_step_workflow`` plus an ``ExecutableStep``, as a body."""
     objects = every_step_objects()
     dump = every_step_workflow(objects).serialize(callables=callables_registry(objects))
     steps = dump["steps"]

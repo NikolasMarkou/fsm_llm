@@ -151,11 +151,6 @@ class CodeBackedExecutable(ABC):
             identity=identity,
         )
 
-    def _check_input_keys(self, inputs: Mapping[str, Any]) -> None:
-        check_input_keys(
-            self.id, inputs, {*self.contract.inputs, *self.optional_inputs}
-        )
-
     def _resolve_objects(self, context: RunContext) -> dict[str, Any]:
         registry = context.callables
         required = list(self.requires.callables)
@@ -190,7 +185,9 @@ class CodeBackedInstance:
         owner = self.executable
         context = RunContext() if context is None else context
         inputs = render_inputs(owner.contract, inputs, optional=owner.optional_inputs)
-        owner._check_input_keys(inputs)
+        check_input_keys(
+            owner.id, inputs, {*owner.contract.inputs, *owner.optional_inputs}
+        )
         identity = Identity(
             template_identity=owner.template_identity,
             instance_identity=self.instance_identity,

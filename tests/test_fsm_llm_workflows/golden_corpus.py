@@ -1,4 +1,4 @@
-"""The corpus and the snapshot of differential G1 (plan 7d9c0955 step 1). Not collected.
+"""The corpus and the snapshot of differential G1 (plan 7d9c0955). Not collected.
 
 ``snapshot()`` serializes a fixed corpus of workflow definitions (every serializable step class,
 nested ``RetryStep`` and ``ParallelStep``, a terminal ``AutoStep(next_step_id="")`` with no action,
@@ -6,13 +6,13 @@ an ``ExecutableStep``, a custom step class) the two ways (``serialize()`` and
 ``serialize(callables=)``), loads the named form back through ``load_workflow`` and records the
 bytes, whether the round trip is equal, and the two tables of named-object fields. The fixture
 ``tests/fixtures/workflow_serialize_golden.json`` was written by running this module against a
-``git archive`` of the parent commit ``a8ad5d31`` (the BASE of the plan); the test compares the
+``git archive`` of the parent commit ``a8ad5d31``; the test compares the
 tree to it, so a field, a type tag, a key order or a table entry that moves is a red row.
 
-``tables()`` is the one place that names where the two tables of named-object fields live: step 2
-of the plan moved them to ``fsm_llm.core.definitions.executable_workflow`` (the BASE archive that
-wrote the golden has them in ``fsm_llm.workflows.definitions`` under private names, so the
-function falls back to that location there: the corpus stays runnable on BASE for the mutant proofs).
+``tables()`` is the one place that names where the two tables of named-object fields live:
+``fsm_llm.core.definitions.executable_workflow`` (the archive that wrote the golden has them in
+``fsm_llm.workflows.definitions`` under private names, so the function falls back to that
+location there: the corpus stays runnable on that archive for the mutant proofs).
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def _noop(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def tables() -> dict[str, list[str]]:
-    """The two tables of named-object fields, sorted (the seam step 2 retargeted)."""
+    """The two tables of named-object fields, sorted."""
     try:
         from fsm_llm.core.definitions import executable_workflow as home
 
