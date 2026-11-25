@@ -20,6 +20,7 @@ import contextlib
 import json
 import os
 import stat
+import sys
 import tempfile
 import threading
 from collections.abc import Callable, Iterator
@@ -172,7 +173,8 @@ class TestTheLoopCensus:
         other.close()
         assert synchronous.total["fsync"] >= 10  # a vacuous census would count none
         assert asynchronous.durable() == synchronous.durable()
-        assert asynchronous.total["dirsync"] >= asynchronous.total["replace"]
+        if sys.platform != "win32":  # a directory cannot be fsynced on Windows
+            assert asynchronous.total["dirsync"] >= asynchronous.total["replace"]
         assert _types(api) == _types(other)
 
     async def test_a_lane_that_runs_inline_turns_the_census_red(

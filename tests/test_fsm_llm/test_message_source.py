@@ -250,7 +250,7 @@ class TestRecordOnly:
 
     def test_the_only_reader_is_the_event_writer(self) -> None:
         readers = sorted(
-            str(path.relative_to(_SRC))
+            path.relative_to(_SRC).as_posix()
             for path in _SRC.rglob("*.py")
             if "current_message_source" in path.read_text(encoding="utf-8")
         )
