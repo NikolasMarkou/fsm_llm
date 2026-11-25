@@ -1,8 +1,8 @@
 // FSM-LLM Monitor — Launch Modal
 
-import { state, TOOL_BASED_AGENTS } from '../services/state.js';
-import { fetchJson, postJson } from '../services/api.js';
-import { $, esc, numVal, intVal, showError, showStatus, openDialog, closeDialog } from '../utils/dom.js';
+import { state, DEFAULT_AGENT_TYPE } from '../services/state.js';
+import { fetchJson, postJson, loadAgentTypes, agentRow, toolsRequired } from '../services/api.js';
+import { $, esc, numVal, intVal, fillSelect, showError, showStatus, openDialog, closeDialog } from '../utils/dom.js';
 
 // Forward references (set by app.js)
 let _showPage, _refreshInstances, _showConversationInDrawer;
@@ -18,7 +18,7 @@ export function showLaunchModal() {
     loadLaunchPresets();
     loadWorkflowPresets();
     checkCapabilities();
-    onAgentTypeChange();
+    loadLaunchAgents();
     populateToolTemplates();
     _clearLaunchStatuses();
 }
@@ -315,11 +315,22 @@ function getStubTools() {
     return tools;
 }
 
+/** Fill the agent select from the launchable rows of GET /api/agent/types, then show the tools it takes. */
+async function loadLaunchAgents() {
+    const sel = $('launch-agent-type');
+    if (!sel) return;
+    const rows = (await loadAgentTypes()).filter(r => r.launchable);
+    fillSelect(sel, [
+        { label: 'Needs tools', rows: rows.filter(r => r.needs_tools) },
+        { label: 'No tools needed', rows: rows.filter(r => !r.needs_tools) },
+    ], 'No agent types available', DEFAULT_AGENT_TYPE);
+    onAgentTypeChange();
+}
+
 export function onAgentTypeChange() {
-    const agentType = $('launch-agent-type')?.value;
-    const needsTools = TOOL_BASED_AGENTS.includes(agentType);
+    const takesTools = agentRow($('launch-agent-type')?.value)?.takes_tools;
     const toolWrapper = $('launch-agent-tools-wrapper');
-    if (toolWrapper) toolWrapper.style.display = needsTools ? '' : 'none';
+    if (toolWrapper) toolWrapper.style.display = takesTools ? '' : 'none';
 }
 
 export async function doLaunchAgent(btn) {
@@ -332,9 +343,12 @@ export async function doLaunchAgent(btn) {
     }
 
     const agentType = $('launch-agent-type').value;
-    const needsTools = TOOL_BASED_AGENTS.includes(agentType);
-    const tools = needsTools ? getStubTools() : [];
-    if (needsTools && tools.length === 0) {
+    if (!agentType) {
+        showError('launch-agent-status', 'No agent type available');
+        _resetBtn(); return;
+    }
+    const tools = agentRow(agentType)?.takes_tools ? getStubTools() : [];
+    if (toolsRequired(agentType) && tools.length === 0) {
         showError('launch-agent-status', `Add at least one tool for ${agentType}`);
         _resetBtn(); return;
     }

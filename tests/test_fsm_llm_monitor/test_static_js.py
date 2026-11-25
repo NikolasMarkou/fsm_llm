@@ -153,6 +153,9 @@ class TestLaunchModal:
         for name in ("agent", "fsm", "workflow"):
             assert out[f"{name}_failed"]["returned"] is False
 
+    def test_the_launch_body_carries_the_selected_executable_id(self, probe):
+        assert probe("launch_modal")["agent_body"]["agent_type"] == "debate"
+
 
 class TestBuilderAgentLaunch:
     def test_a_refused_launch_keeps_the_form_open_for_a_retry(self, probe):
@@ -212,6 +215,15 @@ class TestBuilderAgentLaunchFields:
         pre = probe("builder_agent_fields")["badConfig"]["prefilled"]
         assert (pre["iters"], pre["timeout"]) == (10, 120)
 
+    def test_the_posted_type_is_the_artifact_id_as_it_is(self, probe):
+        sent = probe("builder_agent_fields")["fromBuilderField"]["sent"]
+        assert sent["agent_type"] == "react"  # an executable id, never a class name
+
+    def test_a_type_that_needs_a_tool_is_refused_without_one_and_sends_nothing(
+        self, probe
+    ):
+        assert probe("builder_agent_fields")["noTool"]["sent"] is None
+
 
 class TestBuilderAgentLaunchGate:
     """Plan 51fde95b step 13.2: Launch is disabled, with a note, for an agent
@@ -252,6 +264,98 @@ class TestBuilderAgentLaunchGate:
         out = probe("builder_agent_gate")
         assert out["noList"]["disabled"] is False
         assert out["capsDown"]["disabled"] is False
+
+
+_HOSTILE = "<img src=x onerror=alert(1)>"
+
+
+class TestAgentSelectsAreFilledFromTheTypesRoute:
+    """Plan 659c07c3 step 6: both agent selects are built from GET /api/agent/types
+    with createElement and textContent, never from a list in the page or markup."""
+
+    def test_the_launch_select_offers_only_launchable_ids_in_two_groups(self, probe):
+        launch = probe("agent_select")["launchSelect"]
+        assert launch["shape"] == [
+            {
+                "group": "Needs tools",
+                "options": [["auto_memory", "auto_memory"], ["react", "react"]],
+            },
+            {
+                "group": "No tools needed",
+                "options": [
+                    ["debate", "debate"],
+                    ["adapt", "adapt"],
+                    [_HOSTILE, _HOSTILE],
+                ],
+            },
+        ]
+        assert launch["value"] == "react"  # the default id
+
+    def test_a_hostile_id_is_text_and_never_markup(self, probe):
+        out = probe("agent_select")
+        assert out["launchSelect"]["innerHTML"] == ""
+        assert out["viz"]["innerHTML"] == ""
+        assert [_HOSTILE, _HOSTILE] in [o for o in out["viz"]["shape"]]
+
+    def test_the_visualizer_select_offers_the_drawable_ids_and_defaults_to_react(
+        self, probe
+    ):
+        viz = probe("agent_select")["viz"]
+        assert [o[0] for o in viz["shape"]] == [
+            "debate",
+            "auto_memory",
+            "react",
+            "adapt",
+            _HOSTILE,
+            "evaluator_optimizer",
+        ]  # swarm is listed with drawable false: absent
+        assert viz["value"] == "react"
+        assert viz["drawn"] == ["/api/agent/visualize?agent_type=react"]
+
+    def test_the_tools_wrapper_follows_takes_tools(self, probe):
+        out = probe("agent_select")
+        assert out["launchSelect"]["wrapper"] == ""  # react
+        assert out["noTools"] == "none"  # debate
+        assert out["optionalTools"] == ""  # adapt takes optional tools
+
+    def test_a_second_opening_asks_once_and_keeps_the_choice(self, probe):
+        assert probe("agent_select")["reopened"] == {"value": "adapt", "fetches": 1}
+
+    def test_a_type_that_needs_a_tool_is_refused_unless_the_file_names_its_tools(
+        self, probe
+    ):
+        out = probe("agent_select")
+        assert out["needsOne"]["posts"] == 0
+        assert "Add at least one tool for react" in out["needsOne"]["status"]
+        assert out["namedTools"]["posts"] == 1
+        assert out["namedTools"]["body"]["agent_type"] == "auto_memory"
+
+    @pytest.mark.parametrize("mode", ["empty", "junk", "badrows", "fail"])
+    def test_no_rows_leave_one_disabled_option_and_no_stale_choice(self, probe, mode):
+        out = probe("agent_select_empty")[mode]
+        if mode != "fail":
+            assert out["toast"] == []  # a payload with no usable row is no failure
+        none = [["", "No agent types available", True]]
+        assert out["launch"] == none
+        assert out["viz"] == none
+        assert (out["launchValue"], out["vizValue"]) == ("", "")
+
+    def test_a_failed_fetch_toasts_once_and_the_next_opening_asks_again(self, probe):
+        out = probe("agent_select_empty")
+        assert out["fail"]["toast"] == ["Agent types failed to load: down"]
+        assert out["recovered"]["asked"] == 1
+        assert out["recovered"]["launchValue"] == "react"
+        assert out["recovered"]["vizValue"] == "react"
+
+    def test_with_no_agent_type_nothing_is_posted(self, probe):
+        out = probe("agent_select_empty")["nothingToLaunch"]
+        assert out["posted"] == 0
+        assert "No agent type available" in out["status"]
+        none = [
+            ["", "No agent types available", True]
+        ]  # after a filled select: no stale choice
+        assert (out["launch"], out["viz"]) == (none, none)
+        assert (out["launchValue"], out["vizValue"]) == ("", "")
 
 
 class TestBuilderFsmLaunchOpensTheConversation:

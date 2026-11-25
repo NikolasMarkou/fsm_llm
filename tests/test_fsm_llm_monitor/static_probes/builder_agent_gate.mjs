@@ -1,7 +1,7 @@
 import { el, serve, sleep, out } from './stub.mjs';
 import * as builder from '../static/pages/builder.js';
 // 13.2: Launch is disabled, with a note, for an agent type /api/capabilities does not list.
-let agentType = 'react', capsDelay = 0, capsCalls = 0, slowFirst = false, caps = { fsm: true, agent_types: ['ReactAgent', 'DebateAgent'] }, posts = 0;
+let agentType = 'react', capsDelay = 0, capsCalls = 0, slowFirst = false, caps = { fsm: true, agent_types: ['react', 'debate'] }, posts = 0;
 serve(async url => {
     if (url === '/api/capabilities') { const n = ++capsCalls; await sleep(slowFirst && n === 1 ? 60 : capsDelay); return caps.fail ? { fail: 'down' } : caps; }
     if (url === '/api/agent/launch') { posts++; return {}; }
@@ -28,7 +28,7 @@ caps = { fsm: true };                                        // an older server 
 const noList = await run('maker_checker');
 caps = { fail: true };
 const capsDown = await run('maker_checker');
-caps = { fsm: true, agent_types: ['ReactAgent', 'DebateAgent'] };
+caps = { fsm: true, agent_types: ['react', 'debate'] };
 const inherited = await run('constructor');                  // a key of Object.prototype is no agent type (D-058)
 const protoKey = await run('__proto__');
 capsCalls = 0; slowFirst = true;                             // the reply for the pre-edit artifact arrives after the Apply

@@ -193,6 +193,41 @@ export function intVal(id, fallback) {
     return Number.isFinite(v) ? v : fallback;
 }
 
+/**
+ * Fill a select from agent type rows in groups `[{label, rows}]` (a falsy label means no optgroup).
+ * Options are built with createElement and textContent only, never markup from server data. Keeps the
+ * current value when it is still offered, else `preferred`, else the first option; no rows at all
+ * leaves one disabled option reading `emptyText`.
+ */
+export function fillSelect(sel, groups, emptyText, preferred) {
+    const nodes = [];
+    const ids = [];
+    for (const { label, rows } of groups) {
+        if (!rows.length) continue;
+        const group = label ? document.createElement('optgroup') : null;
+        if (group) group.label = label;
+        for (const row of rows) {
+            const opt = document.createElement('option');
+            opt.value = row.id;
+            opt.textContent = row.name || row.id;
+            ids.push(row.id);
+            if (group) group.appendChild(opt); else nodes.push(opt);
+        }
+        if (group) nodes.push(group);
+    }
+    if (!nodes.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.disabled = true;
+        opt.textContent = emptyText;
+        nodes.push(opt);
+    }
+    const keep = [sel.value, preferred].find(v => ids.includes(v));
+    sel.replaceChildren(...nodes);
+    if (keep) sel.value = keep;
+    else if (!ids.length) sel.value = '';
+}
+
 /** Copy text to clipboard with fallback. */
 export async function copyToClipboard(text) {
     try {

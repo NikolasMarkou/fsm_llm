@@ -2,6 +2,8 @@
 // Thin fetch wrapper with JSON error handling and the optional API key header.
 
 import { getApiKey, requestApiKey } from './auth.js';
+import { state } from './state.js';
+import { showToast } from '../utils/dom.js';
 
 function _withKey(opts) {
     const o = { ...(opts || {}) };
@@ -67,4 +69,41 @@ export function postJson(url, data, opts) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
+}
+
+/**
+ * The rows of GET /api/agent/types (`id`, `name`, `launchable`, `needs_tools`,
+ * `takes_tools`, `tool_names`, `drawable`), fetched once and kept on `state.agentTypes`;
+ * callers that ask while the fetch is in flight share it. A failed fetch shows one toast,
+ * caches nothing (the next call retries) and gives [].
+ */
+export function loadAgentTypes() {
+    if (state.agentTypes) return Promise.resolve(state.agentTypes);
+    _agentTypesLoad ??= _fetchAgentTypes().finally(() => { _agentTypesLoad = null; });
+    return _agentTypesLoad;
+}
+
+let _agentTypesLoad = null;
+
+async function _fetchAgentTypes() {
+    try {
+        const data = await fetchJson('/api/agent/types');
+        state.agentTypes = (Array.isArray(data?.agent_types) ? data.agent_types : [])
+            .filter(r => r && typeof r.id === 'string');
+        return state.agentTypes;
+    } catch (e) {
+        showToast(`Agent types failed to load: ${e.message || e}`, 'error');
+        return [];
+    }
+}
+
+/** The loaded row of an agent type id, or undefined (not loaded, or not a listed id). */
+export function agentRow(id) {
+    return (state.agentTypes || []).find(r => r.id === id);
+}
+
+/** True when launching `id` needs a stub tool typed by the user (a needs_tools row with no tool names of its own). */
+export function toolsRequired(id) {
+    const row = agentRow(id);
+    return !!row?.needs_tools && !row.tool_names?.length;
 }

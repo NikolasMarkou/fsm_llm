@@ -5,6 +5,7 @@ const artifact = { name: 'A', agent_type: 'react', tools: [{ name: 't1', descrip
 let refuse = true;
 const posts = [];
 serve(url => {
+    if (url === '/api/agent/types') return { agent_types: [] };
     if (url === '/api/agent/launch') { posts.push(url); return refuse ? { fail: 'model not configured' } : {}; }
     return { session_id: 's', response: 'done', internal_state: {}, is_complete: true, artifact, artifact_json: JSON.stringify(artifact), artifact_type: 'agent', is_valid: true };
 });

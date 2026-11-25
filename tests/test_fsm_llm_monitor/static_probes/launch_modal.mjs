@@ -4,16 +4,18 @@ import * as launch from '../static/pages/launch.js';
 
 state.capabilities = { fsm: true, workflows: true, agents: true };
 launch.setDeps({ showPage() {}, refreshInstances() {} });
-Object.assign(el('launch-agent-type'), { value: 'DebateAgent' });
+Object.assign(el('launch-agent-type'), { value: 'debate' });      // an executable id, not a class name
 el('launch-agent-task').value = 'do it';
 el('launch-fsm-source').value = 'preset';
 el('launch-fsm-preset-id').value = 'demo';
 el('launch-wf-preset').value = 'linear';
 const posts = [];
+const bodies = [];
 let failing = false;
 serve(async (url, opts) => {
     if (opts?.method !== 'POST') return {};
     posts.push(url);
+    if (url === '/api/agent/launch') bodies.push(JSON.parse(opts.body));
     await sleep(10);
     return failing ? { fail: 'refused' } : { instance_id: 'x', label: 'L', conversation_id: 'c' };
 });
@@ -34,4 +36,5 @@ for (const [name, [run, label]] of Object.entries(launchers)) {
         result[`${name}_${failing ? 'failed' : 'ok'}`] = { returned, window, end: [btn.disabled, btn.textContent] };
     }
 }
+result.agent_body = bodies[0];
 out(result);

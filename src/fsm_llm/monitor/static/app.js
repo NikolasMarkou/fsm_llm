@@ -52,10 +52,8 @@ function showPage(page) {
 
     if (page === 'visualizer') {
         const activeTab = document.querySelector('.tab-content.active');
-        if (activeTab?.id === 'tab-agents') {
-            const sel = $('viz-agent-type');
-            if (sel?.value) visualizer.visualizeGraph('agent', sel.value);
-        } else if (activeTab?.id === 'tab-workflows') {
+        if (activeTab?.id === 'tab-agents') visualizer.showAgentGraph();
+        else if (activeTab?.id === 'tab-workflows') {
             const sel2 = $('viz-wf-type');
             if (sel2?.value) visualizer.visualizeGraph('workflow', sel2.value);
         }
@@ -82,6 +80,7 @@ function switchTab(tabId, btn) {
     tabBar?.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
     $(tabId)?.classList.add('active');
     btn?.classList.add('active');
+    if (tabId === 'tab-agents') visualizer.showAgentGraph();
 }
 
 function navigateFromHash() {

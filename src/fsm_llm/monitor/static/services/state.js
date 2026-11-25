@@ -2,12 +2,13 @@
 // Single source of truth: one plain object every module reads and writes.
 
 export const WS_MAX_DELAY = 30000;
-export const TOOL_BASED_AGENTS = ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent'];
+export const DEFAULT_AGENT_TYPE = 'react';
 
 export const state = {
     ws: null,
     currentPage: 'dashboard',
     presets: null,
+    agentTypes: null,
     wsRetryDelay: 3000,
     capabilities: { fsm: true, workflows: false, agents: false },
     instances: [],

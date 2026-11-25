@@ -1,27 +1,11 @@
 // FSM-LLM Monitor — Builder Page (Meta-Agent)
 
-import { fetchJson, postJson } from '../services/api.js';
-import { TOOL_BASED_AGENTS } from '../services/state.js';
+import { fetchJson, postJson, loadAgentTypes, toolsRequired } from '../services/api.js';
 import { $, esc, intVal, jsonViewHtml, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
 import { highlightJsonIn, renderJson } from '../utils/json_highlight.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
 import { addTypingIndicator, removeTypingIndicator, showConversationInDrawer } from './conversations.js';
-
-// Agent type mapping: builder lowercase → server class names
-const AGENT_TYPE_MAP = {
-    react: 'ReactAgent',
-    plan_execute: 'PlanExecuteAgent',
-    reflexion: 'ReflexionAgent',
-    rewoo: 'REWOOAgent',
-    evaluator_optimizer: 'EvaluatorOptimizerAgent',
-    maker_checker: 'MakerCheckerAgent',
-    prompt_chain: 'PromptChainAgent',
-    self_consistency: 'SelfConsistencyAgent',
-    debate: 'DebateAgent',
-    orchestrator: 'OrchestratorAgent',
-    adapt: 'ADaPTAgent',
-};
 
 // Forward references
 let _showPage, _refreshInstances;
@@ -306,30 +290,28 @@ function _syncLaunch(artifact, artifactType) {
         launchNote.textContent = note;
         launchNote.style.display = note ? 'block' : 'none';
     }
-    if (artifactType === 'agent') _gateAgentLaunch(_agentClass(artifact), _sessionToken);
+    if (artifactType === 'agent') _gateAgentLaunch(_agentId(artifact), _sessionToken);
 }
 
-/** Disable Launch with a note when /api/capabilities does not list the agent class (the list is the server's `_AGENT_CLASSES`). */
-function _gateAgentLaunch(agentClass, token) {
+/** Disable Launch with a note when /api/capabilities does not list the agent type id (the list is the server's launchable rows). */
+function _gateAgentLaunch(agentId, token) {
     const gate = ++_gateToken;  // a newer call (an Apply of Edit JSON) drops the reply of an older one
     fetchJson('/api/capabilities').then(caps => {
-        if (token !== _sessionToken || gate !== _gateToken || !Array.isArray(caps?.agent_types) || caps.agent_types.includes(agentClass)) return;
+        if (token !== _sessionToken || gate !== _gateToken || !Array.isArray(caps?.agent_types) || caps.agent_types.includes(agentId)) return;
         const btn = $('builder-launch-btn');
         const note = $('builder-launch-note');
         if (btn) { btn.disabled = true; btn.setAttribute('aria-describedby', 'builder-launch-note'); btn.title = 'The monitor cannot launch this agent type'; }
         if (note) {
-            note.textContent = `${agentClass} cannot be launched from the monitor (its constructor needs arguments a form cannot supply). `
+            note.textContent = `${agentId} cannot be launched from the monitor (its constructor needs arguments a form cannot supply). `
                 + 'Copy or download the definition and build it with the fsm_llm.agents Python API.';
             note.style.display = 'block';
         }
     }).catch(() => {});  // unknown: leave Launch enabled, the server answers 400 for a type it cannot run
 }
 
-/** The server class name of a built agent artifact (builder lowercase type -> class). */
-function _agentClass(artifact) {
-    const raw = (artifact.agent_type || 'react').toLowerCase();
-    // an own key only: "constructor" or "__proto__" in an edited artifact is no type (D-058)
-    return (Object.hasOwn(AGENT_TYPE_MAP, raw) && AGENT_TYPE_MAP[raw]) || artifact.agent_type || 'ReactAgent';
+/** The agent type id of a built agent artifact: the Builder's type is an executable id, sent as it is (default `react`). */
+function _agentId(artifact) {
+    return typeof artifact.agent_type === 'string' && artifact.agent_type ? artifact.agent_type : 'react';
 }
 
 function _buildResultSummary(artifact, artifactType) {
@@ -593,6 +575,7 @@ function _launchBuilderAgent() {
     if (form.style.display === 'none') {
         form.style.display = 'block';
         launchBtn.textContent = 'Confirm Launch';
+        loadAgentTypes();  // the rows tell which types need a tool
         _populateAgentToolStubs();
         _prefillAgentForm();
         $('builder-agent-task')?.focus();
@@ -609,11 +592,10 @@ function _launchBuilderAgent() {
     let parsed;
     try { parsed = JSON.parse(_artifact); } catch { showError('builder-status', 'Invalid JSON'); return; }
 
-    const agentType = _agentClass(parsed);
+    const agentType = _agentId(parsed);
     const tools = _collectAgentToolStubs(parsed);
-    const needsTools = TOOL_BASED_AGENTS.includes(agentType);
 
-    if (needsTools && tools.length === 0) {
+    if (toolsRequired(agentType) && tools.length === 0) {
         showError('builder-status', 'This agent type requires at least one tool');
         return;
     }

@@ -1,12 +1,13 @@
 // FSM-LLM Monitor — Visualizer Page
 
-import { state } from '../services/state.js';
-import { fetchJson } from '../services/api.js';
-import { $, esc, showToast } from '../utils/dom.js';
+import { state, DEFAULT_AGENT_TYPE } from '../services/state.js';
+import { fetchJson, loadAgentTypes } from '../services/api.js';
+import { $, esc, fillSelect, showToast } from '../utils/dom.js';
 import { attachJsonOverlay } from '../utils/json_highlight.js';
 import { renderGraph } from '../utils/graph.js';
 
 let _vizStatusTimer = null;
+let _filledFrom = null;  // the state.agentTypes rows the select was filled from
 
 /**
  * Render a graph. Returns true on success, false on failure (a toast is
@@ -90,6 +91,18 @@ export async function visualizeGraph(type, typeValue) {
         showToast(`Visualization failed: ${e.message || e}`, 'error');
         return false;
     }
+}
+
+/** Fill the agent select from the drawable rows of GET /api/agent/types (default `react`) and draw the selected one. */
+export async function showAgentGraph() {
+    const sel = $('viz-agent-type');
+    if (!sel) return null;
+    if (!state.agentTypes || _filledFrom !== state.agentTypes) {
+        const rows = (await loadAgentTypes()).filter(r => r.drawable);
+        _filledFrom = state.agentTypes;  // null after a failed load: the next call asks again
+        fillSelect(sel, [{ rows }], 'No agent types available', DEFAULT_AGENT_TYPE);
+    }
+    return sel.value ? visualizeGraph('agent', sel.value) : null;
 }
 
 export async function visualizeFSM() {

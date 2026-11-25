@@ -13,7 +13,6 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-import fsm_llm.agents as agents_pkg
 import fsm_llm.agents.meta_builder as meta_builder
 from fsm_llm.agents.meta_builders import AgentArtifactBuilder
 from fsm_llm.monitor.constants import (
@@ -48,20 +47,9 @@ class TestTheLaunchFormLimitsMatchTheServer:
         assert timeout and int(timeout.group(1)) == int(MAX_AGENT_TIMEOUT_SECONDS)
 
 
-def _js_map(source: str, name: str) -> dict[str, str]:
-    body = re.search(rf"const {name} = \{{(.*?)\}};", source, re.S)
-    assert body is not None, name
-    return dict(re.findall(r"(\w+):\s*'(\w+)'", body.group(1)))
-
-
 class TestTheLaunchableAgentTypesAreOneList:
-    """13.2: ``/api/capabilities`` lists the launchable ids; the JS type map and the
-    builder's type enum agree with the registry."""
-
-    def _builder_js(self) -> str:
-        return (_MONITOR / "static" / "pages" / "builder.js").read_text(
-            encoding="utf-8"
-        )
+    """13.2: ``/api/capabilities`` lists the launchable ids; the builder's type enum
+    names registry ids only."""
 
     def test_capabilities_lists_the_launchable_ids(self):
         mgr = _manager()
@@ -72,20 +60,14 @@ class TestTheLaunchableAgentTypesAreOneList:
         ]
         assert (data["fsm"], data["workflows"], data["agents"]) == (True,) * 3
 
-    def test_the_js_type_map_is_the_builder_enum_of_real_classes(self):
-        mapping = _js_map(self._builder_js(), "AGENT_TYPE_MAP")
-        assert set(mapping) == AgentArtifactBuilder.VALID_AGENT_TYPES
-        assert all(hasattr(agents_pkg, cls) for cls in mapping.values())
-
     def test_every_type_the_builder_can_emit_is_a_registry_id(self):
         """The Builder only offers a type that names an executable of the registry."""
         ids = {r["id"] for r in _manager().agent_types()}
         assert AgentArtifactBuilder.VALID_AGENT_TYPES <= ids
 
     def test_an_orchestrator_artifact_is_buildable_but_not_listed_as_launchable(self):
-        """D-058: the map still translates the Builder type; ``agent_types`` decides launch."""
-        mapping = _js_map(self._builder_js(), "AGENT_TYPE_MAP")
-        assert mapping["orchestrator"] == "OrchestratorAgent"
+        """D-058: the Builder can emit ``orchestrator``; ``agent_types`` does not offer it."""
+        assert "orchestrator" in AgentArtifactBuilder.VALID_AGENT_TYPES
         configure(manager=_manager())
         listed = TestClient(app).get("/api/capabilities").json()["agent_types"]
         assert "orchestrator" not in listed
