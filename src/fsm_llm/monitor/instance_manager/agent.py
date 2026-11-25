@@ -149,7 +149,13 @@ class AgentsMixin(_InstanceSurface):
                     registry = ExecutableRegistry()
                     registry.load_sources()
                 latest = {e.id: e for e in registry.list(kind="pattern")}
-                self._agent_rows = [_agent_row(latest[i]) for i in sorted(latest)]
+                # one id per casefold (`create_agent` lowercases a built-in id): the id that is
+                # its own casefold, a built-in, wins, else the first sorted
+                order = sorted(latest, key=lambda i: (i != i.casefold(), i))
+                picked = {i.casefold(): i for i in reversed(order)}
+                self._agent_rows = [
+                    _agent_row(latest[i]) for i in sorted(picked.values())
+                ]
                 self._executables = registry
             return copy.deepcopy(self._agent_rows)
 

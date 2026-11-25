@@ -9,6 +9,7 @@ a directory with the one-warning-per-file rule. Doubles only: no model, no netwo
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import sys
 import threading
@@ -234,6 +235,48 @@ class TestAUserDirectory:
             len(warnings) == 2
         )  # the shadowing file and the broken one, one line each
         assert all(ln.startswith("t: warning: ") for ln in warnings)
+
+    def test_a_file_that_differs_from_a_builtin_only_in_case_is_not_listed(
+        self, tmp_path, capsys
+    ):
+        """Review of plan 659c07c3 (probe1, probe3): a user file ``React`` was listed, drawn from
+        the file and launched as the built-in ``react``; the loader now refuses it."""
+        _write(tmp_path, "React.json", _doc("React", "react"))
+        mgr = _manager()
+        mgr.attach_executables(_user_registry(tmp_path))
+        assert len(capsys.readouterr().err.splitlines()) == 1
+        assert _ids(mgr.agent_types(), launchable=True) == LAUNCHABLE
+        with pytest.raises(KeyError):
+            mgr.agent_preview("React")
+
+    def test_the_rows_never_list_two_ids_equal_after_casefold(self):
+        """Belt and braces: a registry the monitor did not load (the loader's rule is not there)."""
+        registry = ExecutableRegistry()
+        registry.load_sources()
+        by_id = {e.id: e for e in registry.list(kind="pattern")}
+        clones = []
+        for new_id, base in (("React", "react"), ("Zed", "debate"), ("ZED", "debate")):
+            clone = copy.copy(by_id[base])
+            clone.id = new_id
+            clones.append(clone)
+
+        class Shadowed(ExecutableRegistry):
+            def list(self, *args, **kwargs):
+                return [*super().list(*args, **kwargs), *clones]
+
+            def get(self, id, version=None):
+                return next((c for c in clones if c.id == id), None) or super().get(
+                    id, version
+                )
+
+        shadowed = Shadowed()
+        shadowed.load_sources()
+        mgr = _manager()
+        mgr.attach_executables(shadowed)
+        ids = _ids(mgr.agent_types())
+        assert "react" in ids and "React" not in ids
+        assert [i for i in ids if i.casefold() == "zed"] == ["ZED"]
+        assert len({i.casefold() for i in ids}) == len(ids)
 
     def test_attach_replaces_the_rows_and_loads_no_default_registry(self, tmp_path):
         mgr = _manager()

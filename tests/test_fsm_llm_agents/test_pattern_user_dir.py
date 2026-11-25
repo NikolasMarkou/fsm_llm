@@ -319,6 +319,33 @@ class TestTheSharedDirectoryHelper:
             is ReactAgent
         )
 
+    def test_a_file_that_differs_from_a_built_in_only_in_case_is_refused_with_one_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        """Review of plan 659c07c3 (probe1): ``create_agent`` strips and lowercases a built-in id,
+        so a file ``React`` was listed and drawn from the file and built as the built-in."""
+        self._put(tmp_path, "React.json", _loop_doc("React"))
+
+        registry = self._load(tmp_path)
+
+        err = capsys.readouterr().err.splitlines()
+        assert len(err) == 1 and "React.json" in err[0] and "only in case" in err[0]
+        assert "React" not in {e.id for e in registry.list(kind="pattern")}
+        assert type(registry.get("react")).__name__ == "PatternExecutable"
+
+    def test_two_files_equal_after_casefold_load_the_first_one_only(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ):
+        self._put(tmp_path, "a_upper.json", _loop_doc("user.Loop"))
+        self._put(tmp_path, "b_lower.json", _loop_doc("user.loop"))
+
+        registry = self._load(tmp_path)
+
+        ids = {e.id for e in registry.list(kind="pattern")}
+        assert ids >= {"user.Loop"} and "user.loop" not in ids
+        err = capsys.readouterr().err.splitlines()
+        assert len(err) == 1 and "b_lower.json" in err[0]
+
     def test_a_symlink_is_skipped_and_reported(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ):

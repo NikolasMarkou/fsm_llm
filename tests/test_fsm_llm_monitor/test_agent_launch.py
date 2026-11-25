@@ -330,6 +330,19 @@ class TestUserFiles:
             mgr.launch_agent(agent_type="my_eval", task="t", tools_config=[_STUB])
         assert spy.calls == []
 
+    def test_a_case_only_shadow_of_a_builtin_never_launches_a_different_definition(
+        self, tmp_path, monkeypatch
+    ):
+        """Probe1 of the review: the draw read the user file ``React`` while the launch built the
+        built-in; now ``React`` is no row, so it is refused (400) and nothing is built."""
+        registry = self._registry(tmp_path, "React", "react")
+        spy = _spy(monkeypatch)
+        mgr = _manager()
+        mgr.attach_executables(registry)
+        with pytest.raises(ValueError, match="Unknown agent type"):
+            mgr.launch_agent(agent_type="React", task="t", tools_config=[_STUB])
+        assert spy.calls == []
+
 
 class TestTheWire:
     """``agent_type`` is an id in the request, the instance info, the status and the lists."""

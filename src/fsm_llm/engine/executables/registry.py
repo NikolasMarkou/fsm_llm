@@ -160,6 +160,7 @@ def _assemble(
     """First-wins entries over *candidates*, memory entries first, and the refusals (pure, no I/O)."""
     entries: dict[tuple[str, str], _Entry] = {}
     versions: dict[str, list[str]] = {}
+    cased: dict[str, str] = {}
     refused: list[str] = []
     # DECISION plan-2026-11-24T043150-a555dcfe/D-031
     # A code-backed or registered entry (source `_MEMORY`) always precedes a file, whatever the
@@ -173,6 +174,12 @@ def _assemble(
             refused.append(
                 f"{key[0]!r} version {key[1]!r} from {source} is already served from "
                 f"{entries[key].source}"
+            )
+            continue
+        if cased.setdefault(key[0].casefold(), key[0]) != key[0]:
+            refused.append(
+                f"{key[0]!r} version {key[1]!r} from {source} differs only in case from "
+                f"{cased[key[0].casefold()]!r}, which is already served"
             )
             continue
         known = versions.get(key[0], [])
