@@ -1786,8 +1786,10 @@ fsm_llm.monitor.InstanceInfo class(BaseModel)
 fsm_llm.monitor.InstanceManager class
   def __init__(self, config: MonitorConfig | None = None) -> None
   def advance_workflow(self, instance_id: str, wf_instance_id: str, user_input: str = '') -> bool
+  def agent_types(self) -> list[dict[str, Any]]
   def attach_api(self, api: API) -> None
   def attach_event_log(self, log: EventLog) -> None
+  def attach_executables(self, registry: ExecutableRegistry) -> None
   def cancel_agent(self, instance_id: str) -> bool
   def cancel_workflow(self, instance_id: str, wf_instance_id: str, reason: str = '') -> bool
   def close(self) -> None
@@ -1798,6 +1800,7 @@ fsm_llm.monitor.InstanceManager class
   def end_conversation(self, instance_id: str, conversation_id: str) -> None
   def end_instance(self, instance_id: str) -> None
   property event_log
+  property executables
   def get_active_conversations(self) -> list[str]
   def get_agent_result(self, instance_id: str) -> dict[str, Any]
   def get_agent_status(self, instance_id: str) -> dict[str, Any]

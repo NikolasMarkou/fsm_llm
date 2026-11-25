@@ -2,12 +2,14 @@
 
 ``AgentsMixin``: ``launch_agent`` (a daemon thread per agent), the capacity check, the body of the thread, the
 events read from the finished run, ``cancel_agent``, ``get_agent_status`` and ``get_agent_result``; with the
-launchable classes (``_AGENT_CLASSES``, ``_TOOL_BASED_AGENTS``, D-001), the stub tool registry and the two
-readers of an ``AgentResult``. The method bodies are the old ones, moved.
+launchable classes (``_AGENT_CLASSES``, ``_TOOL_BASED_AGENTS``, D-001), the rows of the executable
+registry (``agent_types``, the launchable rule), the stub tool registry and the two readers of an
+``AgentResult``. The method bodies are the old ones, moved.
 """
 
 from __future__ import annotations
 
+import copy
 import threading
 from typing import Any
 
@@ -22,6 +24,8 @@ from fsm_llm.agents import (
     SelfConsistencyAgent,
     ToolRegistry,
 )
+from fsm_llm.core.definitions.executable import Capability
+from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.llm import resolve_model
 
 from ..collector import redact_context
@@ -79,6 +83,49 @@ _TOOL_BASED_AGENTS = {
 }
 
 
+# DECISION plan-2026-11-25T145435-659c07c3/D-006
+# The launchable agents are rows of the executable registry chosen by ONE rule (kind `pattern`,
+# inputs `["task"]`, callables a subset of {tools}, not CONVERSATIONAL, not in the deny set; D-058
+# above). Do NOT use `registry.list(launchable=True)` (it drops every tools pattern), add a table of
+# classes or ids, or put text of a user directory (a description) in a row: flags and names only.
+_NOT_LAUNCHABLE = frozenset({"orchestrator"})
+
+
+def _launchable(executable: Any) -> bool:
+    """Whether the monitor may launch *executable* from a form: a task and, maybe, stub tools."""
+    return (
+        executable.kind == "pattern"
+        and list(executable.contract.inputs) == ["task"]
+        and set(executable.requires.callables) <= {"tools"}
+        and Capability.CONVERSATIONAL not in executable.capabilities
+        and executable.id not in _NOT_LAUNCHABLE
+    )
+
+
+def _preview(executable: Any) -> dict[str, Any] | None:
+    """The FSM to draw, or ``None`` (no ``preview_definition``, swarm, a file that needs options)."""
+    try:
+        return getattr(executable, "preview_definition", lambda: None)()
+    except Exception:
+        return None
+
+
+def _agent_row(executable: Any) -> dict[str, Any]:
+    """One row of ``agent_types``: flags and tool names, never a text of the document."""
+    needs = "tools" in executable.requires.callables
+    tools = executable.requires.tools
+    return {
+        "id": executable.id,
+        "name": executable.id,
+        "launchable": _launchable(executable),
+        "needs_tools": needs,
+        "takes_tools": needs
+        or "tools" in getattr(executable, "optional_callables", ()),
+        "tool_names": list(tools) if isinstance(tools, list) else [],
+        "drawable": _preview(executable) is not None,
+    }
+
+
 def _tools_used(tool_calls: Any) -> list[dict[str, Any]]:
     """Tool name and redacted parameters for each traced tool call."""
     return [
@@ -125,6 +172,23 @@ def _stub_registry(tools_config: list[StubToolConfig]) -> ToolRegistry:
 
 class AgentsMixin(_InstanceSurface):
     """Launching agents in background threads and reading their runs."""
+
+    # DECISION plan-2026-11-25T145435-659c07c3/D-007
+    # The registry loads ONCE, lazily, off the loop (callers run this in a worker thread), under the
+    # leaf `_catalog_lock` that is never held with `_lock`; a load that raises assigns nothing, so
+    # the next call retries. Do NOT load in `__init__`, on the loop thread or under `_lock`.
+    def agent_types(self) -> list[dict[str, Any]]:
+        """One row per ``pattern`` executable of the registry, sorted by id (a copy)."""
+        with self._catalog_lock:
+            if self._agent_rows is None:
+                registry = self._executables
+                if registry is None:
+                    registry = ExecutableRegistry()
+                    registry.load_sources()
+                latest = {e.id: e for e in registry.list(kind="pattern")}
+                self._agent_rows = [_agent_row(latest[i]) for i in sorted(latest)]
+                self._executables = registry
+            return copy.deepcopy(self._agent_rows)
 
     def launch_agent(
         self,

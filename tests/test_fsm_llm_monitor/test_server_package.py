@@ -187,6 +187,7 @@ _ROUTES = [
     ("GET", "/api/workflow/{instance_id}/status"),
     ("GET", "/api/workflow/{instance_id}/instances"),
     ("POST", "/api/agent/launch"),
+    ("GET", "/api/agent/types"),
     ("GET", "/api/agent/{instance_id}/status"),
     ("GET", "/api/agent/{instance_id}/result"),
     ("POST", "/api/agent/{instance_id}/cancel"),
@@ -212,7 +213,7 @@ _ROUTE_HOMES = (
     + ["routes_monitoring"] * 19
     + ["routes_fsm"] * 5
     + ["routes_workflow"] * 7
-    + ["routes_agent"] * 4
+    + ["routes_agent"] * 5
     + ["routes_visualize"] * 7
     + ["routes_builder"] * 4
     + ["websocket"]

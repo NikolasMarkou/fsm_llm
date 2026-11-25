@@ -34,6 +34,13 @@ async def api_agent_launch(req: LaunchAgentRequest) -> dict[str, Any]:
         _raise_http(e, "launch agent")
 
 
+@app.get("/api/agent/types")
+async def api_agent_types() -> dict[str, Any]:
+    """The registry rows with their launch and draw flags (open like capabilities; launch is gated)."""
+    mgr = get_manager()
+    return {"agent_types": await asyncio.to_thread(mgr.agent_types)}
+
+
 @app.get("/api/agent/{instance_id}/status", dependencies=_GATED)
 async def api_agent_status(instance_id: str) -> dict[str, Any]:
     """Get agent execution status."""

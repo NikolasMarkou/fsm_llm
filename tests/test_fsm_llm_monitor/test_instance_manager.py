@@ -1874,8 +1874,10 @@ _OLD_MEMBERS = frozenset(
         "_validate_workflow_instance_id",
         "_workflow_hook",
         "advance_workflow",
+        "agent_types",
         "attach_api",
         "attach_event_log",
+        "attach_executables",
         "cancel_agent",
         "cancel_workflow",
         "close",
@@ -1884,8 +1886,9 @@ _OLD_MEMBERS = frozenset(
         "dashboard_config",
         "dashboard_config_version",
         "end_conversation",
-        "event_log",
         "end_instance",
+        "event_log",
+        "executables",
         "get_active_conversations",
         "get_agent_result",
         "get_agent_status",
@@ -2167,12 +2170,14 @@ class TestInstanceManagerEdgesOfTheSplit:
     """Edges of ``InstanceManager`` that no test pinned before the split and
     that the mutation proof of step 93 reached (D-001)."""
 
-    def test_the_capabilities_report_is_the_flags_and_the_launchable_agent_types(self):
+    def test_the_capabilities_report_is_the_flags_and_the_launchable_agent_ids(self):
         assert _manager().get_capabilities() == {
             "fsm": True,
             "workflows": True,
             "agents": True,
-            "agent_types": sorted(agent_mod._AGENT_CLASSES),
+            "agent_types": [
+                r["id"] for r in _manager().agent_types() if r["launchable"]
+            ],
         }
 
     def test_a_lexical_dot_dot_in_a_preset_id_is_refused_even_inside_the_tree(self):

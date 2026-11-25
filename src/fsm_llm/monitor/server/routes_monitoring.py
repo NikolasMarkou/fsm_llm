@@ -210,7 +210,7 @@ async def api_info() -> dict[str, str]:
 async def api_capabilities() -> dict[str, Any]:
     """Return which extensions are installed and the launchable agent types."""
     mgr = get_manager()
-    return mgr.get_capabilities()
+    return await asyncio.to_thread(mgr.get_capabilities)
 
 
 # --- REST API: Instance Management ---

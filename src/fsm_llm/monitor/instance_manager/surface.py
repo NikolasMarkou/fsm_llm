@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import threading
 
     from fsm_llm import API, LLMUsage
+    from fsm_llm.engine.executables import ExecutableRegistry
 
     from ..collector import EventCollector
     from ..definitions import ConversationSnapshot, MonitorConfig, MonitorEvent
@@ -35,6 +36,9 @@ class _InstanceSurface:
         _max_ended_conversations: int
         _attached_api: API | None
         _ended_usage: LLMUsage | None
+        _catalog_lock: threading.Lock
+        _executables: ExecutableRegistry | None
+        _agent_rows: list[dict[str, Any]] | None
 
         @property
         def config(self) -> MonitorConfig: ...

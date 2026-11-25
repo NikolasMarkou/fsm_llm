@@ -64,17 +64,14 @@ class TestTheLaunchableAgentTypesAreOneList:
             encoding="utf-8"
         )
 
-    def test_capabilities_lists_the_launchable_classes(self):
-        configure(manager=_manager())
+    def test_capabilities_lists_the_launchable_ids(self):
+        mgr = _manager()
+        configure(manager=mgr)
         data = TestClient(app).get("/api/capabilities").json()
-        assert data["agent_types"] == sorted(agent_mod._AGENT_CLASSES)
+        assert data["agent_types"] == [
+            r["id"] for r in mgr.agent_types() if r["launchable"]
+        ]
         assert (data["fsm"], data["workflows"], data["agents"]) == (True,) * 3
-
-    def test_the_list_follows_the_classes_the_manager_runs(self, monkeypatch):
-        monkeypatch.delitem(agent_mod._AGENT_CLASSES, "DebateAgent")
-        configure(manager=_manager())
-        data = TestClient(app).get("/api/capabilities").json()
-        assert "DebateAgent" not in data["agent_types"]
 
     def test_the_js_type_map_is_the_builder_enum_of_real_classes(self):
         mapping = _js_map(self._builder_js(), "AGENT_TYPE_MAP")
@@ -91,7 +88,7 @@ class TestTheLaunchableAgentTypesAreOneList:
         assert mapping["orchestrator"] == "OrchestratorAgent"
         configure(manager=_manager())
         listed = TestClient(app).get("/api/capabilities").json()["agent_types"]
-        assert "OrchestratorAgent" not in listed
+        assert "orchestrator" not in listed
 
     def test_the_launch_form_offers_exactly_the_launchable_classes(self):
         select = re.search(

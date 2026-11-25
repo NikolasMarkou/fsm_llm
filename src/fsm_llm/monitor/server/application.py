@@ -64,6 +64,8 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         fresh = InstanceManager(_manager.config)
         if (log := _manager.event_log) is not None:
             fresh.attach_event_log(log)
+        if (registry := _manager.executables) is not None:
+            fresh.attach_executables(registry)
         if _manager.dashboard_config is not None:
             fresh.dashboard_config = _manager.dashboard_config
         _manager = fresh

@@ -1174,6 +1174,16 @@
       "delta": 1,
       "reason": "plan 659c07c3 step 2: new anchor D-005 on PatternExecutable.preview_definition",
       "token": "plan-2026-11-25T145435-659c07c3/D-005"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 659c07c3 step 3: new anchors D-006 (the launchable rule) and D-007 (the registry loads once, lazily, off the loop) in monitor/instance_manager/agent.py",
+      "token": "plan-2026-11-25T145435-659c07c3/D-006"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 659c07c3 step 3: new anchors D-006 (the launchable rule) and D-007 (the registry loads once, lazily, off the loop) in monitor/instance_manager/agent.py",
+      "token": "plan-2026-11-25T145435-659c07c3/D-007"
     }
   ]
 }

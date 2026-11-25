@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 
 from fsm_llm.cli_support import add_env_file, apply_env_file, report_error
 from fsm_llm.constants import CLI_EXIT_FAILURE, CLI_EXIT_INTERRUPTED, CLI_EXIT_OK
@@ -99,6 +100,13 @@ def main_cli() -> None:
         default=None,
         help="Show the event logs under DIR on the Event log page (read only)",
     )
+    parser.add_argument(
+        "--executables",
+        metavar="DIR",
+        default=None,
+        help="Pattern files (*.json) in DIR are launchable agent types beside the "
+        "built-in ones (a file named like a built-in is refused)",
+    )
     add_env_file(parser)
     args = parser.parse_args()
 
@@ -127,8 +135,18 @@ def main_cli() -> None:
     # The dashboard starts without a model; a launch request resolves one then
     # (the request, then LLM_MODEL, else HTTP 400: there is no default model).
     # The file supplies LLM_MODEL (and keys) to those launches.
+    registry = None
     try:
         apply_env_file(args)
+        if args.executables:
+            from fsm_llm.agents import executables as patterns
+            from fsm_llm.engine.executables.directory import load_directory_registry
+
+            registry = load_directory_registry(
+                Path(args.executables),
+                [*patterns.builtin_executables(), *patterns.preset_executables()],  # type: ignore[list-item]
+                prog="fsm-llm-monitor",
+            )
     except FileNotFoundError as e:
         report_error("fsm-llm-monitor", f"error: {e}")
         sys.exit(CLI_EXIT_FAILURE)
@@ -188,6 +206,11 @@ def main_cli() -> None:
         from .server import get_manager
 
         get_manager().attach_event_log(EventLog(args.event_log))
+
+    if registry is not None:
+        from .server import get_manager
+
+        get_manager().attach_executables(registry)
 
     url = _browser_url(args.host, args.port)
     print(f"FSM-LLM Monitor starting at {url}")

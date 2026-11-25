@@ -12,6 +12,7 @@ import threading
 from typing import Any, TypeVar
 
 from fsm_llm import API, LLMUsage
+from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.logging import logger
 from fsm_llm.runtime import EventLog
 
@@ -28,7 +29,7 @@ from ..exceptions import (
     MonitorConnectionError,
     MonitorInitializationError,
 )
-from .agent import _AGENT_CLASSES, AgentsMixin
+from .agent import AgentsMixin
 from .fsm import FsmMixin
 from .handlers import register_monitor_handlers, unregister_monitor_handlers
 from .lifecycle import LifecycleMixin
@@ -83,6 +84,11 @@ class InstanceManager(
         self._event_log: EventLog | None = None
         # What the interfaces of torn-down FSM instances used (see _fold_usage)
         self._ended_usage: LLMUsage | None = None
+
+        # The registry the agent rows come from (D-007 of plan 659c07c3): attached, else loaded lazily
+        self._catalog_lock = threading.Lock()
+        self._executables: ExecutableRegistry | None = None
+        self._agent_rows: list[dict[str, Any]] | None = None
 
         # Custom dashboard configuration from MonitorBuilder
         self._dashboard_config: DashboardConfig | None = None
@@ -157,6 +163,16 @@ class InstanceManager(
             self._event_log = log
 
     @property
+    def executables(self) -> ExecutableRegistry | None:
+        """The attached registry (or the default one once loaded), else None."""
+        return self._executables
+
+    def attach_executables(self, registry: ExecutableRegistry) -> None:
+        """List the agents of *registry* (the caller keeps it); the rows are rebuilt on the next read."""
+        with self._catalog_lock:
+            self._executables, self._agent_rows = registry, None
+
+    @property
     def global_collector(self) -> EventCollector:
         return self._global_collector
 
@@ -226,12 +242,12 @@ class InstanceManager(
         )
 
     def get_capabilities(self) -> dict[str, Any]:
-        """Flags per extension, and ``agent_types``: the class names ``launch_agent`` runs."""
+        """Flags per extension and ``agent_types``, the ids of the launchable rows (may load: run off the loop)."""
         return {
             "fsm": True,
             "workflows": True,
             "agents": True,
-            "agent_types": sorted(_AGENT_CLASSES),
+            "agent_types": [r["id"] for r in self.agent_types() if r["launchable"]],
         }
 
     def list_instances(self, type_filter: str | None = None) -> list[InstanceInfo]:
