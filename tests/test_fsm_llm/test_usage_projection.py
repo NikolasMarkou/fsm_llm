@@ -19,7 +19,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
 
 import fsm_llm.llm.usage as usage_module
 from fsm_llm import API
@@ -27,7 +26,6 @@ from fsm_llm.core.definitions import (
     FSMError,
     LLMResponseError,
     LLMUsage,
-    ResponseGenerationRequest,
 )
 from fsm_llm.llm import LiteLLMEmbedder, LiteLLMInterface, LLMInterface
 from fsm_llm.llm.usage import (
@@ -42,6 +40,8 @@ from fsm_llm.llm.usage import (
 from fsm_llm.runtime import EventLog, bind, llm_call
 from fsm_llm.testing import ScriptedLLM
 from tests.test_fsm_llm.event_log_support import _chunk, _Wrapper
+from tests.test_fsm_llm.event_log_support import greeting_request as _request
+from tests.test_fsm_llm.event_log_support import usage_reply as _reply
 from tests.test_fsm_llm.test_event_log_producers import _CHAT, _FSM, _script
 from tests.test_fsm_llm_regression.support import REPO
 
@@ -60,23 +60,6 @@ _FIELDS = (
 def projection() -> ModuleType:
     """``fsm_llm.runtime.usage``, imported on use (a missing module fails the test using it)."""
     return importlib.import_module("fsm_llm.runtime.usage")
-
-
-def _reply(text: str = "ok", prompt: int | None = 11, completion: int = 4) -> Any:
-    kwargs: dict[str, Any] = {}
-    if prompt is not None:
-        kwargs["usage"] = {
-            "prompt_tokens": prompt,
-            "completion_tokens": completion,
-            "total_tokens": prompt + completion,
-        }
-    return ModelResponse(
-        choices=[Choices(message=Message(content=text), finish_reason="stop")], **kwargs
-    )
-
-
-def _request(text: str = "hi") -> ResponseGenerationRequest:
-    return ResponseGenerationRequest(system_prompt="Greet.", user_message=text)
 
 
 def _llm() -> LiteLLMInterface:

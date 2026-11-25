@@ -1,6 +1,6 @@
 """Lane threads of the event log: where a boundary write runs so it does not block the loop.
 
-A logged async turn fsyncs about 28 times (the log, the blobs and their directories), and each
+A logged async turn fsyncs many times (the log, the blobs and their directories), and each
 fsync stalls the event loop for milliseconds. ``Lanes`` runs one boundary write as ONE job on a
 lane thread and the caller awaits it, so the write is today's sync function, unchanged, only on
 another thread. Nothing is queued as data: a line is still written and fsynced by the job

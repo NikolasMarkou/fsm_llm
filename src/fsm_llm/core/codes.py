@@ -1,6 +1,6 @@
 """The shared vocabulary of run statuses, reason codes and completion kinds.
 
-Eight closed vocabularies, each a ``str`` enum whose values are the strings
+The closed vocabularies below are each a ``str`` enum whose values are the strings
 already on the wire (or, for ``Lifecycle`` and ``MessageSource``, the strings of
 the envelope and the event log), so a member and its string are interchangeable
 for ``==``, hashing, ``in``, ``json.dumps`` and pydantic:

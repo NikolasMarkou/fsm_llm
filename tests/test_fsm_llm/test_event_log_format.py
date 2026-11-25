@@ -55,7 +55,7 @@ from tests.test_fsm_llm.test_event_log_producers import (
 RUNTIME_DIR = Path(__file__).resolve().parents[2] / "src" / "fsm_llm" / "runtime"
 
 #: A literal copy of the types of roadmap row 1.1 (docs/2026_roadmap.md), in its order, then the
-#: three run types of row E2.1 (declared, no producer yet: plan ace7a8c8 D-059). The wire strings
+#: three run types of row E2.1 (declared by plan ace7a8c8 D-059). The wire strings
 #: are the contract; no count is pinned, the enum is the source of every set below.
 ROADMAP_TYPES = [
     "turn/start",

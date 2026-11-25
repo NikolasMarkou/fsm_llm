@@ -33,6 +33,7 @@ from typing import Any, TypeVar
 import pytest
 from litellm.types.utils import Choices, Message, ModelResponse
 
+from fsm_llm.core.definitions import ResponseGenerationRequest
 from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.runtime.events import LogLockedError
 from fsm_llm.runtime.stores.jsonl import LOCK_SUFFIX
@@ -57,6 +58,27 @@ def _reply(text: str = "Hello") -> ModelResponse:
     return ModelResponse(
         choices=[Choices(message=Message(content=text), finish_reason="stop")]
     )
+
+
+def usage_reply(
+    text: str = "ok", prompt: int | None = 11, completion: int = 4
+) -> ModelResponse:
+    """A provider reply with a usage block (no block when *prompt* is None)."""
+    kwargs: dict[str, Any] = {}
+    if prompt is not None:
+        kwargs["usage"] = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+        }
+    return ModelResponse(
+        choices=[Choices(message=Message(content=text), finish_reason="stop")], **kwargs
+    )
+
+
+def greeting_request(text: str = "hi") -> ResponseGenerationRequest:
+    """The one-line reply request of the usage and purpose rows."""
+    return ResponseGenerationRequest(system_prompt="Greet.", user_message=text)
 
 
 def _chunk(text: str) -> SimpleNamespace:

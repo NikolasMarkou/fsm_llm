@@ -407,14 +407,33 @@ class TestTheSharedSendPathStaysIntact:
             "_finished_send",
         ]
         # the async transport feeds the same family in the same order (D-007)
+        # Plan 3f4530d3, step 8b: the async transport awaits the async twins of the two
+        # helpers that notify the observer (`_abegin_send`, `_afinished_send`); the order
+        # is the same
         assert order(
-            "_asend", {"_begin_send", "acompletion", "_failed_send", "_finished_send"}
-        ) == ["_begin_send", "acompletion", "_failed_send", "_finished_send"]
-        assert order("_begin_send", {"begin_send", "usage_kind", "_meter_of"}) == [
-            "usage_kind",
-            "_meter_of",
+            "_asend",
+            {"_abegin_send", "acompletion", "_failed_send", "_afinished_send"},
+        ) == ["_abegin_send", "acompletion", "_failed_send", "_afinished_send"]
+        assert order(
+            "_abegin_send", {"begin_send", "abegin_send", "_kind_and_meter"}
+        ) == [
+            "_kind_and_meter",
+            "abegin_send",
+        ]
+        assert order("_afinished_send", {"record", "aend_send"}) == [
+            "record",
+            "aend_send",
+        ]
+        # step 8b: the kind and the meter come from `_kind_and_meter`, shared by both transports
+        assert order("_begin_send", {"begin_send", "_kind_and_meter"}) == [
+            "_kind_and_meter",
             "begin_send",
         ]
+        assert {
+            n.func.id
+            for n in ast.walk(defs["_kind_and_meter"])
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        } >= {"usage_kind", "_meter_of"}
         assert order("_failed_send", {"record_error", "fail_send"}) == [
             "record_error",
             "fail_send",
@@ -435,7 +454,8 @@ class TestTheSharedSendPathStaysIntact:
             "methods, do NOT read usage off a stream (its chunks carry none). "
             "Readers that want counts own (inject) the interface. See D-004, D-014."
         ) in flat
-        assert source.count("meter.record(") == 1
+        # one site per transport (`_finished_send`, `_afinished_send`), nowhere else
+        assert source.count("meter.record(") == 2
         # D-002 of plan 21e6f00d: a reference at the hook, so an editor of the family sees it
         assert "plan-2026-11-17T100529-21e6f00d/D-002" in (
             ast.get_source_segment(send_source, defs["_begin_send"]) or ""

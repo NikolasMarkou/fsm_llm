@@ -18,7 +18,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from litellm.types.utils import Choices, Message, ModelResponse
 
 from fsm_llm import API
 from fsm_llm.agents.composition import _default_complete
@@ -29,7 +28,6 @@ from fsm_llm.core.definitions import (
     CompletionRequest,
     Conversation,
     LLMResponseError,
-    ResponseGenerationRequest,
 )
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.llm.purpose import (
@@ -42,6 +40,8 @@ from fsm_llm.llm.purpose import (
 from fsm_llm.runtime import EventLog, bind
 from fsm_llm.runtime.usage import usage_by_purpose, usage_from_events
 from fsm_llm.testing import ScriptedLLM, final_reply
+from tests.test_fsm_llm.event_log_support import greeting_request as _request
+from tests.test_fsm_llm.event_log_support import usage_reply as _reply
 from tests.test_fsm_llm.support import _aiter1_ambiguous_fsm
 from tests.test_fsm_llm_regression.support import REPO
 
@@ -52,23 +52,6 @@ _VALUES = {p.value for p in Purpose}
 
 def _events(log: EventLog, cid: str, *types: str) -> list[dict[str, Any]]:
     return list(log.query(cid, types=types or None))
-
-
-def _reply(text: str = "ok", prompt: int | None = 11, completion: int = 4) -> Any:
-    kwargs: dict[str, Any] = {}
-    if prompt is not None:
-        kwargs["usage"] = {
-            "prompt_tokens": prompt,
-            "completion_tokens": completion,
-            "total_tokens": prompt + completion,
-        }
-    return ModelResponse(
-        choices=[Choices(message=Message(content=text), finish_reason="stop")], **kwargs
-    )
-
-
-def _request(text: str = "hi") -> ResponseGenerationRequest:
-    return ResponseGenerationRequest(system_prompt="Greet.", user_message=text)
 
 
 def _classify(intent: str) -> Any:

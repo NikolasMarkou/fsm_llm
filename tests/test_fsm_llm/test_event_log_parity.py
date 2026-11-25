@@ -19,7 +19,7 @@ would send. Per cell the rows pin:
    received, in order, the greeting included (no slicing), on both paths;
 4. the sync log and the async log of one cell hold the same event types in the same order, and
    the same prompt bytes (a lane hop moves no byte, no event);
-5. the final produced set is exactly the 23 types of the plan, and the one declared type with no
+5. the final produced set is exactly the types of the plan, and the one declared type with no
    producer is ``compaction/epoch`` (roadmap row 2.5), so a future type cannot slip in unseen.
 """
 
@@ -49,7 +49,7 @@ _MUST = {
                  "extraction", "handler"},
     "call": {"executable/resolve", "stack/push", "stack/pop", "handler", "llm/request"},
 }  # fmt: skip
-#: the 23 types the product writes; the one declared type nothing writes yet
+#: the types the product writes; the one declared type nothing writes yet
 PRODUCED_FINAL = frozenset(
     {
         "turn/start", "turn/end", "llm/request", "llm/response", "provider/error",
@@ -376,11 +376,10 @@ class TestTheApprovalCell:
 
 
 class TestTheFinalProducedSet:
-    def test_the_product_writes_exactly_these_23_types_and_nothing_else_is_declared_but_one(
+    def test_the_product_writes_exactly_these_types_and_nothing_else_is_declared_but_one(
         self,
     ) -> None:
         assert {t.value for t in PRODUCED_TYPES} == PRODUCED_FINAL
-        assert len(PRODUCED_FINAL) == 23
         assert {
             t.value for t in DECLARED_TYPES - PRODUCED_TYPES
         } == NOT_YET_PRODUCED_FINAL
