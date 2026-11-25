@@ -84,7 +84,18 @@ mutating and sensitive routes; `--otel` exports monitor events as OpenTelemetry 
 
 ```bash
 fsm-llm-monitor [--host HOST] [--port PORT] [--no-browser] [--api-key KEY] [--otel] [--env-file PATH]
+                [--executables DIR]
 ```
+
+`--executables DIR` reads the pattern documents (`*.json`) of a directory, as `fsm-llm-meta` does,
+and an agent file whose inputs are exactly `task`, whose required callables are at most `tools` and
+that is not `conversational` becomes launchable and drawable in the dashboard by its `id`, beside
+the built-in patterns (the agent type of a launch request is that id). The dashboard lists the
+agents it can launch at `GET /api/agent/types`. A file that cannot be read or is not a valid
+document is one `warning:` line on stderr and is skipped; a file whose id is a built-in one is
+refused the same way and never replaces it; a directory that does not exist, or is a file, is an
+`error:` line and exit 1 before the server starts. The files are operator input: the directory is as
+trusted as the command line.
 
 Also `--info` and `--version`, which print and exit.
 

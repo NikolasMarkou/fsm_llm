@@ -26,14 +26,14 @@ flowchart LR
 ```
 
 1. `fsm-llm-monitor` starts a FastAPI server (default `http://127.0.0.1:8420`) and opens your browser once the port is listening.
-2. The server keeps one `InstanceManager`. It creates FSM instances (from example presets or pasted JSON), agents (run in background threads with stub tools), and small demo workflows.
+2. The server keeps one `InstanceManager`. It creates FSM instances (from example presets or pasted JSON), agents (an executable id of the pattern registry, run in background threads with stub tools), and small demo workflows.
 3. Every instance gets observer hooks. They record events (conversation start and end, state transitions, pre and post processing, context updates, errors, instance launch and destroy, workflow steps, agent start, iteration, tool call and result) into a per-instance `EventCollector` and a global one. Log output from the `fsm_llm` logger is captured too.
 4. The browser page is one HTML file (`templates/index.html`) plus plain JavaScript modules in `static/`, with no build step. It calls REST endpoints for actions and details and keeps a WebSocket open. Every `refresh_interval` seconds (1 by default) the server pushes metrics, new events, new logs, the instance list, and progress for running agents and workflows.
 5. Everything shown on the page that comes from a conversation context or an agent trace goes through one redaction function first, so secret-looking values never reach the browser.
 
 ## Files
 
-- `__main__.py` - the `fsm-llm-monitor` command: `--host`, `--port`, `--api-key`, `--otel`, `--no-browser`, `--version`, `--info`; then runs uvicorn.
+- `__main__.py` - the `fsm-llm-monitor` command: `--host`, `--port`, `--api-key`, `--otel`, `--no-browser`, `--executables`, `--version`, `--info`; then runs uvicorn.
 - `server/` - FastAPI app (a package: `application.py` holds the app, `configure` and the security checks; the route modules and `websocket.py` register on it): HTML page, REST API, WebSocket, optional API key, meta-builder chat sessions.
 - `instance_manager/` - (a package) creates, runs, queries, and destroys FSM, agent, and workflow instances; attaches the observer hooks; `attach_api` shows an `API` object you already have (its events and conversations; one at a time).
 - `collector.py` - `EventCollector` (thread-safe bounded store of events and logs, metric counters, hook callbacks) and `redact_context`.
@@ -42,7 +42,7 @@ flowchart LR
 - `constants.py` - event type names, defaults and limits, hook name and priority.
 - `exceptions.py` - `MonitorError` and its subclasses.
 - `__init__.py`, `__version__.py` - public exports, version (shared with `fsm_llm`).
-- `static/` - the browser app: `app.js` (boot, navigation, click routing), `style.css` (dark theme), `flows.json` (hand-drawn graphs of the agent patterns and the workflows for the Visualizer), and the `pages/`, `services/`, `utils/` module folders.
+- `static/` - the browser app: `app.js` (boot, navigation, click routing), `style.css` (dark theme), `flows.json` (hand-drawn graphs of the workflows for the Visualizer; agent graphs are drawn from the registry), and the `pages/`, `services/`, `utils/` module folders.
 - `templates/index.html` - the single HTML page. It holds the markup for every screen (Dashboard, Control Center, Visualizer, Logs, Builder, Settings), the launch dialog, the API key dialog, and the mobile nav, and loads `/static/style.css` and `/static/app.js`.
 
 ## How to use it
@@ -54,12 +54,13 @@ pip install "llm-fsm[monitor]"
 fsm-llm-monitor                       # opens http://127.0.0.1:8420
 fsm-llm-monitor --port 9000 --no-browser
 fsm-llm-monitor --env-file .env       # launch requests find LLM_MODEL in that file
+fsm-llm-monitor --executables DIR   # your pattern files (*.json) become launchable agent ids
 python -m fsm_llm.monitor --info
 ```
 
 The dashboard starts without a model. A launch (FSM, agent or builder) uses the model its request names, else `LLM_MODEL` (the `--env-file` file can supply it), else the launch route answers 400 with the `ModelNotConfiguredError` message (there is no default model; `make monitor` passes `--env-file .env`). The command exits with 0 after `--version` and `--info`, and with 1 if `fastapi`, `uvicorn` or `jinja2` is missing. The health route is `GET /health`; the FSM routes are under `/api/fsm/...`. The OpenAPI document (`/openapi.json`, UI at `/api/docs`) reports the package version. Other flags: `--host` (default `127.0.0.1`), `--api-key` and `--otel` (below).
 
-Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent and workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent, cancel a running build, edit the JSON, launch the result with its own model, label and limits), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
+Screens: Dashboard (metrics, events, instances, activity), Control Center (instance table with a detail drawer and chat), Visualizer (FSM graphs from core `build_fsm_graph`; agent graphs from the preview FSM of a registry id through the same builder; workflow graphs from `flows.json`), Logs, Builder (design an FSM or agent by chatting with a meta-builder agent, cancel a running build, edit the JSON, launch the result with its own model, label and limits), Settings. Keys `1` to `6` switch screens, `?` shows the shortcuts.
 
 Watch an `API` object from your own program:
 
@@ -104,9 +105,9 @@ fsm-llm-monitor --api-key secret
 - With an API key set, every route that changes something and every route that shows conversation, event, log, agent, or workflow data needs the key. The WebSocket needs `{"type": "auth", "api_key": "..."}` as its first message within 5 seconds, or the server closes it with code 4401 (code 4403 for a refused Host or Origin). With no key set, no first message is needed. Health, `GET /api/auth`, metrics, config reads, instance lists and details, presets, and visualizations stay open.
 - The server only answers requests whose Host header is `localhost`, `127.0.0.1`, or `::1` by default, refuses state-changing requests from other web origins, and caps request bodies at 1 MiB. Binding to another address with `--host` adds it to the Host list (a wildcard such as `0.0.0.0` turns the Host check off); doing so without an API key prints a warning.
 - FSM presets are read from the repository's `examples/` folder (the `basic`, `intermediate`, `advanced`, `classification` and `reasoning` categories). In an installed wheel without that folder, the preset list is empty.
-- Only these agent types can be launched: ReAct, Reflexion, Plan-Execute, REWOO, ADaPT, Debate, and Self-Consistency. ReAct, Reflexion, Plan-Execute, REWOO and ADaPT need at least one tool. Tools are stubs that return a fixed text you type in. At most 8 agents run at once and 200 instances exist at once by default.
+- An agent is launched by executable id. The launch and Visualizer selects list what `GET /api/agent/types` returns: the `pattern` executables whose only input is `task`, that need at most tools and are not conversational (every built-in pattern except `evaluator_optimizer`, `maker_checker`, `prompt_chain`, `swarm`, `meta_builder`, `orchestrator` and `reasoning.solve`). `fsm-llm-monitor --executables DIR` adds your own pattern files that meet the same rule. A pattern that needs tools (the form says which) needs at least one; tools are stubs that return a fixed text you type in. At most 8 agents run at once and 200 instances exist at once by default.
 - Workflows are limited to the built-in demos (`demo_linear`, `demo_branching`). Pasted workflow JSON is rejected, and workflows made in the Builder cannot be launched.
 - Cancelling an agent sets a flag, but an agent run cannot be interrupted mid-flight. Destroying it waits 1.5 seconds and then leaves the thread running.
 - Secret-looking context values are always hidden. Internal keys (prefixes `_`, `system_`, `internal_`, `__`) are hidden unless `show_internal_keys` is turned on in Settings.
-- The agent and workflow graphs in `static/flows.json` are drawn by hand and can drift from the real agent code.
+- The workflow graphs in `static/flows.json` are drawn by hand and can drift from the real workflow code. An agent graph is the pattern's file machine with `<name>` placeholders (`native_fc` draws five states where a default run builds three), and `swarm` and `reasoning.solve` have no graph.
 - The page loads its fonts from Google Fonts; offline, the browser falls back to system fonts.

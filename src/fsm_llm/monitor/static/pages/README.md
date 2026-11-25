@@ -23,7 +23,7 @@ flowchart LR
 | Control Center | A filterable table of all instances; click one to open a side drawer with details, events, and actions |
 | Conversations | Inside the drawer: read an FSM conversation's state, context, last LLM calls, and chat with it |
 | Launch modal | Start an FSM (from a preset or pasted JSON), a workflow preset, or an agent with stub tools |
-| Visualizer | Paste or pick an FSM definition and see it drawn as a graph, or pick an agent or workflow pattern to see its hand-drawn flow |
+| Visualizer | Paste or pick an FSM definition and see it drawn as a graph, or pick an agent (drawn from its pattern's preview FSM) or a workflow pattern (its hand-drawn flow) |
 | Builder | Chat with the meta-builder agent to create an FSM, workflow, or agent definition, then launch it |
 | Logs | Live log stream with level filters, search, pause, and jump-to-latest |
 | Settings | Monitor refresh rate, buffer sizes, log level, API key, and system info |
@@ -53,7 +53,7 @@ Every page is reachable from the sidebar. To launch something, open the Launch m
 
 ## Things to know
 
-- Agents that act by calling tools (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`) need at least one tool at launch. The monitor only offers stub tools that return a fixed string you type in.
+- An agent whose registry row needs tools (the launch form groups them as `Needs tools`) needs at least one tool at launch. The monitor only offers stub tools that return a fixed string you type in.
 - Workflows built in the Builder cannot be launched from the monitor. The server only launches its built-in workflow presets, so the Launch button is disabled and you copy or download the definition instead.
 - The drawer re-fetches its content every 2 seconds while it is open on the Control Center, except while a conversation is shown in it.
 - The Logs page only draws new entries while you are on it. On other pages it still updates the error badge and level counts, and it reloads the latest 500 entries from the server when you come back.

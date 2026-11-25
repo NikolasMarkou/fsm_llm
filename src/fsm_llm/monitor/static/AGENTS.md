@@ -44,7 +44,7 @@ Control flow in `app.js`:
 | --- | --- | --- |
 | `app.js` | Boot, navigation, delegation, polling | `VALID_PAGES = dashboard, control, visualizer, logs, builder, settings`; exports nothing |
 | `style.css` | Theme and components | Design tokens on `:root` (`--bg`, `--surface`, `--primary`, `--primary-dim`, `--success`, `--warning`, `--danger`, `--info`, `--text*`, `--space-*`, `--radius-*`, `--shadow-*`, `--font-body`, `--font-mono`) |
-| `flows.json` | Pattern graphs for the Visualizer | Hand-maintained; schema under Data shapes |
+| `flows.json` | Workflow graphs for the Visualizer | Hand-maintained; `workflows` only, agent graphs come from `GET /api/agent/visualize`; schema under Data shapes |
 | `pages/` | Screen modules | `dashboard`, `control`, `conversations`, `launch`, `visualizer`, `builder`, `logs`, `settings` |
 | `services/` | `api.js`, `auth.js`, `state.js`, `ws.js` | REST client, API key, shared state, WebSocket |
 | `utils/` | `dom.js`, `format.js`, `markdown.js`, `json_highlight.js`, `graph.js` | `esc()`, formatting, safe Markdown subset, JSON colouring, BFS SVG layout |
@@ -57,26 +57,26 @@ Control flow in `app.js`:
 - `dashboard.js`: metric cards, event feed (max 50), instance grid (12/page), activity table (20/page), optional custom panels and alerts from `/api/dashboard/config`. Exports include `refreshInstances` (shared by several pages), `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `refreshActivityTable`, `loadDashboardConfig`, `setNavigateToInstance`.
 - `control.js`: unified instance table (25/page) and right-side drawer with per-type detail (FSM, workflow, agent), agent trace, workflow Send Event form, cancel and destroy. Exports include `refreshControlCenter`, `renderUnifiedTable`, `updateRunningAgents`, `refreshDetailPanel`, `openDrawer`, `closeDrawer`, `navigateToInstance`, `setDeps`. The drawer polls every 2000 ms through `state.detailPollTimer`; refreshes are token-guarded so only the latest paints.
 - `conversations.js`: conversation detail and chat in the drawer, End conversation; `showConversationInDrawer`, `showConversationDetail`, `addTypingIndicator`, `removeTypingIndicator`, `setDeps`. `_detailRequestId` drops stale responses.
-- `launch.js`: launch modal for FSMs (preset or pasted JSON), workflow presets, agents with stub tools (`TOOL_TEMPLATES`). Launch FSM also starts one conversation and opens it in the drawer after 500 ms.
-- `visualizer.js`: FSM, agent, and workflow graphs through `utils/graph.js`, preset dropdown, resizable split pane (`initVizDivider`).
-- `builder.js`: chat with the meta-builder (`/api/builder/start`, `/send`, DELETE with `?force=true`), Cancel (abort controller plus force delete) with an elapsed-seconds status, result summary, Edit JSON then Apply, copy, download (`artifact.json`), launch. Workflow artifacts cannot be launched, and neither can an agent type missing from `/api/capabilities` `agent_types`.
+- `launch.js`: launch modal for FSMs (preset or pasted JSON), workflow presets, agents with stub tools (`TOOL_TEMPLATES`): the agent select is filled by `fillSelect` from the launchable rows of `loadAgentTypes()` (optgroups `Needs tools` and `No tools needed`), the tools form shows for a row that `takes_tools`, and a `needs_tools` row with no tool is refused before any request. Launch FSM also starts one conversation and opens it in the drawer after 500 ms.
+- `visualizer.js`: FSM, agent, and workflow graphs through `utils/graph.js` (`showAgentGraph()` fills the agent select from the drawable rows and draws the selected id, `react` by default; `app.js` calls it when the Agents tab or the Visualizer page opens, so the registry loads when the page is used, not at startup), preset dropdown, resizable split pane (`initVizDivider`).
+- `builder.js`: chat with the meta-builder (`/api/builder/start`, `/send`, DELETE with `?force=true`), Cancel (abort controller plus force delete) with an elapsed-seconds status, result summary, Edit JSON then Apply, copy, download (`artifact.json`), launch. Workflow artifacts cannot be launched, and neither can an agent type that is no own member of `/api/capabilities` `agent_types`; the Builder posts its agent id as it is and requires a tool for a `needs_tools` row.
 - `logs.js`: `appendLogs`, `syncLogs`, `onShowLogs`. Level pills, search highlight, pause buffer (cap 5000), DOM cap 1000, de-dup by `timestamp|level|module:line|message`, sidebar error badge.
 - `settings.js`: `loadSettings`. Config form (`/api/config`, client bounds `refresh_interval` 0.5..60, `max_events` and `max_log_lines` 10..100000), API key field, system info (`/api/info`).
 
 `services/`:
-- `api.js`: `fetchJson(url, opts)`, `postJson(url, data)`, Adds `X-API-Key` when a key is stored; on 401 prompts once and retries once; a non-OK response throws `Error(detail)` with `.status`.
+- `api.js`: `loadAgentTypes()` (one shared fetch of `GET /api/agent/types`, cached on `state.agentTypes`; a failed or malformed answer shows one toast and caches nothing, so the next call asks again), `agentRow(id)`, `toolsRequired(id)` (a `needs_tools` row with no `tool_names`), `fetchJson(url, opts)`, `postJson(url, data)`, Adds `X-API-Key` when a key is stored; on 401 prompts once and retries once; a non-OK response throws `Error(detail)` with `.status`.
 - `auth.js`: `getApiKey`, `setApiKey`, `clearApiKey`, `onApiKeyChange`, `checkAuthRequired()` (GET `/api/auth`, returns `true|false|null`), `requestApiKey({force, message})` (one shared pending prompt), `submitApiKeyModal`, `cancelApiKeyModal`, `isApiKeyModalOpen`.
-- `state.js`: `state` (a plain shared object), `scheduleRefresh(key, fn, ms)` (run-once-after-delay guard), `cancelRefresh(...keys)`, `WS_MAX_DELAY = 30000`, `TOOL_BASED_AGENTS` (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`).
+- `state.js`: `state` (a plain shared object, with `agentTypes`, the cached rows of `GET /api/agent/types`), `scheduleRefresh(key, fn, ms)` (run-once-after-delay guard), `cancelRefresh(...keys)`, `WS_MAX_DELAY = 30000`, `DEFAULT_AGENT_TYPE = 'react'` (the server's default id).
 - `ws.js`: `connectWS()` (same host `/ws`, `ws:` or `wss:` by page protocol), `registerHandlers(handlers)`. Handler names `app.js` registers: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `renderUnifiedTable`, `updateRunningAgents`, `appendLogs`, `refreshActivityTable`, `showConversationDetail`, `refreshDetailPanel`, `dashboardConfigChanged`.
 
 `utils/`:
-- `dom.js`: `esc`, `$`, `showError`, `showStatus`, `showToast`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `jsonViewHtml`, `highlightText`, `renderPagination(el, page, totalPages, action)`, `showDrawerDetailView`, `hashInstances` (hash over `instance_id:status`), `numVal`, `intVal`, `copyToClipboard`.
+- `dom.js`: `fillSelect(select, groups, emptyText, preferred)` (options built with `createElement` and `textContent` only; keeps the current choice, else `preferred`; no rows leaves one disabled option reading `emptyText`), `esc`, `$`, `showError`, `showStatus`, `showToast`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `jsonViewHtml`, `highlightText`, `renderPagination(el, page, totalPages, action)`, `showDrawerDetailView`, `hashInstances` (hash over `instance_id:status`), `numVal`, `intVal`, `copyToClipboard`.
 - `format.js`: `formatTime`, `relativeTime`, `formatNumber`.
 - `markdown.js`: `renderMarkdown(text)`; escapes first, then a fixed regex sequence (code, headings as bold, bold, italic, lists, rules). No links or tables.
 - `json_highlight.js`: `tokenizeJson(text)`, `renderJson(el, text)`, `highlightJsonIn(root)`; colours JSON text by building `span.json-key|string|number|bool|null|punct` nodes with `textContent` only (never `innerHTML`), so the element's text stays the input byte for byte. A text that does not parse, or is over `JSON_HIGHLIGHT_MAX_CHARS` (200000), stays plain. The colours are the `--json-*` variables of `style.css`.
 - `graph.js`: `renderGraph(svgId, {nodes, edges}, opts)`; BFS layers from the first `is_initial` node, rows of at most 5 columns, writes `x`/`y` onto the passed nodes.
 
-Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`, `/api/config`, `/api/info`, `/api/dashboard/config`, `/api/instances`, `/api/activity`, the `/api/fsm/...`, `/api/workflow/...`, `/api/agent/...`, `/api/builder/...` routes, `GET /api/agent/visualize?agent_type=` (default `ReactAgent`), `GET /api/workflow/visualize?workflow_id=` (default `order_processing`), and `WS /ws`. Error bodies carry `detail`.
+Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`, `/api/config`, `/api/info`, `/api/dashboard/config`, `/api/instances`, `/api/activity`, the `/api/fsm/...`, `/api/workflow/...`, `/api/agent/...`, `/api/builder/...` routes, `GET /api/agent/types`, `GET /api/agent/visualize?agent_type=` (an executable id, default `react`), `GET /api/workflow/visualize?workflow_id=` (default `order_processing`), and `WS /ws`. Error bodies carry `detail`.
 
 ## Data shapes
 
@@ -91,10 +91,9 @@ Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`,
   - `logs` (non-empty) -> `appendLogs(logs)`.
   - `dashboard_config_version` -> `dashboardConfigChanged()` (refetches `/api/dashboard/config`).
 - Main page-level payloads: instance (`instance_id`, `instance_type` fsm|workflow|agent, `label`, `status`, `source`, `conversation_count`, `agent_type`, `task`, `active_workflows`, `created_at`); activity row (`item_type` fsm_conversation|agent_task|workflow_instance, `item_id`, `instance_id`, `label`, `current_step`, `detail`, `status`, `is_terminal`); config (`refresh_interval`, `max_events`, `max_log_lines`, `log_level`, `show_internal_keys`, `auto_scroll_logs`); log record (`timestamp`, `level`, `module`, `line`, `message`, `conversation_id`).
-- `flows.json`: `{agents: {<AgentClass>: {description, nodes[], edges[]}}, workflows: {<id>: {name, description, nodes[], edges[]}}}`. Node `{id, label, description, is_initial, is_terminal}` (workflow nodes also carry `step_type`). Edge `{from, to, label}`.
-  - Agents: `ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `DebateAgent`, `SelfConsistencyAgent`, `REWOOAgent`, `PromptChainAgent`, `EvaluatorOptimizerAgent`, `MakerCheckerAgent`, `OrchestratorAgent`, `ADaPTAgent`, `ReasoningReactAgent`.
-  - Workflows: `order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`.
-  - `server/application.py` `_load_flows()` reads it into `_flows` inside `configure()`, and again in `get_flows()` when `_flows` is empty (a missing file gives `{"agents": {}, "workflows": {}}`). Served by the two visualize routes; unknown names give 404 with `detail`. Also reachable raw at `/static/flows.json`.
+- `flows.json`: `{workflows: {<id>: {name, description, nodes[], edges[]}}}` (no `agents` key since plan 659c07c3: an agent graph is `{fsm, nodes, edges}` from `GET /api/agent/visualize?agent_type=<id>`). Node `{id, label, description, is_initial, is_terminal}` (workflow nodes also carry `step_type`). Edge `{from, to, label}`.
+    - Workflows: `order_processing`, `data_pipeline`, `approval_flow`, `parallel_processing`, `timer_wait`.
+  - `server/application.py` `_load_flows()` reads it into `_flows` inside `configure()`, and again in `get_flows()` when `_flows` is empty (a missing file gives `{"workflows": {}}`). Served by the workflow visualize route; an unknown name gives 404 with `detail`. Also reachable raw at `/static/flows.json`.
 
 ## Invariants and constraints
 
@@ -106,7 +105,7 @@ Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`,
 - `state` fires events only on top-level assignment; nested mutation is silent.
 - `closeDrawer` must clear `state.detailPollTimer`; `openDrawer` replaces any existing timer.
 - `hashInstances` covers only `instance_id:status`, so a change to only `label` or `conversation_count` does not re-render the grid or table until a filter, search, or page change.
-- `flows.json` is hand-maintained, not derived from `src/fsm_llm/agents` or `src/fsm_llm/workflows`; update it by hand when an agent's state graph changes.
+- `flows.json` is hand-maintained and holds the workflows only, not derived from `src/fsm_llm/workflows`; update it by hand when a workflow's step graph changes. Do not put an agent graph or a list of agent ids back into the page: the selects fill from `GET /api/agent/types` (`test_agent_selects.py`).
 
 ## Dependencies
 
@@ -129,7 +128,7 @@ Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`,
 - New live push: add the field in the `server/websocket.py` broadcast, a branch in `services/ws.js` `onmessage`, and a handler in the `registerHandlers({...})` call in `app.js`.
 - New REST call: add the route in the `server/routes_*.py` module of its group first; keep `detail` in error bodies so `fetchJson` can show it.
 - New shared state: add the field with a default to `_target` in `services/state.js`. New debounced refresh: distinct `scheduleRefresh` key, cancelled where its selection is cleared.
-- New launchable agent type: mirror it in `services/state.js` `TOOL_BASED_AGENTS` if it needs tools, and add its graph to `flows.json`.
+- New launchable agent type: nothing here; a pattern file the registry rule accepts is listed by `GET /api/agent/types` and drawn by `GET /api/agent/visualize` (see `monitor/AGENTS.md`).
 - Styling: reuse `:root` tokens in `style.css`; do not hardcode colors in JS except the existing inline fallbacks.
 - New files ship automatically (`static/**/*`); `tests/test_packaging.py` checks every static file is covered by package data. `tests/test_fsm_llm_monitor/test_app.py` lists served JS modules and checks that `style.css`, `app.js`, `flows.json` exist and are served; update it when renaming or removing files.
 - JS tests are node probes, not a framework: `tests/test_fsm_llm_monitor/test_static_js.py` runs `tests/test_fsm_llm_monitor/static_probes/*.mjs` against a copy of this folder on a small DOM stand-in (`stub.mjs`), with no bundler, npm or network. They skip when `node` 18 or newer is not on PATH and fail on a Linux GitHub Actions leg without it; add a probe per behaviour fix, and a pure-Python source regex where a probe is not practical. Run `pytest tests/test_fsm_llm_monitor/`, then verify by running `fsm-llm-monitor` (http://127.0.0.1:8420) and watching the browser console.

@@ -46,6 +46,7 @@ sequenceDiagram
 ## Public interface
 
 `api.js`
+- `loadAgentTypes(): Promise<rows>` - one shared in-flight `GET /api/agent/types`, rows cached on `state.agentTypes` (`{id, name, launchable, needs_tools, takes_tools, tool_names, drawable}`); an error or a payload with no `agent_types` array shows one toast, caches nothing and resolves to `[]`. `agentRow(id)` finds a cached row, `toolsRequired(id)` is true for a `needs_tools` row with no `tool_names`.
 - `fetchJson(url: string, opts?: RequestInit, _retried = false): Promise<any>` - copies `opts`, sets `X-API-Key` from `getApiKey()` (deletes it when no key), on any method. On `!resp.ok` tries `resp.json()` and builds the message with `formatErrorDetail(body?.detail, resp.statusText || "HTTP <status>")`. On a 401 with `_retried` false it awaits `requestApiKey({message})` and, if a key was saved, retries once with `_retried = true`. Otherwise throws `Error(detail)` with `err.status = resp.status`. On success returns `resp.json()`.
 - `postJson(url: string, data: any, opts?: object): Promise<any>` - `fetchJson` with `method: 'POST'`, `Content-Type: application/json`, `JSON.stringify(data)`; `opts` (for example `{signal}` of an `AbortController`) is spread first, so it can never replace the method, headers or body.
 - `formatErrorDetail(detail, fallback)` - `null`/`''` gives `fallback || 'Request failed'`; a string is returned as is; a FastAPI 422 list of `{loc, msg}` becomes `"a.b: msg; ..."` with `body`/`query`/`path` removed from `loc`; an object gives `msg`, `message`, or its JSON.
@@ -67,7 +68,7 @@ sequenceDiagram
 - `scheduleRefresh(key: string, fn: () => void, delayMs: number)` - no-op if `state.refreshTimers[key]` is set; clears the key before calling `fn`.
 - `cancelRefresh(...keys)` - clears pending `scheduleRefresh` timers (`pages/control.js` cancels `ctrl-detail`, `ctrl-detail-wf`, `conv-detail`).
 - `WS_MAX_DELAY = 30000`.
-- `TOOL_BASED_AGENTS = ['ReactAgent', 'ReflexionAgent', 'PlanExecuteAgent', 'REWOOAgent', 'ADaPTAgent']` - agent types that need at least one tool, used by `pages/launch.js` and `pages/builder.js`.
+- `DEFAULT_AGENT_TYPE = 'react'` - the id the server uses when a request names none (`pages/visualizer.js`, `pages/launch.js`). The list of agent ids is not kept here: it is `state.agentTypes`, filled by `loadAgentTypes()`.
 
 `ws.js`
 - `registerHandlers(handlers: object)` - shallow-merges into the dispatch table.
@@ -75,7 +76,7 @@ sequenceDiagram
 
 ## Data shapes
 
-Initial `state` fields: `ws` (`null`), `currentPage` (`'dashboard'`), `presets`, `wsRetryDelay` (3000), `capabilities` (`{fsm: true, workflows: false, agents: false}`), `instances` (`[]`), `selectedConvId`, `selectedConvInstanceId`, `selectedDetailId`, `selectedDetailType`, `detailPollTimer`, `refreshTimers` (`{}`), `autoScrollLogs` (`true`; `pages/settings.js` sets it from the server config's `auto_scroll_logs`), `_lastContextData`. Pages also add fields ad hoc (for example `state.workflowPresets` in `pages/launch.js`).
+Initial `state` fields: `ws` (`null`), `currentPage` (`'dashboard'`), `presets`, `agentTypes` (`null` until loaded), `wsRetryDelay` (3000), `capabilities` (`{fsm: true, workflows: false, agents: false}`), `instances` (`[]`), `selectedConvId`, `selectedConvInstanceId`, `selectedDetailId`, `selectedDetailType`, `detailPollTimer`, `refreshTimers` (`{}`), `autoScrollLogs` (`true`; `pages/settings.js` sets it from the server config's `auto_scroll_logs`), `_lastContextData`. Pages also add fields ad hoc (for example `state.workflowPresets` in `pages/launch.js`).
 
 WebSocket auth message sent on open: `{"type": "auth", "api_key": "<stored key or empty string>"}`.
 

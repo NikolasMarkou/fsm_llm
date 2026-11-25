@@ -418,13 +418,13 @@ _RETIRED = (
     "TOOL_BASED_AGENTS",
     "AGENT_TYPE_MAP",
 )
-_CODE_SUFFIXES = {".py", ".js", ".mjs", ".html", ".json", ".css"}
+_CODE_SUFFIXES = {".py", ".js", ".mjs", ".html", ".json", ".css", ".md"}
 
 
 class TestTheRetiredTablesAreGoneFromSource:
     """Plan 659c07c3 step 7: no file under ``src/fsm_llm`` names a retired launch table.
 
-    A word-bound scan of every code and data file (a hit in a comment counts) plus an AST scan
+    A word-bound scan of every code, data and markdown file (a hit in a comment or a doc counts) plus an AST scan
     of every module (a name, an attribute, an import alias or a defined function or class), so
     a table that comes back under its old name, in any language of the package, is red.
     """

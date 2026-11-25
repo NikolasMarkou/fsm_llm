@@ -193,7 +193,7 @@ A gated tool runs only with a grant bound to that exact call. The model cannot s
 
 ### Watch it, score it, test it
 
-- **`fsm_llm.monitor`**: a FastAPI dashboard (REST, WebSocket, a vanilla-JS single-page app) with events, logs, metrics, a visualizer, a chat console and the meta-builder. `InstanceManager.attach_api(api)` lets it watch your own `API`. It launches example FSMs from a checkout, a set of agent patterns with stub tools and two demo workflows; it is a development tool. Optional OpenTelemetry export (`--otel`).
+- **`fsm_llm.monitor`**: a FastAPI dashboard (REST, WebSocket, a vanilla-JS single-page app) with events, logs, metrics, a visualizer, a chat console and the meta-builder. `InstanceManager.attach_api(api)` lets it watch your own `API`. It launches example FSMs from a checkout, the agent patterns of the executable registry (by id, with stub tools, and the pattern files of `--executables DIR`) and two demo workflows, and draws each agent from its pattern; it is a development tool. Optional OpenTelemetry export (`--otel`).
 - **`fsm_llm.eval`**: scores the examples 0 to 4, or plays scripted conversations N times and reports pass rates with Wilson confidence intervals (`run_dataset`, `run_cases`, `wilson_ci`).
 - **`fsm_llm.testing`**: public test doubles for your own code, and it never imports pytest. `ScriptedLLM`, `MockLLM2Interface` and `PromptGroundedLLM` are fake `LLMInterface` implementations that also answer the async twins; reply builders such as `final_reply` and `tool_call_reply`; a `ScriptedUser` that drives a conversation; and the assertions `assert_state`, `assert_context`, `assert_path` and `assert_result`.
 
@@ -573,7 +573,7 @@ The examples are evaluation baselines: `fsm-llm-eval examples` runs them in para
 | `fsm-llm --fsm <path.json> [--model M] [--env-file PATH]` | Chat with an FSM interactively (`--mode validate` and `--mode visualize` also exist) |
 | `fsm-llm-visualize --fsm <path.json> [--format ascii\|mermaid\|dot]` | Draw an FSM |
 | `fsm-llm-validate --fsm <path.json> [--upgrade]` | Check an FSM definition for problems; `--upgrade` rewrites an older schema version after validating |
-| `fsm-llm-monitor` | Web dashboard at http://127.0.0.1:8420 (`--host`, `--port`, `--no-browser`, `--api-key`, `--otel`, `--env-file`) |
+| `fsm-llm-monitor` | Web dashboard at http://127.0.0.1:8420 (`--host`, `--port`, `--no-browser`, `--api-key`, `--otel`, `--env-file`, `--executables`) |
 | `fsm-llm-meta [--model M] [--env-file PATH] [--output FILE]` | Build FSMs, workflows or agents by chatting |
 | `fsm-llm-okf <validate\|list\|show\|search\|export>` | Check, browse, search and export Open Knowledge Format bundles |
 | `fsm-llm-skills <validate\|list\|show> PATH...` | Check (`--strict` for API portability), list and read Agent Skills folders |

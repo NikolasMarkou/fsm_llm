@@ -32,9 +32,9 @@ flowchart TD
 | `dashboard.js` | Metrics, event feed (max 50 entries), instance grid (12/page), activity table (20/page), custom panels and alerts | `refreshInstances` is shared with control, launch, builder, conversations |
 | `control.js` | Unified table (25/page), drawer, per-type detail, agent trace, workflow Send Event form | Drawer polls every 2000 ms via `state.detailPollTimer`, skipped while the conversation sub-view is shown |
 | `conversations.js` | Conversation detail and chat in the drawer, End conversation | `_detailRequestId` drops stale responses; `_sendingConvId` defers re-renders during a send and refuses a second send (toast); a render of another conversation enables the input; the detail also shows the cut-off line and the classification and tie-classifier panels when the snapshot carries them |
-| `launch.js` | Launch modal | `TOOL_TEMPLATES` (the stub tools); default FSM temperature 0.5, agent `max_iterations` 10 |
-| `visualizer.js` | Graph rendering for fsm/agent/workflow, preset dropdown, split pane | Uses `renderGraph` from `utils/graph.js` |
-| `builder.js` | Meta-builder chat and launch | `AGENT_TYPE_MAP` lowercase -> class name (pinned against the builder enum and `_AGENT_CLASSES`); `_sessionToken` drops replies from abandoned sessions; `_abort` and `_elapsedTimer` belong to the send in flight |
+| `launch.js` | Launch modal | `TOOL_TEMPLATES` (the stub tools); default FSM temperature 0.5, agent `max_iterations` 10; the agent select is filled from the launchable rows of `loadAgentTypes()` |
+| `visualizer.js` | Graph rendering for fsm/agent/workflow, preset dropdown, split pane | Uses `renderGraph` from `utils/graph.js`; the agent select is filled from the drawable rows of `loadAgentTypes()` |
+| `builder.js` | Meta-builder chat and launch | posts the agent id of the artifact as it is (no map; `test_agent_selects.py` pins the builder enum against the registry ids); `_sessionToken` drops replies from abandoned sessions; `_abort` and `_elapsedTimer` belong to the send in flight |
 | `eventlog.js` | Event log panel of the Logs page (`loadEventLogs`, `openEventLog`) | Read only; every id and field goes through `esc()`; shown on page show and by Refresh |
 | `logs.js` | Log stream | Pause buffer cap 5000, DOM cap 1000, de-dup key set cap 10000 |
 | `settings.js` | Config form and API key field | Reset defaults 1.0 / 1000 / 5000 / INFO; client bounds in `LIMITS` |
@@ -63,11 +63,11 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 | POST `/api/fsm/launch`, POST `/api/fsm/{id}/start`, POST `/api/fsm/{id}/converse` `{conversation_id, message}`, POST `/api/fsm/{id}/end` `{conversation_id}`, GET `/api/fsm/{id}/conversations` | launch, builder, control, conversations |
 | GET `/api/conversations/{convId}` | conversations |
 | GET `/api/workflow/presets`, POST `/api/workflow/launch` (presets only), GET `/api/workflow/{id}/instances`, POST `/api/workflow/{id}/advance` `{workflow_instance_id, user_input: ''}`, POST `/api/workflow/{id}/cancel` `{workflow_instance_id, reason}`, POST `/api/workflow/{id}/event` `{event_type, payload, workflow_instance_id ("" = broadcast)}` -> `{affected}` | launch, control |
-| POST `/api/agent/launch`, GET `/api/agent/{id}/status`, GET `/api/agent/{id}/result`, POST `/api/agent/{id}/cancel` | launch, builder, control |
+| GET `/api/agent/types`, POST `/api/agent/launch`, GET `/api/agent/{id}/status`, GET `/api/agent/{id}/result`, POST `/api/agent/{id}/cancel` | launch, builder, control |
 | GET `/api/capabilities` | launch |
 | GET `/api/presets` | launch, visualizer |
 | GET `/api/preset/fsm/{id}` | visualizer |
-| POST `/api/fsm/visualize`, GET `/api/fsm/visualize/preset/{id}` (used when the value contains `/`), GET `/api/agent/visualize?agent_type=`, GET `/api/workflow/visualize?workflow_id=` | visualizer, builder |
+| POST `/api/fsm/visualize`, GET `/api/fsm/visualize/preset/{id}` (used when the value contains `/`), GET `/api/agent/visualize?agent_type=<id>`, GET `/api/workflow/visualize?workflow_id=` | visualizer, builder |
 | POST `/api/builder/start` `{model, temperature}`, POST `/api/builder/send` `{session_id, message}`, DELETE `/api/builder/{sessionId}?force=true`, GET `/api/capabilities` (the `agent_types` list gates Launch) | builder |
 | GET `/api/logs?limit=500&level=<min active level>`, GET/POST `/api/config`, GET `/api/info` | logs, settings |
 
@@ -96,15 +96,15 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 - Logs: records are de-duplicated by `timestamp|level|module:line|message` across WS pushes, `syncLogs`, and `refreshLogs`. Pause buffers new records and resume renders only those. `clearLogs` keeps records marked as seen so sync does not bring them back. The sidebar badge counts ERROR/CRITICAL lines received (not the server's error metric) and shows `99+` above 99. `state.autoScrollLogs` (from Settings) gates auto-scroll.
 - Conversations: while a chat send is in flight for a conversation, `showConversationDetail` for it is deferred and re-run once the send finishes.
 - Builder: starting a session or resetting aborts the send in flight, bumps `_sessionToken` and force-DELETEs the previous unfinished server session; a late start reply is dropped and its session DELETEd; Cancel does the same for the running send and leaves the session closed. Start sends `max_tokens` from the Max Tokens field. Agent launch is two-click (the first shows the form: label, model, max iterations, timeout, stub tool responses; the second submits). The model field is pre-filled from the Builder Model field, never from `artifact.config.model` (a template value of every built agent and model-authored text); label and limits are pre-filled from the artifact and the server bounds them. Edit JSON swaps the result text for a textarea; Apply only parses it (never executes it), shows a parse error and refuses a non-object, and Launch waits while the editor is open; the launch route is the validator. Launching a built FSM opens its conversation in the drawer. Workflow artifacts are never launched (button disabled, `WORKFLOW_LAUNCH_NOTE` shown).
-- `TOOL_BASED_AGENTS` (`ReactAgent`, `ReflexionAgent`, `PlanExecuteAgent`, `REWOOAgent`, `ADaPTAgent`, from `services/state.js`) require at least one tool in both launch paths.
+- A row of `loadAgentTypes()` (`services/api.js`) with `needs_tools` and no `tool_names` requires at least one tool in both launch paths (`toolsRequired(id)`); a row that `takes_tools` shows the tools form.
 - Launch FSM also starts one conversation (`initial_context: {}`) and, after 500 ms, opens it in the drawer.
 - Settings validates `refresh_interval` 0.5..60 and `max_events`/`max_log_lines` integers 10..100000 before POST, marking bad fields `aria-invalid`. The API key is stored in sessionStorage only (via `services/auth.js`).
 - Modals and the drawer open with `openDialog` (focus moves in) and close with `closeDialog` (focus restored).
 
 ## Dependencies
 
-- `../services/api.js`: `fetchJson`, `postJson`.
-- `../services/state.js`: `state`, `scheduleRefresh(key, fn, ms)`, `cancelRefresh(...keys)`, `TOOL_BASED_AGENTS`.
+- `../services/api.js`: `fetchJson`, `postJson`, `loadAgentTypes`, `agentRow`, `toolsRequired`.
+- `../services/state.js`: `state`, `scheduleRefresh(key, fn, ms)`, `cancelRefresh(...keys)`, `DEFAULT_AGENT_TYPE`.
 - `../services/auth.js`: `getApiKey`, `setApiKey`, `clearApiKey`, `checkAuthRequired` (settings only).
 - `../utils/dom.js`: `$`, `esc`, `statusBadge`, `hashInstances`, `showToast`, `showError`, `showStatus`, `levelClass`, `highlightText`, `renderPagination`, `showDrawerDetailView`, `renderLLMData`, `jsonViewHtml`, `renderResultBanner`, `copyToClipboard`, `openDialog`, `closeDialog`, `numVal`, `intVal`.
 - `../utils/format.js` (`formatTime`, `relativeTime`, `formatNumber`), `../utils/markdown.js` (`renderMarkdown`), `../utils/graph.js` (`renderGraph`), `../utils/json_highlight.js` (`highlightJsonIn`, `renderJson`: `eventlog.js`, `conversations.js`, `builder.js` and `control.js` mark their JSON with `jsonViewHtml` and colour it after the `innerHTML` assignment; a page that shows JSON must do the same).

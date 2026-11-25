@@ -12,7 +12,11 @@ Purpose: A subpackage of `fsm_llm`: public test doubles, a scripted user and ass
 
 ```mermaid
 flowchart TD
-    testing[fsm_llm.testing] --> core[fsm_llm core and fsm_llm.core.codes]
+    testing[fsm_llm.testing] --> engine[fsm_llm.engine.api.conversation: API]
+    testing --> handlers[fsm_llm.handlers]
+    testing --> llm[fsm_llm.llm and llm.usage]
+    testing --> core[fsm_llm.core.codes and core.definitions]
+    testing --> kernel[fsm_llm.constants]
 ```
 
 ## Key files
@@ -28,7 +32,7 @@ flowchart TD
 
 ## Invariants and constraints
 
-- Imports the core and `fsm_llm.core.codes` only; never `pytest`, `litellm` or another subpackage (`tests/test_fsm_llm_testing/test_layering.py` reads the source with `ast`).
+- Imports the core layers and the kernel only: `fsm_llm.core.codes` and `fsm_llm.core.definitions`, `fsm_llm.constants`, `fsm_llm.llm` (`LLMInterface`, and the private `llm.usage` meter), `fsm_llm.handlers` (`BaseHandler`, `HandlerTiming`, for `PathRecorder`) and `fsm_llm.engine.api.conversation` (`API`, for `ScriptedUser` and the assertions), plus `fsm_llm.__version__`; never `pytest`, `litellm` or another subpackage (`tests/test_fsm_llm_testing/test_layering.py` reads the source with `ast` and pins exactly that: no `pytest`, no `litellm`, no other subpackage, no private name from outside the package beyond the named `llm.usage` debt). The layering test does not pin which core layers it reads, so a new import of another layer package is a visible diff here, not a red test.
 - No library module imports it and `fsm_llm/__init__.py` never loads it; it is imported by name.
 - Importing it has no side effect: no clock, no randomness, no socket.
 - `ScriptedLLM` never answers an unscripted call with an invented reply: it records it in `unexpected`, counts an error and raises `UnscriptedCallError` (an `AssertionError`). The pipeline swallows a raised extraction error, so `assert_exhausted()` is what fails the test. It reuses core's private `_Metered`/`_meter_of` from `fsm_llm.llm.usage` (one meter, not a second copy); a rename there must update `doubles.py`. This is recorded debt (review gate 1 concern 12): plan step 73 split the old `llm.py` and retargeted the import to the defining module `fsm_llm.llm.usage` but left the seam private; `test_layering.py` pins that exactly these two private names are imported from that module and no third. The API snapshot prints `ScriptedLLM` with the private base until the MRO-aware snapshot (step 59) drops private mixin bases from the class line.

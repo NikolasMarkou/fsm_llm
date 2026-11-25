@@ -25,9 +25,9 @@ flowchart LR
 
 ## Files
 
-- `api.js` - `fetchJson(url, opts)`, `postJson(url, data, opts)`,
+- `api.js` - `loadAgentTypes()` (the agent ids from `GET /api/agent/types`), `fetchJson(url, opts)`, `postJson(url, data, opts)`,
 - `auth.js` - API key get/set/clear, change listeners, the `GET /api/auth` check, and the key-entry modal.
-- `state.js` - shared `state`, `scheduleRefresh(key, fn, delayMs)`, `cancelRefresh(...keys)`, and the constants `WS_MAX_DELAY` and `TOOL_BASED_AGENTS`.
+- `state.js` - shared `state`, `scheduleRefresh(key, fn, delayMs)`, `cancelRefresh(...keys)`, and the constants `WS_MAX_DELAY` and `DEFAULT_AGENT_TYPE`.
 - `ws.js` - `connectWS()` and `registerHandlers(handlers)`.
 
 ## How to use it

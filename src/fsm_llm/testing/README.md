@@ -60,11 +60,12 @@ The doubles are plain classes: their attributes are public and may change betwee
 
 ```mermaid
 flowchart TD
-    testing[fsm_llm.testing] --> core[fsm_llm core]
+    testing[fsm_llm.testing] --> engine[fsm_llm.engine.api.conversation]
+    testing --> core[core, llm, handlers, kernel constants]
 ```
 
 - Import it by name: `from fsm_llm.testing import ...`. `import fsm_llm` never loads it and no library module imports it.
-- It imports the core and `fsm_llm.core.codes` only. It never imports `pytest` (an opt-in pytest plugin module may, later, and is imported only by name), `litellm` or another subpackage.
+- It imports the core layers and the kernel only (`fsm_llm.core.codes` and `core.definitions`, `fsm_llm.llm`, `fsm_llm.handlers`, `fsm_llm.engine.api.conversation` and `fsm_llm.constants`). It never imports `pytest` (an opt-in pytest plugin module may, later, and is imported only by name), `litellm` or another subpackage.
 - The `testing` extra in `pyproject.toml` is `[]` (no third-party dependency); `all`, `make install-dev`, tox and CI request it.
 - Importing it has no side effect: no clock, no randomness, no socket.
 
