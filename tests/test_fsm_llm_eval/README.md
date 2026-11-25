@@ -23,7 +23,7 @@ The pytest suite for `fsm_llm.eval`, the evaluation package of the FSM-LLM repos
 - `test_records.py` - JSONL rows, JSON writing, UTC time, git hashes, model slugs, run directory names, exception hierarchy.
 - `test_scoring.py` - golden table for `classify_result`, the score labels, and the rule that a line-anchored `Error:` or `Success: False`, or an extraction rate of at most 50%, cannot score 4.
 - `test_timeout_table.py` - reads the examples' source with `ast` and checks that no harness timeout ties or is below an agent's own `timeout_seconds` budget.
-- `test_stats.py` - Wilson interval, Fisher exact test, `pass_rate`, and exact `below_percent` threshold checks.
+- The statistics tests moved to `tests/test_fsm_llm/test_simulation_stats.py` with `fsm_llm.eval.stats`.
 
 ## How to use it
 

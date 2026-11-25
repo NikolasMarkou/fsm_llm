@@ -5,7 +5,7 @@ Purpose: Offline pytest suite for `fsm_llm.eval` and the `fsm-llm-eval` CLI (`fs
 
 ## Scope
 
-Covers `fsm_llm.eval`: `config`, `records`, `stats`, `scoring`, `examples`, `cases`, `__main__`, and the exception hierarchy. The eval modes tested:
+Covers `fsm_llm.eval`: `config`, `records`, `scoring`, `examples`, `cases`, `__main__`, and the exception hierarchy. The eval modes tested:
 
 - `examples` mode: run each `examples/<category>/<name>/run.py` (and `run_manual.py`) as a subprocess, score 0 (CRASH) to 4 (PASS) with `classify_result`, write `results.json`, `scorecard.md`, and per-example logs.
 - `run` mode (cases): replay JSON/JSONL conversation cases N trials each against an FSM, check expectations, write `rows.jsonl`, `results.json`, `summary.md` with Wilson intervals.
@@ -38,7 +38,7 @@ Test doubles and fixtures:
 | `test_examples.py` | `discover_examples`, `get_timeout`, `run_examples`, `run_example`, `create_output_dir`, logs (`logs/` exists before the first example finishes), `results.json`, `scorecard.md` |
 | `test_records.py` | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, exceptions |
 | `test_scoring.py` | `classify_result` golden parity, `SCORE_LABELS`, `MAX_SCORE`, `TestReportedFailure` (a line-anchored `Error:` or `Success: False` caps at 2, an extraction rate of at most 50% is partial) |
-| `test_stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` |
+| (moved) | the statistics tests are `tests/test_fsm_llm/test_simulation_stats.py` since `fsm_llm.eval.stats` moved to `fsm_llm.simulation.stats` |
 | `test_timeout_table.py` | the harness timeout table against the agent budgets found by an `ast` scan of `examples/`: no harness timeout ties or is below an `AgentConfig` budget; the examples on the default 300 s budget are at 360 s |
 | `__init__.py` | Empty package marker |
 
@@ -86,7 +86,7 @@ Run dir name: `YYYY-MM-DD_HH-MM_<short hash or "unknown">_<model_slug>`, collisi
 
 ## Dependencies
 
-- `fsm_llm.eval` and its submodules (`__main__`, `cases`, `examples`, `stats`, `records`, `constants`).
+- `fsm_llm.eval` and its submodules (`__main__`, `cases`, `examples`, `records`, `constants`).
 - `fsm_llm.constants` (`ENV_LLM_MODEL`), `fsm_llm.core.definitions.FSMError` (root of `EvalError`), `fsm_llm.logging`.
 - `fsm_llm.testing.MockLLM2Interface`.
 - Repository files: `evaluation/datasets/simple_greeting_cases.json` (config `{"trials": 3}`, includes case `name_is_extracted`, passes fully with extraction `{"user_name": "Alex"}`), the historical `results.json` above, `examples/` (listing must include `basic/simple_greeting` and `classification/classified_transitions_manual`), and a git checkout.

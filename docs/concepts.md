@@ -62,7 +62,6 @@ flowchart TD
     monitor -- demo workflows --> workflows
     eval[fsm_llm.eval] --> core
     synthesis[fsm_llm.synthesis] --> core
-    synthesis --> agents
     testing[fsm_llm.testing] --> core
 ```
 

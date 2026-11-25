@@ -34,6 +34,9 @@ The pytest suite for `fsm_llm.synthesis`, the runtime FSM synthesis package of t
 - `test_concierge.py` - the whole pattern end to end, offline.
 - `test_traces.py` - the value-free `RunTrace` and `TraceRecorder`.
 - `test_diagnose.py` - the fixed rule table.
+- `test_diagnose_signals.py` - the diagnosis of seeded defects through real child runs, at both privacy levels.
+- `test_trace_signals.py` - the event-log signals on a run trace.
+- `test_roles.py` - the roles of a simulated compile and where the judge refusal is raised.
 - `test_patch.py` - the RFC 6902 subset against the RFC's own examples and hostile input.
 - `test_repair.py` - `propose_patch` and `repair_procedure`: the promotion order, the decision rule, the poisoning guards.
 

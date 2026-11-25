@@ -35,7 +35,7 @@ The examples score is a heuristic: it reads the example's exit code, timing and 
 - `scoring.py` - the 0-4 heuristic that reads an example's output.
 - `cases.py` - conversation datasets, one trial of one case, whole runs and their reports.
 - `records.py` - append-only JSONL rows, JSON output, run-directory names.
-- `stats.py` - Wilson confidence interval, Fisher exact test, `pass_rate`, the exact `--fail-under` comparison.
+- There is no `stats.py`: the Wilson interval, `pass_rate` and the exact `--fail-under` comparison live in `fsm_llm.simulation.stats`, and `fsm_llm.eval` re-exports `pass_rate` and `wilson_ci`.
 - `_pool.py` - the thread pool both runners use, with Ctrl-C handling.
 - `constants.py` - defaults, exit codes, score labels, and the per-example input and timeout tables.
 - `exceptions.py` - error classes.

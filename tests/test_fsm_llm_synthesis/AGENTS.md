@@ -47,6 +47,9 @@ Layout: most files test one module, named `test_<module>.py`. Cross-module files
 | `reference_tasks.py`, `test_reference_tasks.py` | the 16 reference tasks of the retired synthesis bench, their `hand_fsm` and `host_definition`, the scripted `User`, the grader and `drive_fsm` (arms S and H on one host, a bare `API` with a `SynthesizeExecutor`, and library); the hand arm runs every task offline with no strong call |
 | `test_traces.py` | `RunTrace.__post_init__` (value-free), `TraceRecorder` folding |
 | `test_diagnose.py` | the rule table in order, outages never a procedure fault |
+| `test_diagnose_signals.py` | seeded defects through real child runs at both privacy levels: an outage never a fault, `malformed-extraction`, `intent-out-of-scope`, observed `extraction-miss`, shape equals values, a lost reader leaves the rules inert, no value in a trace |
+| `test_trace_signals.py` | the signals of a child frame on `RunTrace` (`failures`, `misses`, `scopes`, `bad_extractions`): log on gives them, log off gives the old row, an old row loads, value-free, read once at the child's end |
+| `test_roles.py` | `Roles` on `SimulationReport`, `CompileResult` and the receipt (none for a library hit); the refusal at `FSMSynthesizer` construction and in `repair_procedure`; never in `LibraryRecord.provenance` |
 | `test_patch.py` | RFC 6902 Appendix A examples under `/states/s`, scope, bounds before the walk, atomicity |
 | `test_repair.py` | `propose_patch` fence, `repair_procedure` check order, decision rule, `write=False` default, never `trusted` |
 

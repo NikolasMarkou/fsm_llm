@@ -52,10 +52,11 @@ A compile after a miss may carry one near miss in its request: the stored proced
 - `prompts.py` - the compile and patch prompts, the goal fence, a worked example FSM.
 - `library.py` - `FSMLibrary`, `LibraryRecord`, `LibraryMatch`, `digest_of`.
 - `executor.py` - `SynthesizeExecutor`: the `synthesize` state run on the engine (`API(executors=...)`), the only driver; a bare `API` refuses the state with `MissingExecutorError` (plan baa37f40, steps 20 and 22; `ProcedureRunner` is gone).
+- `executor_trace.py` - the trace emitters of the executor, split out of `executor.py`.
 - `procedures.py` - the pure helpers of a run: `runnable_reason`, `reason_of`, the result record and the round strings.
 - `tools.py` - `create_procedure_tools`: the agent tools `obtain_procedure` and `run_procedure`.
-- `traces.py` - `RunTrace`, `TraceRecorder`.
-- `diagnose.py` - `diagnose`, `Diagnosis`.
+- `traces.py` - `RunTrace` (with the event-log evidence fields `failures`, `misses`, `scopes`, `bad_extractions`), `TraceRecorder`.
+- `diagnose.py` - `diagnose`, `Diagnosis`: the outage precheck, `malformed-extraction`, `intent-out-of-scope`, the observed `extraction-miss` (these read the event log, so they are inert with the log off) and the older rules.
 - `patch.py` - `apply_patch`: the state scope around `fsm_llm.core.definitions.apply_json_patch`, the RFC 6902 subset (`add`, `remove`, `replace`, `test`).
 - `repair.py` - `propose_patch`, `repair_procedure`, `PromotionResult`.
 - `constants.py` - reserved names, status and reason codes, lifecycle names, caps.

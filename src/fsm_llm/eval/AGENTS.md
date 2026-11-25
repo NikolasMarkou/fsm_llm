@@ -5,7 +5,7 @@ Purpose: Evaluation tooling inside the core `fsm_llm` package: the examples eval
 
 ## Scope
 
-Two evaluation kinds behind one CLI, sharing config, records, stats and the run-directory rule:
+Two evaluation kinds behind one CLI, sharing config, records, the statistics of `fsm_llm.simulation` and the run-directory rule:
 
 - `examples`: one subprocess per example script, heuristic scoring, the output layout of the historical `scripts/eval.py` (that script has been removed from the repo; this package replaces it).
 - `run`: in-process conversations through `fsm_llm.API`, pass/fail per trial, Wilson intervals.
@@ -26,8 +26,9 @@ flowchart TD
     cs --> pool
     ex --> rec[records: open_run_dir, write_json, git_short_hash]
     cs --> rec
-    cs --> st[stats: pass_rate]
-    cs --> api[fsm_llm.API]
+    cs --> st[simulation.stats: pass_rate]
+    cs --> pl[simulation.play: the turn loop]
+    pl --> api[fsm_llm.API]
 ```
 
 Examples run: `discover_examples(config)` -> `create_output_dir` (`open_run_dir`, git hash of the examples tree's parent) -> `run_interruptible` over `config.workers` threads, each driving one subprocess (`run_example`, scored once with `classify_result`) -> log written as each finishes (`write_example_log`) -> results sorted by name -> `write_scorecard` (`scorecard.md` + `results.json`).
@@ -46,7 +47,7 @@ Scoring (`classify_result`, checked in order): score 0 when `exit_code == -1`, o
 | `scoring.py` | `classify_result(result) -> (score, failures)` | moved verbatim from `scripts/eval.py` at commit `0facf56`; golden parity table in `tests/test_fsm_llm_eval/test_scoring.py` |
 | `cases.py` | `Expectations`, `ConversationCase`, `TrialResult`, `CaseReport`, `load_cases`, `check_expectations`, `run_case_trial`, `run_cases`, `run_dataset`, `write_case_report` | D-004 anchors on `run_cases` and `Expectations._at_least_one_check`; `run_case_trial` plays its turns through `fsm_llm.simulation.driver.play` and then checks the expectations (the loop is not here) |
 | `records.py` | `append_row`, `read_rows`, `write_json`, `utc_now`, `git_commit`, `git_short_hash`, `model_slug`, `make_run_dir`, `open_run_dir` | run dirs never reused |
-| `stats.py` | `wilson_ci`, `fisher_exact_two_sided`, `pass_rate`, `below_percent` | stdlib only; `below_percent` is the exact `--fail-under` test (not exported from `__init__`) |
+| (no `stats.py`) | `pass_rate`, `wilson_ci` re-exported from `fsm_llm.simulation.stats` | the statistics moved to the layer package `fsm_llm.simulation` (plan c720601d, roadmap 6.6); `fsm_llm.eval.stats` no longer exists (BREAKING in `CHANGELOG.md`); `below_percent`, the exact `--fail-under` test, is imported from there by `__main__.py` |
 | `_pool.py` | `run_interruptible(work, items, workers, on_done) -> bool`, `sigterm_as_interrupt()`, `run_tracked(args, *, cwd, env, input, timeout)`, `PoolInterrupted` | returns `True` when interrupted; SIGTERM raises `KeyboardInterrupt` for the run only (main thread, not over `SIG_IGN`), the old handler is restored. `run_tracked` is `subprocess.run` (captured utf-8 text, the same `TimeoutExpired` partial output) over `Popen`: on POSIX each child starts in its own session, a timeout kills its process group, and inside a `run_interruptible` worker the child is registered with that run's `_ChildScope`, which an interrupt terminates (SIGTERM to the group, `CHILD_TERMINATE_GRACE_SECONDS` = 2.0, then SIGKILL; D-028 of plan 0068b055). A child spawned after the interrupt is refused with `PoolInterrupted`. The registry is per `run_interruptible` call (a thread-local), never a module global |
 | `constants.py` | defaults, exit codes, `SCORE_LABELS`, `EXAMPLE_INPUTS`, `EXAMPLE_TIMEOUTS`, `CATEGORY_TIMEOUTS`, `EXAMPLE_SCRIPT_NAMES` | tables moved verbatim from `scripts/eval.py` (`0facf56`) |
 | `exceptions.py` | `EvalError`, `EvalConfigError`, `EvalDatasetError` | rooted at `fsm_llm.core.definitions.FSMError` |
@@ -76,7 +77,7 @@ Python:
 - `load_cases(path) -> (cases, embedded_config)`; `run_cases(cases, config, run_dir, *, llm_interface_factory=None, progress=None, dataset=None, checks=()) -> CaseReport`; `run_dataset(path, *, config=None, llm_interface_factory=None, checks=(), progress=None, **overrides) -> CaseReport` (load, layer `embedded < config (file path, mapping, or EvalConfig with only its set fields) < overrides`, open the run dir, run); With `llm_interface_factory` no model is needed: the report and the run directory are labelled by the factory's own `model` attribute, else the model the config or `LLM_MODEL` names, else `injected`; without a factory and without a model both runners raise `ModelNotConfiguredError` before any trial runs or any directory is made.  `run_case_trial(case, config, trial, llm_interface_factory=None, *, checks=(), stop=None) -> TrialResult` (never raises; `stop`, a callable checked before every turn, ends the trial there when true, as an ended conversation does; `run_cases` does not pass it, runtime synthesis's G6b simulator does); `check_expectations(expect, trial) -> list[str]` (`[]` = pass); `write_case_report(report, config, dataset=None) -> Path`.
 - A check is `Callable[[TrialResult], list[str]]` (failure messages); a raising check becomes a trial error. Progress callbacks: `(completed, total, result_or_trial)`.
 - `ExampleReport.interrupted` / `CaseReport.interrupted`: `True` after Ctrl-C or SIGTERM; results then hold only finished work.
-- `pass_rate(k, n) -> {"k","n","rate","wilson_ci":[lo,hi]}` (n=0 -> rate 0.0, CI `[0.0, 1.0]`); `wilson_ci(k, n, z=1.96)`; `fisher_exact_two_sided(k1, n1, k2, n2)`; `below_percent(k, n, percent)` (n=0 is below any positive percent). Impossible counts raise `ValueError`.
+- `pass_rate(k, n) -> {"k","n","rate","wilson_ci":[lo,hi]}` (n=0 -> rate 0.0, CI `[0.0, 1.0]`) and `wilson_ci(k, n, z=1.96)` are defined in `fsm_llm.simulation.stats` and re-exported by `fsm_llm.eval`; `below_percent(k, n, percent)` (n=0 is below any positive percent) is imported from `fsm_llm.simulation`. Impossible counts raise `ValueError`.
 - `open_run_dir(output_dir, output_root, model, cwd=None) -> Path`; `make_run_dir(root, model, cwd=None, now=None) -> Path`.
 
 ## Data shapes
@@ -126,6 +127,6 @@ Python:
 - New export: add it to the static `__all__` in `__init__.py`.
 - Import as `from fsm_llm import eval as fsm_eval` or import names directly; a bare `from fsm_llm import eval` shadows the builtin.
 - Read the `# DECISION` anchors (D-003 in `examples.py`, D-004 in `cases.py`) before editing nearby.
-- Tests: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/` (`test_stats.py`, `test_records.py`, `test_config.py`, `test_scoring.py`, `test_examples.py`, `test_timeout_table.py`, `test_example_inputs.py`, `test_cases.py`, `test_cli.py`); offline, cases use `MockLLM2Interface`.
+- Tests: `.venv/bin/python -m pytest tests/test_fsm_llm_eval/` (`test_records.py`, `test_config.py`, `test_scoring.py`, `test_examples.py`, `test_timeout_table.py`, `test_example_inputs.py`, `test_cases.py`, `test_cli.py`); offline, cases use `MockLLM2Interface`.
 - Sample dataset: `evaluation/datasets/simple_greeting_cases.json` (the plumbing cases over `examples/basic/simple_greeting/fsm.json` plus `name_is_extracted` over `name_capture_fsm.json`, which a do-nothing model fails). Keep at least one case that depends on the model.
 - Do not edit `examples/`: its scripts are the evaluation baselines this package runs.

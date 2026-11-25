@@ -295,6 +295,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the ext
 | Layer (top to bottom) | Packages | What it holds |
 |---|---|---|
 | Subpackages | `monitor`, `eval`; `agents`, `synthesis`, `workflows`, `reasoning`; `testing` | One extra each, imported by name, never by `import fsm_llm` |
+| `simulation` | `fsm_llm.simulation` | The generic simulator: `Simulator`, the turn loop `play` and `Trial`, `write_scenarios`, `Roles` with the distinct-judge rule, and the statistics (`pass_rate`, `wilson_ci`). It sits above `engine` and below the consumers (`eval`, `synthesis`), imports no consumer, and `import fsm_llm` does not load it |
 | `engine` | `fsm_llm.engine` | `API` (`engine.api`), `FSMManager` (`engine.fsm`), the 2-pass `MessagePipeline` (`engine.turn`), the state-kind executors (`engine.kinds`), `Classifier`, the builders, the session store, the plain-FSM OKF handler (`engine.okf_bridge`), and, above the API, the run context (`engine.context`) and the executables (`engine.executables`), both loaded by name only |
 | `handlers` | `fsm_llm.handlers` | The handler system, `HandlerBuilder`, `create_handler` |
 | `policy` | `fsm_llm.policy` | Approval types and the human-in-the-loop manager; imports `tools` and none of `context`, `okf`, `skills` (the contract `policy-imports-no-sibling-layer`: the row sits above the siblings, so only the contract keeps it off them) |
@@ -304,7 +305,7 @@ The library is one import package, `fsm_llm`, in `src/fsm_llm/`. Beneath the ext
 | `core` | `fsm_llm.core` | Pydantic FSM models (`core.definitions`), JsonLogic (`core.expressions`), `core.transition_evaluator`, `core.state_kinds`, `core.verify` (validator, data-flow and liveness analyses, the executable load sequence), `core.visualize`, `core.results`, `core.names`, `core.codes`, the executable envelope and the JSON patch applier in `core.definitions` |
 | Kernel | `constants`, `logging`, `security`, `text`, `env`, `frontmatter`, `memory`, `cli_support` | Small modules any layer may import; they import no layer |
 
-`import fsm_llm` loads the `core`, `engine`, `handlers`, `context`, `llm`, `runtime` and `security` packages and a few kernel modules, and nothing else: no subpackage and none of `okf`, `skills`, `tools` or `policy` (pinned by `tests/test_fsm_llm_regression/test_import_laziness.py`). A few edges break the order on purpose and are named in `.importlinter`: `agents` imports `reasoning` (for `ReasoningReactAgent`), and `synthesis` imports `eval` (the simulator reuses the scripted-trial code); `import fsm_llm.synthesis` loads no agents module (the embedding helpers it reads are `fsm_llm.llm` names).
+`import fsm_llm` loads the `core`, `engine`, `handlers`, `context`, `llm`, `runtime` and `security` packages and a few kernel modules, and nothing else: no subpackage and none of `okf`, `skills`, `tools` or `policy` (pinned by `tests/test_fsm_llm_regression/test_import_laziness.py`). A few edges break the order on purpose and are named in `.importlinter`: `agents` imports `reasoning` (for `ReasoningReactAgent`), `synthesis` has no such edge any more (the simulator and its statistics are in `fsm_llm.simulation`, the embedding helpers are `fsm_llm.llm` names), so `import fsm_llm.synthesis` loads no agents module.
 
 ## Extension Integration
 
