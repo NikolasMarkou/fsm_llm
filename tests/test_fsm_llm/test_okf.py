@@ -5901,7 +5901,9 @@ class TestOkfModuleSurface:
         for name in names:
             assert getattr(okf_module, name) is getattr(text_module, name), name
             assert getattr(text_module, name).__module__ == "fsm_llm.text", name
-        assert sorted(text_module.__all__) == sorted(names)
+        # `safe_text` (plan c720601d D-007) lives beside them and is not an okf name
+        assert sorted(text_module.__all__) == sorted((*names, "safe_text"))
+        assert not hasattr(okf_module, "safe_text")
 
     def test_no_private_alias_of_the_frontmatter_seam_is_left(self) -> None:
         for name in ("_Note", "_SURROGATE_RE"):

@@ -204,7 +204,7 @@ class TestSettersAtTheRealCallSites:
         [
             ("synthesis/synthesizer.py", "COMPILE", "complete"),
             ("synthesis/repair.py", "COMPILE", "complete"),
-            ("synthesis/simulation.py", "SIMULATE", "complete"),
+            ("simulation/scenarios.py", "SIMULATE", "complete"),
             ("engine/turn/transitions.py", "TIE_BREAK", "classify"),
         ],
     )
