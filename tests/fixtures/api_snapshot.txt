@@ -2021,6 +2021,7 @@ fsm_llm.reasoning.ValidationResult class(TimestampedModel)
   property total_checks
   property validation_summary
 fsm_llm.reasoning.get_available_reasoning_types def(*, registry: ExecutableRegistry | None = None) -> dict[str, str]
+# fsm_llm.simulation
 # fsm_llm.synthesis
 fsm_llm.synthesis.CompileResult class
   def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = ()) -> None

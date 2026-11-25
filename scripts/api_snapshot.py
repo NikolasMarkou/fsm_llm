@@ -65,6 +65,7 @@ MODULES = (
     "fsm_llm.eval",
     "fsm_llm.monitor",
     "fsm_llm.reasoning",
+    "fsm_llm.simulation",
     "fsm_llm.synthesis",
     "fsm_llm.testing",
     "fsm_llm.workflows",

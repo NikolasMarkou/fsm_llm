@@ -128,6 +128,7 @@ LAYER_PACKAGES: frozenset[str] = frozenset(
         "policy",
         "runtime",
         "security",
+        "simulation",
         "skills",
         "tools",
     }

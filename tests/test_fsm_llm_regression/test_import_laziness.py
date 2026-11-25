@@ -77,6 +77,7 @@ ON_REQUEST = (
     "skills",
     "tools",
     "policy",
+    "simulation",
     "text",
     "frontmatter",
     "cli_support",
@@ -322,3 +323,20 @@ class TestImportSynthesisLoadsNoAgents:
         names = first_level(synthesis_modules)
 
         assert not names & {"agents", "reasoning", "workflows", "monitor"}, names
+
+
+class TestImportSimulationLoadsCoreAndKernelOnly:
+    """`import fsm_llm.simulation` loads no consumer package (plan c720601d, step 2, R1)."""
+
+    def test_no_consumer_package_loads(self) -> None:
+        names = first_level(loaded_by_import_of("fsm_llm.simulation"))
+
+        assert not names & {
+            "eval",
+            "synthesis",
+            "agents",
+            "workflows",
+            "reasoning",
+            "monitor",
+            "testing",
+        }, names

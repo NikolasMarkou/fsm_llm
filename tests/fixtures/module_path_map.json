@@ -1195,6 +1195,7 @@
     "fsm_llm.runtime.stores.session",
     "fsm_llm.runtime.stores.stack",
     "fsm_llm.runtime.usage",
+    "fsm_llm.simulation",
     "fsm_llm.skills",
     "fsm_llm.synthesis",
     "fsm_llm.synthesis.__version__",
