@@ -91,7 +91,8 @@ from fsm_llm.engine.kinds.targets import (
     ResolvedTarget,
 )
 from fsm_llm.logging import logger
-from fsm_llm.runtime.usage import watch_provider_errors
+from fsm_llm.runtime.signals import FrameSignals
+from fsm_llm.runtime.usage import watch_frame_signals, watch_provider_errors
 
 from .delegated import RunMark, flush_run_ends, settle_delegated
 
@@ -129,13 +130,15 @@ class CallMarks:
     ``errors``: child frame id to the reader of the provider errors made since its push, taken
     only for an executor with ``watches_outage`` (D-038). ``runs``: handle to the ``RunMark`` of a
     delegated run whose ``run/start`` is written and whose ``run/end`` is owed (``delegated.py``,
-    D-052).
+    D-052). ``signals``: child frame id to the reader of its event-log signals since its push,
+    taken beside ``errors`` and only with a log (plan c720601d D-012); read once, at its end.
     """
 
     settling: set[str] = field(default_factory=set)
     ending: set[str] = field(default_factory=set)
     pushed: dict[str, ResolvedTarget] = field(default_factory=dict)
     errors: dict[str, Callable[[], int]] = field(default_factory=dict)
+    signals: dict[str, Callable[[], FrameSignals]] = field(default_factory=dict)
     runs: dict[str, RunMark] = field(default_factory=dict)
 
     def forget(self, frame_ids: Iterable[str]) -> None:
@@ -145,6 +148,7 @@ class CallMarks:
             self.ending.discard(frame_id)
             self.pushed.pop(frame_id, None)
             self.errors.pop(frame_id, None)
+            self.signals.pop(frame_id, None)
         for handle in [h for h, mark in self.runs.items() if mark.frame_id in gone]:
             del self.runs[handle]
 
@@ -384,10 +388,17 @@ def _child_view(
     spent: str | None,
 ) -> ChildView:
     """The child frame as an executor may see it: copies and plain values only (D-038). The
-    provider-error count is read here, once, from the reader taken at the push (``0`` for an
-    executor that did not ask for one, or after a restart that lost it)."""
+    provider-error count is read here, from the reader taken at the push (``0`` for an
+    executor that did not ask for one, or after a restart that lost it); the event-log signals
+    are read ONCE, only when the child ended or spent its budget (``None`` otherwise, with the
+    log off, and after a restart or a fork that lost the reader: empty, never an error)."""
     with api._stack_lock:
         reader = api._call_marks.errors.get(child.conversation_id)
+        watch = (
+            api._call_marks.signals.get(child.conversation_id)
+            if ended or spent is not None
+            else None
+        )
     errors = 0
     if reader is not None:
         try:
@@ -403,6 +414,7 @@ def _child_view(
         spent=spent,
         steps=api.fsm_manager.turn_budget_steps(child.conversation_id),
         errors=errors,
+        signals=None if watch is None else watch(),
     )
 
 
@@ -686,6 +698,11 @@ async def _push_plan(
         if reader is not None:
             with api._stack_lock:
                 api._call_marks.errors[child_id] = reader
+        # the signals of the child, from the same push (D-012 of plan c720601d)
+        if api._event_log is not None:
+            watch = watch_frame_signals(api._event_log, root_id, depth - 1)
+            with api._stack_lock:
+                api._call_marks.signals[child_id] = watch
     await executor.on_pushed(root_id, top.conversation_id, child_id, state, record)
     return True
 

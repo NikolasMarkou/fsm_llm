@@ -15,17 +15,22 @@ the executor's ``trace_sink``; the library stores them (``FSMLibrary.add_trace``
 from __future__ import annotations
 
 import json
+import re
 import threading
+from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from fsm_llm.core.codes import LlmFailureCode
 from fsm_llm.core.definitions import (
+    ASCII_IDENTIFIER_PATTERN,
     State,
     TransitionEvaluationResult,
     logic_referenced_keys,
 )
 from fsm_llm.okf import capped_line
+from fsm_llm.runtime.signals import FrameSignals
 
 from .constants import (
     STATUS_ABORTED,
@@ -44,6 +49,10 @@ _TEXT = 80  # characters of any stored string
 _MAX_STATES, _MAX_NAMES = 100, 64
 _MAX_OPEN = 256  # runs the recorder follows at once
 _EVENTS = ("obtained", "pushed", "stepped", "aborted", "popped", "failed")
+_NAME = re.compile(ASCII_IDENTIFIER_PATTERN)
+_FAILURE_CODES = frozenset(code.value for code in LlmFailureCode)
+#: the signal fields of a trace and the width of an entry: names first, then a count
+_SIGNALS = {"failures": 2, "misses": 3, "scopes": 3, "bad_extractions": 2}
 
 
 def gate_reads(states: Iterable[State]) -> set[str]:
@@ -56,6 +65,53 @@ def gate_reads(states: Iterable[State]) -> set[str]:
         for c in t.conditions or []
         for key in (*(c.requires_context_keys or []), *logic_referenced_keys(c.logic))
     }
+
+
+def _entry_ok(entry: object, width: int) -> bool:
+    """One signal entry: ``width - 1`` identifiers (80 characters at most) and a count."""
+    return (
+        isinstance(entry, (tuple, list))
+        and len(entry) == width
+        and all(
+            isinstance(n, str) and len(n) <= _TEXT and bool(_NAME.fullmatch(n))
+            for n in entry[:-1]
+        )
+        and type(entry[-1]) is int
+        and entry[-1] >= 0
+    )
+
+
+def signal_fields(signals: FrameSignals) -> dict[str, str]:
+    """The event fields of the signals of one child (the non-empty ones, entries as
+    ``name:name:count`` joined by commas); ``extraction_failed`` and ``cut`` sum per state."""
+    bad: Counter[str] = Counter()
+    for state, n in (*signals.extraction_failed, *signals.cut):
+        bad[state] += n
+    found = {
+        "failures": signals.failures,
+        "misses": signals.misses,
+        "scopes": signals.out_of_scope,
+        "bad_extractions": tuple(sorted(bad.items())),
+    }
+    return {
+        name: ",".join(":".join(map(str, e)) for e in entries)
+        for name, entries in found.items()
+        if entries
+    }
+
+
+def _decode(text: object, width: int) -> tuple[tuple[Any, ...], ...]:
+    """The entries of a ``signal_fields`` string; an entry that is not valid is dropped."""
+    if not isinstance(text, str):
+        return ()
+    entries = []
+    for part in text.split(","):
+        *names, count = part.split(":")
+        if count.isdecimal() and len(count) <= 9:
+            entry = (*names, int(count))
+            if _entry_ok(entry, width):
+                entries.append(entry)
+    return tuple(entries)[:_MAX_NAMES]
 
 
 def _strs(value: object) -> tuple[str, ...]:
@@ -76,7 +132,10 @@ class RunTrace:
     ``(key, type name)`` for gate-read keys (``TRACE_KINDS`` names or
     ``other``); ``status``, ``reason``: the executor's result; ``stuck``: the
     state an unfinished run was in; ``outcome``: ``blocked``, ``ambiguous`` or
-    ``deterministic`` there.
+    ``deterministic`` there. The signal fields come from the event log (plan c720601d, D-012)
+    and are empty with the log off or after a restart or a fork: ``failures`` ``(code, n)`` (a
+    code outside ``LlmFailureCode`` is ``unknown``), ``misses`` and ``scopes`` ``(state, key,
+    n)``, ``bad_extractions`` ``(state, n)``: identifiers and counts, never a value.
 
     Interface contract: the constructor raises ``TypeError`` or ``ValueError``
     for a wrong shape and caps what it keeps (strings 80 characters, keys and
@@ -95,6 +154,10 @@ class RunTrace:
     reason: str | None = None
     stuck: str | None = None
     outcome: str | None = None
+    failures: tuple[tuple[str, int], ...] = ()
+    misses: tuple[tuple[str, str, int], ...] = ()
+    scopes: tuple[tuple[str, str, int], ...] = ()
+    bad_extractions: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
         def put(name: str, value: Any) -> None:
@@ -127,10 +190,21 @@ class RunTrace:
             "kinds",
             tuple((capped_line(k, _TEXT), t) for k, t in self.kinds)[:_MAX_NAMES],
         )
+        for name, width in _SIGNALS.items():
+            entries = getattr(self, name)
+            if not isinstance(entries, (tuple, list)) or not all(
+                _entry_ok(e, width) for e in entries
+            ):
+                raise ValueError(f"{name} are (name, count) entries of identifiers")
+            put(name, tuple(tuple(e) for e in entries)[:_MAX_NAMES])
+        codes = ((c if c in _FAILURE_CODES else "unknown", n) for c, n in self.failures)
+        put("failures", tuple(codes))
 
     def to_row(self) -> dict[str, Any]:
-        """A JSON-ready dict: the fields (tuples as lists) and ``"v": 1``."""
-        return dict(json.loads(json.dumps({"v": TRACE_VERSION, **asdict(self)})))
+        """A JSON-ready dict: the fields (tuples as lists) and ``"v": 1``. A signal field is
+        written only when it is not empty, so a run with the log off is the row it always was."""
+        row = dict(json.loads(json.dumps({"v": TRACE_VERSION, **asdict(self)})))
+        return {k: v for k, v in row.items() if v or k not in _SIGNALS}
 
     @classmethod
     def from_row(cls, row: object) -> RunTrace:
@@ -206,6 +280,9 @@ class TraceRecorder:
                     )
                     if k and t in _KIND_TYPES
                 )
+            for name, width in _SIGNALS.items():  # read once, at the child's end
+                if name in fields:
+                    run[name] = _decode(fields[name], width)
         if event == "obtained" and isinstance(fields.get("version"), str):
             run["version"] = fields["version"]
         elif event == "pushed":
@@ -234,5 +311,6 @@ class TraceRecorder:
                 reason=fields.get("reason"),
                 stuck=run.get("stuck"),
                 outcome=run.get("outcome"),
+                **{name: run.get(name, ()) for name in _SIGNALS},
             )
         return None

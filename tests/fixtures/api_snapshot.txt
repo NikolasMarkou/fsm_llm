@@ -2109,7 +2109,7 @@ fsm_llm.synthesis.PromotionResult class
   property promote
   def rates(self) -> tuple[dict[str, Any], dict[str, Any]]
 fsm_llm.synthesis.RunTrace class
-  def __init__(self, digest: str, version: str | None = None, mode: str = 'run', states: tuple[str, ...] = (), steps: int = 0, keys: tuple[str, ...] = (), kinds: tuple[tuple[str, str], ...] = (), status: str = 'ok', reason: str | None = None, stuck: str | None = None, outcome: str | None = None) -> None
+  def __init__(self, digest: str, version: str | None = None, mode: str = 'run', states: tuple[str, ...] = (), steps: int = 0, keys: tuple[str, ...] = (), kinds: tuple[tuple[str, str], ...] = (), status: str = 'ok', reason: str | None = None, stuck: str | None = None, outcome: str | None = None, failures: tuple[tuple[str, int], ...] = (), misses: tuple[tuple[str, str, int], ...] = (), scopes: tuple[tuple[str, str, int], ...] = (), bad_extractions: tuple[tuple[str, int], ...] = ()) -> None
   classmethod def from_row(cls, row: object) -> RunTrace
   def to_row(self) -> dict[str, Any]
 fsm_llm.synthesis.SimulationReport class

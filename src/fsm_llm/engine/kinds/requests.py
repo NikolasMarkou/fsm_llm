@@ -15,8 +15,10 @@ definition and a copy of its raw context, and the ``running`` record the state w
 (``None`` for none). ``ChildView``: a child frame as it is now: its conversation id, ``fsm_id``,
 current state, a copy of its raw context, whether it ended (its state has no transition), the
 name of its spent lifetime budget (``"steps"`` or ``"seconds"``) or ``None``, the engine's
-count of its turns (``None`` when unknown) and the provider errors made since the push (``0``
-unless the executor sets ``watches_outage``). ``PopContext``: the root and parent ids, the
+count of its turns (``None`` when unknown), the provider errors made since the push (``0``
+unless the executor sets ``watches_outage``) and its ``signals`` (a frozen ``FrameSignals`` read
+once, at the child's end, from the event log; ``None`` with the log off, after a restart or a
+fork that lost the reader, and on every turn before the end). ``PopContext``: the root and parent ids, the
 parent's state and definition, the ``running`` record and the ``ChildView``.
 """
 
@@ -27,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fsm_llm.core.definitions import FSMDefinition, State
+from fsm_llm.runtime.signals import FrameSignals
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,7 @@ class ChildView:
     spent: str | None
     steps: int | None
     errors: int = 0
+    signals: FrameSignals | None = None
 
 
 @dataclass(frozen=True)

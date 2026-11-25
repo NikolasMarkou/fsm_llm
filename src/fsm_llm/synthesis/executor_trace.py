@@ -29,7 +29,7 @@ from fsm_llm.logging import logger
 from .constants import TRACE_KIND_OTHER, TRACE_KINDS
 from .procedures import _round_string
 from .synthesizer import Procedure
-from .traces import gate_reads
+from .traces import gate_reads, signal_fields
 
 if TYPE_CHECKING:
     from .executor import _Run
@@ -61,7 +61,8 @@ class TraceEmitters:
     ) -> dict[str, Any]:
         """Value-free facts about the child for a trace event: its ``state``, the declared names
         present (``keys``), ``name:type`` for those an edge gate reads (``kinds``, types from
-        ``TRACE_KINDS``) and, with ``outcome``, what the evaluator makes of its edges now. ``{}``
+        ``TRACE_KINDS``), with ``outcome`` what the evaluator makes of its edges now, and the
+        event-log signals of the child when it has them (names and counts only). ``{}``
         without a sink, and on any failure (one WARNING): a trace never changes a run."""
         if self._sink is None:
             return {}
@@ -88,6 +89,8 @@ class TraceEmitters:
                     definition.states[child.state_id], FSMContext(data=dict(data))
                 )
                 view["outcome"] = found.result_type.value
+            if child.signals is not None:  # set at the child's end, with the log on
+                view.update(signal_fields(child.signals))
             return view
         except Exception as e:
             logger.warning(f"could not read the child for a trace: {type(e).__name__}")
