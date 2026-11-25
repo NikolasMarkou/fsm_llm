@@ -11,19 +11,27 @@ Interface contract (callers: ``runtime.usage.watch_frame_signals``, tests):
       and no provider error inside. No ``turn/end`` (a killed turn), a rolled-back or a tainted
       window gives nothing. ``seq`` is the order. Never reads a blob, a ``source`` or a ``ts``,
       never raises on an event it can read. Absence proves nothing (writes are best effort).
+    - ``is_signal_name(value) -> bool``: the one rule for a state or key name a signal may carry
+      (an ASCII identifier of at most ``SIGNAL_NAME_MAX`` characters). An event with any other
+      name is not recorded: a model-written key such as ``a,b:c`` cannot shape a wire string.
 """
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from fsm_llm.core.codes import LlmFailureCode, Purpose
+from fsm_llm.core.definitions import ASCII_IDENTIFIER_PATTERN
 from fsm_llm.runtime.events import EventType, TurnOutcome
 
-__all__ = ["FrameSignals", "frame_signals"]
+__all__ = ["SIGNAL_NAME_MAX", "FrameSignals", "frame_signals", "is_signal_name"]
+
+SIGNAL_NAME_MAX = 80
+_NAME = re.compile(ASCII_IDENTIFIER_PATTERN)
 
 _KNOWN_CODES = frozenset(code.value for code in LlmFailureCode)
 _CUT_PURPOSES = frozenset({Purpose.EXTRACT.value, Purpose.CLASSIFY.value})
@@ -39,8 +47,17 @@ class FrameSignals:
     errors: int = 0
 
 
+def is_signal_name(value: object) -> bool:
+    """Whether *value* may be a name in a signal (see the module docstring)."""
+    return (
+        isinstance(value, str)
+        and len(value) <= SIGNAL_NAME_MAX
+        and _NAME.fullmatch(value) is not None
+    )
+
+
 def _name(value: Any) -> str | None:
-    return value if isinstance(value, str) and value else None
+    return value if is_signal_name(value) else None
 
 
 def _window(

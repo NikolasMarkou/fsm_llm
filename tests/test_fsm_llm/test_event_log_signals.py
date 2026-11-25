@@ -13,7 +13,7 @@ import ast
 import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest import mock
 
 import pytest
@@ -403,6 +403,63 @@ class TestTheWindowRule:
         )
         events.append({"seq": 99})
         assert frame_signals(events, 1) == FrameSignals()
+
+
+class TestANameIsAnIdentifierOrTheEventIsNotRecorded:
+    """Plan c720601d step 19.1: a model-written key or state name reaches the wire of a trace, so
+    only an ASCII identifier of at most 80 characters is recorded (review probe p9, p10)."""
+
+    HOSTILE: ClassVar[list[str]] = [
+        "x,ask:ghost",  # the wire separators
+        "a:b",
+        "a,b",
+        "a" * 81,
+        "caf\u00e9",  # not ASCII
+        "\u043a\u043b\u044e\u0447",
+        "x\u200b",  # a zero width character
+        "city\n",  # a trailing newline
+        "1city",
+        "a b",
+        "",
+    ]
+
+    @pytest.mark.parametrize("name", HOSTILE)
+    def test_a_hostile_key_is_dropped_and_the_good_one_beside_it_stays(self, name: str):
+        miss = ("extraction/miss", {"state": "ask", "keys": [name, "city"]})
+
+        assert frame_signals(_turn(1, miss), 1).misses == (("ask", "city", 1),)
+
+    @pytest.mark.parametrize("name", HOSTILE)
+    def test_a_hostile_state_gives_no_evidence_of_any_kind(self, name: str):
+        events = (
+            ("extraction/miss", {"state": name, "keys": ["city"]}),
+            ("intent/out_of_scope", {"state": name, "field": "city"}),
+            ("executor/result", {"state": name, "extraction_failed": True}),
+        )
+
+        assert frame_signals(_turn(1, *events), 1) == FrameSignals()
+
+    @pytest.mark.parametrize("name", HOSTILE)
+    def test_a_hostile_field_of_a_scope_event_is_dropped(self, name: str):
+        scope = ("intent/out_of_scope", {"state": "ask", "field": name})
+
+        assert frame_signals(_turn(1, scope), 1).out_of_scope == ()
+
+    def test_the_longest_name_and_a_plain_one_are_kept(self):
+        longest = "a" * 80
+        miss = ("extraction/miss", {"state": longest, "keys": [longest, "_x9"]})
+
+        got = frame_signals(_turn(1, miss), 1).misses
+
+        assert got == ((longest, "_x9", 1), (longest, longest, 1))
+
+    def test_the_one_rule_is_a_function_the_trace_shares(self):
+        from fsm_llm.runtime.signals import is_signal_name
+
+        assert is_signal_name("ask") and is_signal_name("a" * 80)
+        assert not is_signal_name("a" * 81)
+        assert not any(is_signal_name(n) for n in self.HOSTILE)
+        assert not any(is_signal_name(n) for n in (None, 3, b"ask", ["ask"]))
 
 
 class TestTheOrderAndTheFieldsItReads:

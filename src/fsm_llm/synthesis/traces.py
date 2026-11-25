@@ -15,7 +15,6 @@ the executor's ``trace_sink``; the library stores them (``FSMLibrary.add_trace``
 from __future__ import annotations
 
 import json
-import re
 import threading
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -24,13 +23,12 @@ from typing import Any
 
 from fsm_llm.core.codes import LlmFailureCode
 from fsm_llm.core.definitions import (
-    ASCII_IDENTIFIER_PATTERN,
     State,
     TransitionEvaluationResult,
     logic_referenced_keys,
 )
 from fsm_llm.okf import capped_line
-from fsm_llm.runtime.signals import FrameSignals
+from fsm_llm.runtime.signals import FrameSignals, is_signal_name
 
 from .constants import (
     STATUS_ABORTED,
@@ -49,7 +47,6 @@ _TEXT = 80  # characters of any stored string
 _MAX_STATES, _MAX_NAMES = 100, 64
 _MAX_OPEN = 256  # runs the recorder follows at once
 _EVENTS = ("obtained", "pushed", "stepped", "aborted", "popped", "failed")
-_NAME = re.compile(ASCII_IDENTIFIER_PATTERN)
 _FAILURE_CODES = frozenset(code.value for code in LlmFailureCode)
 #: the signal fields of a trace and the width of an entry: names first, then a count
 _SIGNALS = {"failures": 2, "misses": 3, "scopes": 3, "bad_extractions": 2}
@@ -68,14 +65,11 @@ def gate_reads(states: Iterable[State]) -> set[str]:
 
 
 def _entry_ok(entry: object, width: int) -> bool:
-    """One signal entry: ``width - 1`` identifiers (80 characters at most) and a count."""
+    """One signal entry: ``width - 1`` signal names (``is_signal_name``) and a count."""
     return (
         isinstance(entry, (tuple, list))
         and len(entry) == width
-        and all(
-            isinstance(n, str) and len(n) <= _TEXT and bool(_NAME.fullmatch(n))
-            for n in entry[:-1]
-        )
+        and all(is_signal_name(n) for n in entry[:-1])
         and type(entry[-1]) is int
         and entry[-1] >= 0
     )
@@ -101,16 +95,18 @@ def signal_fields(signals: FrameSignals) -> dict[str, str]:
 
 
 def _decode(text: object, width: int) -> tuple[tuple[Any, ...], ...]:
-    """The entries of a ``signal_fields`` string; an entry that is not valid is dropped."""
+    """The entries of a ``signal_fields`` string. One malformed entry makes the WHOLE string
+    foreign and it gives nothing: the entries are comma joined, so the boundaries of a forged
+    string cannot be told from real ones and no part of it is trusted."""
     if not isinstance(text, str):
         return ()
     entries = []
     for part in text.split(","):
         *names, count = part.split(":")
-        if count.isdecimal() and len(count) <= 9:
-            entry = (*names, int(count))
-            if _entry_ok(entry, width):
-                entries.append(entry)
+        entry = (*names, int(count)) if count.isdecimal() and len(count) <= 9 else ()
+        if not _entry_ok(entry, width):
+            return ()
+        entries.append(entry)
     return tuple(entries)[:_MAX_NAMES]
 
 

@@ -557,6 +557,29 @@ class TestAMissIsObservedNotInferred:
 
 
 @pytest.mark.parametrize("level", LEVELS)
+class TestAFieldNamedLikeTheWireIsNoEvidenceForAnotherKey:
+    """Review probe p10 (plan c720601d step 19.1): a model-written field ``x,ask:ghost`` is read
+    back from the log as the key ``ghost`` of state ``ask`` by a decoder that splits on the
+    wire separators. No state declares ``ghost``."""
+
+    @pytest.mark.parametrize("name", ["x,ask:ghost", "x,mid:answer", "a:b"])
+    def test_the_miss_of_such_a_field_is_not_a_miss_of_another_key(
+        self, tmp_path: Path, level: str, name: str
+    ):
+        fsm = good_fsm()
+        fsm["states"]["ask"]["field_extractions"].append(
+            {"field_name": name, "field_type": "str", "extraction_instructions": "x"}
+        )
+
+        outcome = drive(tmp_path, fsm, _Seeded({"town": "x"}), level)
+
+        logged = [e for e in _events(outcome) if e["type"] == "extraction/miss"]
+        assert name in logged[0]["keys"]  # the real run missed the hostile field too
+        assert outcome.trace.misses == ((ASK, "answer", 3),)
+        assert outcome.codes == [MISS]
+
+
+@pytest.mark.parametrize("level", LEVELS)
 class TestAnIntentOutOfScope:
     @pytest.mark.parametrize("name", ["fallback", "discarded"])
     def test_a_fallback_or_a_discarded_intent_is_out_of_scope(

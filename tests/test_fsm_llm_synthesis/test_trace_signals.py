@@ -300,6 +300,52 @@ class TestTheWireOfTheSignals:
             (),
         )
 
+    def test_a_forged_name_makes_no_evidence_for_another_state_or_key(self):
+        """A key ``x,ask:ghost`` joined on the wire reads back as ``(ask, ghost, 3)`` in the
+        old decoder; the whole string is foreign now and gives nothing."""
+        for forged in (
+            FrameSignals(misses=(("ask", "x,ask:ghost", 3),)),
+            FrameSignals(misses=(("ask", "answer", 3), ("ask", "x,mid:answer", 3))),
+            FrameSignals(out_of_scope=(("ask", "a,mid:f", 2),)),
+            FrameSignals(extraction_failed=(("zz,ask", 5),)),
+            FrameSignals(extraction_failed=(("ask", 3), ("x,mid", 3))),
+        ):
+            rows: list[RunTrace] = []
+            recorder = TraceRecorder(rows.append)
+            recorder("pushed", {"conv": "c", "digest": D1, "step": 0})
+            recorder(
+                "aborted",
+                {"conv": "c", "digest": D1, "state": "ask", **signal_fields(forged)},
+            )
+            recorder("popped", {"conv": "c", "digest": D1, "status": "aborted"})
+
+            (trace,) = rows
+            assert (trace.misses, trace.scopes, trace.bad_extractions) == ((), (), ())
+
+    @pytest.mark.parametrize(
+        "text", ["ask:answer:3,x,ask:ghost:3", "ask:answer:3,", "ask:a:3,ask:b:x"]
+    )
+    def test_one_malformed_part_makes_the_whole_wire_string_foreign(self, text: str):
+        rows: list[RunTrace] = []
+        recorder = TraceRecorder(rows.append)
+        recorder("pushed", {"conv": "c", "digest": D1, "step": 0})
+        recorder("aborted", {"conv": "c", "digest": D1, "misses": text})
+        recorder("popped", {"conv": "c", "digest": D1, "status": "aborted"})
+
+        assert rows[0].misses == ()
+
+    def test_a_clean_wire_string_still_decodes_every_entry(self):
+        rows: list[RunTrace] = []
+        recorder = TraceRecorder(rows.append)
+        recorder("pushed", {"conv": "c", "digest": D1, "step": 0})
+        recorder(
+            "aborted",
+            {"conv": "c", "digest": D1, "misses": "ask:a:3,ask:b:1,wait:c:2"},
+        )
+        recorder("popped", {"conv": "c", "digest": D1, "status": "aborted"})
+
+        assert rows[0].misses == (("ask", "a", 3), ("ask", "b", 1), ("wait", "c", 2))
+
     def test_a_non_string_field_is_ignored(self):
         rows: list[RunTrace] = []
         recorder = TraceRecorder(rows.append)
