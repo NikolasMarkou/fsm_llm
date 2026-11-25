@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 from fsm_llm.llm import LLMInterface, interface_model
@@ -26,9 +27,17 @@ def _name(llm: LLMInterface | None) -> str | None:
     return (interface_model(llm) or "").strip() or None
 
 
+def _form(name: str | None) -> str:
+    """The compared form of a name: no format (zero width) characters, the part after the last
+    ``/`` (a provider prefix), case folded; ``""`` when nothing is left."""
+    plain = "".join(c for c in name or "" if unicodedata.category(c) != "Cf")
+    return plain.rpartition("/")[2].strip().casefold()
+
+
 # DECISION plan-2026-11-25T074601-c720601d/D-009
-# A guard against the default (judge is executor), not a proof: it compares names, so
-# an alias or two servers behind one name pass. It fails closed: an unnamed model
+# A guard against the default (judge is executor), not a proof: it compares names (case,
+# provider prefix and zero width characters aside), so a deeper alias or two servers
+# behind one name pass. It fails closed: an unnamed model
 # cannot be shown distinct. A compiler equal to the executor is allowed. Roles ride
 # the report, the compile result and the receipt, NEVER ``LibraryRecord.provenance``;
 # the refusal is raised at synthesizer construction and in ``repair_procedure`` only,
@@ -43,8 +52,8 @@ def roles_of(
     """The ``Roles`` of a run, refusing a judge that is not distinct.
 
     Interface contract (caller: ``Simulator.roles``): ``judge`` must differ from
-    ``executor`` and, when given, from ``compiler``: the same object, equal stripped
-    model names (``interface_model``) or an unnamed side is refused with
+    ``executor`` and, when given, from ``compiler``: the same object, equal model names
+    (``interface_model``, compared by ``_form``) or an unnamed side is refused with
     ``SimulationError(code=CODE_JUDGE_NOT_DISTINCT)``; the message names no model.
     ``allow=True`` skips the check. Never calls a model.
     """
@@ -52,8 +61,8 @@ def roles_of(
         for other in (executor, compiler):
             if other is None:
                 continue
-            a, b = _name(judge), _name(other)
-            if judge is other or a is None or b is None or a == b:
+            a, b = _form(_name(judge)), _form(_name(other))
+            if judge is other or not a or not b or a == b:
                 raise SimulationError(
                     "the judge must be a different model from the executor and the "
                     f"compiler ({CODE_JUDGE_NOT_DISTINCT}); name each model or pass "

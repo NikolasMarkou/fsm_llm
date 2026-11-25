@@ -66,6 +66,36 @@ class TestRefusals:
         with pytest.raises(SimulationError):  # a mock attribute is not a name
             Simulator(one, two)
 
+    @pytest.mark.parametrize(
+        ("executor", "judge"),
+        [
+            ("Bonsai-2:27b", "bonsai-2:27b"),  # a case change
+            ("ollama_chat/bonsai-2:27b", "bonsai-2:27b"),  # a provider prefix
+            ("ollama_chat/bonsai-2:27b", "ollama/bonsai-2:27b"),  # two prefixes
+            ("x\u200b", "x"),  # a zero width space
+            ("x", "\ufeffx\u2060"),  # a byte order mark and a word joiner
+            ("openai/Gpt-4o", " GPT-4O "),
+        ],
+    )
+    def test_a_case_a_prefix_or_a_zero_width_character_does_not_make_models_distinct(
+        self, executor: str, judge: str
+    ):
+        """Review concern 7 (probe p6): the same model written another way is refused."""
+        with pytest.raises(SimulationError, match="judge_not_distinct"):
+            Simulator(_llm(executor), _llm(judge))
+
+    @pytest.mark.parametrize("name", ["ollama/", "/", "\u200b/\u200b"])
+    def test_a_name_with_nothing_after_the_last_slash_fails_closed(self, name: str):
+        with pytest.raises(SimulationError):
+            Simulator(_llm(name), _llm("j"))
+        with pytest.raises(SimulationError):
+            Simulator(_llm("e"), _llm(name))
+
+    def test_the_compiler_is_compared_by_the_same_form(self):
+        sim = Simulator(_llm("runner"), _llm("ollama/Judge"))
+        with pytest.raises(SimulationError):
+            sim.roles(_llm("openai/judge"))
+
     def test_the_message_names_the_code_and_no_model(self):
         with pytest.raises(SimulationError) as info:
             Simulator(_llm("secret-model-7"), _llm("secret-model-7"))
@@ -91,6 +121,24 @@ class TestAllowed:
         assert sim.roles(_llm("compiler")) == Roles(
             "compiler", "runner", "judge", False
         )
+
+    @pytest.mark.parametrize(
+        ("executor", "judge"),
+        [
+            ("ollama/bonsai-2:27b", "ollama/bonsai-3:27b"),
+            ("a/m1", "b/m2"),
+            ("gpt-4o", "gpt-4o-mini"),
+            (
+                "azure/my-deployment",
+                "gpt-4o",
+            ),  # a deeper alias passes: names only (D-009)
+        ],
+    )
+    def test_distinct_names_pass_whatever_their_prefix_and_an_alias_still_does(
+        self, executor: str, judge: str
+    ):
+        roles = Simulator(_llm(executor), _llm(judge)).roles()
+        assert (roles.executor, roles.judge) == (executor, judge)  # the names as given
 
     def test_the_compiler_may_equal_the_executor(self):
         sim = Simulator(_llm("runner"), _llm("judge"))

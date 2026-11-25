@@ -306,6 +306,7 @@ def replay_g6b(
     bounds as ``run_g6b`` (``policy``) are checked before every trial; a spent bound
     returns ``None``, never a partial count.
     """
+    simulator.roles()  # a judge set late is refused before any trial
     model = _model(definition)
     budget = simulator.budget(
         policy.max_simulation_seconds, policy.max_simulation_calls
@@ -354,6 +355,7 @@ def run_g6b(
         repair; no provider text in it), chained from an ``LLMResponseError`` when
         every error was a provider failure.
     """
+    roles = simulator.roles()  # a judge set late is refused before the writer call
     model = _model(definition)
     budget = simulator.budget(
         policy.max_simulation_seconds, policy.max_simulation_calls
@@ -440,7 +442,7 @@ def run_g6b(
         happy,
         len({i for i, _, _ in ran if i}),
         budget.calls(),
-        simulator.roles(),
+        roles,
     )
 
 

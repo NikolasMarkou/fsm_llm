@@ -184,10 +184,11 @@ class ConversationClassificationMixin(_ConversationSurface):
 
                 # Always store fallback intent so the context key exists
                 # for downstream JsonLogic conditions
+                low = "low_confidence" in full_result
                 if result.intent == config.fallback_intent:
                     extracted[config.field_name] = result.intent
                     _record_out_of_scope(
-                        current_state, config, result, low_confidence=False
+                        current_state, config, result, low_confidence=low
                     )
                     log.debug(
                         f"Classification extraction '{config.field_name}': "
@@ -196,7 +197,7 @@ class ConversationClassificationMixin(_ConversationSurface):
                     continue
 
                 # Skip low confidence
-                if "low_confidence" in full_result:
+                if low:
                     _record_out_of_scope(
                         current_state, config, result, low_confidence=True
                     )

@@ -151,7 +151,8 @@ class TestTheReply:
 
 
 class TestOneDefangOneFence:
-    """D-007 here: exactly one defang and one fence function in the tree (R2)."""
+    """D-007 here: exactly one defang FUNCTION and one fence function in the tree (R2). The
+    ``SKILL_DEFANG`` table is applied directly by two other callers, for other texts."""
 
     @staticmethod
     def _defined(name: str) -> list[str]:

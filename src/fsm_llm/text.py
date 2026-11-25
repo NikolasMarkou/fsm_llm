@@ -87,11 +87,11 @@ def capped_line(value: object, cap: int = OKF_SUMMARY_FIELD_CHARS) -> str:
 
 
 # DECISION plan-2026-11-25T074601-c720601d/D-007
-# ONE defang (this function) and ONE fence (``synthesis.prompts._fence``) in every state
-# of the tree. Model-authored or caller text reaches a model only through them. Do NOT
-# write a second defang in ``simulation`` or ``synthesis``, and do NOT make ``simulation``
-# import the fence from ``synthesis`` (the layer forbids it): the caller hands the writer
-# its text READY-FENCED.
+# ONE defang function (this one) and ONE fence (``synthesis.prompts._fence``) for the text a
+# model sees from ``simulation`` and ``synthesis`` (``synthesizer.py`` and ``skills.catalog``
+# apply ``SKILL_DEFANG`` to other texts). Do NOT write a second defang function there, and
+# do NOT make ``simulation`` import the fence from ``synthesis`` (the layer forbids it): the
+# caller hands the writer its text READY-FENCED.
 def safe_text(text: str, cap: int = SAFE_TEXT_CHARS) -> str:
     """``text`` as one safe line: control-stripped, cut at ``cap`` characters and
     ``[ ] < >`` defanged. ``""`` for a non-string."""

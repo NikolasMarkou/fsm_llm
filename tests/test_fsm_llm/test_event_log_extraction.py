@@ -253,6 +253,21 @@ class TestIntentOutOfScope:
         assert event["intent"] == "browse" and event["confidence"] == 0.9
         assert event["low_confidence"] is False
 
+    def test_a_fallback_below_the_threshold_is_flagged_low_confidence(
+        self, log: EventLog
+    ):
+        """Review concern 6: the fallback event said ``low_confidence=False`` whatever the
+        confidence was; an honest fallback (0.9 above) stays False, a doubtful one is True."""
+        cid = _turn(log, _llm("browse", 0.3))
+        (event,) = _of(log, cid, "intent/out_of_scope")
+        assert event["intent"] == "browse" and event["confidence"] == 0.3
+        assert event["low_confidence"] is True
+
+    def test_a_fallback_at_the_threshold_is_not_low_confidence(self, log: EventLog):
+        cid = _turn(log, _llm("browse", 0.7))  # the rule is ``<``, as at every site
+        (event,) = _of(log, cid, "intent/out_of_scope")
+        assert event["low_confidence"] is False
+
     def test_a_discarded_low_confidence_intent_is_flagged(self, log: EventLog):
         cid = _turn(log, _llm("buy", 0.2))
         (event,) = _of(log, cid, "intent/out_of_scope")

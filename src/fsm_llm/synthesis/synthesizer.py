@@ -380,6 +380,10 @@ class FSMSynthesizer:
                 "a simulation is required and no simulator is set",
                 {"rounds": [(CODE_SIMULATION_INCOMPLETE,)]},
             )
+        # a judge changed after construction is refused before the first model call
+        roles = (
+            None if self.simulator is None else checked_roles(self.simulator, self.llm)
+        )
         messages = compile_messages(goal, ins, keys, policy, reference)
         deadline = self._clock() + policy.max_synthesis_seconds
         failed: list[tuple[str, ...]] = []
@@ -423,9 +427,7 @@ class FSMSynthesizer:
                         usage() if callable(usage) else None,
                         simulation,
                         tuple(failed),
-                        None
-                        if self.simulator is None
-                        else checked_roles(self.simulator, self.llm),
+                        roles,
                     )
                 report = GateReport(simulation.findings)  # the G6b failure
             failed.append(tuple(dict.fromkeys(f.code for f in report.findings)))

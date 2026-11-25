@@ -11,18 +11,26 @@ from typing import Any
 
 import pytest
 
-from fsm_llm.simulation import CODE_JUDGE_NOT_DISTINCT, Roles, Simulator
+from fsm_llm.simulation import (
+    CODE_JUDGE_NOT_DISTINCT,
+    Roles,
+    SimulationError,
+    Simulator,
+)
 from fsm_llm.synthesis import (
     FSMLibrary,
     FSMSynthesizer,
+    SynthesisPolicy,
     SynthesisRefusedError,
     create_procedure_tools,
     repair_procedure,
+    run_gates,
 )
 from fsm_llm.synthesis.constants import CODE_JUDGE_NOT_DISTINCT as SYNTHESIS_CODE
+from fsm_llm.synthesis.simulation import replay_g6b, run_g6b
 from fsm_llm.testing import ScriptedLLM
 from fsm_llm.tools import ToolCall
-from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM
+from tests.test_fsm_llm_synthesis.conftest import ScriptedRunnerLLM, good_fsm
 
 GOAL = "Collect one answer"
 SCENARIOS = json.dumps({"scenarios": [{"kind": "off_topic", "turns": ["hello there"]}]})
@@ -169,3 +177,75 @@ class TestTheRefusal:
             )
         assert info.value.code == CODE_JUDGE_NOT_DISTINCT
         assert judge.requests == [] and runner.call_history == []
+
+
+class TestAJudgeChangedAfterConstructionIsRefusedBeforeAnyCall:
+    """Review concern 8 (probe p7): ``Simulator.executor`` and ``judge`` and ``FSMSynthesizer.llm``
+    are plain attributes. A refusal that waited for the report came after every model call."""
+
+    @staticmethod
+    def _armed() -> tuple[Simulator, ScriptedRunnerLLM, ScriptedLLM]:
+        runner, judge = ScriptedRunnerLLM({"answer": "42"}), _writer()
+        sim = Simulator(runner, judge)
+        sim.judge = runner  # the default the check exists against, set late
+        return sim, runner, judge
+
+    @staticmethod
+    def _definition() -> Any:
+        report = run_gates(
+            good_fsm(), SynthesisPolicy(), inputs=("topic",), return_keys=("answer",)
+        )
+        return report.injected
+
+    def test_run_g6b_refuses_before_the_writer_and_before_any_trial(self):
+        sim, runner, judge = self._armed()
+        with pytest.raises(SimulationError) as info:
+            run_g6b(
+                sim,
+                self._definition(),
+                goal=GOAL,
+                inputs=("topic",),
+                return_keys=("answer",),
+                policy=SynthesisPolicy(),
+            )
+        assert info.value.code == CODE_JUDGE_NOT_DISTINCT
+        assert judge.requests == [] and runner.call_history == []
+
+    def test_replay_g6b_refuses_before_any_trial(self):
+        sim, runner, judge = self._armed()
+        with pytest.raises(SimulationError) as info:
+            replay_g6b(
+                sim,
+                self._definition(),
+                [{"kind": "happy", "turns": ["hello"]}],
+                inputs=("topic",),
+                return_keys=("answer",),
+                trials=1,
+                policy=SynthesisPolicy(),
+            )
+        assert info.value.code == CODE_JUDGE_NOT_DISTINCT
+        assert judge.requests == [] and runner.call_history == []
+
+    @pytest.mark.parametrize("use_async", [False, True])
+    def test_a_compile_refuses_before_the_strong_model_is_called(
+        self, valid_fsm, tmp_path, use_async: bool
+    ):
+        compiler = ScriptedLLM([json.dumps(valid_fsm)] * 2, model="compiler")
+        runner = ScriptedRunnerLLM({"answer": "42"})
+        sim = Simulator(runner, _writer())
+        synth = FSMSynthesizer(compiler, simulator=sim)
+        sim.judge = (
+            compiler  # the judge is the compiler, set after the construction check
+        )
+
+        def go() -> Any:
+            if use_async:
+                return asyncio.run(
+                    synth.acompile(GOAL, inputs=("topic",), return_keys=("answer",))
+                )
+            return synth.compile(GOAL, inputs=("topic",), return_keys=("answer",))
+
+        with pytest.raises(SynthesisRefusedError) as info:
+            go()
+        assert info.value.code == CODE_JUDGE_NOT_DISTINCT
+        assert compiler.requests == [] and runner.call_history == []

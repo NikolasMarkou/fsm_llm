@@ -6,8 +6,10 @@ Interface contract (callers: ``runtime.usage.watch_frame_signals``, tests):
       ``misses`` and ``out_of_scope``: ``(state, key or field, n)``. ``extraction_failed`` and
       ``cut``: ``(state, n)``. ``errors``: how many ``provider/error`` events were read. Every
       ``n`` but the failures' counts CLEAN TURN WINDOWS (a turn, once per kind and name, however
-      many events it wrote); ``cut`` counts only the windows where no extraction of that state
-      failed too, so ``extraction_failed + cut`` is the number of windows with a bad extraction.
+      many events it wrote). ``out_of_scope`` counts only an event with ``low_confidence``
+      true (an honest fallback is in scope). ``cut`` counts only the windows where no
+      extraction of that state failed too, so ``extraction_failed + cut`` is the number of
+      windows with a bad extraction.
     - ``frame_signals(events, frame) -> FrameSignals``: one pass over any iterable of events
       (``log.query(...)``). Failures count EVERY provider error of the frame. The rest comes only
       from a CLEAN turn window: ``turn/start`` to ``turn/end``, the outcome not ``rolled_back``
@@ -87,7 +89,7 @@ def _window(
                 if _name(key):
                     hits.add(("miss", (here, key)))
         elif kind == EventType.INTENT_OUT_OF_SCOPE.value and here:
-            if _name(event.get("field")):
+            if _name(event.get("field")) and event.get("low_confidence") is True:
                 hits.add(("scope", (here, event["field"])))
         elif (
             kind == EventType.LLM_RESPONSE.value

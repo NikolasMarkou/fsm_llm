@@ -289,8 +289,8 @@ def _classify_fsm() -> dict[str, Any]:
 
 @pytest.mark.parametrize("level", LEVELS)
 class TestOutOfScopeFromTheRealLog:
-    @pytest.mark.parametrize(("intent", "confidence"), [("browse", 0.9), ("buy", 0.2)])
-    def test_a_fallback_or_a_discarded_intent_is_out_of_scope(
+    @pytest.mark.parametrize(("intent", "confidence"), [("browse", 0.3), ("buy", 0.2)])
+    def test_a_doubtful_fallback_or_a_discarded_intent_is_out_of_scope(
         self, tmp_path: Path, level: str, intent: str, confidence: float
     ):
         log = EventLog(tmp_path / "ev", privacy=level)
@@ -303,6 +303,25 @@ class TestOutOfScopeFromTheRealLog:
         api.converse("my private words", cid)
         got = frame_signals(log.read(cid), 0)
         assert got.out_of_scope == (("ask", "user_intent", 1),)
+
+    @pytest.mark.parametrize("confidence", [0.9, 0.7])
+    def test_an_honest_fallback_is_in_scope_and_counts_nothing(
+        self, tmp_path: Path, level: str, confidence: float
+    ):
+        """Review concern 6 (probe p2): a user who honestly says "just browsing" three times
+        picks the diagnosis code when every fallback counts. Only a confidence below the
+        threshold (0.7) is out of scope; the event itself is still written."""
+        log = EventLog(tmp_path / "ev", privacy=level)
+        reply = final_reply(
+            json.dumps({"reasoning": "r", "intent": "browse", "confidence": confidence})
+        )
+        llm = ScriptedLLM([reply], extraction_data={}, responses={"ask": "reply"})
+        api = API(copy.deepcopy(_classify_fsm()), llm_interface=llm, event_log=log)
+        cid, _ = api.start_conversation()
+        api.converse("just browsing", cid)
+        events = [e for e in log.read(cid) if e["type"] == "intent/out_of_scope"]
+        assert [e["low_confidence"] for e in events] == [False]
+        assert frame_signals(log.read(cid), 0).out_of_scope == ()
 
     def test_a_confident_in_scope_intent_is_not(self, tmp_path: Path, level: str):
         log = EventLog(tmp_path / "ev", privacy=level)
@@ -336,6 +355,10 @@ _MISS = ("extraction/miss", {"state": "ask", "keys": ["city"]})
 _BAD = ("executor/result", {"state": "ask", "extraction_failed": True})
 _CUT = ("llm/response", {"finish_reason": "length", "purpose": "extract"})
 _FAIL = ("provider/error", {"failure_code": "timeout", "purpose": "extract"})
+_SCOPE = (
+    "intent/out_of_scope",
+    {"state": "ask", "field": "tone", "intent": "browse", "low_confidence": True},
+)
 
 
 class TestTheWindowRule:
@@ -359,7 +382,7 @@ class TestTheWindowRule:
         assert (got.extraction_failed, got.cut) == ((("ask", 1),), (("ask", 1),))
 
     def test_several_events_of_a_kind_and_name_in_one_window_count_once(self):
-        scope = ("intent/out_of_scope", {"state": "ask", "field": "tone"})
+        scope = _SCOPE
         twice = ("extraction/miss", {"state": "ask", "keys": ["city", "city"]})
         got = frame_signals(_turn(1, _MISS, _MISS, twice, scope, scope, _BAD, _BAD), 1)
         assert got.misses == (("ask", "city", 1),)
@@ -415,6 +438,20 @@ class TestTheWindowRule:
             ("ask", "city", 2),
         )
 
+    def test_only_a_low_confidence_intent_is_out_of_scope(self):
+        def got(**fields: Any) -> Any:
+            event = ("intent/out_of_scope", {**_SCOPE[1], **fields})
+            return frame_signals(_turn(1, event), 1).out_of_scope
+
+        assert got() == (("ask", "tone", 1),)
+        assert got(low_confidence=False) == ()  # an honest fallback
+        for odd in (None, "yes", 1, [True]):
+            assert got(low_confidence=odd) == ()  # only the boolean True counts
+        no_flag = {k: v for k, v in _SCOPE[1].items() if k != "low_confidence"}
+        assert frame_signals(_turn(1, ("intent/out_of_scope", no_flag)), 1) == (
+            FrameSignals()
+        )
+
     def test_a_cut_reply_of_another_purpose_is_no_cut(self):
         reply = ("llm/response", {"finish_reason": "length", "purpose": "reply"})
         assert frame_signals(_turn(1, reply), 1).cut == ()
@@ -463,7 +500,7 @@ class TestANameIsAnIdentifierOrTheEventIsNotRecorded:
     def test_a_hostile_state_gives_no_evidence_of_any_kind(self, name: str):
         events = (
             ("extraction/miss", {"state": name, "keys": ["city"]}),
-            ("intent/out_of_scope", {"state": name, "field": "city"}),
+            ("intent/out_of_scope", {**_SCOPE[1], "state": name}),
             ("executor/result", {"state": name, "extraction_failed": True}),
         )
 
@@ -471,7 +508,7 @@ class TestANameIsAnIdentifierOrTheEventIsNotRecorded:
 
     @pytest.mark.parametrize("name", HOSTILE)
     def test_a_hostile_field_of_a_scope_event_is_dropped(self, name: str):
-        scope = ("intent/out_of_scope", {"state": "ask", "field": name})
+        scope = ("intent/out_of_scope", {**_SCOPE[1], "field": name})
 
         assert frame_signals(_turn(1, scope), 1).out_of_scope == ()
 

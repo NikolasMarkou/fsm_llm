@@ -397,8 +397,12 @@ SEEDS: dict[str, tuple[Callable[[Path, str], Outcome], list[tuple[Any, ...]]]] =
     "wrong_key": (_seed_wrong_key, [MISS]),
     "null": (_seed_null, [MISS]),
     "fallback": (
-        _seed_intent("browse", 0.9),
+        _seed_intent("browse", 0.3),
         [("intent-out-of-scope", ASK, ("answer",))],
+    ),
+    "honest_fallback": (
+        _seed_intent("browse", 0.9),
+        [("value-gate-unmet", ASK, ("answer",))],
     ),
     "discarded": (
         _seed_intent("buy", 0.2),
@@ -685,6 +689,27 @@ class TestAnIntentOutOfScope:
         assert outcome.trace.scopes == ((ASK, "answer", 3),)
         assert outcome.codes == [("intent-out-of-scope", ASK, ("answer",))]
 
+    @pytest.mark.parametrize("turns", [1, 3, 5])
+    def test_an_honest_fallback_never_flips_the_code_however_often_it_repeats(
+        self, tmp_path: Path, level: str, turns: int
+    ):
+        """Review concern 6 (probe p2): a user who says "just browsing" three times used to turn
+        ``value-gate-unmet`` into ``intent-out-of-scope``. The fallback at 0.9 is in scope."""
+        outcome = drive(
+            tmp_path,
+            _classify_fsm(),
+            _classifying("browse", 0.9),
+            level,
+            classify=True,
+            turns=turns,
+        )
+
+        events = [e for e in _events(outcome) if e["type"] == "intent/out_of_scope"]
+        assert len(events) == turns  # the event is still written, once per turn
+        assert all(e["low_confidence"] is False for e in events)
+        assert outcome.trace.scopes == ()
+        assert outcome.codes == [("value-gate-unmet", ASK, ("answer",))]
+
     def test_a_confident_in_scope_intent_leaves_no_scope_and_no_fault(
         self, tmp_path: Path, level: str
     ):
@@ -801,7 +826,7 @@ class TestALostReaderLeavesTheNewRulesInert:
         outcome = drive(
             tmp_path,
             _classify_fsm(),
-            _classifying("browse", 0.9),
+            _classifying("browse", 0.3),
             level,
             classify=True,
             hook=self._lose,
