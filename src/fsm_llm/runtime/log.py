@@ -35,6 +35,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -59,7 +60,7 @@ from fsm_llm.runtime.events import (
     check_depth,
     to_jsonable,
 )
-from fsm_llm.runtime.lanes import Lanes
+from fsm_llm.runtime.lanes import Lanes, settle
 from fsm_llm.runtime.privacy import (
     PrivacyLevel,
     RedactionHook,
@@ -702,9 +703,13 @@ class EventLog:
 
         This is also the recovery of a poisoned writer (see the class contract). While a lane
         thread serves this tree the release runs on it, behind the jobs already queued (so each
-        meets the writer it was queued against) and returns before the writer is closed.
+        meets the writer it was queued against), and the caller waits for it (``settle``: at most
+        ``LANE_WAIT_SECONDS``, never on a lane thread), so a finished conversation holds no
+        writer, file or lock when this returns: ``API.resume`` and a new ``EventLog`` on the
+        directory can follow at once.
         """
-        self._lanes.after(conversation_id, lambda: self._release_now(conversation_id))
+        release = partial(self._release_now, conversation_id)
+        settle([self._lanes.after(conversation_id, release)])
 
     def _release_now(self, conversation_id: str) -> None:
         with self._guard:
@@ -716,14 +721,15 @@ class EventLog:
         """Close every writer and refuse later appends. Idempotent; the files stay.
 
         A writer is closed behind the jobs already queued on its lane (a job in flight
-        finishes first) and the lane threads end once those ran; ``close`` does not wait.
+        finishes first), the lane threads end once those ran, and ``close`` waits for the closes
+        as ``release`` does.
         """
         with self._guard:
             self._closed = True
             writers, self._writers = list(self._writers.items()), {}
-        for conversation_id, writer in writers:
-            self._lanes.after(conversation_id, writer.close)
+        jobs = [self._lanes.after(cid, writer.close) for cid, writer in writers]
         self._lanes.shutdown()
+        settle(jobs)
 
     def __enter__(self) -> EventLog:
         return self

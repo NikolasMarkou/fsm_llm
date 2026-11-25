@@ -71,3 +71,8 @@ USAGE_TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 #: The lane threads one ``EventLog`` starts at most (``runtime.lanes``); a root conversation id
 #: always maps to the same lane, so the jobs of one tree run in the order they were queued.
 LANE_COUNT = 4
+
+#: The longest ``EventLog.release`` and ``close`` wait for the lane job that closes a writer (the
+#: wait keeps a finished conversation from holding a writer, file or lock after the call returns;
+#: the bound only caps a hung disk, after which the caller goes on with a WARNING).
+LANE_WAIT_SECONDS = 5.0

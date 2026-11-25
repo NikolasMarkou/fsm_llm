@@ -17,12 +17,14 @@ import contextvars
 import gc
 import json
 import threading
+from functools import partial
 from pathlib import Path
 
 import pytest
 
 from fsm_llm.aio import run_sync
 from fsm_llm.runtime import EventLog, LogWriteError
+from fsm_llm.runtime import lanes as lanes_module
 from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import jsonl, read_events
 from fsm_llm.runtime.stores.jsonl import JsonlWriter
@@ -85,6 +87,9 @@ class TestLaneCall:
 
     async def test_a_root_always_maps_to_the_same_lane_thread(self):
         lanes = Lanes(count=4)
+        before = set(
+            _lane_threads()
+        )  # pools other tests left to the collector are not ours
         try:
             seen: dict[str, set[int]] = {}
             for _ in range(3):
@@ -92,7 +97,7 @@ class TestLaneCall:
                     ident = await lanes.lane_call(root, threading.get_ident)
                     seen.setdefault(root, set()).add(ident)
             assert all(len(idents) == 1 for idents in seen.values())
-            assert len(_lane_threads()) <= 4
+            assert len(set(_lane_threads()) - before) <= 4
         finally:
             lanes.shutdown()
 
@@ -212,8 +217,20 @@ class TestLaneCall:
             Lanes(count=0)
 
 
+def _pool_of(log: EventLog, root: str):
+    """The lane pool of *root* as it stands now (taken BEFORE a ``close`` drops the table)."""
+    return log._lanes._pools[log._lanes.lane_of(root)]
+
+
+def _queued(pool) -> int:
+    """Jobs waiting in *pool* (the job in flight is not counted)."""
+    return pool._work_queue.qsize()
+
+
 class TestCloseAndRelease:
-    async def test_close_drains_a_job_in_flight_before_the_writer_is_closed(self, log):
+    async def test_close_waits_for_the_job_in_flight_and_closes_the_writer_behind_it(
+        self, log
+    ):
         log.append("root", "context/record", n=1)
         writer = log._writers["root"]
         started, release, finished = (threading.Event() for _ in range(3))
@@ -229,18 +246,22 @@ class TestCloseAndRelease:
             await asyncio.sleep(0)
         threads = _lane_threads()
         assert threads
-        log.close()  # returns at once
-        assert writer._fd >= 0  # queued behind the job in flight
+        pool = _pool_of(log, "root")
+        closer, out = _run_in_thread(log.close)
+        _until(lambda: _queued(pool) >= 1, "the close job to queue behind the job")
+        assert writer._fd >= 0 and closer.is_alive()  # waiting, not returned
         release.set()
         await task
-        _until(lambda: writer._fd < 0, "the writer to be closed behind the job")
+        _until(lambda: not closer.is_alive(), "close to return")
+        assert out == [None] and writer._fd < 0 and finished.is_set()
         _until(
             lambda: not any(t.is_alive() for t in threads), "the lane threads to end"
         )
-        assert finished.is_set()
         assert [e["n"] for e in read_events(log.root / "logs" / "root.jsonl")] == [1, 2]
 
-    async def test_release_runs_behind_the_queued_jobs_of_its_tree(self, log):
+    async def test_release_runs_behind_the_queued_jobs_of_its_tree_and_waits_for_them(
+        self, log
+    ):
         log.append("root", "context/record", n=1)
         started, release = threading.Event(), threading.Event()
         outcome: list[object] = []
@@ -260,11 +281,14 @@ class TestCloseAndRelease:
             await asyncio.sleep(0)
         t2 = asyncio.ensure_future(log.lane_call("root", second))
         await asyncio.sleep(0)  # the task has submitted its job
-        log.release("root")  # queued behind both jobs
-        assert log.has_writer("root")
+        pool = _pool_of(log, "root")
+        releaser, out = _run_in_thread(lambda: log.release("root"))
+        _until(lambda: _queued(pool) == 2, "the release job to queue behind both")
+        assert log.has_writer("root") and releaser.is_alive()  # it waits for them
         release.set()
         await asyncio.gather(t1, t2)
-        _until(lambda: not log.has_writer("root"), "the release job to run")
+        _until(lambda: not releaser.is_alive(), "release to return")
+        assert out == [None] and not log.has_writer("root")
         assert outcome == [2]
         log.append("root", "context/record", n=3)  # a later append reopens the writer
         assert [e["n"] for e in read_events(log.root / "logs" / "root.jsonl")] == [
@@ -272,6 +296,99 @@ class TestCloseAndRelease:
             2,
             3,
         ]
+
+    async def test_release_returns_only_after_the_writer_is_closed_and_the_lock_is_free(
+        self, log
+    ):
+        """Kills: a release that returns at once while the close runs on the lane (review 1:
+        ``resume`` after an async ``end_conversation`` met its own writer)."""
+        await log.lane_call("root", partial(log.append, "root", "context/record", n=1))
+        writer = log._writers["root"]
+        real_close = JsonlWriter.close
+
+        def slow_close(self) -> None:
+            threading.Event().wait(
+                0.05
+            )  # widens the window; no assertion reads a clock
+            real_close(self)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(JsonlWriter, "close", slow_close)
+            log.release("root")
+            assert writer._fd < 0 and not log.has_writer("root")
+        with EventLog(log.root) as other:  # the advisory lock is free again
+            assert other.open_existing("root") >= 1
+
+    async def test_close_returns_only_after_every_writer_is_closed_and_the_lock_is_free(
+        self, tmp_path
+    ):
+        """Kills: a close that returns before the lane closed the writers (review 1: a new
+        ``EventLog`` on the directory met ``held by another writer``)."""
+        first = EventLog(tmp_path)
+        await first.lane_call(
+            "root", partial(first.append, "root", "context/record", n=1)
+        )
+        real_close = JsonlWriter.close
+
+        def slow_close(self) -> None:
+            threading.Event().wait(0.05)
+            real_close(self)
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(JsonlWriter, "close", slow_close)
+            first.close()
+        with EventLog(tmp_path) as second:
+            assert second.open_existing("root") >= 1
+
+    async def test_a_wait_is_bounded_when_the_lane_is_stuck(self, log, monkeypatch):
+        """Kills: a wait with no bound (a hung disk would pin the caller, and the loop in async
+        mode, for good). The job parks until the test ends; the release gives up and warns."""
+        monkeypatch.setattr(lanes_module, "LANE_WAIT_SECONDS", 0.05)
+        log.append("root", "context/record", n=1)
+        started, release = threading.Event(), threading.Event()
+
+        def stuck() -> None:
+            started.set()
+            release.wait(
+                3 * CAP_SECONDS
+            )  # outlives the poll below: an unbounded wait fails it
+
+        task = asyncio.ensure_future(log.lane_call("root", stuck))
+        while not started.is_set():
+            await asyncio.sleep(0)
+        waiter, out = _run_in_thread(lambda: log.release("root"))
+        _until(lambda: not waiter.is_alive(), "a bounded release to return")
+        assert out == [None] and log.has_writer("root")  # the job still owns the close
+        release.set()
+        await task
+        _until(lambda: not log.has_writer("root"), "the queued close to run")
+
+    async def test_a_release_and_a_close_called_on_a_lane_thread_never_wait(
+        self, log, monkeypatch
+    ):
+        """Kills: a wait on a lane thread (the job would wait for its own queue: a deadlock
+        until the bound). A job of one lane ends its tree, another tree on another lane and then
+        closes the log; it returns, and every writer is closed once the lanes drained."""
+        monkeypatch.setattr(lanes_module, "LANE_WAIT_SECONDS", 2 * CAP_SECONDS)
+        other = next(
+            name
+            for name in (f"tree-{n}" for n in range(64))
+            if log._lanes.lane_of(name) != log._lanes.lane_of("root")
+        )
+        await log.lane_call("root", partial(log.append, "root", "context/record", n=1))
+        await log.lane_call(other, partial(log.append, other, "context/record", n=1))
+        writers = [log._writers["root"], log._writers[other]]
+        verdicts: list[object] = []
+
+        def job() -> None:
+            verdicts.append(lanes_module.on_lane_thread())
+            log.release("root")  # own lane: queued behind this very job
+            log.release(other)  # another lane
+            log.close()
+
+        await asyncio.wait_for(log.lane_call("root", job), CAP_SECONDS)
+        assert verdicts == [True] and not lanes_module.on_lane_thread()
+        _until(lambda: all(w._fd < 0 for w in writers), "the queued closes to run")
 
     def test_release_and_close_are_inline_when_no_lane_ever_ran(self, log):
         log.append("root", "context/record", n=1)

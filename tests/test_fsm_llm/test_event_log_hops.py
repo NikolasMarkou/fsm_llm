@@ -30,6 +30,7 @@ from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.runtime import EventLog, LogWriteError
 from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import fold_session, read_events
+from fsm_llm.runtime.stores.jsonl import JsonlWriter
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm import event_log_child as child
 from tests.test_fsm_llm import kind_corpus as kc
@@ -44,6 +45,12 @@ from tests.test_fsm_llm.test_async_cancel import _gate_is_free, _prepare, _seen
 from tests.test_fsm_llm.test_async_engine import _CID, _SCENARIOS
 from tests.test_fsm_llm.test_event_log_census import _chat, _llm
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
+from tests.test_fsm_llm.test_event_log_lanes import (
+    _pool_of,
+    _queued,
+    _run_in_thread,
+    _until,
+)
 
 CAP_SECONDS = 20.0  # only ends a hang
 
@@ -327,10 +334,18 @@ class TestAnOrphanAndTheRelease:
                 task.cancel()
                 await asyncio.sleep(0)
                 # the cancelled task has queued its ``turn/end`` behind the parked job; the
-                # release lands behind both (an ended conversation would be refused: busy)
-                api.event_log.release(_CID)
+                # release lands behind both (an ended conversation would be refused: busy) and,
+                # off a lane thread, waits for them: a thread of its own keeps the loop free
+                pool = _pool_of(api.event_log, _CID)
+                _until(lambda: _queued(pool) == 1, "the turn/end job to queue")
+                releaser, _ = _run_in_thread(lambda: api.event_log.release(_CID))
+                _until(lambda: _queued(pool) == 2, "the release job to queue")
+                assert (
+                    releaser.is_alive()
+                )  # it waits for the parked job and the turn/end
             finally:
                 hops.gate.set()
+            _until(lambda: not releaser.is_alive(), "the release to return")
             await asyncio.wait({task}, timeout=CAP_SECONDS)
             await _barrier(api.event_log, _CID)
             assert hops.ran.is_set()
@@ -550,4 +565,47 @@ class TestATurnThatNeverStarted:
         assert "turn/start" not in kinds and "turn/end" not in kinds, kinds
         assert _seen(api, cid) == before and _gate_is_free(api, cid)
         assert await api.aconverse(message, cid)  # the log works again: the turn runs
+        api.close()
+
+
+class TestAnEndedLoggedConversationHoldsNoWriter:
+    """Review 1 of plan 3f4530d3: ``end_conversation`` and ``close`` return with no writer, file
+    or lock left, so the next step of the same caller (``resume``, a new ``EventLog`` on the
+    directory) never meets it."""
+
+    async def test_resume_right_after_an_async_end_conversation_works(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: a ``release`` that queues the close on the lane and returns (``resume`` then
+        raised ``LogLockedError ... already has a live writer``, 30 of 30 runs)."""
+        for n in range(3):
+            api, _, cid = await _prepare("plain", 1, tmp_path / f"log{n}")
+            state = api.get_current_state(cid)
+            api.end_conversation(cid)
+            assert not api.event_log.has_writer(cid), n
+            api.resume(cid)
+            assert api.get_current_state(cid) == state, n
+            api.close()
+
+    async def test_a_new_event_log_on_the_directory_resumes_right_after_a_close(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: a ``close`` that returns before the lane released the advisory lock (a second
+        ``EventLog`` then met ``held by another writer``, 7 of 30 runs). The close is slowed so
+        the window is certain; nothing asserts a duration."""
+        root = tmp_path / "log"
+        api, _, cid = await _prepare("plain", 1, root)
+        real_close = JsonlWriter.close
+
+        def slow_close(self: JsonlWriter) -> None:
+            threading.Event().wait(0.05)
+            real_close(self)
+
+        with mock.patch.object(JsonlWriter, "close", slow_close):
+            api.event_log.close()
+        again = EventLog(root)
+        try:
+            assert again.open_existing(cid) >= 1  # the lock is free
+        finally:
+            again.close()
         api.close()
