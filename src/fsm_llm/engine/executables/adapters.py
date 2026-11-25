@@ -43,7 +43,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from fsm_llm.aio import run_sync
-from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.codes import Lifecycle, Reason, Status
 from fsm_llm.core.definitions import (
     FSMDefinition,
@@ -69,7 +68,7 @@ from fsm_llm.engine.api import API
 from fsm_llm.engine.context import RunCancelledError, RunContext
 from fsm_llm.logging import logger
 
-from .protocol import DEFAULT_EXECUTABLE_MAX_STEPS
+from .protocol import DEFAULT_EXECUTABLE_MAX_STEPS, check_input_keys
 
 __all__ = [
     "FsmBodyExecutable",
@@ -198,7 +197,7 @@ class FsmInstance:
         owner = self.executable
         context = RunContext() if context is None else context
         inputs = render_inputs(owner.contract, inputs)
-        self._check_input_keys(inputs)
+        check_input_keys(owner.id, inputs, owner.contract.inputs)
         identity = Identity(
             template_identity=owner.template_identity,
             instance_identity=self.instance_identity,
@@ -270,19 +269,6 @@ class FsmInstance:
             _release(api, conversation_id)
             if owner.pins is not None:
                 owner.pins.unpin(owner)
-
-    def _check_input_keys(self, inputs: Mapping[str, Any]) -> None:
-        declared = set(self.executable.contract.inputs)
-        if undeclared := sorted(str(k) for k in inputs if k not in declared):
-            raise ValueError(
-                f"executable {self.executable.id!r} declares no input {undeclared}; "
-                f"declared: {sorted(declared)}"
-            )
-        if internal := sorted(str(k) for k in inputs if has_internal_prefix(str(k))):
-            raise ValueError(
-                f"inputs {internal} use a reserved prefix: a caller input is data, "
-                "never an engine key"
-            )
 
     def _stopped(
         self,

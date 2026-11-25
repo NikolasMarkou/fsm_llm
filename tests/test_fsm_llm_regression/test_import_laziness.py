@@ -121,6 +121,17 @@ MUST_NOT_LOAD_AT_IMPORT: dict[str, str] = {
     "fsm_llm.engine.context": (
         "the run context (C12) loads when a runner imports it; `engine/__init__.py` imports nothing"
     ),
+    "fsm_llm.core.definitions.executable_workflow": (
+        "the body of a workflow executable (plan 7d9c0955) loads with `fsm_llm.workflows` or the "
+        "envelope module, never with `import fsm_llm`"
+    ),
+    "fsm_llm.core.verify.executable_workflow": (
+        "the workflow checks of the load sequence load when `core/verify/executable.py` is imported"
+    ),
+    "fsm_llm.workflows.executable": (
+        "the adapter of the workflow kind registers itself when a host imports it by name "
+        "(plan 7d9c0955 D-004, D-008); `import fsm_llm` and `import fsm_llm.workflows` do not"
+    ),
 }
 
 # The child code: import the package from `root`, print every loaded `fsm_llm` module and the
@@ -340,3 +351,96 @@ class TestImportSimulationLoadsCoreAndKernelOnly:
             "monitor",
             "testing",
         }, names
+
+
+#: Modules that belong to the executable machinery: an envelope or verifier module, the adapters and
+#: registry package, a step module for executables. What a workflows import may load of them is pinned.
+def _executable_family(modules: list[str]) -> set[str]:
+    return {
+        m
+        for m in modules
+        if ".executable" in m and not m.startswith("fsm_llm.engine.kinds")
+    }
+
+
+_KINDS_PROBE = (
+    "import json, sys\n"
+    "sys.path.insert(0, {root!r})\n"
+    "import {module}\n"
+    "from fsm_llm.engine.executables.namespaces import EXECUTABLE_KINDS\n"
+    "print(json.dumps(EXECUTABLE_KINDS.list()))\n"
+)
+
+
+def registered_kinds_after(module: str) -> list[str]:
+    """The ``executable_kinds`` registered after `import <module>` and the namespaces import."""
+    code = _KINDS_PROBE.format(root=str(REPO / "src"), module=module)
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=REPO,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "OLLAMA_API_BASE": "http://127.0.0.1:9",
+            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+            **(
+                {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
+                if "SYSTEMROOT" in os.environ
+                else {}
+            ),
+        },
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+class TestImportWorkflowsRegistersNothing:
+    """`import fsm_llm.workflows` loads no executable module and registers no kind (plan 7d9c0955
+    step 5, D-004): the cost of the namespaces import (+42 ms measured at step 1) is paid only by a
+    host that imports `fsm_llm.workflows.executable` by name, which registers the `workflow` kind."""
+
+    def test_the_package_import_loads_only_the_body_and_the_step(self) -> None:
+        family = _executable_family(loaded_by_import_of("fsm_llm.workflows"))
+
+        assert family == {
+            "fsm_llm.core.definitions.executable_workflow",
+            "fsm_llm.workflows.steps.executable",
+        }, family
+
+    def test_the_package_import_registers_no_workflow_kind(self) -> None:
+        assert "workflow" not in registered_kinds_after("fsm_llm.workflows")
+
+    def test_the_adapter_import_registers_the_kind_and_loads_the_pinned_set(
+        self,
+    ) -> None:
+        modules = loaded_by_import_of("fsm_llm.workflows.executable")
+
+        assert "workflow" in registered_kinds_after("fsm_llm.workflows.executable")
+        assert _executable_family(modules) == {
+            "fsm_llm.core.definitions.executable",
+            "fsm_llm.core.definitions.executable_instance",
+            "fsm_llm.core.definitions.executable_pattern",
+            "fsm_llm.core.definitions.executable_preset",
+            "fsm_llm.core.definitions.executable_workflow",
+            "fsm_llm.core.verify.executable",
+            "fsm_llm.core.verify.executable_pattern",
+            "fsm_llm.core.verify.executable_workflow",
+            "fsm_llm.engine.executables",
+            "fsm_llm.engine.executables.adapters",
+            "fsm_llm.engine.executables.aliases",
+            "fsm_llm.engine.executables.code_backed",
+            "fsm_llm.engine.executables.namespaces",
+            "fsm_llm.engine.executables.protocol",
+            "fsm_llm.engine.executables.registry",
+            "fsm_llm.engine.executables.runs",
+            "fsm_llm.workflows.executable",
+            "fsm_llm.workflows.steps.executable",
+        }
+
+    def test_the_adapter_import_pulls_no_consumer_package(self) -> None:
+        """It builds no approver and no tool binding (invariant 1): no policy, tools or agents."""
+        names = first_level(loaded_by_import_of("fsm_llm.workflows.executable"))
+
+        assert not names & {"agents", "reasoning", "monitor", "policy", "tools"}, names

@@ -39,12 +39,10 @@ from typing import Any, ClassVar
 
 from fsm_llm.__version__ import __version__ as _FSM_LLM_VERSION
 from fsm_llm.aio import run_sync
-from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.codes import Lifecycle, Reason, Status
 from fsm_llm.core.definitions.executable import (
     Capability,
     Contract,
-    ExecutableError,
     InstantiationError,
     Requires,
 )
@@ -54,6 +52,8 @@ from fsm_llm.core.definitions.executable_instance import (
 )
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunCancelledError, RunContext
+
+from .protocol import check_input_keys, require_callables
 
 __all__ = ["CodeBackedExecutable", "CodeBackedInstance"]
 
@@ -152,28 +152,14 @@ class CodeBackedExecutable(ABC):
         )
 
     def _check_input_keys(self, inputs: Mapping[str, Any]) -> None:
-        allowed = {*self.contract.inputs, *self.optional_inputs}
-        if undeclared := sorted(str(k) for k in inputs if k not in allowed):
-            raise ValueError(
-                f"executable {self.id!r} declares no input {undeclared}; "
-                f"declared: {sorted(allowed)}"
-            )
-        if internal := sorted(str(k) for k in inputs if has_internal_prefix(str(k))):
-            raise ValueError(
-                f"inputs {internal} use a reserved prefix: a caller input is data, "
-                "never an engine key"
-            )
+        check_input_keys(
+            self.id, inputs, {*self.contract.inputs, *self.optional_inputs}
+        )
 
     def _resolve_objects(self, context: RunContext) -> dict[str, Any]:
         registry = context.callables
         required = list(self.requires.callables)
-        absent = [n for n in required if registry is None or n not in registry]
-        if absent:
-            raise ExecutableError(
-                f"executable {self.id!r} needs the callables {absent}, which the run "
-                "context does not supply (RunContext.callables)",
-                details={"executable": self.id, "unresolved": absent},
-            )
+        require_callables(self.id, required, registry)
         if registry is None:
             return {}
         objects = {name: registry.resolve(name) for name in required}

@@ -1209,6 +1209,11 @@
       "delta": 1,
       "reason": "plan 7d9c0955 D-007 (step 4): new anchor in workflows/steps/helpers.py for the run context ContextVar inherited by ExecutableStep",
       "token": "plan-2026-11-25T195353-7d9c0955/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 7d9c0955 step 5 D-008: the new anchor token of the workflow adapter (workflows/executable.py), one engine per run, engine cancel only",
+      "token": "plan-2026-11-25T195353-7d9c0955/D-008"
     }
   ]
 }
