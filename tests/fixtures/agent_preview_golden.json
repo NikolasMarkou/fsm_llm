@@ -1,0 +1,1975 @@
+{
+  "g1": {
+    "adapt": {
+      "graph": {
+        "edges": [
+          [
+            "assess",
+            "combine",
+            1
+          ],
+          [
+            "assess",
+            "combine",
+            10
+          ],
+          [
+            "assess",
+            "combine",
+            200
+          ],
+          [
+            "assess",
+            "combine",
+            900
+          ],
+          [
+            "assess",
+            "decompose",
+            150
+          ],
+          [
+            "attempt",
+            "assess",
+            100
+          ],
+          [
+            "attempt",
+            "combine",
+            1
+          ],
+          [
+            "decompose",
+            "combine",
+            1
+          ],
+          [
+            "decompose",
+            "combine",
+            100
+          ],
+          [
+            "decompose",
+            "combine",
+            900
+          ]
+        ],
+        "nodes": [
+          [
+            "assess",
+            false,
+            false
+          ],
+          [
+            "attempt",
+            true,
+            false
+          ],
+          [
+            "combine",
+            false,
+            true
+          ],
+          [
+            "decompose",
+            false,
+            false
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "assess",
+              "combine",
+              1
+            ],
+            [
+              "assess",
+              "combine",
+              10
+            ],
+            [
+              "assess",
+              "combine",
+              200
+            ],
+            [
+              "assess",
+              "combine",
+              900
+            ],
+            [
+              "assess",
+              "decompose",
+              150
+            ],
+            [
+              "attempt",
+              "assess",
+              100
+            ],
+            [
+              "attempt",
+              "combine",
+              1
+            ],
+            [
+              "decompose",
+              "combine",
+              1
+            ],
+            [
+              "decompose",
+              "combine",
+              100
+            ],
+            [
+              "decompose",
+              "combine",
+              900
+            ]
+          ],
+          "nodes": [
+            [
+              "assess",
+              false,
+              false
+            ],
+            [
+              "attempt",
+              true,
+              false
+            ],
+            [
+              "combine",
+              false,
+              true
+            ],
+            [
+              "decompose",
+              false,
+              false
+            ]
+          ]
+        },
+        "states": 4
+      },
+      "route": "builder"
+    },
+    "auto_memory": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "act",
+              "conclude",
+              1
+            ],
+            [
+              "act",
+              "think",
+              900
+            ],
+            [
+              "think",
+              "act",
+              300
+            ],
+            [
+              "think",
+              "conclude",
+              10
+            ]
+          ],
+          "nodes": [
+            [
+              "act",
+              false,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "think",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "file"
+    },
+    "code-review": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": null,
+      "route": "file"
+    },
+    "data-extraction": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": null,
+      "route": "file"
+    },
+    "debate": {
+      "graph": {
+        "edges": [
+          [
+            "counter",
+            "judge",
+            100
+          ],
+          [
+            "critique",
+            "counter",
+            100
+          ],
+          [
+            "judge",
+            "conclude",
+            10
+          ],
+          [
+            "judge",
+            "propose",
+            300
+          ],
+          [
+            "propose",
+            "critique",
+            100
+          ]
+        ],
+        "nodes": [
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "counter",
+            false,
+            false
+          ],
+          [
+            "critique",
+            false,
+            false
+          ],
+          [
+            "judge",
+            false,
+            false
+          ],
+          [
+            "propose",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "consensus_instructions",
+        "counter_instructions",
+        "critique_instructions",
+        "debate_persona",
+        "proposition_instructions",
+        "verdict_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "counter",
+              "judge",
+              100
+            ],
+            [
+              "critique",
+              "counter",
+              100
+            ],
+            [
+              "judge",
+              "conclude",
+              10
+            ],
+            [
+              "judge",
+              "propose",
+              300
+            ],
+            [
+              "propose",
+              "critique",
+              100
+            ]
+          ],
+          "nodes": [
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "counter",
+              false,
+              false
+            ],
+            [
+              "critique",
+              false,
+              false
+            ],
+            [
+              "judge",
+              false,
+              false
+            ],
+            [
+              "propose",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 5
+      },
+      "route": "file"
+    },
+    "evaluator_optimizer": {
+      "graph": {
+        "edges": [
+          [
+            "evaluate",
+            "output",
+            10
+          ],
+          [
+            "evaluate",
+            "output",
+            900
+          ],
+          [
+            "evaluate",
+            "refine",
+            300
+          ],
+          [
+            "generate",
+            "evaluate",
+            100
+          ],
+          [
+            "generate",
+            "evaluate",
+            900
+          ],
+          [
+            "refine",
+            "evaluate",
+            100
+          ]
+        ],
+        "nodes": [
+          [
+            "evaluate",
+            false,
+            false
+          ],
+          [
+            "generate",
+            true,
+            false
+          ],
+          [
+            "output",
+            false,
+            true
+          ],
+          [
+            "refine",
+            false,
+            false
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "evaluate",
+              "output",
+              10
+            ],
+            [
+              "evaluate",
+              "output",
+              900
+            ],
+            [
+              "evaluate",
+              "refine",
+              300
+            ],
+            [
+              "generate",
+              "evaluate",
+              100
+            ],
+            [
+              "generate",
+              "evaluate",
+              900
+            ],
+            [
+              "refine",
+              "evaluate",
+              100
+            ]
+          ],
+          "nodes": [
+            [
+              "evaluate",
+              false,
+              false
+            ],
+            [
+              "generate",
+              true,
+              false
+            ],
+            [
+              "output",
+              false,
+              true
+            ],
+            [
+              "refine",
+              false,
+              false
+            ]
+          ]
+        },
+        "states": 4
+      },
+      "route": "file"
+    },
+    "maker_checker": {
+      "graph": {
+        "edges": [
+          [
+            "check",
+            "output",
+            10
+          ],
+          [
+            "check",
+            "revise",
+            300
+          ],
+          [
+            "check",
+            "revise",
+            900
+          ],
+          [
+            "make",
+            "check",
+            100
+          ],
+          [
+            "revise",
+            "check",
+            100
+          ]
+        ],
+        "nodes": [
+          [
+            "check",
+            false,
+            false
+          ],
+          [
+            "make",
+            true,
+            false
+          ],
+          [
+            "output",
+            false,
+            true
+          ],
+          [
+            "revise",
+            false,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "feedback_instructions",
+        "make_instructions",
+        "revise_instructions",
+        "score_instructions",
+        "verdict_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "check",
+              "output",
+              10
+            ],
+            [
+              "check",
+              "revise",
+              300
+            ],
+            [
+              "check",
+              "revise",
+              900
+            ],
+            [
+              "make",
+              "check",
+              100
+            ],
+            [
+              "revise",
+              "check",
+              100
+            ]
+          ],
+          "nodes": [
+            [
+              "check",
+              false,
+              false
+            ],
+            [
+              "make",
+              true,
+              false
+            ],
+            [
+              "output",
+              false,
+              true
+            ],
+            [
+              "revise",
+              false,
+              false
+            ]
+          ]
+        },
+        "states": 4
+      },
+      "route": "file"
+    },
+    "meta_builder": {
+      "graph": {
+        "edges": [
+          [
+            "build",
+            "build_failed",
+            900
+          ],
+          [
+            "build",
+            "done",
+            10
+          ],
+          [
+            "build_failed",
+            "build",
+            20
+          ],
+          [
+            "build_failed",
+            "classify",
+            10
+          ],
+          [
+            "build_failed",
+            "collect",
+            900
+          ],
+          [
+            "classify",
+            "build",
+            10
+          ],
+          [
+            "classify",
+            "collect",
+            900
+          ],
+          [
+            "collect",
+            "build",
+            20
+          ],
+          [
+            "collect",
+            "classify",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "build",
+            false,
+            false
+          ],
+          [
+            "build_failed",
+            false,
+            false
+          ],
+          [
+            "classify",
+            true,
+            false
+          ],
+          [
+            "collect",
+            false,
+            false
+          ],
+          [
+            "done",
+            false,
+            true
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": null,
+      "route": "builder"
+    },
+    "native_fc": {
+      "graph": {
+        "edges": [
+          [
+            "call_model",
+            "conclude",
+            900
+          ],
+          [
+            "call_model",
+            "force_final",
+            20
+          ],
+          [
+            "call_model",
+            "repair",
+            30
+          ],
+          [
+            "call_model",
+            "run_tools",
+            10
+          ],
+          [
+            "force_final",
+            "conclude",
+            900
+          ],
+          [
+            "force_final",
+            "repair",
+            30
+          ],
+          [
+            "repair",
+            "conclude",
+            900
+          ],
+          [
+            "run_tools",
+            "call_model",
+            900
+          ],
+          [
+            "run_tools",
+            "conclude",
+            40
+          ],
+          [
+            "run_tools",
+            "force_final",
+            20
+          ],
+          [
+            "run_tools",
+            "repair",
+            30
+          ]
+        ],
+        "nodes": [
+          [
+            "call_model",
+            true,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "force_final",
+            false,
+            false
+          ],
+          [
+            "repair",
+            false,
+            false
+          ],
+          [
+            "run_tools",
+            false,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "system_message"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "call_model",
+              "conclude",
+              900
+            ],
+            [
+              "call_model",
+              "run_tools",
+              10
+            ],
+            [
+              "run_tools",
+              "call_model",
+              900
+            ],
+            [
+              "run_tools",
+              "conclude",
+              40
+            ]
+          ],
+          "nodes": [
+            [
+              "call_model",
+              true,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "run_tools",
+              false,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "file"
+    },
+    "orchestrator": {
+      "graph": {
+        "edges": [
+          [
+            "collect",
+            "orchestrate",
+            300
+          ],
+          [
+            "collect",
+            "synthesize",
+            10
+          ],
+          [
+            "collect",
+            "synthesize",
+            900
+          ],
+          [
+            "delegate",
+            "collect",
+            100
+          ],
+          [
+            "orchestrate",
+            "delegate",
+            100
+          ],
+          [
+            "orchestrate",
+            "synthesize",
+            900
+          ]
+        ],
+        "nodes": [
+          [
+            "collect",
+            false,
+            false
+          ],
+          [
+            "delegate",
+            false,
+            false
+          ],
+          [
+            "orchestrate",
+            true,
+            false
+          ],
+          [
+            "synthesize",
+            false,
+            true
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "collect",
+              "orchestrate",
+              300
+            ],
+            [
+              "collect",
+              "synthesize",
+              10
+            ],
+            [
+              "collect",
+              "synthesize",
+              900
+            ],
+            [
+              "delegate",
+              "collect",
+              100
+            ],
+            [
+              "orchestrate",
+              "delegate",
+              100
+            ],
+            [
+              "orchestrate",
+              "synthesize",
+              900
+            ]
+          ],
+          "nodes": [
+            [
+              "collect",
+              false,
+              false
+            ],
+            [
+              "delegate",
+              false,
+              false
+            ],
+            [
+              "orchestrate",
+              true,
+              false
+            ],
+            [
+              "synthesize",
+              false,
+              true
+            ]
+          ]
+        },
+        "states": 4
+      },
+      "route": "file"
+    },
+    "parallel_react": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "act",
+              "conclude",
+              1
+            ],
+            [
+              "act",
+              "think",
+              900
+            ],
+            [
+              "think",
+              "act",
+              300
+            ],
+            [
+              "think",
+              "conclude",
+              10
+            ]
+          ],
+          "nodes": [
+            [
+              "act",
+              false,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "think",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "builder"
+    },
+    "plan_execute": {
+      "graph": {
+        "edges": [
+          [
+            "check_result",
+            "execute_step",
+            300
+          ],
+          [
+            "check_result",
+            "replan",
+            150
+          ],
+          [
+            "check_result",
+            "synthesize",
+            10
+          ],
+          [
+            "execute_step",
+            "check_result",
+            100
+          ],
+          [
+            "plan",
+            "execute_step",
+            100
+          ],
+          [
+            "replan",
+            "execute_step",
+            100
+          ]
+        ],
+        "nodes": [
+          [
+            "check_result",
+            false,
+            false
+          ],
+          [
+            "execute_step",
+            false,
+            false
+          ],
+          [
+            "plan",
+            true,
+            false
+          ],
+          [
+            "replan",
+            false,
+            false
+          ],
+          [
+            "synthesize",
+            false,
+            true
+          ]
+        ]
+      },
+      "placeholders": [
+        "plan_steps_instructions",
+        "replan_steps_instructions",
+        "step_instructions",
+        "step_result_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "check_result",
+              "execute_step",
+              300
+            ],
+            [
+              "check_result",
+              "replan",
+              150
+            ],
+            [
+              "check_result",
+              "synthesize",
+              10
+            ],
+            [
+              "execute_step",
+              "check_result",
+              100
+            ],
+            [
+              "plan",
+              "execute_step",
+              100
+            ],
+            [
+              "replan",
+              "execute_step",
+              100
+            ]
+          ],
+          "nodes": [
+            [
+              "check_result",
+              false,
+              false
+            ],
+            [
+              "execute_step",
+              false,
+              false
+            ],
+            [
+              "plan",
+              true,
+              false
+            ],
+            [
+              "replan",
+              false,
+              false
+            ],
+            [
+              "synthesize",
+              false,
+              true
+            ]
+          ]
+        },
+        "states": 5
+      },
+      "route": "file"
+    },
+    "prompt_chain": {
+      "graph": {
+        "edges": [
+          [
+            "step_0",
+            "step_1",
+            100
+          ],
+          [
+            "step_1",
+            "output",
+            100
+          ]
+        ],
+        "nodes": [
+          [
+            "output",
+            false,
+            true
+          ],
+          [
+            "step_0",
+            true,
+            false
+          ],
+          [
+            "step_1",
+            false,
+            false
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "step_0",
+              "step_1",
+              100
+            ],
+            [
+              "step_1",
+              "output",
+              100
+            ]
+          ],
+          "nodes": [
+            [
+              "output",
+              false,
+              true
+            ],
+            [
+              "step_0",
+              true,
+              false
+            ],
+            [
+              "step_1",
+              false,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "file"
+    },
+    "react": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "act",
+              "conclude",
+              1
+            ],
+            [
+              "act",
+              "think",
+              900
+            ],
+            [
+              "think",
+              "act",
+              300
+            ],
+            [
+              "think",
+              "conclude",
+              10
+            ]
+          ],
+          "nodes": [
+            [
+              "act",
+              false,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "think",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "file"
+    },
+    "reasoning_react": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "act",
+              "conclude",
+              1
+            ],
+            [
+              "act",
+              "think",
+              900
+            ],
+            [
+              "think",
+              "act",
+              300
+            ],
+            [
+              "think",
+              "conclude",
+              10
+            ]
+          ],
+          "nodes": [
+            [
+              "act",
+              false,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "think",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "builder"
+    },
+    "reflexion": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "evaluate",
+            900
+          ],
+          [
+            "evaluate",
+            "conclude",
+            10
+          ],
+          [
+            "evaluate",
+            "reflect",
+            300
+          ],
+          [
+            "evaluate",
+            "reflect",
+            900
+          ],
+          [
+            "reflect",
+            "think",
+            100
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "evaluate",
+            false,
+            false
+          ],
+          [
+            "reflect",
+            false,
+            false
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "act",
+              "conclude",
+              1
+            ],
+            [
+              "act",
+              "evaluate",
+              900
+            ],
+            [
+              "evaluate",
+              "conclude",
+              10
+            ],
+            [
+              "evaluate",
+              "reflect",
+              300
+            ],
+            [
+              "evaluate",
+              "reflect",
+              900
+            ],
+            [
+              "reflect",
+              "think",
+              100
+            ],
+            [
+              "think",
+              "act",
+              300
+            ],
+            [
+              "think",
+              "conclude",
+              10
+            ]
+          ],
+          "nodes": [
+            [
+              "act",
+              false,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "evaluate",
+              false,
+              false
+            ],
+            [
+              "reflect",
+              false,
+              false
+            ],
+            [
+              "think",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 5
+      },
+      "route": "file"
+    },
+    "rewoo": {
+      "graph": {
+        "edges": [
+          [
+            "execute_plans",
+            "solve",
+            100
+          ],
+          [
+            "plan_all",
+            "execute_plans",
+            100
+          ]
+        ],
+        "nodes": [
+          [
+            "execute_plans",
+            false,
+            false
+          ],
+          [
+            "plan_all",
+            true,
+            false
+          ],
+          [
+            "solve",
+            false,
+            true
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "plan_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "execute_plans",
+              "solve",
+              100
+            ],
+            [
+              "plan_all",
+              "execute_plans",
+              100
+            ]
+          ],
+          "nodes": [
+            [
+              "execute_plans",
+              false,
+              false
+            ],
+            [
+              "plan_all",
+              true,
+              false
+            ],
+            [
+              "solve",
+              false,
+              true
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "file"
+    },
+    "self_consistency": {
+      "graph": {
+        "edges": [],
+        "nodes": [
+          [
+            "generate",
+            true,
+            true
+          ]
+        ]
+      },
+      "placeholders": [],
+      "real": {
+        "graph": {
+          "edges": [],
+          "nodes": [
+            [
+              "generate",
+              true,
+              true
+            ]
+          ]
+        },
+        "states": 1
+      },
+      "route": "builder"
+    },
+    "summarize": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": null,
+      "route": "file"
+    },
+    "swarm": {
+      "graph": null,
+      "placeholders": [],
+      "real": null,
+      "route": "none"
+    },
+    "verified_react": {
+      "graph": {
+        "edges": [
+          [
+            "act",
+            "conclude",
+            1
+          ],
+          [
+            "act",
+            "think",
+            900
+          ],
+          [
+            "think",
+            "act",
+            300
+          ],
+          [
+            "think",
+            "conclude",
+            10
+          ]
+        ],
+        "nodes": [
+          [
+            "act",
+            false,
+            false
+          ],
+          [
+            "conclude",
+            false,
+            true
+          ],
+          [
+            "think",
+            true,
+            false
+          ]
+        ]
+      },
+      "placeholders": [
+        "context_names",
+        "think_instructions"
+      ],
+      "real": {
+        "graph": {
+          "edges": [
+            [
+              "act",
+              "conclude",
+              1
+            ],
+            [
+              "act",
+              "think",
+              900
+            ],
+            [
+              "think",
+              "act",
+              300
+            ],
+            [
+              "think",
+              "conclude",
+              10
+            ]
+          ],
+          "nodes": [
+            [
+              "act",
+              false,
+              false
+            ],
+            [
+              "conclude",
+              false,
+              true
+            ],
+            [
+              "think",
+              true,
+              false
+            ]
+          ]
+        },
+        "states": 3
+      },
+      "route": "file"
+    }
+  },
+  "g2": {
+    "ADaPTAgent": {
+      "class": "fsm_llm.agents.adapt.ADaPTAgent",
+      "fsm_digest": "63b05f8048f8238f053d66f4ee93e1301f7fab8990627a9fa7ab18c32b1cb61f",
+      "id": "adapt"
+    },
+    "DebateAgent": {
+      "class": "fsm_llm.agents.debate.DebateAgent",
+      "fsm_digest": "5f55f5600206ccb24393b81b04665c15651054475401037b2a11002fd036e832",
+      "id": "debate"
+    },
+    "PlanExecuteAgent": {
+      "class": "fsm_llm.agents.plan_execute.PlanExecuteAgent",
+      "fsm_digest": "24744baad42482e1bcab59118e851e5d876e6db21c0473c98dbf2cdce3ef9900",
+      "id": "plan_execute"
+    },
+    "REWOOAgent": {
+      "class": "fsm_llm.agents.rewoo.REWOOAgent",
+      "fsm_digest": "18045cb3d103df2759b06d22d149f8dcac02e5eb67122c8d77e9a0da5dc7f312",
+      "id": "rewoo"
+    },
+    "ReactAgent": {
+      "class": "fsm_llm.agents.react.ReactAgent",
+      "fsm_digest": "f04517d3bae59a6722bbc661096473a2eefd898e2e6188d27d82be33196d523a",
+      "id": "react"
+    },
+    "ReflexionAgent": {
+      "class": "fsm_llm.agents.reflexion.ReflexionAgent",
+      "fsm_digest": "da6ee0f8763a9933eb4e0b36da5878b0f49cc2e1a55b055146a4d84639030e0a",
+      "id": "reflexion"
+    },
+    "SelfConsistencyAgent": {
+      "class": "fsm_llm.agents.self_consistency.SelfConsistencyAgent",
+      "fsm_digest": "f0f9e85e97a224be48ee11161aadb870b5a43e94088f885b8587ebefd65b8cd5",
+      "id": "self_consistency"
+    }
+  },
+  "g3": {
+    "body": "{\"fsm\":{\"name\":\"G3\",\"description\":\"Fixed FSM of the drawing path\",\"version\":\"\",\"initial_state\":\"ask\",\"persona\":\"A tester\",\"state_count\":2,\"states\":[{\"state_id\":\"ask\",\"description\":\"Ask\",\"purpose\":\"Ask the question\",\"is_initial\":true,\"is_terminal\":false,\"transition_count\":2,\"transitions\":[{\"target_state\":\"ask\",\"description\":\"No answer yet\",\"priority\":100,\"condition_count\":0,\"has_logic\":false},{\"target_state\":\"done\",\"description\":\"The user gave a complete and usable answer to the question\",\"priority\":50,\"condition_count\":1,\"has_logic\":true}]},{\"state_id\":\"done\",\"description\":\"Done\",\"purpose\":\"Wrap up\",\"is_initial\":false,\"is_terminal\":true,\"transition_count\":0,\"transitions\":[]}]},\"nodes\":[{\"id\":\"ask\",\"label\":\"ask\",\"description\":\"Ask\",\"purpose\":\"Ask the question\",\"is_initial\":true,\"is_terminal\":false},{\"id\":\"done\",\"label\":\"done\",\"description\":\"Done\",\"purpose\":\"Wrap up\",\"is_initial\":false,\"is_terminal\":true}],\"edges\":[{\"from\":\"ask\",\"to\":\"ask\",\"label\":\"No answer yet\",\"priority\":100},{\"from\":\"ask\",\"to\":\"done\",\"label\":\"The user gave a complete and u\",\"priority\":50}]}",
+    "body_sha256": "3f03f1a570a0568b75744e066e212265fe803b6eae7c7e2f0473b1c929f29b41",
+    "status": 200
+  },
+  "meta": {
+    "no_real_fsm": {
+      "code-review, data-extraction, summarize": "presets: no agent class",
+      "meta_builder": "builds its API in its own session, not through a run",
+      "swarm": "no FSM: its members own theirs"
+    },
+    "placeholder": "<{}>",
+    "stub_tool": "lookup",
+    "task": "Summarize the quarterly report.",
+    "written_from": "git archive of the parent commit ab2b4499"
+  }
+}

@@ -73,7 +73,7 @@ GUARD_ROWS=(
   "D9 server auth: tests/test_fsm_llm_monitor/test_server_security.py $F/test_api_key_compare_sites.py $A/test_remote.py"
   "D10 supply chain: tests/test_packaging.py $R/test_supply_chain.py $R/test_distribution_name.py"
   "D11 no silent model, distinct roles: $F/test_model_not_configured.py $R/test_no_model_paths.py $F/test_simulation_roles.py tests/test_fsm_llm_synthesis/test_roles.py"
-  "D12 examples bind: tests/test_examples/test_example_calls_bind.py tests/test_examples/test_example_import_paths.py"
+  "D12 examples bind: tests/test_examples/test_example_calls_bind.py tests/test_examples/test_example_import_paths.py $A/test_agent_preview_golden.py"
 )
 unset A F R
 MARKERS="not slow and not real_llm and not integration"
