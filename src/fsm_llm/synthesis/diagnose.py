@@ -108,7 +108,7 @@ def _intent_out_of_scope(t: RunTrace, ctx: _Ctx) -> Any:
 
 def _extraction_miss(t: RunTrace, ctx: _Ctx) -> Any:
     found = _blocked(t, ctx)
-    seen = found and _observed(t, t.misses, ctx) - set(t.keys)
+    seen = found and (_observed(t, t.misses, ctx) & found[1]) - set(t.keys)
     missing = seen or (found and found[1] - set(t.keys))
     return (found[0], tuple(sorted(missing))) if found and missing else None
 

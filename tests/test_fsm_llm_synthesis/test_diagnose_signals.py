@@ -544,6 +544,26 @@ class TestAMissIsObservedNotInferred:
         ) in outcome.trace.misses  # three misses, in the other state
         assert outcome.codes == [("value-gate-unmet", "mid", ("answer",))]
 
+    def test_a_miss_of_an_optional_field_the_gate_never_reads_is_not_the_fault(
+        self, tmp_path: Path, level: str
+    ):
+        """Review concern 3 (probe p4), as a real run: ``nick`` is never given, ``answer`` is,
+        and the gate on ``answer`` wants another value. The run is stuck on the value."""
+        fsm = good_fsm()
+        ask = fsm["states"]["ask"]
+        ask["field_extractions"].append(
+            {"field_name": "nick", "field_type": "str", "extraction_instructions": "n"}
+        )
+        ask["transitions"][0]["conditions"][0]["logic"] = {
+            "==": [{"var": "answer"}, "never"]
+        }
+
+        outcome = drive(tmp_path, fsm, _Seeded({}, later={"answer": "42"}), level)
+
+        assert outcome.trace.misses == ((ASK, "nick", 3),)  # the miss is real and clean
+        assert "answer" in outcome.trace.keys
+        assert outcome.codes == [("value-gate-unmet", ASK, ("answer",))]
+
     def test_a_collection_that_resolves_later_is_no_fault(
         self, tmp_path: Path, level: str
     ):

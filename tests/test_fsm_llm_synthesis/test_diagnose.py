@@ -505,14 +505,47 @@ class TestObservedRules:
         assert "intent-out-of-scope" not in [c for c, _ in _codes([t])]
 
     def test_observed_miss_keys_replace_the_inferred_ones(self):
-        t = _t(misses=(("ask", "anything", 3), ("ask", "zed", 1)))
-        got = diagnose([t], DEFINITION, POLICY)
-        assert [(d.code, d.keys) for d in got] == [("extraction-miss", ("anything",))]
+        """``both`` gates on ``age`` and ``nick``: the inference names both, the observed miss
+        names the one that was really missed."""
+        t = _t(stuck="both", states=("both", "both"), misses=(("both", "nick", 3),))
+        assert [(d.code, d.keys) for d in diagnose([t], DEFINITION, POLICY)] == [
+            ("extraction-miss", ("nick",))
+        ]
+        bare = _t(stuck="both", states=("both", "both"))
+        assert [(d.code, d.keys) for d in diagnose([bare], DEFINITION, POLICY)] == [
+            ("extraction-miss", ("age", "nick"))
+        ]
 
     def test_observed_miss_of_a_key_the_run_ended_with_is_dropped(self):
-        t = _t(keys=("anything",), misses=(("ask", "anything", 5),))
+        t = _t(
+            stuck="both",
+            states=("both", "both"),
+            keys=("nick",),
+            misses=(("both", "nick", 5), ("both", "age", 5)),
+        )
         got = diagnose([t], DEFINITION, POLICY)
         assert [(d.code, d.keys) for d in got] == [("extraction-miss", ("age",))]
+
+    def test_observed_miss_of_a_key_the_gate_never_reads_replaces_nothing(self):
+        """Review concern 3 (probe p4): ``anything`` is extracted by ``ask`` and never read by
+        its gate, which reads ``age``. Missing it is not why the run is stuck."""
+        t = _t(misses=(("ask", "anything", 5),), keys=("age",))
+        got = diagnose([t], DEFINITION, POLICY)
+        assert [(d.code, d.keys) for d in got] == [("value-gate-unmet", ("age",))]
+
+    def test_only_the_gate_keys_of_the_observed_misses_are_named(self):
+        t = _t(
+            stuck="both",
+            states=("both", "both"),
+            misses=(("both", "nick", 3), ("both", "zed", 9)),
+        )
+        got = diagnose([t], DEFINITION, POLICY)
+        assert [(d.code, d.keys) for d in got] == [("extraction-miss", ("nick",))]
+
+    def test_misses_of_no_gate_key_give_the_old_result_byte_for_byte(self):
+        old = diagnose([_t(keys=("age",))], DEFINITION, POLICY)
+        t = _t(keys=("age",), misses=(("ask", "anything", 9), ("ask", "zed", 9)))
+        assert diagnose([t], DEFINITION, POLICY) == old
 
     @pytest.mark.parametrize(
         "extra",
