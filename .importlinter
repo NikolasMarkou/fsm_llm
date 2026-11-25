@@ -84,10 +84,6 @@ ignore_imports =
     fsm_llm.synthesis.simulation -> fsm_llm.eval.config
     fsm_llm.synthesis.simulation -> fsm_llm.eval.stats
     fsm_llm.synthesis.repair -> fsm_llm.eval.stats
-    # retired by: roadmap 3.2 (the `VectorStore` protocol and the embedding helpers
-    # `EmbedTextsFn` and `cosine_similarity` move to `retrieval/`; D-016 b).
-    fsm_llm.synthesis.library -> fsm_llm.agents.semantic_tools
-    fsm_llm.synthesis.synthesizer -> fsm_llm.agents.semantic_tools
     # permanent (D-016 c): `ReasoningReactAgent` is the agents pattern built on the reasoning
     # engine, and no roadmap row retires the edge; it is reported to the user as a decision.
     fsm_llm.agents.reasoning_react -> fsm_llm.reasoning

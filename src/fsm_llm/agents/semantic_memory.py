@@ -39,11 +39,11 @@ import threading
 import time
 from typing import Annotated, Any
 
-from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL
+from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL, similarity
 from fsm_llm.logging import logger
 from fsm_llm.tools import READ_ONLY_ANNOTATIONS, ToolDefinition, require_int_limit, tool
 
-from .semantic_tools import EmbedFn, cosine_similarity, embedding_backend
+from .semantic_tools import EmbedFn, embedding_backend
 
 
 class MemoryEntry:
@@ -251,7 +251,7 @@ class SemanticMemoryStore:
             scored = self._substring_search(query, entries)
         else:
             scored = [
-                (e, cosine_similarity(query_emb, e.embedding))
+                (e, similarity.cosine_similarity(query_emb, e.embedding))
                 for e in entries
                 if e.embedding is not None
             ]

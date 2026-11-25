@@ -70,6 +70,8 @@ working; a private helper is imported from its defining module.
   with its environment guard and banner setting; ``providers.request``:
   ``RequestMixin``, the one provider request builder; ``providers.embedder``:
   ``LiteLLMEmbedder``.
+- ``similarity``: ``EmbedTextsFn`` and ``cosine_similarity`` (moved from
+  ``agents.semantic_tools``, plan c720601d step 1b).
 - ``ollama``, ``text``, ``json_extraction``: Ollama parameter helpers and reply text helpers.
 
 ``completion``, ``embedding`` and ``get_supported_openai_params`` are NOT names of this
@@ -103,6 +105,7 @@ from .interface import (
 from .parsing import cut_off_note
 from .providers.embedder import LiteLLMEmbedder
 from .providers.litellm import LiteLLMInterface
+from .similarity import EmbedTextsFn, cosine_similarity
 
 __all__ = [
     "DEFAULT_EMBEDDING_MODEL",
@@ -111,6 +114,7 @@ __all__ = [
     "PLACEHOLDER_MODEL",
     "CompletionRequest",
     "CompletionResponse",
+    "EmbedTextsFn",
     "LLMInterface",
     "LLMResponseError",
     "LLMUsage",
@@ -119,6 +123,7 @@ __all__ = [
     "ModelNotConfiguredError",
     "ModelToolCall",
     "check_tool_transcript",
+    "cosine_similarity",
     "cut_off_note",
     "decode_tool_arguments",
     "implements_complete",

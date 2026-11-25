@@ -90,7 +90,7 @@ class TestSemanticToolRegistry:
 
     def test_cosine_similarity(self):
         """Cosine similarity computation is correct."""
-        from fsm_llm.agents.semantic_tools import cosine_similarity
+        from fsm_llm.llm import cosine_similarity
 
         assert cosine_similarity([1, 0], [1, 0]) == pytest.approx(1.0)
         assert cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)

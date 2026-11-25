@@ -8,18 +8,15 @@ new dependencies) or a caller-supplied ``embed_fn``.
 
 from __future__ import annotations
 
-import math
 import threading
 from collections.abc import Callable, Sequence
 
-from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL, LiteLLMEmbedder
+from fsm_llm.llm import DEFAULT_EMBEDDING_MODEL, LiteLLMEmbedder, similarity
 from fsm_llm.logging import logger
 from fsm_llm.tools import ToolDefinition, ToolRegistry
 
 EmbedFn = Callable[[str], list[float]]
 """A custom embedding backend: one text in, its vector out."""
-
-EmbedTextsFn = Callable[[Sequence[str]], list[list[float]]]
 
 
 # DECISION plan-2026-10-01T093600-944e2692/D-005: the default backend is core's
@@ -27,7 +24,9 @@ EmbedTextsFn = Callable[[Sequence[str]], list[list[float]]]
 # import the provider SDK or call an embedding API here, and do NOT add an Embedder ABC
 # or per-class embedding code: the memory store and the tool registry share
 # this one function. See D-005.
-def embedding_backend(embedding_model: str, embed_fn: EmbedFn | None) -> EmbedTextsFn:
+def embedding_backend(
+    embedding_model: str, embed_fn: EmbedFn | None
+) -> similarity.EmbedTextsFn:
     """The batch embedding function of a semantic store or registry.
 
     Shared by :class:`SemanticToolRegistry` and
@@ -60,27 +59,6 @@ def embedding_backend(embedding_model: str, embed_fn: EmbedFn | None) -> EmbedTe
 def _tool_text(tool: ToolDefinition) -> str:
     """The text embedded for a tool."""
     return f"{tool.name}: {tool.description}"
-
-
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Compute cosine similarity between two vectors.
-
-    Vectors of different length (e.g. cached under another embedding model)
-    are not comparable: they score ``0.0`` and log a WARNING instead of being
-    silently truncated to the shorter length.
-    """
-    if len(a) != len(b):
-        logger.warning(
-            f"Embedding dimension mismatch ({len(a)} vs {len(b)}); "
-            "scoring 0.0. Were the vectors made by different embedding models?"
-        )
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 class SemanticToolRegistry(ToolRegistry):
@@ -237,7 +215,7 @@ class SemanticToolRegistry(ToolRegistry):
         # Score each tool
         scores: list[tuple[str, float]] = []
         for tool_name, tool_embedding in embedding_snapshot:
-            score = cosine_similarity(query_embedding, tool_embedding)
+            score = similarity.cosine_similarity(query_embedding, tool_embedding)
             scores.append((tool_name, score))
 
         # Sort by score descending

@@ -30,7 +30,6 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from fsm_llm.agents.semantic_tools import EmbedTextsFn
 from fsm_llm.aio import acall, aoffload, run_sync
 from fsm_llm.constants import SKILL_DEFANG
 from fsm_llm.core.codes import Purpose
@@ -46,6 +45,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.core.state_kinds import declared_tool_names
 from fsm_llm.core.visualize import build_fsm_graph, to_mermaid
 from fsm_llm.llm import (
+    EmbedTextsFn,
     LiteLLMInterface,
     LLMInterface,
     implements_complete,

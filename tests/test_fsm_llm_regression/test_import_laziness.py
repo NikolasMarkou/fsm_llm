@@ -168,6 +168,50 @@ def loaded_by_import(src_root: Path = REPO / "src") -> dict[str, list[str]]:
     return json.loads(done.stdout)
 
 
+# The same child for `import <module>`: what a subpackage pulls in with it (plan c720601d,
+# step 1b, P7.4a). `modules` is every loaded dotted `fsm_llm` module, sorted.
+_PROBE_SUBPACKAGE = (
+    "import json, sys\n"
+    "sys.path.insert(0, {root!r})\n"
+    "import {module}\n"
+    "import fsm_llm\n"
+    "assert fsm_llm.__file__.startswith({root!r}), fsm_llm.__file__\n"
+    "mods = sorted(m for m in sys.modules if m == 'fsm_llm' or m.startswith('fsm_llm.'))\n"
+    "print(json.dumps({{'modules': mods}}))\n"
+)
+
+
+def loaded_by_import_of(module: str, src_root: Path = REPO / "src") -> list[str]:
+    """Every dotted `fsm_llm` module loaded by `import <module>` from the tree at *src_root*.
+
+    Interface contract: *module* is a dotted name below `fsm_llm`; *src_root* contains the
+    `fsm_llm` package directory. One `python -I` child with the model-server variables on a
+    closed port and a 120 s timeout; raises `AssertionError` with its stderr when the import
+    fails. Returns the sorted module names.
+    """
+    code = _PROBE_SUBPACKAGE.format(root=str(src_root), module=module)
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=REPO,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "OLLAMA_API_BASE": "http://127.0.0.1:9",
+            "OLLAMA_HOST": "http://127.0.0.1:9",
+            "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+            **(
+                {"SYSTEMROOT": os.environ["SYSTEMROOT"]}
+                if "SYSTEMROOT" in os.environ
+                else {}
+            ),
+        },
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)["modules"]
+
+
 def first_level(modules: list[str]) -> set[str]:
     """The first-level names below `fsm_llm` in a list of dotted module names."""
     return {m.split(".")[1] for m in modules if m.startswith("fsm_llm.")}
@@ -244,3 +288,37 @@ class TestImportFsmLlmIsLazy:
         )
 
         assert unclassified == set(), unclassified
+
+
+@pytest.fixture(scope="module")
+def synthesis_modules() -> list[str]:
+    """The one child process of the synthesis rows."""
+    return loaded_by_import_of("fsm_llm.synthesis")
+
+
+class TestImportSynthesisLoadsNoAgents:
+    """`import fsm_llm.synthesis` loads no `fsm_llm.agents` module (plan c720601d, P7.4a).
+
+    The two edges that loaded the agents package were `synthesis.library` and
+    `synthesis.synthesizer` importing `EmbedTextsFn` and `cosine_similarity` from
+    `agents.semantic_tools`; both names live in `fsm_llm.llm` now, so the pattern runtimes
+    (`agents`, and `reasoning` behind `agents.reasoning_react`) stay out of a synthesis import.
+    Precondition: this pins the module set of one fresh `python -I` process; a host that imports
+    `fsm_llm.agents` itself, or passes an `agents` object in, loads it of course.
+    """
+
+    def test_no_agents_module_loads(self, synthesis_modules: list[str]) -> None:
+        leaked = [
+            m
+            for m in synthesis_modules
+            if m == "fsm_llm.agents" or m.startswith("fsm_llm.agents.")
+        ]
+
+        assert leaked == [], leaked[:5]
+
+    def test_the_pattern_runtimes_stay_out_too(
+        self, synthesis_modules: list[str]
+    ) -> None:
+        names = first_level(synthesis_modules)
+
+        assert not names & {"agents", "reasoning", "workflows", "monitor"}, names
