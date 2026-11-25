@@ -71,6 +71,7 @@ _SHARED: dict[tuple[str, str], tuple[Any, ...]] = {
             "TOOL_EXECUTION_FAILED",
             "TOOL_TIMED_OUT",
             "TOOL_BAD_TIMEOUT",
+            "TOOL_NOT_LOGGED",
         )
     },
     ("LogMessages", "TOOL_LATE_RESULT"): (_AGENTS, _TOOLS),
@@ -208,6 +209,22 @@ def _probe_bad_timeout(mp: pytest.MonkeyPatch) -> object:
     return "accepted"
 
 
+def _probe_not_logged(mp: pytest.MonkeyPatch) -> object:
+    from fsm_llm.core.tool_observer import install_tool_observer, reset_tool_observer
+
+    class _Refuses:
+        def begin_tool(self, **_: Any) -> object:
+            raise RuntimeError("log refused")
+
+    registry = ToolRegistry()
+    registry.register_function(lambda: "x", name="charge", description="d")
+    token = install_tool_observer(_Refuses())  # type: ignore[arg-type]
+    try:
+        return registry.execute(ToolCall(tool_name="charge", parameters={})).error
+    finally:
+        reset_tool_observer(token)
+
+
 def _probe_late_result(mp: pytest.MonkeyPatch) -> object:
     from fsm_llm.tools import timeouts
 
@@ -263,6 +280,7 @@ _PROBES: dict[
         _probe_bad_timeout,
         "BT {name} {timeout} {limit}",
     ),
+    ("ErrorMessages", "TOOL_NOT_LOGGED"): (_probe_not_logged, "NL {name}"),
     ("LogMessages", "TOOL_LATE_RESULT"): (
         _probe_late_result,
         "LR {name} {timeout} {outcome}",

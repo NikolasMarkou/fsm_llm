@@ -275,6 +275,7 @@ class ErrorMessages(metaclass=MirroredConstants):
     TOOL_EXECUTION_FAILED = _ToolErrorMessages.TOOL_EXECUTION_FAILED
     TOOL_TIMED_OUT = _ToolErrorMessages.TOOL_TIMED_OUT
     TOOL_BAD_TIMEOUT = _ToolErrorMessages.TOOL_BAD_TIMEOUT
+    TOOL_NOT_LOGGED = _ToolErrorMessages.TOOL_NOT_LOGGED
     EXECUTE_WITHOUT_GATED = (
         "{registry}.execute does not accept the keyword argument 'gated': a "
         "ToolRegistry subclass must keep the signature "
@@ -344,7 +345,13 @@ mirror(_PolicyDefaults, Defaults, ("CONFIDENCE_THRESHOLD",))
 mirror(
     _ToolErrorMessages,
     ErrorMessages,
-    ("TOOL_NOT_FOUND", "TOOL_EXECUTION_FAILED", "TOOL_TIMED_OUT", "TOOL_BAD_TIMEOUT"),
+    (
+        "TOOL_NOT_FOUND",
+        "TOOL_EXECUTION_FAILED",
+        "TOOL_TIMED_OUT",
+        "TOOL_BAD_TIMEOUT",
+        "TOOL_NOT_LOGGED",
+    ),
 )
 mirror(_ToolLogMessages, LogMessages, ("TOOL_LATE_RESULT",))
 mirror(

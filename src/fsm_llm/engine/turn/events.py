@@ -115,10 +115,8 @@ def record_extraction_miss(
     if current_scope() is None:
         return
     with warn_on_failure(EventType.EXTRACTION_MISS):
-        declared = {
-            *kind_of(state).minted_keys(state),
-            *(c.field_name for c in state.classification_extractions or ()),
-        } - handler_only_names(fsm_resolver(instance.fsm_id))
+        handler_only = handler_only_names(fsm_resolver(instance.fsm_id))
+        declared = kind_of(state).produced_keys(state, handler_only) - handler_only
         data = instance.context.data
         missing = visible_entries({k: None for k in declared if data.get(k) is None})
         if missing:

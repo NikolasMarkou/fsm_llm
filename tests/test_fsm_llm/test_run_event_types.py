@@ -2,7 +2,8 @@
 
 ``run/start``, ``run/end`` and ``executable/resolve`` are declared event types. ``run/start`` and
 ``run/end`` have a producer since plan baa37f40 K7.4 (a delegated ``call``, proven in
-``test_call_delegated_settle.py``); ``executable/resolve`` has none yet. Adding members is additive: no ``LOG_FORMAT_VERSION`` bump, an
+``test_call_delegated_settle.py``) and ``executable/resolve`` since plan 3f4530d3 step 5
+(``test_event_log_handlers.py``). Adding members is additive: no ``LOG_FORMAT_VERSION`` bump, an
 unknown type is still refused on write, and a log that holds the new types reads and folds like
 one that does not.
 """
@@ -30,7 +31,7 @@ from tests.test_fsm_llm import kind_corpus as kc
 RUN_TYPES = [EventType.EXECUTABLE_RESOLVE, EventType.RUN_START, EventType.RUN_END]
 
 
-def test_the_three_types_are_declared_and_only_the_run_pair_is_produced() -> None:
+def test_the_three_types_are_declared_and_produced() -> None:
     assert [t.value for t in RUN_TYPES] == [
         "executable/resolve",
         "run/start",
@@ -39,8 +40,9 @@ def test_the_three_types_are_declared_and_only_the_run_pair_is_produced() -> Non
     for member in RUN_TYPES:
         assert member in DECLARED_TYPES
         assert EventType.from_string(member.value) is member
-    assert EventType.EXECUTABLE_RESOLVE not in PRODUCED_TYPES
-    assert {EventType.RUN_START, EventType.RUN_END} <= PRODUCED_TYPES
+    assert (
+        set(RUN_TYPES) <= PRODUCED_TYPES
+    )  # executable/resolve since plan 3f4530d3 step 5
     assert LOG_FORMAT_VERSION == 1  # additive: the format version did not move
 
 
