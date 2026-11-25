@@ -25,6 +25,7 @@ import pytest
 
 import fsm_llm
 from fsm_llm.core.definitions import CompletionResponse, LLMResponseError
+from fsm_llm.simulation import Simulator
 from fsm_llm.synthesis import (
     FSMLibrary,
     SynthesisError,
@@ -58,10 +59,15 @@ def _empty(synth: FSMSynthesizer) -> bool:
 def _synth(
     replies: list[Any], tmp_path: Path | None = None, **kw: Any
 ) -> tuple[FSMSynthesizer, ScriptedLLM]:
-    llm = ScriptedLLM(replies)
+    llm = ScriptedLLM(replies, model="compiler" if "simulator" in kw else None)
     if tmp_path is not None:
         kw.setdefault("library", FSMLibrary(tmp_path / "lib"))
     return FSMSynthesizer(llm, **kw), llm
+
+
+def _simulator() -> Simulator:
+    """A real, labelled simulator: the hop under test patches ``run_g6b``, not this."""
+    return Simulator(ScriptedLLM([], model="runner"), ScriptedLLM([], model="judge"))
 
 
 class _Parked(ScriptedLLM):
@@ -255,7 +261,7 @@ class TestTheSimulatorHop:
         self, valid_fsm, monkeypatch
     ) -> None:
         threads = self._spy(monkeypatch)
-        synth, _ = _synth([_text(valid_fsm)], simulator=object())
+        synth, _ = _synth([_text(valid_fsm)], simulator=_simulator())
         result = await synth.acompile("g", return_keys=RET)
         assert result.simulation is not None
         assert threads and threads[0] != threading.get_ident()
@@ -264,7 +270,7 @@ class TestTheSimulatorHop:
         self, valid_fsm, monkeypatch
     ) -> None:
         threads = self._spy(monkeypatch)
-        synth, _ = _synth([_text(valid_fsm)], simulator=object())
+        synth, _ = _synth([_text(valid_fsm)], simulator=_simulator())
         synth.compile("g", return_keys=RET)
         assert threads == [threading.get_ident()]
 

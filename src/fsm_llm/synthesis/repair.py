@@ -59,7 +59,7 @@ from .library import FSMLibrary, digest_of
 from .patch import apply_patch
 from .policy import SynthesisPolicy, strip_abort
 from .prompts import patch_messages
-from .simulation import replay_g6b, run_g6b
+from .simulation import checked_roles, replay_g6b, run_g6b
 from .synthesizer import CompileResult, FSMSynthesizer
 
 
@@ -209,6 +209,7 @@ def repair_procedure(
     parent or a corrupt file, ``SynthesisError`` for malformed
     ``replay_scripts``; a provider outage inside G6b is ``simulation-failed``.
     """
+    checked_roles(simulator, synthesizer.llm)  # before any call is made
     policy = synthesizer.policy
     stop = partial(PromotionResult, parent_digest)
     try:

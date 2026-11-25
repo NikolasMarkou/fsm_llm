@@ -78,8 +78,10 @@ def _run(
         {"answer": "42"} if extraction is None else extraction
     )
     writer = writer if writer is not None else ScriptedLLM([_reply(*_four())])
+    if writer.model is None and writer is not llm:
+        writer.model = "writer"  # distinct from the runner: the default path
     kw = {} if clock is None else {"clock": clock}
-    sim = Simulator(llm, writer, **kw)
+    sim = Simulator(llm, writer, allow_same_model=writer is llm, **kw)
     report = run_g6b(
         sim,
         _injected() if fsm is None else fsm,
@@ -598,7 +600,7 @@ class TestReplay:
 
     def _replay(self, llm: Any = None, clock: Any = None, **limits: Any):
         llm = llm or ScriptedRunnerLLM({"answer": "42"})
-        writer = ScriptedLLM([])  # a replay never calls the writer
+        writer = ScriptedLLM([], model="writer")  # a replay never calls the writer
         kw = {} if clock is None else {"clock": clock}
         sim = Simulator(llm, writer, **kw)
         out = replay_g6b(

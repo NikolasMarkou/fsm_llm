@@ -320,10 +320,10 @@ class Rig:
             self.lib.add_scenarios(self.parent, [{"kind": "happy", "turns": ["go"]}])
         _stuck_runs(self.lib, self.parent, failures)
         self.llm = Cheap()
-        self.writer = ScriptedLLM([NO_SCENARIOS] * writes)
+        self.writer = ScriptedLLM([NO_SCENARIOS] * writes, model="writer")
         self.sim = Simulator(self.llm, self.writer)
         self.synth = FSMSynthesizer(
-            ScriptedLLM([]),
+            ScriptedLLM([], model="compiler"),
             policy=self.policy,
             library=self.lib,
             reviewer=reviewer,
@@ -875,7 +875,7 @@ class TestTheLoopEndToEnd:
         assert ops == FIX and len(patcher.requests) == 1
 
         # 4. judged without writing, then written
-        sim = Simulator(cheap, ScriptedLLM([NO_SCENARIOS] * 4))
+        sim = Simulator(cheap, ScriptedLLM([NO_SCENARIOS] * 4, model="writer"))
         args: dict[str, Any] = dict(
             library=library,
             synthesizer=rig.synth,

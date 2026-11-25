@@ -73,6 +73,7 @@ class ScriptedRunnerLLM(MockLLM2Interface):
         responses: dict[str, str] | None = None,
     ) -> None:
         super().__init__(extraction_data=extraction_data)
+        self.model = "runner"  # a named executor: the simulator refuses an unnamed one
         self.responses = responses or {}
 
     def usage(self) -> LLMUsage:

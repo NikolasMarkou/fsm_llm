@@ -444,7 +444,7 @@ class TestUsage:
     def test_the_synthesis_simulator_accepts_the_double(self) -> None:
         from fsm_llm.simulation import Simulator
 
-        Simulator(ScriptedLLM(["x"]))
+        Simulator(ScriptedLLM(["x"]), allow_same_model=True)  # usage() is the row
 
 
 class TestSubclassing:

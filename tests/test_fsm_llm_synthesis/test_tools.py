@@ -342,9 +342,11 @@ class TestRequireSimulation:
             gates_passed=gates,
             lifecycle="verified",
         )
-        strong, cheap = ScriptedLLM([]), ScriptedRunnerLLM({"answer": "42"})
+        strong = ScriptedLLM([], model="compiler")
+        cheap = ScriptedRunnerLLM({"answer": "42"})
+        judge = ScriptedLLM([], model="judge")  # the judge is not the compiler
         synth = FSMSynthesizer(
-            strong, policy=policy, library=lib, simulator=Simulator(cheap, strong)
+            strong, policy=policy, library=lib, simulator=Simulator(cheap, judge)
         )
         registry = create_procedure_tools(synth, runner_llm=cheap)
         return _Rig(registry, lib, strong, cheap, synth)

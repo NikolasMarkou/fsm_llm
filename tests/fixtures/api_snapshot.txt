@@ -2026,9 +2026,15 @@ fsm_llm.simulation.Budget class
   def __init__(self, meter: Callable[[], int], clock: Callable[[], float], max_seconds: float, max_calls: int, start: float, calls0: int) -> None
   def calls(self) -> int
   def spent(self) -> bool
+fsm_llm.simulation.CODE_JUDGE_NOT_DISTINCT = 'judge_not_distinct'
+fsm_llm.simulation.Roles class
+  def __init__(self, compiler: str | None, executor: str | None, judge: str | None, same_model_allowed: bool = False) -> None
+fsm_llm.simulation.SimulationError class(FSMError)
+  def __init__(self, message: str, *, code: str, details: dict[str, Any] | None = None) -> None
 fsm_llm.simulation.Simulator class
-  def __init__(self, executor: LLMInterface, judge: LLMInterface | None = None, *, clock: Callable[[], float] = monotonic) -> None
+  def __init__(self, executor: LLMInterface, judge: LLMInterface | None = None, *, allow_same_model: bool = False, clock: Callable[[], float] = monotonic) -> None
   def budget(self, max_seconds: float, max_calls: int) -> Budget
+  def roles(self, compiler: LLMInterface | None = None) -> Roles
   def trial(self, fsm: FSMDefinition | dict[str, Any], initial_context: Mapping[str, Any], turns: Sequence[str], *, budget: Budget) -> Trial | None
 fsm_llm.simulation.Trial class
   def __init__(self, responses: list[str] = <factory>, visited_states: list[str] = <factory>, turns_sent: int = 0, final_state: str | None = None, context: dict[str, Any] = <factory>, ended: bool = False, error: str | None = None, close_error: str | None = None, duration: float = 0.0) -> None
@@ -2040,7 +2046,7 @@ fsm_llm.simulation.wilson_ci def(k: int, n: int, z: float = 1.96) -> tuple[float
 fsm_llm.simulation.write_scenarios def(llm: LLMInterface, *, system: str, user: str, kinds: Collection[str], max_scenarios: int, max_turns: int, turn_chars: int, max_tokens: int) -> list[dict[str, Any]]
 # fsm_llm.synthesis
 fsm_llm.synthesis.CompileResult class
-  def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = ()) -> None
+  def __init__(self, definition: FSMDefinition, data: dict[str, Any], report: GateReport, rounds: int, usage: LLMUsage | None, simulation: SimulationReport | None = None, failures: tuple[tuple[str, ...], ...] = (), roles: Roles | None = None) -> None
 fsm_llm.synthesis.Diagnosis class
   def __init__(self, code: str, state: str, keys: tuple[str, ...], runs: int, share: float) -> None
 fsm_llm.synthesis.FSMLibrary class
@@ -2093,7 +2099,7 @@ fsm_llm.synthesis.PatchError class(SynthesisError)
 fsm_llm.synthesis.PolicyFinding class
   def __init__(self, code: str, state: str, message: str, gate: str = 'G5') -> None
 fsm_llm.synthesis.Procedure class
-  def __init__(self, digest: str, definition: FSMDefinition, record: LibraryRecord | None, source: str, rounds: tuple[tuple[str, ...], ...] = (), seconds: float = 0.0, usage: LLMUsage = <factory>) -> None
+  def __init__(self, digest: str, definition: FSMDefinition, record: LibraryRecord | None, source: str, rounds: tuple[tuple[str, ...], ...] = (), seconds: float = 0.0, usage: LLMUsage = <factory>, roles: Roles | None = None) -> None
   property data
 fsm_llm.synthesis.ProcedureApprovalRequest class
   def __init__(self, digest: str, mermaid: str, report: str, goal: str, summary: str) -> None
@@ -2107,7 +2113,7 @@ fsm_llm.synthesis.RunTrace class
   classmethod def from_row(cls, row: object) -> RunTrace
   def to_row(self) -> dict[str, Any]
 fsm_llm.synthesis.SimulationReport class
-  def __init__(self, findings: tuple[GateFinding, ...], scenarios: tuple[dict[str, Any], ...], overall: dict[str, Any], happy: dict[str, Any], generated: int, calls: int) -> None
+  def __init__(self, findings: tuple[GateFinding, ...], scenarios: tuple[dict[str, Any], ...], overall: dict[str, Any], happy: dict[str, Any], generated: int, calls: int, roles: Roles | None = None) -> None
   property passed
   def repair_text(self, cap: int = 2000) -> str
 fsm_llm.synthesis.SynthesisError class(FSMError)

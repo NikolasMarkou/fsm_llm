@@ -34,7 +34,15 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.expressions import is_missing
 from fsm_llm.core.state_kinds import kind_of
-from fsm_llm.simulation import Simulator, Trial, pass_rate, write_scenarios
+from fsm_llm.llm import LLMInterface
+from fsm_llm.simulation import (
+    Roles,
+    SimulationError,
+    Simulator,
+    Trial,
+    pass_rate,
+    write_scenarios,
+)
 from fsm_llm.text import safe_text
 
 from .constants import (
@@ -49,7 +57,7 @@ from .constants import (
     MAX_SCENARIOS,
 )
 from .dryrun import FILLER, edge_witnesses
-from .exceptions import SynthesisError
+from .exceptions import SynthesisError, SynthesisRefusedError
 from .gates import GateFinding, GateReport
 from .policy import SynthesisPolicy
 from .prompts import goal_block
@@ -81,7 +89,8 @@ class SimulationReport:
     ``scenarios`` are the accepted generated ones as ``{"kind", "turns"}`` (the
     replay set), ``generated`` how many of them ran, ``happy`` and ``overall``
     ``pass_rate`` dicts over the trials that finished, ``calls`` the
-    interface's call count during the run.
+    interface's call count during the run. ``roles`` names the executor and the judge
+    (the compiler is known to the caller: ``CompileResult.roles``).
     """
 
     findings: tuple[GateFinding, ...]
@@ -90,6 +99,7 @@ class SimulationReport:
     happy: dict[str, Any]
     generated: int
     calls: int
+    roles: Roles | None = None
 
     @property
     def passed(self) -> bool:
@@ -430,7 +440,21 @@ def run_g6b(
         happy,
         len({i for i, _, _ in ran if i}),
         budget.calls(),
+        simulator.roles(),
     )
+
+
+def checked_roles(simulator: Simulator, compiler: LLMInterface) -> Roles:
+    """``simulator.roles(compiler)``, the refusal as ``SynthesisRefusedError``.
+
+    Interface contract (callers: ``FSMSynthesizer``, ``repair_procedure``): raises
+    ``SynthesisRefusedError`` with ``code == CODE_JUDGE_NOT_DISTINCT`` and no model
+    name in the message; never calls a model.
+    """
+    try:
+        return simulator.roles(compiler)
+    except SimulationError as e:
+        raise SynthesisRefusedError(str(e), e.code) from e
 
 
 def _write(

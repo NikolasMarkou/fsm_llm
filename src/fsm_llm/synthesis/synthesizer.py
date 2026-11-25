@@ -56,7 +56,7 @@ from fsm_llm.llm.purpose import purpose_scope
 from fsm_llm.logging import logger
 from fsm_llm.okf import capped_line, strip_unsafe_text
 from fsm_llm.policy import HumanInTheLoop
-from fsm_llm.simulation import Simulator
+from fsm_llm.simulation import Roles, Simulator
 from fsm_llm.text import safe_text
 from fsm_llm.tools import ToolCall
 
@@ -82,7 +82,7 @@ from .library import FSMLibrary, LibraryRecord, digest_of
 from .policy import SynthesisPolicy, needs_approval, strip_abort
 from .prompts import compile_messages, repair_message
 from .reply import _judge
-from .simulation import SimulationReport, run_g6b
+from .simulation import SimulationReport, checked_roles, run_g6b
 
 _NO_REPLY = "(no reply)"  # the assistant turn echoed for a reply with no text
 _MERMAID_CHARS = 4000  # the diagram shown to a reviewer
@@ -99,7 +99,8 @@ class CompileResult:
     ``rounds`` the strong-model calls made, ``usage`` a snapshot of the
     interface's call counters (its totals so far, not only this compile) or
     ``None`` when the interface keeps none. ``simulation`` is the G6b report
-    when a simulator ran and passed, else ``None`` (never a failed one).
+    when a simulator ran and passed, else ``None`` (never a failed one). ``roles``
+    names the compiler, the executor and the judge (``None`` without a simulator).
     """
 
     definition: FSMDefinition
@@ -109,6 +110,7 @@ class CompileResult:
     usage: LLMUsage | None
     simulation: SimulationReport | None = None
     failures: tuple[tuple[str, ...], ...] = ()  # the codes of each failed round
+    roles: Roles | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,7 @@ class Procedure:
     rounds: tuple[tuple[str, ...], ...] = ()
     seconds: float = 0.0
     usage: LLMUsage = field(default_factory=LLMUsage)
+    roles: Roles | None = None  # a compile with a simulator; never a library hit
 
     @property
     def data(self) -> dict[str, Any]:
@@ -328,6 +331,8 @@ class FSMSynthesizer:
         self._embed = embed
         self.simulator = simulator
         self._clock = clock
+        if simulator is not None:
+            checked_roles(simulator, llm)  # a judge that is not distinct is refused
 
     def compile(
         self,
@@ -418,6 +423,9 @@ class FSMSynthesizer:
                         usage() if callable(usage) else None,
                         simulation,
                         tuple(failed),
+                        None
+                        if self.simulator is None
+                        else checked_roles(self.simulator, self.llm),
                     )
                 report = GateReport(simulation.findings)  # the G6b failure
             failed.append(tuple(dict.fromkeys(f.code for f in report.findings)))
@@ -584,6 +592,7 @@ class FSMSynthesizer:
             result.failures,
             self._since(started),
             _spent(result.usage, before),
+            result.roles,
         )
 
     async def _areference(

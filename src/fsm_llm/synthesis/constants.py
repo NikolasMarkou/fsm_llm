@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from fsm_llm.core.definitions import DEFAULT_SYNTHESIS_RESULT_KEY
 from fsm_llm.core.definitions import MAX_PATCH_DEPTH as MAX_PATCH_DEPTH
+from fsm_llm.simulation.exceptions import (
+    CODE_JUDGE_NOT_DISTINCT as CODE_JUDGE_NOT_DISTINCT,
+)
 
 # --- Reserved names (a compiled procedure may never declare or write these) ---
 ABORT_STATE_ID = "abort"
@@ -99,6 +102,7 @@ MAX_SCENARIO_TURN_CHARS = 300
 # the kinds a writer may add ---
 GATE_SIMULATION = "G6b"
 CODE_SIMULATION_INCOMPLETE = "simulation-incomplete"
+# the judge is not distinct from the executor or the compiler (a gate code, not a Reason)
 HAPPY_KIND = "happy"
 GENERATED_KINDS = ("missing_info", "correction", "off_topic", "adversarial")
 

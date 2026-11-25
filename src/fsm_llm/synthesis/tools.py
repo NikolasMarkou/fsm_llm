@@ -18,6 +18,7 @@ hands back only its return values. Approval stays inside the synthesizer (G7).
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict
 from threading import Lock
 from typing import Any
 
@@ -176,7 +177,9 @@ def create_procedure_tools(
           ``synthesizer.obtain`` and replies with a receipt: ``procedure_id``,
           ``version`` and ``lifecycle`` (``-`` without a library), ``source``,
           ``states`` (abort terminal included) and the ``G1`` to ``G6a``
-          verdicts. No generated text.
+          verdicts; a compile that ran a simulator adds ``compiler``,
+          ``executor``, ``judge`` (model names, ``-`` when unnamed) and
+          ``same_model_allowed``. No generated text.
         - ``run_procedure(procedure_id, inputs={})`` needs the synthesizer's
           library. It loads by id (64 lowercase hex), applies
           ``runnable_reason``, needs every declared input, runs the procedure on
@@ -251,6 +254,7 @@ def create_procedure_tools(
         except SynthesisError as e:
             return failed(reason_of(e), room)
         record = procedure.record
+        roles = asdict(procedure.roles).items() if procedure.roles else ()
         gates = verify_stored(
             procedure.definition, policy, inputs=names, return_keys=return_keys
         ).verdicts
@@ -262,6 +266,7 @@ def create_procedure_tools(
                 f"source: {procedure.source}",
                 f"states: {len(procedure.definition.states)}",
                 "gates: " + " ".join(f"{g}={v}" for g, v in gates.items()),
+                *(f"{k}: {_safe('-' if v is None else v, 100)}" for k, v in roles),
             ],
             room,
         )

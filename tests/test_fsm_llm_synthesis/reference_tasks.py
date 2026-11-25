@@ -223,7 +223,7 @@ def drive_fsm(
             f"{task.id}: the hand child fails the gates"
         )
         library.put(gates.definition, goal=task.goal, inputs_required=(), return_keys=keys, synthesizing_model="hand-written", gates_passed=GATES, lifecycle="verified")  # fmt: skip
-    sim = None if hand else Simulator(llms["sim"], llms["compile"])
+    sim = None if hand else Simulator(llms["sim"], llms["compile"], allow_same_model=True)  # fmt: skip
     synth = syn.FSMSynthesizer(llms["compile"], policy=policy, library=library, simulator=sim)  # fmt: skip
     events: list[tuple[str, dict[str, Any]]] = []
     host = host_definition(task)

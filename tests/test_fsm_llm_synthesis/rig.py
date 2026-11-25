@@ -204,7 +204,9 @@ def make_rig(
     cheap = cheap or ScriptedRunnerLLM(
         {"answer": "42"} if extraction is None else extraction, dict(REPLIES)
     )
-    strong = ScriptedLLM([json.dumps(valid_fsm)] if replies is None else replies)
+    strong = ScriptedLLM(
+        [json.dumps(valid_fsm)] if replies is None else replies, model="compiler"
+    )
     library = FSMLibrary(tmp_path / "lib") if tmp_path is not None else None
     synth = FSMSynthesizer(strong, policy=policy, library=library)
     definition = make_host(**(config or {}))

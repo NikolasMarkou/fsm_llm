@@ -359,7 +359,7 @@ def _synthesis_executor_and_tools(tmp_path: Path) -> None:
         executors={"synthesize": SynthesizeExecutor(synthesizer)},
     )
     create_procedure_tools(synthesizer, runner_llm=_double())
-    Simulator(_double())
+    Simulator(_double(), allow_same_model=True)  # one double plays every role
 
 
 def _agents_run_with_a_double(tmp_path: Path) -> None:

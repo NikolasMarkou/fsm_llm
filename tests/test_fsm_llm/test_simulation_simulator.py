@@ -47,7 +47,7 @@ class TestTheInterface:
         executor = ScriptedLLM([])
         executor.usage = None  # type: ignore[assignment,method-assign]
         with pytest.raises(ValueError, match="usage"):
-            Simulator(executor)
+            Simulator(executor, allow_same_model=True)
 
     def test_a_judge_without_complete_is_refused(self):
         class Bare:
@@ -58,8 +58,8 @@ class TestTheInterface:
 
     def test_the_judge_is_the_executor_unless_one_is_given(self):
         executor, other = _llm(), _llm()
-        assert Simulator(executor).judge is executor
-        sim = Simulator(executor, other)
+        assert Simulator(executor, allow_same_model=True).judge is executor
+        sim = Simulator(executor, other, allow_same_model=True)
         assert sim.executor is executor and sim.judge is other
 
     def test_the_interface_is_never_closed_and_never_replaced(self):
@@ -70,7 +70,7 @@ class TestTheInterface:
                 self.closed += 1
 
         executor = Closable(responses={"chat": "r"})
-        sim = Simulator(executor)
+        sim = Simulator(executor, allow_same_model=True)
         trial = _play(sim, ["a", "b"])
         assert trial is not None and trial.error is None and trial.turns_sent == 2
         assert executor.closed == 0 and sim.executor is executor
@@ -87,7 +87,7 @@ class TestTheInterface:
 
         monkeypatch.setattr(API, "from_definition", spy)
         executor = _llm()
-        assert _play(Simulator(executor), ["a"]) is not None
+        assert _play(Simulator(executor, allow_same_model=True), ["a"]) is not None
         assert seen == [executor]
 
     def test_the_simulator_decides_nothing(self):
@@ -97,20 +97,20 @@ class TestTheInterface:
 
 class TestTheBound:
     def test_a_spent_bound_before_the_first_trial_drops_it(self):
-        sim = Simulator(_llm(), clock=Clock(1.0))
+        sim = Simulator(_llm(), allow_same_model=True, clock=Clock(1.0))
         assert _play(sim, ["a"], max_seconds=0) is None
 
     def test_the_seconds_bound_stops_a_trial_between_turns_and_drops_it(self):
         # reads: budget start 0, trial check 1, then one read per turn after the first
-        sim = Simulator(_llm(), clock=Clock(1.0))
+        sim = Simulator(_llm(), allow_same_model=True, clock=Clock(1.0))
         assert _play(sim, ["a", "b", "c", "d"], max_seconds=3) is None
-        sim = Simulator(_llm(), clock=Clock(1.0))
+        sim = Simulator(_llm(), allow_same_model=True, clock=Clock(1.0))
         done = _play(sim, ["a", "b", "c", "d"], max_seconds=100)
         assert done is not None and done.turns_sent == 4
 
     def test_the_calls_bound_reads_the_executor_meter(self):
         executor = _llm()
-        sim = Simulator(executor)
+        sim = Simulator(executor, allow_same_model=True)
         assert _play(sim, ["a", "b", "c"], max_calls=1) is None
         assert executor.usage().calls >= 1  # it spent one turn past the bound
 
@@ -133,7 +133,7 @@ class TestTheBound:
 
     def test_budget_reads_the_clock_once_per_check_and_the_meter_after_it(self):
         clock = Clock(0.0)
-        sim = Simulator(_llm(), clock=clock)
+        sim = Simulator(_llm(), allow_same_model=True, clock=clock)
         budget = sim.budget(300, 400)
         reads = clock.reads
         assert reads == 1  # the start mark

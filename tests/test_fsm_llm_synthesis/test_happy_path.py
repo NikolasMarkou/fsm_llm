@@ -97,7 +97,7 @@ def _compiled(
 
 class NoWriter(ScriptedLLM):
     def __init__(self) -> None:
-        super().__init__([json.dumps({"scenarios": []})] * 4)
+        super().__init__([json.dumps({"scenarios": []})] * 4, model="writer")
 
 
 def _simulate(
@@ -425,7 +425,7 @@ class TestTheCorrectionChannel:
             {"kind": "correction", "turns": ["party is 12", "party is 6"]},
             {"kind": "correction", "turns": ["party is 20", "party is 4"]},
         ]
-        return ScriptedLLM([json.dumps({"scenarios": two})])
+        return ScriptedLLM([json.dumps({"scenarios": two})], model="writer")
 
     def test_a_compile_without_the_channel_fails_with_a_code_the_repair_explains(self):
         report, _ = _simulate(
@@ -567,7 +567,9 @@ class TestAnIntegerNoSpeechCanHold:
         text = json.dumps(self._huge(4300))
         sim = Simulator(ByTurn(), NoWriter())
         synth = FSMSynthesizer(
-            ScriptedLLM([text] * 4), policy=SynthesisPolicy(), simulator=sim
+            ScriptedLLM([text] * 4, model="compiler"),
+            policy=SynthesisPolicy(),
+            simulator=sim,
         )
         with pytest.raises(SynthesisError):
             synth.compile("collect a number", return_keys=["n"])

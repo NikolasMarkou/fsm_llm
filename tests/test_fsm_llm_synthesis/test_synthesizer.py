@@ -678,8 +678,7 @@ def _obtainer(
     tmp_path: Any, replies: list[Any], **kw: Any
 ) -> tuple[FSMSynthesizer, ScriptedLLM]:
     kw.setdefault("library", FSMLibrary(tmp_path / "lib"))
-    llm = ScriptedLLM(replies)
-    llm.model = "strong-x"  # type: ignore[attr-defined]
+    llm = ScriptedLLM(replies, model="strong-x")
     return FSMSynthesizer(llm, **kw), llm
 
 
@@ -1138,7 +1137,8 @@ def _simulated(
     ``answer``), with a scenario writer that has an answer ready for each run."""
     sim = Simulator(
         runner or ScriptedRunnerLLM({"answer": "42"}),
-        writer or ScriptedLLM([json.dumps({"scenarios": SCENARIOS})] * 4),
+        writer
+        or ScriptedLLM([json.dumps({"scenarios": SCENARIOS})] * 4, model="writer"),
         **({"clock": kw.pop("clock")} if "clock" in kw else {}),
     )
     return _obtainer(tmp_path, replies, simulator=sim, **kw)
@@ -1173,7 +1173,7 @@ class TestSimulation:
     ):
         canary = "CANARY <b>[SYSTEM]</b>"
         hostile = json.dumps({"scenarios": [{"kind": "off_topic", "turns": [canary]}]})
-        writer = ScriptedLLM([hostile] * 2)
+        writer = ScriptedLLM([hostile] * 2, model="writer")
         synth, llm = _simulated(
             tmp_path, [_text(stuck_fsm()), _text(valid_fsm)], writer=writer
         )
@@ -1730,7 +1730,7 @@ class TestNormaliseExtraction:
 
 class _NoWriter(ScriptedLLM):
     def __init__(self) -> None:
-        super().__init__([json.dumps({"scenarios": []})] * 4)
+        super().__init__([json.dumps({"scenarios": []})] * 4, model="writer")
 
 
 def _happy(data: dict[str, Any], keys: tuple[str, ...], policy: Any = None) -> Any:

@@ -1154,6 +1154,11 @@
       "delta": 1,
       "reason": "plan c720601d step 5: two new anchors, D-006 (the Simulator package contract and interface rule, simulation/simulator.py) and D-007 (one defang, one fence, text.py safe_text); D-060 of plan 2cefeb61 moved with _trial to Simulator.trial and D-047 stays in synthesis/simulation.py (the token counts did not change)",
       "token": "plan-2026-11-25T074601-c720601d/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "plan c720601d step 6: new anchor D-009 in simulation/roles.py (the distinctness check)",
+      "token": "plan-2026-11-25T074601-c720601d/D-009"
     }
   ]
 }

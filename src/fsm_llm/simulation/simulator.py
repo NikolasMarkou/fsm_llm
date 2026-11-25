@@ -12,6 +12,7 @@ from fsm_llm.engine.api.conversation import API
 from fsm_llm.llm import LLMInterface, implements_complete
 
 from .driver import Trial, play
+from .roles import Roles, roles_of
 
 
 @dataclass(frozen=True)
@@ -53,10 +54,12 @@ class Simulator:
     """Plays scripted users against a definition on one executor interface.
 
     Interface contract (callers: ``synthesis.simulation.run_g6b`` and
-    ``replay_g6b``, tests): ``Simulator(executor, judge=None, *, clock=time.monotonic)``.
-    ``executor`` runs the procedure under test and needs a callable ``usage()``, else
-    ``ValueError``. ``judge`` (default ``executor``) writes scenarios and must
-    implement ``complete``, else ``ValueError``; it is read as ``.judge``. Neither is
+    ``replay_g6b``, tests): ``Simulator(executor, judge=None, *, allow_same_model=False,
+    clock=time.monotonic)``. ``executor`` runs the procedure under test and needs a
+    callable ``usage()``, else ``ValueError``. ``judge`` (default ``executor``) writes
+    scenarios and must implement ``complete``, else ``ValueError``; it is read as
+    ``.judge`` and must be distinct from the executor (``roles``) unless
+    ``allow_same_model``, else ``SimulationError``. Neither is
     ever closed or replaced. ``budget(max_seconds, max_calls)`` starts a run's bounds.
     ``trial(fsm, initial_context, turns, *, budget)`` plays one conversation on a
     fresh ``API`` over the executor and returns the ``Trial`` (an error is data), or
@@ -69,6 +72,7 @@ class Simulator:
         executor: LLMInterface,
         judge: LLMInterface | None = None,
         *,
+        allow_same_model: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not callable(getattr(executor, "usage", None)):
@@ -77,6 +81,17 @@ class Simulator:
         if not implements_complete(writer):
             raise ValueError("the judge must implement complete")
         self.executor, self.judge, self._clock = executor, writer, clock
+        self.allow_same_model = allow_same_model
+        self.roles()  # a judge that is not distinct is refused here
+
+    def roles(self, compiler: LLMInterface | None = None) -> Roles:
+        """The ``Roles`` of this simulator (``compiler`` named by the caller).
+
+        Raises ``SimulationError(code="judge_not_distinct")`` (``roles.roles_of``).
+        """
+        return roles_of(
+            compiler, self.executor, self.judge, allow=self.allow_same_model
+        )
 
     def _calls(self) -> int:
         return int(self.executor.usage().calls)  # type: ignore[attr-defined]
