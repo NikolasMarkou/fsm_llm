@@ -1189,6 +1189,7 @@
     "fsm_llm.runtime.privacy",
     "fsm_llm.runtime.retention",
     "fsm_llm.runtime.scope",
+    "fsm_llm.runtime.signals",
     "fsm_llm.runtime.stores",
     "fsm_llm.runtime.stores.jsonl",
     "fsm_llm.runtime.stores.session",

@@ -31,6 +31,9 @@ Interface contract (callers: ``engine.api.calls`` (settle) for the outage reader
       (a position that survives ``reset_usage()``), the ``usage().errors`` count of an
       interface that has its own ``usage()`` (read before and after, as the synthesis runner, since deleted, always did),
       and 0. An interface with no meter and no log reads 0 (documented limit).
+    - ``watch_frame_signals(log, root_id, frame) -> Callable[[], FrameSignals]``: the same
+      position, and a reader of the ``FrameSignals`` of *frame* since it (one scan per call, see
+      ``runtime.signals``). No log, or a failing read: empty signals (absence proves nothing).
 
 Imports ``llm`` and ``runtime`` modules only.
 """
@@ -53,6 +56,7 @@ from fsm_llm.llm.usage import (
 from fsm_llm.runtime.constants import USAGE_TOKEN_FIELDS
 from fsm_llm.runtime.events import EventType
 from fsm_llm.runtime.log import EventLog
+from fsm_llm.runtime.signals import FrameSignals, frame_signals
 
 _RESPONSE = EventType.LLM_RESPONSE.value
 _ERROR = EventType.PROVIDER_ERROR.value
@@ -157,3 +161,37 @@ def watch_provider_errors(
         return 0
 
     return errors
+
+
+_SIGNAL_TYPES = (
+    EventType.TURN_START,
+    EventType.TURN_END,
+    EventType.PROVIDER_ERROR,
+    EventType.EXECUTOR_RESULT,
+    EventType.EXTRACTION_MISS,
+    EventType.INTENT_OUT_OF_SCOPE,
+    EventType.LLM_RESPONSE,
+)
+
+
+def watch_frame_signals(
+    log: EventLog | None, root_id: str, frame: int
+) -> Callable[[], FrameSignals]:
+    """A reader of the signals of *frame* since now (see the module docstring)."""
+    if log is None:
+        return FrameSignals
+    try:
+        after = log_position(log, root_id)
+    except Exception:
+        return FrameSignals
+
+    def signals() -> FrameSignals:
+        try:
+            events = log.query(
+                root_id, types=_SIGNAL_TYPES, frame=frame, since_seq=after
+            )
+            return frame_signals(events, frame)
+        except Exception:
+            return FrameSignals()
+
+    return signals
