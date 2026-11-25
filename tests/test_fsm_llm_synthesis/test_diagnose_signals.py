@@ -509,6 +509,17 @@ class TestABadExtractionReplyIsNotAMalformedResponse:
         assert not [e for e in _events(outcome) if e["type"] == "provider/error"]
         assert outcome.trace.bad_extractions[0][0] == ASK
 
+    def test_one_cut_turn_is_one_unit_not_three(self, tmp_path: Path, level: str):
+        """Review concern 4 (probe p1): one cut reply wrote two cut replies and one failed
+        result, which counted as three and met the threshold of three after ONE turn."""
+        one = _seed_bad_reply(CUT, gate="42", turns=1)(tmp_path / "a", level)
+        three = _seed_bad_reply(CUT, gate="42", turns=3)(tmp_path / "b", level)
+
+        assert one.trace.bad_extractions == ((ASK, 1),)
+        assert "malformed-extraction" not in [c for c, *_ in one.codes]
+        assert three.trace.bad_extractions == ((ASK, 3),)
+        assert [c for c, *_ in three.codes] == ["malformed-extraction"]
+
     def test_the_count_must_reach_the_dwell_threshold(self, tmp_path: Path, level: str):
         threshold = SynthesisPolicy().dwell_threshold
         short = _seed_bad_reply(EMPTY, turns=threshold - 1)(tmp_path / "a", level)

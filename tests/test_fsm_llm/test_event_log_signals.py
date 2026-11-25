@@ -342,8 +342,38 @@ class TestTheWindowRule:
     def test_a_clean_window_gives_its_evidence(self):
         got = frame_signals(_turn(1, _MISS, _BAD, _CUT), 1)
         assert got.misses == (("ask", "city", 1),)
-        assert got.extraction_failed == (("ask", 1),) and got.cut == (("ask", 1),)
+        assert got.extraction_failed == (("ask", 1),)
+        assert got.cut == ()  # the cut reply is the failed extraction: one, not two
         assert got.failures == () and got.errors == 0
+
+    def test_a_cut_reply_that_failed_the_extraction_is_one_bad_window(self):
+        """Review concern 4 (probe p1): the real log of one cut turn holds two cut replies and
+        one failed result, three events of one turn."""
+        got = frame_signals(_turn(1, _CUT, _CUT, _BAD), 1)
+        assert (got.extraction_failed, got.cut) == ((("ask", 1),), ())
+
+    def test_a_cut_reply_that_did_not_fail_the_extraction_is_one_cut_window(self):
+        assert frame_signals(_turn(1, _CUT, _CUT), 1).cut == (("ask", 1),)
+        both = _turn(1, _CUT) + _turn(10, _BAD)  # two turns, two bad windows
+        got = frame_signals(both, 1)
+        assert (got.extraction_failed, got.cut) == ((("ask", 1),), (("ask", 1),))
+
+    def test_several_events_of_a_kind_and_name_in_one_window_count_once(self):
+        scope = ("intent/out_of_scope", {"state": "ask", "field": "tone"})
+        twice = ("extraction/miss", {"state": "ask", "keys": ["city", "city"]})
+        got = frame_signals(_turn(1, _MISS, _MISS, twice, scope, scope, _BAD, _BAD), 1)
+        assert got.misses == (("ask", "city", 1),)
+        assert got.out_of_scope == (("ask", "tone", 1),)
+        assert got.extraction_failed == (("ask", 1),)
+
+    def test_a_window_counts_each_key_once_and_a_count_is_the_number_of_turns(self):
+        pair = ("extraction/miss", {"state": "ask", "keys": ["a", "b"]})
+        events = []
+        for start in (1, 10, 20):
+            events += _turn(start, pair, pair, _CUT, _CUT, _BAD)
+        got = frame_signals(events, 1)
+        assert got.misses == (("ask", "a", 3), ("ask", "b", 3))
+        assert (got.extraction_failed, got.cut) == ((("ask", 3),), ())
 
     def test_a_rolled_back_window_gives_no_evidence_and_keeps_its_failures(self):
         got = frame_signals(

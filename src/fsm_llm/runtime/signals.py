@@ -4,7 +4,10 @@ Interface contract (callers: ``runtime.usage.watch_frame_signals``, tests):
     - ``FrameSignals``: frozen, plain tuples sorted by name, the count last. ``failures``:
       ``(code, n)`` of every ``provider/error`` (a missing or foreign code is ``unknown``).
       ``misses`` and ``out_of_scope``: ``(state, key or field, n)``. ``extraction_failed`` and
-      ``cut``: ``(state, n)``. ``errors``: how many ``provider/error`` events were read.
+      ``cut``: ``(state, n)``. ``errors``: how many ``provider/error`` events were read. Every
+      ``n`` but the failures' counts CLEAN TURN WINDOWS (a turn, once per kind and name, however
+      many events it wrote); ``cut`` counts only the windows where no extraction of that state
+      failed too, so ``extraction_failed + cut`` is the number of windows with a bad extraction.
     - ``frame_signals(events, frame) -> FrameSignals``: one pass over any iterable of events
       (``log.query(...)``). Failures count EVERY provider error of the frame. The rest comes only
       from a CLEAN turn window: ``turn/start`` to ``turn/end``, the outcome not ``rolled_back``
@@ -63,7 +66,8 @@ def _name(value: Any) -> str | None:
 def _window(
     window: list[Mapping[str, Any]], end: Mapping[str, Any], found: dict[str, Counter]
 ) -> None:
-    """Add the evidence of one finished turn window (nothing when it is not clean)."""
+    """Add the evidence of one finished turn window (nothing when it is not clean). Evidence
+    counts ONCE PER WINDOW per (kind, state or key): a count is a number of turns."""
     kinds = {e.get("type") for e in window}
     if (
         end.get("outcome") == TurnOutcome.ROLLED_BACK.value
@@ -71,26 +75,30 @@ def _window(
     ):
         return
     state = _name(window[0].get("state"))
+    hits: set[tuple[str, tuple[str, ...]]] = set()
     for event in window:
         kind, here = event.get("type"), _name(event.get("state"))
         if kind == EventType.EXECUTOR_RESULT.value and here:
             if event.get("extraction_failed") is True:
-                found["bad"][(here,)] += 1
+                hits.add(("bad", (here,)))
         elif kind == EventType.EXTRACTION_MISS.value and here:
             keys = event.get("keys")
             for key in keys if isinstance(keys, list) else ():
                 if _name(key):
-                    found["miss"][(here, key)] += 1
+                    hits.add(("miss", (here, key)))
         elif kind == EventType.INTENT_OUT_OF_SCOPE.value and here:
             if _name(event.get("field")):
-                found["scope"][(here, event["field"])] += 1
+                hits.add(("scope", (here, event["field"])))
         elif (
             kind == EventType.LLM_RESPONSE.value
             and event.get("finish_reason") == "length"
             and event.get("purpose") in _CUT_PURPOSES
             and state
         ):
-            found["cut"][(state,)] += 1
+            hits.add(("cut", (state,)))
+    hits -= {("cut", key) for name, key in hits if name == "bad"}  # a failed cut is one
+    for name, key in hits:
+        found[name][key] += 1
 
 
 # DECISION plan-2026-11-25T074601-c720601d/D-012
