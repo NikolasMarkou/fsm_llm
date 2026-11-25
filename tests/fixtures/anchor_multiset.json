@@ -1214,6 +1214,11 @@
       "delta": 1,
       "reason": "plan 7d9c0955 step 5 D-008: the new anchor token of the workflow adapter (workflows/executable.py), one engine per run, engine cancel only",
       "token": "plan-2026-11-25T195353-7d9c0955/D-008"
+    },
+    {
+      "delta": 1,
+      "reason": "plan-2026-11-25T195353-7d9c0955 step 6: new anchor token D-010 at engine/executables/registry.py (a workflow is a delegated target and never a frame)",
+      "token": "plan-2026-11-25T195353-7d9c0955/D-010"
     }
   ]
 }

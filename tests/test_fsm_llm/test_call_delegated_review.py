@@ -2,7 +2,7 @@
 
 Each row reproduces one finding of ``findings/review-k7.md`` with the reviewer's probe shape, on a
 REAL ``ExecutableTargets`` and ``RunHost`` over a code-backed stub (and, where the finding names
-one, a real executable): a workflow-kind executable is no delegated target and the call's
+one, a real executable): an unlisted-kind executable is no delegated target and the call's
 ``max_steps`` reaches an accepting run (K7R.1, warnings 7 and 1), and the rows of the later steps
 (the stream run loops, a popped frame, the finished results, the launcher guards) are appended
 by their steps. Rules of the rows (LESSONS ace7a8c8, D-048): no ``Thread.join``, events and
@@ -93,12 +93,12 @@ def _drive(api: API, cid: str, steps: int = 30) -> None:
 
 
 class _Workflow(CodeBackedExecutable):
-    """A host-registered code-backed executable of the ``workflow`` kind."""
+    """A host-registered code-backed executable of a chosen kind (``unlisted`` is no target)."""
 
-    def __init__(self) -> None:
+    def __init__(self, kind: str = "unlisted") -> None:
         super().__init__(
             id=_TARGET,
-            kind="workflow",
+            kind=kind,
             impl="tests.probe.Workflow",
             contract=Contract(inputs=["topic"], outputs=["findings"]),
         )
@@ -111,11 +111,13 @@ class _Workflow(CodeBackedExecutable):
         )
 
 
-class TestAWorkflowKindIsNoDelegatedTarget:
-    """K7R.1, review warning 7 (D-053: delegated mode is pattern targets only)."""
+class TestAnUnlistedKindIsNoDelegatedTarget:
+    """K7R.1, review warning 7: delegated mode is the listed kinds only (``pattern``, and
+    ``workflow`` since plan 7d9c0955 D-010; a row of it was rewritten from ``workflow`` to an
+    unlisted kind, the invariant is unchanged: a kind outside ``_DELEGATED_KINDS`` is no target)."""
 
-    def test_the_registry_does_not_resolve_a_workflow_kind(self, tmp_path) -> None:
-        """Kills: ``_DELEGATED_KINDS`` holding ``workflow`` (the registry answers a target)."""
+    def test_the_registry_does_not_resolve_an_unlisted_kind(self, tmp_path) -> None:
+        """Kills: ``_DELEGATED_KINDS`` holding the unlisted kind (the registry answers a target)."""
         workflow = _Workflow()
         api, targets, log = _build(
             tmp_path, workflow, config=_call(target=_TARGET, inputs=["topic"])
@@ -127,7 +129,7 @@ class TestAWorkflowKindIsNoDelegatedTarget:
             assert log is not None
             log.close()
 
-    def test_a_call_to_a_workflow_ends_unknown_target_and_runs_nothing(
+    def test_a_call_to_an_unlisted_kind_ends_unknown_target_and_runs_nothing(
         self, tmp_path
     ) -> None:
         workflow = _Workflow()

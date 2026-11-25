@@ -263,9 +263,15 @@ class TestTheSeam:
 
 
 class TestResolvesDelegated:
-    def test_a_workflow_kind_resolves_to_nothing(self) -> None:
-        """D-053, D-055: delegated mode is pattern targets only (E5.2 and E5.3 carry workflows)."""
-        assert _resolve(_registry(_Stub("workflow"))) is None
+    def test_a_workflow_kind_resolves_like_a_pattern(self) -> None:
+        """Plan 7d9c0955 D-010 (rewritten from "a workflow kind resolves to nothing", D-053): the
+        listed kinds resolve, and the invariant that a kind outside ``_DELEGATED_KINDS`` is no
+        delegated target holds for an unlisted one."""
+        stub = _Stub("workflow")
+        target = _resolve(_registry(stub))
+        assert isinstance(target, DelegatedTarget) and target.kind == "workflow"
+        assert target.executable is stub
+        assert _resolve(_registry(_Stub("unlisted"))) is None
 
     @pytest.mark.parametrize("kind", ["pattern"])
     def test_a_code_backed_kind_resolves_with_its_identities(self, kind) -> None:

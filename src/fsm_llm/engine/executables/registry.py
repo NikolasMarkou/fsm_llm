@@ -38,7 +38,7 @@ Interface contract:
   by the id and keeps no instance.
 - ``resolve_delegated(target_id, *, launcher, context=None, input_keys=(), max_steps=None) ->
   DelegatedTarget | None`` (plan baa37f40 phase K7, D-049): the delegated twin, for the kinds
-  ``pattern`` only (a ``workflow`` kind is no target: D-053, D-055). ``None`` (the one answer a caller maps to
+  ``pattern`` and ``workflow`` (plan 7d9c0955 D-010; a workflow is never a frame). ``None`` (the one answer a caller maps to
   ``failed/unknown_target``) for: a *launcher* that is not a ``RunLauncher`` (``is_run_launcher``), an unknown or
   deprecated id, a kind that is not code-backed (a body kind stays a frame target), the
   capability ``conversational`` (a delegated run has no user to talk to), a name of
@@ -119,11 +119,15 @@ MAX_RETAINED_TEMPLATES = 256
 MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 _MEMORY = "memory"
-#: The kinds that run as code on a host thread (delegated mode); a body kind is a frame and a
-#: ``workflow`` is no target until E5.2 and E5.3 (D-053, D-055).
-_DELEGATED_KINDS = ("pattern",)
+#: The kinds that run as code on a host thread (delegated mode); a body kind is a frame. A
+#: ``workflow`` runs delegated only when the host bound its ``requires.callables``.
+# DECISION plan-2026-11-25T195353-7d9c0955/D-010
+# A workflow is never a frame, BY KIND (its host-bound callables and registry would not run in a
+# pushed child) and runs delegated through the one kind-generic path. Do NOT key the guard on the
+# type of `instance.definition`, allow delegation with an unbound callable, or add a kind branch.
+_DELEGATED_KINDS = ("pattern", "workflow")
 #: The kinds that are never a frame: their handlers, hooks and per-run objects would not run.
-_NEVER_A_FRAME_KINDS = ("pattern",)
+_NEVER_A_FRAME_KINDS = ("pattern", "workflow")
 _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
 
