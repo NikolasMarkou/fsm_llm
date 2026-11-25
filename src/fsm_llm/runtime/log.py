@@ -209,9 +209,9 @@ class EventLog:
     def _writer(self, conversation_id: str) -> JsonlWriter:
         check_conversation_id(conversation_id)
         with self._guard:
-            if self._closed:
-                raise LogWriteError("the event log is closed")
             writer = self._writers.get(conversation_id)
+            if self._closed and writer is None:  # a queued job meets its own writer
+                raise LogWriteError("the event log is closed")
             if writer is None:
                 writer = JsonlWriter(self._logs / f"{conversation_id}{LOG_SUFFIX}")
                 self._writers[conversation_id] = writer
@@ -720,16 +720,24 @@ class EventLog:
     def close(self) -> None:
         """Close every writer and refuse later appends. Idempotent; the files stay.
 
-        A writer is closed behind the jobs already queued on its lane (a job in flight
-        finishes first), the lane threads end once those ran, and ``close`` waits for the closes
-        as ``release`` does.
+        New lane jobs are refused first, then each lane closes ITS writers behind the jobs
+        already queued (a job in flight and every queued one meets the writer it was queued
+        against, so no ``llm/request`` is left without its end), the lane threads end once those
+        ran, and ``close`` waits for the closes as ``release`` does. A second call returns at once.
         """
         with self._guard:
+            if self._closed:
+                return
             self._closed = True
-            writers, self._writers = list(self._writers.items()), {}
-        jobs = [self._lanes.after(cid, writer.close) for cid, writer in writers]
-        self._lanes.shutdown()
-        settle(jobs)
+        settle(self._lanes.shutdown(self._close_lane))
+
+    def _close_lane(self, lane: int) -> None:
+        """Pop and close the writers of one lane, as they stand when the job runs."""
+        with self._guard:
+            ids = [cid for cid in self._writers if self._lanes.lane_of(cid) == lane]
+            writers = [self._writers.pop(cid) for cid in ids]
+        for writer in writers:
+            writer.close()
 
     def __enter__(self) -> EventLog:
         return self

@@ -31,6 +31,7 @@ from fsm_llm.core.definitions import FSMDefinition, FSMError
 from fsm_llm.engine import events as engine_events
 from fsm_llm.llm import LiteLLMInterface
 from fsm_llm.runtime import EventLog, LogWriteError
+from fsm_llm.runtime import scope as scope_module
 from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import fold_session, read_events
 from fsm_llm.runtime.stores.jsonl import JsonlWriter
@@ -776,3 +777,58 @@ class TestACancelOnTheEndWriteOfACommittedTurn:
             order.append("reply")
         assert order == ["turn/end written", "reply"]
         api.close()
+
+
+class TestACloseWithJobsStillQueued:
+    """Review 3 of plan 3f4530d3: ``close`` drops no write that was already queued."""
+
+    async def test_a_close_leaves_the_end_of_a_held_request_and_its_turn_end_in_the_log(
+        self, tmp_path: Path
+    ) -> None:
+        """A request job is held on its lane, the turn is cancelled twice (its ``provider/error``
+        and ``turn/end`` are queued behind the held job) and the host closes the log. Kills: a
+        ``close`` that marks the log closed and empties the table first (the queued jobs found
+        no writer and the log ended with an ``llm/request`` and no end)."""
+        entered, gate = threading.Event(), threading.Event()
+        armed = [True]
+        real = scope_module.log_request
+
+        def parked(scope: Any, build: Any, **fields: Any) -> int:
+            seq = real(scope, build, **fields)
+            if armed[0]:
+                armed[0] = False
+                entered.set()
+                gate.wait(CAP_SECONDS)
+            return seq
+
+        root = tmp_path / "log"
+        with mock.patch.object(scope_module, "log_request", parked):
+            api, _, cid = await _prepare("plain", 0, root)
+            armed[0] = True
+            task = asyncio.ensure_future(
+                api.aconverse(_SCENARIOS["plain"].turns[0], cid)
+            )
+            closer = None
+            try:
+                assert await asyncio.to_thread(entered.wait, CAP_SECONDS)
+                task.cancel()
+                await asyncio.sleep(0)
+                task.cancel()  # the second cancel ends the task; its turn/end stays queued
+                await asyncio.wait({task}, timeout=CAP_SECONDS)
+                assert task.cancelled()
+                pool = _pool_of(api.event_log, _CID)
+                closer, _ = _run_in_thread(api.event_log.close)
+                _until(lambda: _queued(pool) >= 3, "the close job to queue")
+                assert (
+                    closer.is_alive()
+                )  # it waits for the held job and what is behind it
+            finally:
+                gate.set()
+            _until(lambda: not (closer and closer.is_alive()), "close to return")
+        events = list(read_events(root / "logs" / f"{_CID}.jsonl"))
+        kinds = [e["type"] for e in events]
+        _every_request_has_its_end(kinds)
+        assert kinds[-2:] == ["provider/error", "turn/end"], kinds
+        assert not api.event_log.has_writer(_CID)
+        with EventLog(root) as other:  # no writer, file or lock is left
+            assert other.open_existing(_CID) >= 1

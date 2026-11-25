@@ -23,8 +23,9 @@ Interface contract (callers: ``EventLog.lane_call``, ``EventLog.close`` and ``re
       result is ``None``. ``settle(jobs) -> bool`` waits for the futures ``after`` returned, at
       most ``LANE_WAIT_SECONDS`` (a WARNING and ``False`` when one is still running); on a lane
       thread it never waits (``on_lane_thread()``) and answers ``False``.
-    - ``lanes.shutdown()``: idempotent, never waits; queued jobs still run, then the threads
-      end, and no new job is accepted.
+    - ``lanes.shutdown(final=None) -> list[Future]``: idempotent, never waits; queued jobs still
+      run, then the threads end, and no new job is accepted. ``final(lane_index)`` runs behind
+      the queued jobs of each started lane (the futures are returned) and inline for the others.
 Imports ``aio`` and ``runtime.events`` only.
 """
 
@@ -157,11 +158,27 @@ class Lanes:
         job.add_done_callback(_warn_on_failure)
         return job
 
-    def shutdown(self) -> None:
-        """Stop accepting jobs; queued ones still run and the threads then end. Never waits."""
+    def shutdown(
+        self, final: Callable[[int], object] | None = None
+    ) -> list[Future[object]]:
+        """Stop accepting jobs; queued ones still run and the threads then end. Never waits.
+
+        *final*, when given, is called with the index of each lane: queued behind the jobs of a
+        started lane (the futures come back, for ``settle``), inline for a lane never started.
+        """
         with self._guard:
             self._closed = True
             pools, self._pools = self._pools, [None] * len(self._pools)
-        for pool in pools:
+            jobs = [
+                pool.submit(final, index)
+                for index, pool in enumerate(pools)
+                if pool is not None and final is not None
+            ]
+        for index, pool in enumerate(pools):
             if pool is not None:
                 pool.shutdown(wait=False)
+            elif final is not None:
+                final(index)
+        for job in jobs:
+            job.add_done_callback(_warn_on_failure)
+        return jobs

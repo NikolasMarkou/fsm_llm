@@ -566,3 +566,34 @@ class TestFsyncOutsideTheGuard:
         body = source.split("def append_many", 1)[1].split("def _flush", 1)[0]
         assert "_fsync(" not in body
         assert "self._flush()" in body
+
+
+class TestShutdownRunsTheFinalJobBehindTheQueue:
+    async def test_the_final_job_follows_the_jobs_of_a_started_lane_and_runs_inline_for_idle_ones(
+        self,
+    ):
+        """Kills: a final job that overtakes a job already queued (a writer closed under it) and
+        a lane never started that is skipped (its inline writers stay open)."""
+        lanes = Lanes(count=4)
+        order: list[str] = []
+        started, release = threading.Event(), threading.Event()
+
+        def held() -> None:
+            started.set()
+            release.wait(CAP_SECONDS)
+            order.append("job")
+
+        task = asyncio.ensure_future(lanes.lane_call("a", held))
+        while not started.is_set():
+            await asyncio.sleep(0)
+        busy = lanes.lane_of("a")
+        jobs = lanes.shutdown(lambda lane: order.append(f"final {lane}"))
+        assert len(jobs) == 1 and sorted(order) == [
+            f"final {i}" for i in range(4) if i != busy
+        ]  # the idle lanes ran inline, the busy lane's final is still queued
+        release.set()
+        await task
+        _until(lambda: jobs[0].done(), "the final job of the busy lane")
+        assert order[-2:] == ["job", f"final {busy}"]
+        with pytest.raises(LogWriteError):
+            await lanes.lane_call("a", lambda: None)
