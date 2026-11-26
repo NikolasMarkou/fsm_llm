@@ -50,7 +50,9 @@ Interface contract:
   ``budget_spent()`` is ``budget.spent()`` or ``None`` (a caller reads it after a catch);
   ``ledger_detail()`` is ``{"shared_budget": "steps" | "seconds"}`` when it is set, else ``{}``
   (what an adapter adds to the ``detail`` of a budget stop, so a ledger stop reads as the shared
-  budget by a fact, never by error text).
+  budget by a fact, never by error text). ``adopt_into(kwargs)`` fills ``llm_interface`` and
+  ``event_log`` of an API-keyword dict from the context where the caller set none (the agent and
+  the reasoning engine adopt a context through it; an explicit keyword wins).
 - ``CancelToken``: one thread-safe, set-once request. ``cancel()``, ``cancelled``,
   ``raise_if_cancelled()`` (raises ``RunCancelledError``, an ``FSMError``). A token is checked
   BETWEEN steps (the executable's ``before_step``); it never interrupts a model call in
@@ -214,6 +216,16 @@ class RunContext:
         if self.llm_factory is not None:
             return self.llm_factory()
         return None
+
+    def adopt_into(self, kwargs: dict[str, Any]) -> None:
+        """Put the interface (one ``resolve_llm()`` call) and the log into *kwargs* where the
+        caller's own ``llm_interface`` or ``event_log`` is unset; an explicit keyword wins."""
+        if kwargs.get("llm_interface") is None:
+            llm = self.resolve_llm()
+            if llm is not None:
+                kwargs["llm_interface"] = llm
+        if kwargs.get("event_log") is None and self.event_log is not None:
+            kwargs["event_log"] = self.event_log
 
     def step_hook(self) -> Callable[[int], None]:
         """A fresh ``before_step`` for ONE run: the cancel check, then one charge per step."""

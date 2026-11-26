@@ -360,16 +360,19 @@ class TestSolve:
     def test_optional_inputs_reach_the_engine_as_the_initial_context(
         self, spy_engine: type[_SpyEngine]
     ) -> None:
+        context = RunContext(llm_interface=ScriptedLLM())
         _registry().get(SOLVE_ID).run(
             _solve(context={"hint": "x"}, preferred_reasoning_type="deductive"),
-            context=RunContext(llm_interface=ScriptedLLM()),
+            context=context,
         )
         (engine,) = spy_engine.instances
         assert engine.solved == (
             _PROBLEM,
             {"hint": "x", ContextKeys.PREFERRED_REASONING_TYPE: "deductive"},
         )
-        assert engine.kwargs["llm_interface"] is not None
+        # the executable hands the engine its CONTEXT and builds no keyword of its own (plan
+        # 7efd5cb4 D-009; the interface and log reach a real engine in the row below)
+        assert engine.kwargs == {"context": context}
 
     def test_no_optional_input_is_no_initial_context(
         self, spy_engine: type[_SpyEngine]
@@ -389,12 +392,20 @@ class TestSolve:
             return made[-1]
 
         log = str(tmp_path / "logs")
-        _registry().get(SOLVE_ID).run(
-            _solve(), context=RunContext(llm_factory=factory, event_log=log)
-        )
+        context = RunContext(llm_factory=factory, event_log=log)
+        _registry().get(SOLVE_ID).run(_solve(), context=context)
         (engine,) = spy_engine.instances
-        assert len(made) == 1 and engine.kwargs["llm_interface"] is made[0]
-        assert engine.kwargs["event_log"] == log
+        assert (
+            engine.kwargs == {"context": context} and made == []
+        )  # the engine resolves it
+        real = ReasoningEngine(
+            context=context
+        )  # the real one: ONE call, both APIs share it
+        try:
+            assert len(made) == 1 and real.api_kwargs["llm_interface"] is made[0]
+            assert real.api_kwargs["event_log"] == log
+        finally:
+            real.close()
 
     def test_one_engine_per_run_closed_in_a_finally(
         self, spy_engine: type[_SpyEngine]

@@ -14,6 +14,7 @@ from typing import Any
 
 from fsm_llm import API, FSMDefinition, FSMError, RunBudgetExceededError
 from fsm_llm.engine.api.helpers import llm_settings_for
+from fsm_llm.engine.context import RunCancelledError, RunContext
 from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.engine.fsm.budget import check_turn_limits
 from fsm_llm.llm import interface_model, resolve_model
@@ -50,6 +51,7 @@ class ReasoningEngine(EngineHandlers):
         model: str | None = None,
         *,
         registry: ExecutableRegistry | None = None,
+        context: RunContext | None = None,
         **kwargs,
     ):
         """
@@ -61,6 +63,14 @@ class ReasoningEngine(EngineHandlers):
             orchestrator's call and an intent of the classifier (plan baa37f40 D-033); it must
             hold a strategy named ``analytical`` and at least one other. ``None`` is the nine
             built-ins. Read once, here: a later change of the registry does not reach this engine
+        :param context: A ``RunContext`` (D-009 of plan 7efd5cb4): its interface, log, cancel
+            token, shared budget and per-run limits, never its ``callables``; an explicit
+            ``llm_interface`` or ``event_log`` wins. Each run loop of a solve (orchestrator,
+            nested classifier, stream) calls its own ``context.step_hook()``; a set token ends a
+            solve with ``ReasoningExecutionError`` chained from ``RunCancelledError`` (set-once:
+            a long-lived engine on a cancelled context is dead for later solves, ``close()``
+            still works). The limits of ``solve_problem`` default to the narrower of the engine's
+            and the context's; an explicit one above the context's is a ``ValueError``
         :param kwargs: Additional arguments for the API
 
         Raises ``ModelNotConfiguredError`` when no model is named (argument or
@@ -85,6 +95,20 @@ class ReasoningEngine(EngineHandlers):
             raise TypeError(
                 f"registry must be an ExecutableRegistry, got {type(registry).__name__}"
             )
+        # DECISION plan-2026-11-26T022222-7efd5cb4/D-009
+        # A context supplies interface, log, cancel, shared ledger and limits ONLY (`adopt_into`
+        # BEFORE the model is resolved): never its `callables`, and no grant exists here. Do NOT
+        # swallow `RunCancelledError` in `_solve` (it is wrapped and chained by `_failed_solve`
+        # like any failure), run the classifier loop without the hook (its steps are charged and
+        # a cancel would wait for the next orchestrator step) or build the hook once per engine
+        # (one closure per run keeps the last-step state of a run apart).
+        if context is not None and not isinstance(context, RunContext):
+            raise TypeError(
+                f"context must be a RunContext, got {type(context).__name__}"
+            )
+        self._context = context
+        if context is not None:
+            context.adopt_into(kwargs)
         self._solve_lock = SolveLock()
         self.api_kwargs = kwargs.copy()
         # DECISION plan-2026-11-12T073150-d454fd62/D-005
@@ -225,7 +249,7 @@ class ReasoningEngine(EngineHandlers):
         :raises ReasoningExecutionError: If reasoning execution fails, a spent budget
             included (chained from ``RunBudgetExceededError``)
         """
-        check_turn_limits(max_steps, max_seconds)
+        max_steps, max_seconds = self._run_limits(max_steps, max_seconds)
         solve = self._solve(
             problem, initial_context, max_steps, max_seconds, stream=False
         )
@@ -263,9 +287,34 @@ class ReasoningEngine(EngineHandlers):
         :return: The ``SolveStream``; iterating it raises what ``solve_problem`` raises
         :raises ValueError: If a limit is not a valid run limit (before any model call)
         """
-        check_turn_limits(max_steps, max_seconds)
+        max_steps, max_seconds = self._run_limits(max_steps, max_seconds)
         return SolveStream(
             self._solve(problem, initial_context, max_steps, max_seconds, stream=True)
+        )
+
+    def _run_limits(
+        self, max_steps: int | None, max_seconds: float | None
+    ) -> tuple[int | None, float | None]:
+        """The limits of one solve: checked (``ValueError``), then, under a context, an explicit one
+        above the context's is refused (``derive``'s rule) and an unset one is the narrower of the
+        engine's own default and the context's."""
+        check_turn_limits(max_steps, max_seconds)
+        context = self._context
+        if context is None:
+            return max_steps, max_seconds
+        for name, mine, new in (
+            ("max_steps", context.max_steps, max_steps),
+            ("max_seconds", context.max_seconds, max_seconds),
+        ):
+            if new is not None and mine is not None and new > mine:
+                raise ValueError(
+                    f"{name} {new!r} is above the context's {mine!r}: a solve never widens it"
+                )
+        if max_steps is None and context.max_steps is not None:
+            max_steps = min(self._solve_steps, context.max_steps)
+        return (
+            max_steps,
+            max_seconds if max_seconds is not None else context.max_seconds,
         )
 
     # DECISION plan-2026-11-23T122249-baa37f40/D-036
@@ -293,6 +342,11 @@ class ReasoningEngine(EngineHandlers):
         ``stream`` is true. Holds ``_solve_lock`` from its first step to its end."""
         steps = self._solve_steps if max_steps is None else max_steps
         with self._solve_lock:
+            # a cancelled context starts nothing, not even the greeting
+            if self._context is not None and self._context.cancel.cancelled:
+                raise ReasoningExecutionError(
+                    "Reasoning was cancelled before it started"
+                ) from RunCancelledError()
             # Initialize context (copy to avoid mutating caller's dict)
             context = dict(initial_context) if initial_context else {}
             # The strategy keys are the engine's own (D-058, D-060).
@@ -324,7 +378,10 @@ class ReasoningEngine(EngineHandlers):
                     # One message-free run drives the orchestrator, every strategy FSM its
                     # `execute_reasoning` call pushes (and pops) and every retry.
                     results = self.orchestrator.run_until_terminal(
-                        conversation_id, max_steps=steps, max_seconds=max_seconds
+                        conversation_id,
+                        max_steps=steps,
+                        max_seconds=max_seconds,
+                        before_step=self._run_hook(),
                     )
                     # a pushed child's greeting rides on the reply of the step that pushed it
                     responses = [initial_response] + [
@@ -336,9 +393,12 @@ class ReasoningEngine(EngineHandlers):
                 # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
                 # unfinished solve raises, never returns a fallback string as the
                 # solution.
+                shared = self._context.budget_spent() if self._context else None
                 raise self._failed_solve(
                     conversation_id,
-                    f"Reasoning did not finish within {e.limit} {e.budget}",
+                    f"Reasoning did not finish within the shared run budget ({e.limit} {e.budget})"
+                    if shared
+                    else f"Reasoning did not finish within {e.limit} {e.budget}",
                 ) from e
             except Exception as e:
                 raise self._failed_solve(
@@ -409,9 +469,12 @@ class ReasoningEngine(EngineHandlers):
         """
         steps: dict[int, list[str]] = {}
         current: list[str] = []
+        check = self._run_hook()
 
         def begin_step(step: int) -> None:
             nonlocal current
+            if check is not None:
+                check(step)
             current = steps.setdefault(step, [])
 
         if initial_response:

@@ -169,8 +169,37 @@ class TestParityWithTheBase:
     def test_the_case_equals_the_golden(
         self, sections: dict[str, dict[str, Any]], section: str, case: str
     ) -> None:
-        found = first_difference(sections[section][case], GOLDEN[section][case])
+        got, want = sections[section][case], GOLDEN[section][case]
+        if (section, case) in HOOKED_BY_STEP_6:
+            got, want = _hooked(got, hooked=True), _hooked(want, hooked=False)
+        found = first_difference(got, want)
         assert found is None, f"{section}/{case}{found}"
+
+
+#: The ONE deliberate delta from the base (D-009 of plan 7efd5cb4, step 6): `reasoning.solve` under
+#: a context hands it to its engine, so both run loops of the solve (orchestrator and classifier)
+#: are now hooked. Result and events stay byte equal; only `hook` and `steps` of `runs` move, and
+#: the rows of `TestReasoningUnderContext` pin the hook calls (the exact step numbers).
+HOOKED_BY_STEP_6 = frozenset(
+    {("PG-adapters", "solve_ok"), ("PG-adapters", "solve_budget")}
+)
+_ONE_CALL_PER_STEP = "<one hook call per step>"
+
+
+def _hooked(record: dict[str, Any], *, hooked: bool) -> dict[str, Any]:
+    """``record`` with the ``runs`` of a hooked solve told apart from an unhooked one by name."""
+    runs = []
+    for run in record["runs"]:
+        steps = run["steps"]
+        if hooked and not (
+            run["hook"] is True and steps and steps == list(range(1, len(steps) + 1))
+        ):
+            runs.append(
+                run
+            )  # not hooked as expected: keep it, so the comparer reports it
+        else:
+            runs.append({**run, "hook": True, "steps": _ONE_CALL_PER_STEP})
+    return {**record, "runs": runs}
 
 
 # ---- the agent row (plan 7efd5cb4 step 5, D-008) -------------------------------------------------
@@ -606,7 +635,7 @@ class TestAgentUnderContext:
     def test_the_reasoning_react_inner_engine_gets_the_adopted_interface_and_log(
         self, tmp_path: Path
     ) -> None:
-        """The context itself reaches the engine with step 6; the interface and log already do."""
+        """The inner engine takes the adopted interface and log (the context itself: step 6, below)."""
         from fsm_llm import agents as A
         from tests import pattern_runs as pr
 
@@ -657,3 +686,580 @@ class TestAgentContextHoldsNoGrant:
             "task", {ContextKeys.DRIVER_APPROVAL: {"tool": "search"}}
         )
         assert ContextKeys.DRIVER_APPROVAL not in seeded
+
+
+# ---- the reasoning engine (plan 7efd5cb4 step 6, D-009) ----------------------------------------
+
+from fsm_llm.core.definitions import RunBudgetExceededError
+from fsm_llm.engine.context import (
+    CancelToken,
+    RunBudget,
+    RunCancelledError,
+    RunContext,
+)
+from fsm_llm.engine.executables.code_backed import cause_chain
+from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
+from tests.test_fsm_llm_reasoning import test_engine_scripted as sc
+
+
+class _Stopper(sc._ScriptedLLM):
+    """The scripted solve double that runs ``on_field()`` when it is asked for ``field``."""
+
+    def __init__(self, script: dict[str, Any], field: str | None, on_field: Any):
+        super().__init__(script)
+        self.field, self.on_field = field, on_field
+
+    def extract_field(self, request: Any) -> Any:
+        if request.field_name == self.field:
+            self.on_field()
+        return super().extract_field(request)
+
+
+class _Solve:
+    """One context over a scripted solve double and an ``EventLog`` OBJECT, and its engine."""
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        script: dict[str, Any] | None = None,
+        *,
+        stop_at: str | None = None,
+        **context: Any,
+    ) -> None:
+        from fsm_llm.runtime import EventLog
+
+        self.token = CancelToken()
+        self.llm = _Stopper(script or sc._VALID_SCRIPT, stop_at, self.token.cancel)
+        self.log = EventLog(tmp_path / "logs")
+        self.ctx = RunContext(
+            llm_interface=self.llm, event_log=self.log, cancel=self.token, **context
+        )
+        self.engine = ReasoningEngine(context=self.ctx)
+
+    @property
+    def calls(self) -> int:
+        return len(self.llm.requests) + len(self.llm.completions)
+
+    @property
+    def taken(self) -> int:
+        assert self.ctx.budget is not None
+        return self.ctx.budget.steps_taken
+
+    def types(self) -> list[str]:
+        return [e["type"] for e in rig.events_of(self.log)]
+
+    def paired(self) -> bool:
+        types = self.types()
+        ends = types.count("llm/response") + types.count("provider/error")
+        return types.count("llm/request") == ends
+
+    def idle(self) -> bool:
+        """Nothing active on either API, no strategy frame left, the solve lock free."""
+        e = self.engine
+        return (
+            e.orchestrator.list_active_conversations() == []
+            and e.classifier.list_active_conversations() == []
+            and dict(e.orchestrator.fsm_manager.instances) == {}
+            and not e._solve_lock.locked()
+        )
+
+    def solve(self, how: str = "solve", **limits: Any) -> Any:
+        if how == "solve":
+            return self.engine.solve_problem(sc._PROBLEM, **limits)
+        stream = self.engine.solve_problem_stream(sc._PROBLEM, **limits)
+        list(stream)
+        return stream.result()
+
+    def close(self) -> None:
+        self.engine.close()
+        self.log.close()
+
+
+@pytest.fixture
+def solve_rig(tmp_path: Path) -> Any:
+    made: list[_Solve] = []
+
+    def make(script: dict[str, Any] | None = None, **kw: Any) -> _Solve:
+        made.append(_Solve(tmp_path / f"r{len(made)}", script, **kw))
+        return made[-1]
+
+    yield make
+    for r in made:
+        r.close()
+
+
+def _solve_chain(error: BaseException) -> list[type[BaseException]]:
+    return [type(c) for c in cause_chain(error)]
+
+
+@pytest.mark.usefixtures("no_model")
+class TestReasoningUnderContext:
+    """ONE log, ONE cancel, ONE budget for ``ReasoningEngine(context=)`` (D-009)."""
+
+    def test_one_log_holds_both_conversations_and_the_double_of_the_context(
+        self, solve_rig: Any
+    ) -> None:
+        """Kills: the context ignored (no model resolves, the log is not shared)."""
+        r = solve_rig()
+        solution, info = r.solve()
+        assert solution == sc._VALID_SCRIPT["final_solution"] and r.llm.requests
+        assert len(r.log.conversation_ids()) == 2  # the orchestrator and the classifier
+        assert "llm/request" in r.types() and r.paired()
+        assert info["reasoning_trace"]["steps"] and r.idle()
+
+    @pytest.mark.parametrize("how", ["solve", "stream"])
+    @pytest.mark.parametrize(
+        ("script", "orchestrator", "classifier"),
+        [(sc._VALID_SCRIPT, 7, 3), (sc._CALC_SCRIPT, 6, 3)],
+        ids=["deductive", "calculator"],
+    )
+    def test_both_run_loops_are_hooked_and_the_ledger_counts_every_step(
+        self,
+        how: str,
+        script: dict[str, Any],
+        orchestrator: int,
+        classifier: int,
+        solve_rig: Any,
+    ) -> None:
+        """Kills: the classifier loop unhooked (3 steps uncounted), the stream unhooked, a charge
+        per call. The total is the engine's own steps_done: orchestrator plus classifier."""
+        r = solve_rig(script, budget=RunBudget())
+        with rig.HookSpy() as spy:
+            r.solve(how)
+        assert [(run["hook"], run["steps"]) for run in spy.runs] == [
+            (True, list(range(1, orchestrator + 1))),
+            (True, list(range(1, classifier + 1))),
+        ]
+        assert r.taken == orchestrator + classifier
+
+    @pytest.mark.parametrize("how", ["solve", "stream"])
+    def test_a_set_token_ends_the_solve_before_any_model_call(
+        self, how: str, solve_rig: Any
+    ) -> None:
+        """Kills: the pre-check dropped (the greeting is spent), the context ignored."""
+        r = solve_rig(budget=RunBudget())
+        r.token.cancel()
+        with pytest.raises(ReasoningExecutionError) as caught:
+            r.solve(how)
+        assert RunCancelledError in _solve_chain(caught.value)
+        assert r.calls == 0 and r.taken == 0 and r.idle()
+        r.close()  # still closable
+
+    @pytest.mark.parametrize("how", ["solve", "stream"])
+    @pytest.mark.parametrize(
+        ("field", "taken", "calls", "through"),
+        [
+            ("problem_type", 1, 5, "HandlerExecutionError"),
+            ("problem_domain", 2, 11, "HandlerExecutionError"),
+            ("conclusion", 7, 35, None),
+        ],
+        ids=["before_the_classifier", "inside_the_classifier", "inside_a_strategy"],
+    )
+    def test_a_token_set_during_a_step_stops_the_solve_at_the_next_check(
+        self,
+        how: str,
+        field: str,
+        taken: int,
+        calls: int,
+        through: str | None,
+        solve_rig: Any,
+    ) -> None:
+        """Kills: the hook not passed (to the classifier loop, to the stream), the cancel
+        swallowed (a tuple returned), `_end_quietly` skipped (a conversation or a strategy frame
+        left active). The step in flight ends, then no model call; the NEXT solve on the dead
+        context ends at its first check and the engine stays closable."""
+        r = solve_rig(budget=RunBudget(), stop_at=field)
+        with pytest.raises(ReasoningExecutionError) as caught:
+            r.solve(how)
+        chain = _solve_chain(caught.value)
+        assert RunCancelledError in chain
+        assert (through in [c.__name__ for c in chain]) is (through is not None)
+        assert (r.taken, r.calls) == (taken, calls)
+        assert r.idle() and r.paired()
+        with pytest.raises(ReasoningExecutionError, match="cancelled before"):
+            r.solve(how)
+        assert (r.taken, r.calls) == (taken, calls)
+        r.close()
+
+    @pytest.mark.parametrize(
+        ("limit", "stops_in"),
+        [(3, "classifier"), (6, "orchestrator")],
+    )
+    def test_a_ledger_smaller_than_the_solve_reads_as_the_shared_budget(
+        self, limit: int, stops_in: str, solve_rig: Any
+    ) -> None:
+        """Kills: the ledger error mislabelled as the 170-step ceiling or as the classifier's own
+        10 steps; the classifier loop unhooked. The count is exact and unchanged by the refusal."""
+        r = solve_rig(budget=RunBudget(max_steps=limit))
+        with pytest.raises(ReasoningExecutionError) as caught:
+            r.solve()
+        spent = next(
+            c
+            for c in cause_chain(caught.value)
+            if isinstance(c, RunBudgetExceededError)
+        )
+        assert (spent.budget, spent.limit) == ("steps", limit)
+        assert r.taken == limit and r.ctx.budget_spent() == "steps"
+        text = " | ".join(str(c) for c in cause_chain(caught.value))
+        assert "170" not in text and "did not converge" not in text
+        assert ("shared run budget" in text) is (stops_in == "orchestrator")
+        assert caught.value.details["partial_context"] is not None
+        assert r.idle() and r.paired()
+
+    def test_a_seconds_ledger_is_the_shared_budget_too(
+        self, solve_rig: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        clock = _Clock()
+        monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", clock)
+        r = solve_rig(budget=RunBudget(max_seconds=5.0), stop_at="conclusion")
+        r.llm.on_field = lambda: setattr(clock, "now", clock.now + 100.0)
+        with pytest.raises(
+            ReasoningExecutionError, match="shared run budget"
+        ) as caught:
+            r.solve()
+        spent = next(
+            c
+            for c in cause_chain(caught.value)
+            if isinstance(c, RunBudgetExceededError)
+        )
+        assert (spent.budget, spent.limit) == ("seconds", 5.0)
+        assert r.ctx.budget_spent() == "seconds" and r.idle()
+
+    def test_the_classifiers_own_ten_steps_keep_their_text(
+        self, solve_rig: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Parity: an unspent ledger changes nothing about the classifier's own budget error."""
+        from fsm_llm.reasoning.constants import ContextKeys
+        from fsm_llm.reasoning.exceptions import ReasoningClassificationError
+
+        r = solve_rig(budget=RunBudget(max_steps=1000))
+
+        def spent(conversation_id: str, **kwargs: Any) -> Any:
+            raise RunBudgetExceededError("steps", 10, 10)
+
+        monkeypatch.setattr(r.engine.classifier, "run_until_terminal", spent)
+        with pytest.raises(ReasoningClassificationError, match="10 steps"):
+            r.engine._classify_problem({ContextKeys.PROBLEM_STATEMENT: sc._PROBLEM})
+        assert r.ctx.budget_spent() is None
+
+    def test_a_cancel_reaches_the_solve_of_a_reasoning_executable(
+        self, solve_rig: Any
+    ) -> None:
+        """The executable path: a real engine, a token set inside the classifier."""
+        from fsm_llm.core.codes import Reason, Status
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from fsm_llm.reasoning.executables import SOLVE_ID
+
+        r = solve_rig(budget=RunBudget(), stop_at="problem_domain")
+        registry = ExecutableRegistry()
+        registry.load_sources()
+        result = registry.get(SOLVE_ID).run({"problem": sc._PROBLEM}, context=r.ctx)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert (r.taken, r.calls) == (2, 11) and r.paired()
+        again = registry.get(SOLVE_ID).run({"problem": sc._PROBLEM}, context=r.ctx)
+        assert (again.status, again.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert r.calls == 11
+
+    def test_a_ledger_reaches_the_solve_of_a_reasoning_executable(
+        self, solve_rig: Any
+    ) -> None:
+        from fsm_llm.core.codes import Reason, Status
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from fsm_llm.reasoning.executables import SOLVE_ID
+
+        r = solve_rig(budget=RunBudget(max_steps=6))
+        registry = ExecutableRegistry()
+        registry.load_sources()
+        result = registry.get(SOLVE_ID).run({"problem": sc._PROBLEM}, context=r.ctx)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["shared_budget"] == "steps" and r.taken == 6
+
+    def test_an_explicit_keyword_wins_over_the_context(
+        self, solve_rig: Any, tmp_path: Path
+    ) -> None:
+        """Kills: the explicit `llm_interface` or `event_log` overridden by the context."""
+        from fsm_llm.runtime import EventLog
+
+        r = solve_rig()
+        mine = sc._ScriptedLLM(sc._VALID_SCRIPT)
+        log = EventLog(tmp_path / "mine")
+        try:
+            with ReasoningEngine(
+                llm_interface=mine, event_log=log, context=r.ctx
+            ) as engine:
+                engine.solve_problem(sc._PROBLEM)
+        finally:
+            log.close()
+        assert mine.requests and r.calls == 0
+        assert len(log.conversation_ids()) == 2 and r.log.conversation_ids() == []
+
+    def test_a_factory_is_called_once_per_engine_and_serves_both_apis(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: the factory resolved per solve or per API (two interfaces, two meters)."""
+        made: list[sc._ScriptedLLM] = []
+
+        def factory() -> sc._ScriptedLLM:
+            made.append(sc._ScriptedLLM(sc._VALID_SCRIPT))
+            return made[-1]
+
+        with ReasoningEngine(context=RunContext(llm_factory=factory)) as engine:
+            engine.solve_problem(sc._PROBLEM)
+            engine.solve_problem(sc._PROBLEM)
+        assert len(made) == 1 and made[0].requests
+        assert engine.api_kwargs["llm_interface"] is made[0]
+
+    def test_a_context_that_is_no_run_context_is_a_type_error(self) -> None:
+        with pytest.raises(TypeError, match="RunContext"):
+            ReasoningEngine(model="mock", context=object())  # type: ignore[arg-type]
+
+    def test_the_engine_reads_no_callables_and_no_grant_reaches_it(
+        self, solve_rig: Any
+    ) -> None:
+        """Invariant 1. Kills: `callables` consumed by the engine (no approval path exists)."""
+        from fsm_llm.core.names import NameRegistry
+
+        marker = object()
+        callables: NameRegistry[Any] = NameRegistry("test callables")
+        callables.register("hitl", marker)
+        r = solve_rig(callables=callables)
+        _solution, info = r.solve()
+        held = [*vars(r.engine).values(), *r.engine.api_kwargs.values()]
+        assert not any(v is marker or v is callables for v in held)
+        for key in ("context", "_approval_granted", "approval_granted"):
+            assert key not in info["final_context"], key
+        assert not any(v is r.ctx for v in info["final_context"].values())
+
+
+def test_a_cancelled_solve_is_the_next_solve_s_first_check_on_one_engine_only(
+    solve_rig: Any,
+) -> None:
+    """A fresh engine on a FRESH context runs: the death is the context's, not the class's."""
+    dead = solve_rig()
+    dead.token.cancel()
+    alive = solve_rig()
+    solution, _ = alive.solve()
+    assert solution == sc._VALID_SCRIPT["final_solution"]
+
+
+class TestReasoningReactUnderContext:
+    """The inner engine of ``ReasoningReactAgent`` is under the SAME context as the agent."""
+
+    @staticmethod
+    def _models() -> Any:
+        from tests import pattern_runs as pr
+
+        class Both(pr.ScriptedModel):
+            """One interface for the agent (it picks `reason`) and for the inner solve."""
+
+            def __init__(self, on_field: Any = None, field: str | None = None) -> None:
+                super().__init__(tool="reason")
+                self.inner = sc._ScriptedLLM(sc._VALID_SCRIPT)
+                self.on_field, self.field = on_field, field
+                self.inner_calls = 0
+
+            def extract_field(self, request: Any) -> Any:
+                if request.field_name in sc._VALID_SCRIPT:
+                    self.inner_calls += 1
+                    if request.field_name == self.field:
+                        self.on_field()
+                    return self.inner.extract_field(request)
+                return super().extract_field(request)
+
+            def extract_bulk_data(self, request: Any) -> Any:
+                names = pr._BULK_NAME.findall(request.system_prompt)
+                if any(n in sc._VALID_SCRIPT for n in names):
+                    self.inner_calls += 1
+                    return self.inner.extract_bulk_data(request)
+                return super().extract_bulk_data(request)
+
+            def complete(self, request: Any) -> Any:
+                self.inner_calls += 1
+                return self.inner.complete(request)
+
+        return Both
+
+    def _agent(self, ctx: Any) -> Any:
+        from fsm_llm import agents as A
+        from tests import pattern_runs as pr
+
+        return A.ReasoningReactAgent(pr._tools(), config=pr._config(), context=ctx)
+
+    def test_the_context_reaches_the_inner_engine_by_identity(self) -> None:
+        """Kills: the context not forwarded (the inner engine runs unhooked)."""
+        ctx = RunContext(llm_interface=self._models()())
+        agent = self._agent(ctx)
+        assert agent._reasoning_engine._context is ctx
+
+    def test_one_ledger_counts_the_agent_and_the_inner_solve_exactly(self) -> None:
+        from tests import pattern_runs as pr
+
+        ctx = RunContext(llm_interface=self._models()(), budget=RunBudget())
+        with rig.HookSpy() as spy:
+            result = self._agent(ctx).run(pr._TASK)
+        assert result.stop_reason == "answered"
+        runs = [(run["max_steps"], run["steps"]) for run in spy.runs]
+        assert [len(steps) for _limit, steps in runs] == [
+            3,
+            17,
+            3,
+        ]  # agent, solve, classifier
+        assert ctx.budget is not None and ctx.budget.steps_taken == 23
+
+    @pytest.mark.parametrize(
+        ("field", "inner_calls", "taken"),
+        [("problem_domain", 6, 3), ("conclusion", 19, 8)],
+    )
+    def test_one_cancel_stops_the_inner_solve_and_the_outer_agent(
+        self, field: str, inner_calls: int, taken: int
+    ) -> None:
+        """Kills: the context not forwarded, the cancel recorded as a failed observation and the
+        run going on. Both runs end with their conversations ended and no later model call."""
+        from tests import pattern_runs as pr
+
+        token = CancelToken()
+        model = self._models()(token.cancel, field)
+        ctx = RunContext(llm_interface=model, cancel=token, budget=RunBudget())
+        agent = self._agent(ctx)
+        with pytest.raises(RunCancelledError):
+            agent.run(pr._TASK)
+        engine = agent._reasoning_engine
+        assert engine.orchestrator.list_active_conversations() == []
+        assert engine.classifier.list_active_conversations() == []
+        # the inner solve stopped where the token was set (a full solve asks the double 38 times)
+        assert (model.inner_calls, ctx.budget.steps_taken) == (inner_calls, taken)  # type: ignore[union-attr]
+        frozen = (len(model.log), model.inner_calls)
+        with pytest.raises(RunCancelledError):
+            agent.run(
+                pr._TASK
+            )  # the NEXT run of the dead context ends at its first check
+        assert (len(model.log), model.inner_calls) == frozen
+
+    def test_a_ledger_shared_by_both_names_the_shared_budget(self) -> None:
+        from fsm_llm.agents.exceptions import BudgetExhaustedError
+        from tests import pattern_runs as pr
+
+        ctx = RunContext(llm_interface=self._models()(), budget=RunBudget(max_steps=6))
+        with pytest.raises(BudgetExhaustedError, match="shared run steps"):
+            self._agent(ctx).run(pr._TASK)
+        assert ctx.budget is not None and ctx.budget.steps_taken == 6
+
+    @pytest.mark.parametrize("kind", ["cancel", "ledger"])
+    def test_a_stop_of_the_context_is_no_failed_reason_observation(
+        self, kind: str
+    ) -> None:
+        """Kills: the `except Exception` of `reason` recording a stop of the context as a failed
+        tool. The executor raises it; a real failure is still recorded."""
+        from fsm_llm.agents.constants import ContextKeys
+        from tests import pattern_runs as pr
+
+        ctx = RunContext(llm_interface=self._models()(), budget=RunBudget(max_steps=1))
+        agent = self._agent(ctx)
+        engine = agent._reasoning_engine
+
+        def boom(*_a: Any, **_k: Any) -> Any:
+            raise ReasoningExecutionError("the inner solve stopped")
+
+        engine.solve_problem = boom  # type: ignore[method-assign]
+        handlers = agent._call_handlers(agent.tools)
+        execute = agent._make_reasoning_tool_executor(handlers)
+        state = {ContextKeys.TOOL_NAME: "reason", ContextKeys.TOOL_INPUT: {"x": "1"}}
+        state[ContextKeys.TASK] = pr._TASK
+        failed = execute(dict(state))  # a plain failure is recorded, as before
+        assert failed[ContextKeys.TOOL_STATUS] == "failed"
+        if kind == "cancel":
+            ctx.cancel.cancel()
+        else:
+            ctx.budget.charge()  # type: ignore[union-attr]
+        with pytest.raises(ReasoningExecutionError, match="inner solve stopped"):
+            execute(dict(state))
+
+
+# ---- the sweep: every run loop of a runner passes ``before_step`` (invariant 2) ----------------
+
+import ast
+
+_RUN_LOOPS = frozenset(
+    {
+        "run_until_terminal",
+        "arun_until_terminal",
+        "run_until_terminal_stream",
+        "arun_until_terminal_stream",
+    }
+)
+_SWEPT = ("agents", "reasoning", "workflows")
+#: a call site that may run a loop with no hook, as ``"<path under fsm_llm>:<line>": reason``;
+#: empty on purpose: a runner that skips the hook is silently outside the cancel and the ledger
+_ALLOWED_UNHOOKED: dict[str, str] = {}
+
+
+def _loop_calls(source: str) -> list[tuple[int, bool]]:
+    """Every call that runs a run loop, as ``(line, passes before_step)``.
+
+    Two forms: the direct one (``api.run_until_terminal(...)``, a name or an attribute) and the
+    string-named one the agents use (``acall(api, "run_until_terminal", ...)``: the loop name is a
+    string constant among the arguments).
+    """
+    sites: list[tuple[int, bool]] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        named = any(
+            isinstance(arg, ast.Constant) and arg.value in _RUN_LOOPS
+            for arg in node.args
+        )
+        if name in _RUN_LOOPS or named:
+            hooked = any(
+                kw.arg == "before_step"
+                and not (isinstance(kw.value, ast.Constant) and kw.value.value is None)
+                for kw in node.keywords
+            )  # a literal `before_step=None` is no hook
+            sites.append((node.lineno, hooked))
+    return sorted(sites)
+
+
+class TestEveryRunLoopPassesTheHook:
+    def test_no_run_loop_of_the_three_packages_runs_unhooked(self) -> None:
+        found: dict[str, list[tuple[int, bool]]] = {}
+        for package in _SWEPT:
+            for path in sorted((REPO / "src" / "fsm_llm" / package).rglob("*.py")):
+                sites = _loop_calls(path.read_text(encoding="utf-8"))
+                if sites:
+                    found[path.relative_to(REPO / "src" / "fsm_llm").as_posix()] = sites
+        bare = [
+            f"{where}:{line}"
+            for where, sites in found.items()
+            for line, hooked in sites
+            if not hooked and f"{where}:{line}" not in _ALLOWED_UNHOOKED
+        ]
+        assert bare == [], (
+            f"a run loop with no before_step (cancel and ledger skipped): {bare}"
+        )
+        # the walk must SEE the known sites, or a rename would blind it
+        assert sorted(found) == [
+            "agents/base/runs.py",
+            "reasoning/engine.py",
+            "reasoning/engine_handlers.py",
+        ]
+        assert [len(found[k]) for k in sorted(found)] == [2, 2, 1]
+
+    def test_the_walk_sees_both_forms_and_flags_the_missing_keyword(self) -> None:
+        """Negative control: a planted module with each form, once without the hook."""
+        source = (
+            "def f(api, acall, hook):\n"
+            "    api.run_until_terminal(c, max_steps=1)\n"  # line 2: direct, unhooked
+            "    api.arun_until_terminal(c, before_step=hook)\n"  # 3: direct, hooked
+            "    acall(api, 'run_until_terminal', c)\n"  # 4: string-named, unhooked
+            "    acall(api, 'run_until_terminal_stream', c, before_step=hook)\n"  # 5
+            "    other(api, 'run_until_terminal_x', c)\n"  # 6: not a loop
+            "    api.run_until_terminal(c, before_step=None)\n"  # 7: a literal None is no hook
+        )
+        assert _loop_calls(source) == [
+            (2, False),
+            (3, True),
+            (4, False),
+            (5, True),
+            (7, False),
+        ]

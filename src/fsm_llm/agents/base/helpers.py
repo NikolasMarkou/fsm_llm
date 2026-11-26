@@ -357,10 +357,5 @@ def adopt_context(
         raise ValueError(
             f"{name} takes no max_steps from a context: set AgentConfig.max_iterations"
         )
-    if api_kwargs.get("llm_interface") is None:
-        llm = context.resolve_llm()
-        if llm is not None:
-            api_kwargs["llm_interface"] = llm
-    if api_kwargs.get("event_log") is None and context.event_log is not None:
-        api_kwargs["event_log"] = context.event_log
+    context.adopt_into(api_kwargs)
     return context

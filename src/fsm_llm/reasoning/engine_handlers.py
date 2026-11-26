@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from fsm_llm import API, RunBudgetExceededError, clear_keys_on_entry
 from fsm_llm.core.definitions import CallStateConfig
+from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.kinds.call import chosen_target
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
@@ -41,6 +43,11 @@ class EngineHandlers:
     _analytical: StrategyChoice
     _names: dict[str, str]
     _call_config: CallStateConfig
+    _context: RunContext | None
+
+    def _run_hook(self) -> Callable[[int], None] | None:
+        """ONE fresh ``before_step`` for one run loop of this engine (the context's), or ``None``."""
+        return self._context.step_hook() if self._context is not None else None
 
     def _register_handlers(self):
         """Register all handlers with proper configuration."""
@@ -156,7 +163,9 @@ class EngineHandlers:
             # Message-free steps: the problem reaches the model through the
             # conversation context, never through a synthetic user message.
             self.classifier.run_until_terminal(
-                conversation_id, max_steps=Defaults.MAX_CLASSIFICATION_STEPS
+                conversation_id,
+                max_steps=Defaults.MAX_CLASSIFICATION_STEPS,
+                before_step=self._run_hook(),
             )
 
             # Get results
@@ -164,6 +173,8 @@ class EngineHandlers:
             self.classifier.end_conversation(conversation_id)
             conversation_id = None  # Mark as cleaned up
         except RunBudgetExceededError as e:
+            if self._context is not None and self._context.budget_spent():
+                raise  # the shared ledger, not the classifier's own steps
             raise ReasoningClassificationError(
                 "Classification did not converge after "
                 f"{Defaults.MAX_CLASSIFICATION_STEPS} steps",

@@ -201,10 +201,10 @@ class ReasoningReactAgent(BaseAgent):
 
         # Create reasoning engine
         reasoning_model_name = reasoning_model or self.config.model
-        # the adopted interface and log, byte equal to ``api_kwargs`` with no context; the context
-        # itself reaches the engine with step 6 of plan 7efd5cb4 (D-008)
+        # the adopted interface and log, and the context itself: one cancel stops the inner solve
+        # too, and a shared ledger counts its steps (plan 7efd5cb4 D-009)
         self._reasoning_engine = ReasoningEngine(
-            model=reasoning_model_name, **self._api_kwargs
+            model=reasoning_model_name, context=self._context, **self._api_kwargs
         )
         # DECISION plan-2026-09-12T135914-45a654de/D-012
         # No `self._handlers` here (matches react.py's D-014 pattern) — a
@@ -360,6 +360,9 @@ class ReasoningReactAgent(BaseAgent):
                 }
 
             except Exception as e:
+                ctx = self._context
+                if ctx is not None and (ctx.cancel.cancelled or ctx.budget_spent()):
+                    raise  # a stop of the context (a fact), not a failed tool: no observation
                 logger.opt(exception=True).warning(
                     "Reasoning failed, recording error: {}", e
                 )

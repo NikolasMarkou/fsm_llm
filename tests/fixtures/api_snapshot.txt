@@ -817,6 +817,7 @@ fsm_llm.engine.context.RunCancelledError class(FSMError)
   def __init__(self, message: str = 'the run was cancelled', *, details: dict[str, Any] | None = None)
 fsm_llm.engine.context.RunContext class
   def __init__(self, llm_interface: LLMInterface | None = None, llm_factory: Callable[[], LLMInterface] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken = <factory>, callables: NameRegistry[Any] | None = None, parent: str | None = None, registry: TargetResolver | None = None, budget: RunBudget | None = None) -> None
+  def adopt_into(self, kwargs: dict[str, Any]) -> None
   def budget_spent(self) -> Literal['steps', 'seconds'] | None
   def derive(self, *, parent: str, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken | None = None) -> RunContext
   def ledger_detail(self) -> dict[str, str]
@@ -1990,7 +1991,7 @@ fsm_llm.reasoning.ReasoningClassificationResult class(TimestampedModel)
   property has_alternatives
   classmethod def validate_alternatives_unique(cls, v: list[str]) -> list[str]
 fsm_llm.reasoning.ReasoningEngine class(EngineHandlers)
-  def __init__(self, model: str | None = None, *, registry: ExecutableRegistry | None = None, **kwargs)
+  def __init__(self, model: str | None = None, *, registry: ExecutableRegistry | None = None, context: RunContext | None = None, **kwargs)
   def close(self) -> None
   def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, dict[str, Any]]
   def solve_problem_stream(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> SolveStream

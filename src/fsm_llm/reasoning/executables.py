@@ -32,7 +32,8 @@ Interface contract:
   one whose cause is an ``LLMResponseError`` ends ``failed/provider_error``, any other error
   propagates. The ``max_steps`` and ``max_seconds`` of the run context are the two keywords of
   ``solve_problem`` (plan baa37f40 D-032): ``None`` keeps the engine's own derived step budget and no seconds limit. The cancel token
-  is checked before the run starts. The identity has no instance (code-backed). ``solve_problem``
+  is checked before the run starts and between the steps of both run loops of the solve (the engine
+  takes the context itself, plan 7efd5cb4 D-009). The identity has no instance (code-backed). ``solve_problem``
   itself stays a tuple.
 """
 
@@ -145,13 +146,7 @@ class SolveExecutable(CodeBackedExecutable):
         problem: str, initial_context: dict[str, Any] | None, context: RunContext
     ) -> tuple[str, dict[str, Any]]:
         """One engine per run, closed in a ``finally`` (the sync body, run on a worker)."""
-        kwargs: dict[str, Any] = {}
-        llm = context.resolve_llm()
-        if llm is not None:
-            kwargs["llm_interface"] = llm
-        if context.event_log is not None:
-            kwargs["event_log"] = context.event_log
-        engine = ReasoningEngine(**kwargs)
+        engine = ReasoningEngine(context=context)
         try:
             return engine.solve_problem(
                 problem,

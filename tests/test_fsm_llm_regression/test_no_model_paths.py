@@ -373,6 +373,11 @@ def _agents_context_with_a_double(tmp_path: Path) -> None:
     PatternAgent(load_envelope("code-review"), registry_from([_echo]), context=context)
 
 
+def _reasoning_context_with_a_double(tmp_path: Path) -> None:
+    """Plan 7efd5cb4 D-009: `context=` supplies the interface of an engine."""
+    ReasoningEngine(context=RunContext(llm_interface=_double())).close()
+
+
 def _agents_graph(tmp_path: Path) -> None:
     (
         AgentGraphBuilder()
@@ -425,6 +430,9 @@ _NO_MODEL_NEEDED: dict[str, Any] = {
     "synthesis: FSMSynthesizer(injected llm)": _synthesis_synthesizer_injected,
     "synthesis: SynthesizeExecutor, create_procedure_tools, Simulator": (
         _synthesis_executor_and_tools
+    ),
+    "reasoning: ReasoningEngine(context=) on a context's double": (
+        _reasoning_context_with_a_double
     ),
     "agents: run() of react and debate on a double": _agents_run_with_a_double,
     "agents: AgentGraphBuilder with an injected-interface node": _agents_graph,
@@ -573,6 +581,10 @@ def _need_reasoning_engine(tmp_path: Path) -> None:
     ReasoningEngine()
 
 
+def _need_reasoning_engine_context_without_interface(tmp_path: Path) -> None:
+    ReasoningEngine(context=RunContext())
+
+
 def _need_judge_without_backend(tmp_path: Path) -> None:
     default_llm_judge()
 
@@ -618,6 +630,9 @@ _MODEL_REQUIRED: dict[str, Any] = {
         _need_preset_agent_context_without_interface
     ),
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
+    "reasoning: ReasoningEngine(context=RunContext()) names no interface": (
+        _need_reasoning_engine_context_without_interface
+    ),
     "agents: default_llm_judge() without a backend": _need_judge_without_backend,
     "synthesis: FSMSynthesizer(model=resolve_model())": _need_synthesizer_by_model,
     "eval: run_cases without a factory": _need_eval_run_cases,

@@ -297,3 +297,79 @@ class TestTheCallSurfaceOfTheReasoningAgentIsUnchanged:
         assert calls
         for call in calls:
             assert len(call.args) == 1 and not call.keywords
+
+
+def _context_engine(**limits: Any) -> tuple[_ScriptedLLM, ReasoningEngine]:
+    llm = _ScriptedLLM(_NEVER_ENDING_SCRIPT)
+    return llm, ReasoningEngine(context=RunContext(llm_interface=llm, **limits))
+
+
+class TestLimitsUnderAContext:
+    """The limits of a ``RunContext`` narrow the defaults of ``solve_problem`` and never widen
+    them (plan 7efd5cb4 D-009, the ``derive`` rule); a limit of the context is not a ledger."""
+
+    @pytest.mark.parametrize("how", ["solve", "stream"])
+    def test_the_context_steps_bound_a_solve_with_no_limit_of_its_own(
+        self, how: str
+    ) -> None:
+        """Kills: the context limits ignored."""
+        _llm, engine = _context_engine(max_steps=7)
+        with pytest.raises(ReasoningExecutionError, match=r"within 7 steps") as info:
+            if how == "solve":
+                engine.solve_problem(_PROBLEM)
+            else:
+                list(engine.solve_problem_stream(_PROBLEM))
+        cause = info.value.__cause__
+        assert isinstance(cause, RunBudgetExceededError)
+        assert (cause.budget, cause.limit, cause.steps_done) == ("steps", 7, 7)
+        assert "shared" not in str(info.value)  # a limit of one run, not the ledger
+        assert engine.orchestrator.list_active_conversations() == []
+
+    def test_the_narrower_of_the_engine_default_and_the_context_wins(self) -> None:
+        _llm, engine = _context_engine(max_steps=500)
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM)
+        assert info.value.__cause__.limit == engine._solve_steps == 170
+
+    def test_an_explicit_limit_below_the_contexts_is_kept(self) -> None:
+        _llm, engine = _context_engine(max_steps=7)
+        with pytest.raises(ReasoningExecutionError, match=r"within 4 steps"):
+            engine.solve_problem(_PROBLEM, max_steps=4)
+
+    @pytest.mark.parametrize("how", ["solve", "stream"])
+    @pytest.mark.parametrize(
+        ("name", "value", "context"),
+        [
+            ("max_steps", 8, {"max_steps": 7}),
+            ("max_seconds", 9.0, {"max_seconds": 8.0}),
+        ],
+    )
+    def test_an_explicit_limit_above_the_contexts_is_refused_before_any_call(
+        self, how: str, name: str, value: Any, context: dict[str, Any]
+    ) -> None:
+        """Kills: the context silently widened (the `derive` rule)."""
+        llm, engine = _context_engine(**context)
+        call = engine.solve_problem if how == "solve" else engine.solve_problem_stream
+        with pytest.raises(ValueError, match=f"{name}.*above the context"):
+            call(_PROBLEM, **{name: value})
+        assert llm.requests == [] and llm.completions == []
+        assert engine._solve_lock.acquire(blocking=False)
+        engine._solve_lock.release()
+
+    def test_the_context_seconds_bound_a_solve_with_no_limit_of_its_own(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bind_api_clock(monkeypatch, _TickingClock())
+        _llm, engine = _context_engine(max_seconds=3.5)
+        with pytest.raises(ReasoningExecutionError) as info:
+            engine.solve_problem(_PROBLEM)
+        cause = info.value.__cause__
+        assert isinstance(cause, RunBudgetExceededError)
+        assert (cause.budget, cause.limit) == ("seconds", 3.5)
+        assert engine.orchestrator.list_active_conversations() == []
+
+    def test_a_bad_limit_is_still_refused_under_a_context(self) -> None:
+        llm, engine = _context_engine(max_steps=7)
+        with pytest.raises(ValueError, match="max_steps"):
+            engine.solve_problem(_PROBLEM, max_steps=0)
+        assert llm.requests == []
