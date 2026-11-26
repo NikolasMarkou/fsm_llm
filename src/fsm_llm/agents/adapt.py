@@ -25,6 +25,7 @@ from fsm_llm.agents.constants import (
 )
 from fsm_llm.agents.fsm_definitions.adapt import build_adapt_fsm
 from fsm_llm.core.definitions import AgentError
+from fsm_llm.engine.context import RunCancelledError
 from fsm_llm.handlers import HandlerTiming
 from fsm_llm.logging import logger
 from fsm_llm.tools import ToolRegistry, require_int_limit
@@ -203,7 +204,7 @@ class ADaPTAgent(BaseAgent):
                 ),
             )
 
-        except AgentError:
+        except (AgentError, RunCancelledError):
             raise
         except Exception as e:
             raise AgentError(

@@ -201,8 +201,10 @@ class ReasoningReactAgent(BaseAgent):
 
         # Create reasoning engine
         reasoning_model_name = reasoning_model or self.config.model
+        # the adopted interface and log, byte equal to ``api_kwargs`` with no context; the context
+        # itself reaches the engine with step 6 of plan 7efd5cb4 (D-008)
         self._reasoning_engine = ReasoningEngine(
-            model=reasoning_model_name, **api_kwargs
+            model=reasoning_model_name, **self._api_kwargs
         )
         # DECISION plan-2026-09-12T135914-45a654de/D-012
         # No `self._handlers` here (matches react.py's D-014 pattern) — a

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from fsm_llm import API
     from fsm_llm.agents.constants import StopReason
     from fsm_llm.agents.definitions import AgentConfig, AgentTrace
+    from fsm_llm.engine.context import RunContext
 
 
 class _AgentSurface:
@@ -25,6 +26,7 @@ class _AgentSurface:
     if TYPE_CHECKING:
         config: AgentConfig
         _api_kwargs: dict[str, Any]
+        _context: RunContext | None
 
         # the shell (agent.py)
         def _seconds_exempt_for(self, api: API) -> frozenset[str]: ...

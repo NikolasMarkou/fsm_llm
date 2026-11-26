@@ -550,10 +550,8 @@ class TestRunsWithCallables:
     ) -> None:
         objects = _full_objects()[pattern]
         llm = _Filler()
-        _exe(pattern).run(
-            {"task": TASK},
-            context=RunContext(llm_interface=llm, callables=_callables(**objects)),
-        )
+        context = RunContext(llm_interface=llm, callables=_callables(**objects))
+        _exe(pattern).run({"task": TASK}, context=context)
         (agent,) = spy
         assert agent.pattern == pattern
         assert agent.tools is objects.get("tools")
@@ -565,6 +563,10 @@ class TestRunsWithCallables:
             assert "llm_interface" not in got
         else:
             assert got.pop("llm_interface") is llm
+        # plan 7efd5cb4 D-008: a class that takes a context gets the context itself (its log,
+        # cancel and ledger), never a grant: `callables` stay the executable's to read
+        if getattr(PATTERN_AGENTS.get(pattern), "takes_context", False):
+            assert got.pop("context") is context
         assert got == expected  # the same objects, nothing added, nothing renamed
 
     def test_a_pattern_is_built_per_run_and_the_executable_keeps_no_state(
@@ -744,7 +746,25 @@ class TestBudgetsAndErrors:
         _exe("debate").run({"task": TASK}, context=context)
         assert len(made) == 1
         assert spy[0].kwargs["llm_interface"] is made[0]
-        assert spy[0].kwargs["event_log"] == str(tmp_path / "logs")
+        # a class that takes the context gets it, with the log inside (D-008 of plan 7efd5cb4)
+        assert spy[0].kwargs["context"] is context and "event_log" not in spy[0].kwargs
+
+    def test_a_class_with_no_context_keyword_keeps_the_interface_and_log_hand_over(
+        self, spy: list[_SpyAgent], tmp_path: Path
+    ) -> None:
+        context = RunContext(llm_interface=_Filler(), event_log=str(tmp_path / "logs"))
+        _exe("self_consistency").run({"task": TASK}, context=context)
+        _exe("swarm").run(
+            {"task": TASK},
+            context=RunContext(
+                llm_interface=_Filler(),
+                callables=_callables(agents={"a": object()}, entry_agent="a"),
+            ),
+        )
+        kept, swarm = spy[0].kwargs, spy[1].kwargs
+        assert kept["llm_interface"] is context.llm_interface
+        assert kept["event_log"] == str(tmp_path / "logs") and "context" not in kept
+        assert not {"llm_interface", "event_log", "context"} & set(swarm)
 
     def test_the_model_is_resolved_by_the_agent_when_the_context_has_none(
         self, spy: list[_SpyAgent]
@@ -871,6 +891,47 @@ class TestSharedContextStops:
         both = exe.run({"task": TASK}, context=context)
         assert (both.status, both.reason) == (Status.ABORTED, Reason.CANCELLED)
         assert "shared_budget" not in both.detail and len(spy) == 1
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_real_agent_stopped_by_the_context_maps_to_the_shared_stops(
+        self, how: str
+    ) -> None:
+        """Plan 7efd5cb4 step 5 (D-008): the pattern is built with `context=`, so the token set
+        inside a tool ends the run `aborted/cancelled` and a small ledger `aborted/budget_spent`
+        with the shared budget named (no spy agent: the real `react` over a scripted double)."""
+        from tests import pattern_runs as pr
+
+        def run(context: RunContext, tools: ToolRegistry) -> Any:
+            objects = _callables(tools=tools, config=pr._config())
+            context = RunContext(
+                llm_interface=context.llm_interface,
+                cancel=context.cancel,
+                budget=context.budget,
+                callables=objects,
+            )
+            if how == "sync":
+                return _exe("react").run({"task": TASK}, context=context)
+            return asyncio.run(_exe("react").arun({"task": TASK}, context=context))
+
+        holder: list[RunContext] = []
+        registry = ToolRegistry()
+        registry.register_function(
+            lambda params: holder[0].cancel.cancel() or "ok",
+            name="search",
+            description="Tool search",
+            parameter_schema={"properties": {"x": {"type": "string"}}},
+        )
+        context = RunContext(llm_interface=pr.ScriptedModel())
+        holder.append(context)
+        stopped = run(context, registry)
+        assert (stopped.status, stopped.reason) == (Status.ABORTED, Reason.CANCELLED)
+        small = RunBudget(max_steps=2)
+        spent = run(
+            RunContext(llm_interface=pr.ScriptedModel(), budget=small), pr._tools()
+        )
+        assert (spent.status, spent.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert spent.detail["shared_budget"] == "steps" and small.steps_taken == 2
+        assert spent.detail["error"] == "BudgetExhaustedError"
 
     def test_the_agents_own_ceiling_is_not_called_shared(
         self, monkeypatch: pytest.MonkeyPatch

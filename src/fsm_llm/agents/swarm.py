@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar
 
 from fsm_llm.agents.constants import StopReason
 from fsm_llm.logging import logger
@@ -65,6 +65,8 @@ class SwarmAgent(BaseAgent):
     two keys may come from different runs. Nothing in ``run()`` reads them
     back; they exist for callers observing a shared ``WorkingMemory``.
     """
+
+    takes_context: ClassVar[bool] = False  # runs member agents, owns no model
 
     def __init__(
         self,

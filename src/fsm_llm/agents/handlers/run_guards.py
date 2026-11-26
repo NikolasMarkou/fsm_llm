@@ -9,6 +9,7 @@ from typing import Any
 
 from fsm_llm.agents.definitions import EvaluationResult
 from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+from fsm_llm.engine.context import RunCancelledError
 from fsm_llm.logging import logger
 
 
@@ -61,10 +62,12 @@ def run_evaluation_fn(
     return result
 
 
-# Errors that end a whole run even when a sub-agent raises them inside a handler.
+# Errors that end a whole run even when a sub-agent raises them inside a handler (a cancelled
+# context included: D-008 of plan 7efd5cb4).
 RUN_ENDING_ERRORS: tuple[type[Exception], ...] = (
     AgentTimeoutError,
     BudgetExhaustedError,
+    RunCancelledError,
 )
 
 

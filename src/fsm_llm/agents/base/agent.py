@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import inspect
 from abc import ABC, abstractmethod
-from typing import Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from fsm_llm import API
 from fsm_llm.agents.constants import ContextKeys, ErrorMessages, StopReason
@@ -20,6 +20,7 @@ from fsm_llm.agents.definitions import (
     AgentConfig,
     AgentResult,
     AgentTrace,
+    config_with,
     default_agent_config,
 )
 from fsm_llm.aio import aoffload
@@ -29,6 +30,7 @@ from fsm_llm.logging import logger
 
 from .helpers import (
     _output_response_format,
+    adopt_context,
     pattern_run_output_keys,
     reject_misplaced_kwargs,
     strip_caller_context,
@@ -37,6 +39,9 @@ from .hitl_gate import HitlGateMixin
 from .outcome import OutcomeMixin
 from .registration import RegistrationMixin
 from .runs import RunsMixin
+
+if TYPE_CHECKING:
+    from fsm_llm.engine.context import RunContext
 
 _H = TypeVar("_H")
 
@@ -74,13 +79,28 @@ class BaseAgent(HitlGateMixin, OutcomeMixin, RunsMixin, RegistrationMixin, ABC):
     # refuses an id that is not a state of the running definition (D-039).
     _seconds_exempt_states: ClassVar[frozenset[str]] = frozenset()
 
+    # DECISION plan-2026-11-26T022222-7efd5cb4/D-008
+    # `context=` gives an agent the interface, log, cancel token, shared budget and `max_seconds`
+    # of a `RunContext` and NOTHING else: never its `callables` (no `hitl` is inherited, no grant
+    # exists), never a `max_steps` (the ceiling is `max_iterations`). An explicit `llm_interface=`
+    # or `event_log=` wins; a factory is called once per agent. Do NOT read `context.callables`,
+    # touch `_approval_granted`, count steps here, or keep the hook closure on the agent.
+    takes_context: ClassVar[bool] = True
+    _context: RunContext | None = None
+
     def __init__(
         self,
         config: AgentConfig | None = None,
+        *,
+        context: RunContext | None = None,
         **api_kwargs: Any,
     ) -> None:
         reject_misplaced_kwargs(type(self).__name__, api_kwargs)
+        self._context = adopt_context(self, context, api_kwargs)
         self.config = config or default_agent_config(api_kwargs.get("llm_interface"))
+        seconds = self._context.max_seconds if self._context else None
+        if seconds is not None and seconds < self.config.timeout_seconds:
+            self.config = config_with(self.config, timeout_seconds=seconds)
         self._api_kwargs = api_kwargs
         self._refuse_prompt_cache_with_injected_interface()
 

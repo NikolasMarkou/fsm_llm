@@ -80,6 +80,7 @@ from .base import (
     pattern_run_output_keys,
     reject_misplaced_kwargs,
 )
+from .base.helpers import adopt_context
 from .definitions import AgentConfig, AgentResult, config_with, default_agent_config
 
 __all__ = ["PatternAgent"]
@@ -210,12 +211,14 @@ class PatternAgent(BaseAgent):
                 f"pattern {envelope.id!r} binds no {APPROVAL_GATE_HANDLER}: a HumanInTheLoop "
                 "given to it could never be consulted"
             )
+        # a context supplies the interface the config below reads (D-008 of plan 7efd5cb4)
+        context = adopt_context(self, api_kwargs.pop("context", None), api_kwargs)
         # a class that stands behind a file owns its options (D-033)
         if standalone:
             config = _config_from_options(
                 config, body, options or {}, api_kwargs.get("llm_interface")
             )
-        super().__init__(config, **api_kwargs)
+        super().__init__(config, context=context, **api_kwargs)
         self.envelope = envelope
         self.tools = tools
         self.hitl = hitl

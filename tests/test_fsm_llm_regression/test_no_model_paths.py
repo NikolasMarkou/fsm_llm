@@ -59,6 +59,7 @@ from fsm_llm.agents.pattern_agent import PatternAgent
 from fsm_llm.agents.pattern_files import load_envelope
 from fsm_llm.constants import ENV_LLM_MODEL
 from fsm_llm.core.definitions import ClassificationSchema, IntentDefinition
+from fsm_llm.engine.context import RunContext
 from fsm_llm.eval import ConversationCase, EvalConfig, run_cases, run_dataset
 from fsm_llm.eval import __main__ as eval_cli
 from fsm_llm.llm import interface_model, resolve_model
@@ -365,6 +366,13 @@ def _agents_run_with_a_double(tmp_path: Path) -> None:
     create_agent("debate", llm_interface=_double()).run("hi")
 
 
+def _agents_context_with_a_double(tmp_path: Path) -> None:
+    """Plan 7efd5cb4 D-008: `context=` supplies the interface, a preset reads it too."""
+    context = RunContext(llm_interface=_double())
+    create_agent("react", [_echo], context=context).run("hi")
+    PatternAgent(load_envelope("code-review"), registry_from([_echo]), context=context)
+
+
 def _agents_graph(tmp_path: Path) -> None:
     (
         AgentGraphBuilder()
@@ -420,6 +428,9 @@ _NO_MODEL_NEEDED: dict[str, Any] = {
     ),
     "agents: run() of react and debate on a double": _agents_run_with_a_double,
     "agents: AgentGraphBuilder with an injected-interface node": _agents_graph,
+    "agents: create_agent(context=) and a preset on a context's double": (
+        _agents_context_with_a_double
+    ),
     "agents: SemanticToolRegistry(embed_fn=)": _agents_semantic_registry,
     "agents: default_llm_judge(complete_fn=)": _agents_judge_with_a_backend,
     "meta: MetaBuilderAgent(llm_interface=).start()": _meta_agent_starts,
@@ -548,6 +559,16 @@ def _need_preset_config_outliving_its_interface(tmp_path: Path) -> None:
         raise exc.__cause__ or exc from None
 
 
+def _need_agent_context_without_interface(tmp_path: Path) -> None:
+    create_agent("react", [_echo], context=RunContext())
+
+
+def _need_preset_agent_context_without_interface(tmp_path: Path) -> None:
+    PatternAgent(
+        load_envelope("code-review"), registry_from([_echo]), context=RunContext()
+    )
+
+
 def _need_reasoning_engine(tmp_path: Path) -> None:
     ReasoningEngine()
 
@@ -589,6 +610,12 @@ _MODEL_REQUIRED: dict[str, Any] = {
     "agents: a preset agent without an interface": _need_preset_agent,
     "agents: a preset agent's config used without the interface": (
         _need_preset_config_outliving_its_interface
+    ),
+    "agents: create_agent(context=RunContext()) names no interface": (
+        _need_agent_context_without_interface
+    ),
+    "agents: a preset agent with a context that names no interface": (
+        _need_preset_agent_context_without_interface
     ),
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
     "agents: default_llm_judge() without a backend": _need_judge_without_backend,

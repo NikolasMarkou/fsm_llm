@@ -1244,6 +1244,11 @@
       "delta": 1,
       "reason": "plan 7efd5cb4 step 3: new anchor D-005 in workflows/executable.py (the workflow adapter charges the shared ledger through the step hook and stops through engine.cancel); no existing token moved",
       "token": "plan-2026-11-26T022222-7efd5cb4/D-005"
+    },
+    {
+      "delta": 1,
+      "reason": "plan-2026-11-26T022222-7efd5cb4/D-008 added: BaseAgent(context=) consumes interface, log, cancel, budget and seconds only (agents/base/agent.py)",
+      "token": "plan-2026-11-26T022222-7efd5cb4/D-008"
     }
   ]
 }

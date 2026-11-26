@@ -302,7 +302,10 @@ class PatternExecutable(CodeBackedExecutable):
         if not swarm:
             if llm is not None:
                 kwargs["llm_interface"] = llm
-            if context.event_log is not None:
+            cls = PATTERN_AGENTS.get(self.pattern) or PatternAgent
+            if getattr(cls, "takes_context", False):
+                kwargs["context"] = context  # log, cancel and ledger
+            elif context.event_log is not None:
                 kwargs["event_log"] = context.event_log
         if context.max_seconds is not None:
             # DECISION plan-2026-11-20T055240-ace7a8c8/D-068: a run budget NARROWS the host's own

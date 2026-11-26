@@ -25,6 +25,7 @@ from fsm_llm.agents.constants import (
 from fsm_llm.agents.tools import flagged_tool_names
 from fsm_llm.constants import has_internal_prefix
 from fsm_llm.core.definitions import AgentError
+from fsm_llm.engine.context import RunContext
 from fsm_llm.logging import logger
 from fsm_llm.policy import ApprovalPolicy, HumanInTheLoop
 from fsm_llm.tools import ToolCall
@@ -330,3 +331,36 @@ def reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None
             f"set them on AgentConfig instead, e.g. "
             f"{pattern}(config=AgentConfig({config_owned[0]}=...))"
         )
+
+
+def adopt_context(
+    owner: Any, context: Any, api_kwargs: dict[str, Any]
+) -> RunContext | None:
+    """Put the interface and the log of a ``RunContext`` into *api_kwargs*; return the context.
+
+    Interface contract (callers: ``BaseAgent.__init__`` and ``PatternAgent.__init__``; idempotent):
+    ``None`` returns ``None``. ``TypeError`` for an *owner* whose class does not ``takes_context``
+    or a value that is no ``RunContext``; ``ValueError`` for a context ``max_steps``. The interface
+    (one ``resolve_llm()`` call) and the log fill ``llm_interface`` and ``event_log`` ONLY where
+    the agent's own keyword is unset. The context's ``callables`` are never read (no grant).
+    """
+    if context is None:
+        return None
+    name = type(owner).__name__
+    if not type(owner).takes_context:
+        raise TypeError(f"{name} does not accept context=: it has no between-step seam")
+    if not isinstance(context, RunContext):
+        raise TypeError(
+            f"{name}(context=) takes a RunContext, got {type(context).__name__}"
+        )
+    if context.max_steps is not None:
+        raise ValueError(
+            f"{name} takes no max_steps from a context: set AgentConfig.max_iterations"
+        )
+    if api_kwargs.get("llm_interface") is None:
+        llm = context.resolve_llm()
+        if llm is not None:
+            api_kwargs["llm_interface"] = llm
+    if api_kwargs.get("event_log") is None and context.event_log is not None:
+        api_kwargs["event_log"] = context.event_log
+    return context

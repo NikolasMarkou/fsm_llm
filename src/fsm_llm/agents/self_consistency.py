@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 from fsm_llm import API
 from fsm_llm.agents.constants import ContextKeys, Defaults, LogMessages, StopReason
@@ -87,6 +87,8 @@ class SelfConsistencyAgent(BaseAgent):
             aggregation_fn=lambda samples: max(samples, key=len),
         )
     """
+
+    takes_context: ClassVar[bool] = False  # no between-step seam
 
     # Run outputs caller context may not seed (D-052 of plan 06a5ec0a).
     _run_output_keys = frozenset(

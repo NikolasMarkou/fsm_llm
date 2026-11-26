@@ -32,6 +32,7 @@ from fsm_llm.core.definitions import (
     RunBudgetExceededError,
 )
 from fsm_llm.engine.api.helpers import llm_settings_for
+from fsm_llm.engine.context import RunCancelledError
 from fsm_llm.logging import logger
 
 from .helpers import _prompt_overflow_error, _with_instructions
@@ -183,7 +184,10 @@ class RunsMixin(_AgentSurface):
     ) -> Callable[[int], Awaitable[None]]:
         """Core's ``before_step`` for one run: an async callable of the step number that
         awaits ``_on_loop_iteration`` through ``acall`` (inline in sync mode, on a worker
-        thread in async mode)."""
+        thread in async mode). With a ``RunContext`` the hook first calls ONE fresh
+        ``context.step_hook()`` closure (cancel, then one ledger charge per step) and only then
+        ``_on_loop_iteration`` (D-008 of plan 7efd5cb4)."""
+        check = self._context.step_hook() if self._context else None
 
         # DECISION plan-2026-11-24T043150-a555dcfe/D-009
         # The hook is AWAITED and reaches the sync `_on_loop_iteration` through
@@ -193,6 +197,8 @@ class RunsMixin(_AgentSurface):
         # before the step it gates), do NOT add an `_aon_loop_iteration` (tests and
         # subclasses override the sync name). See decisions.md D-009.
         async def before_step(step: int) -> None:
+            if check is not None:
+                check(step)
             await acall(self, "_on_loop_iteration", api, conversation_id, step)
 
         return before_step
@@ -259,9 +265,19 @@ class RunsMixin(_AgentSurface):
 
         Interface contract (same callers as ``_run_budgets``): the seconds
         budget maps to ``AgentTimeoutError(config.timeout_seconds)``, the
-        steps budget to ``BudgetExhaustedError`` citing the step ceiling.
-        Returns the error; the caller raises it ``from exc``.
+        steps budget to ``BudgetExhaustedError`` citing the step ceiling; a spent
+        ``RunContext`` ledger (``context.budget_spent()``) gives a ``BudgetExhaustedError`` that
+        names the shared budget, never ``max_iterations``. Returns the error; the caller raises
+        it ``from exc``.
         """
+        # the shared ledger is told apart by a fact of the context, never by the text of the error
+        shared = self._context.budget_spent() if self._context else None
+        if shared:
+            return BudgetExhaustedError(
+                f"shared run {shared}",
+                exc.limit,
+                detail="the RunContext budget is spent",
+            )
         if exc.budget == "seconds":
             return AgentTimeoutError(self.config.timeout_seconds)
         ceiling, formula = self._step_ceiling(
@@ -281,6 +297,8 @@ class RunsMixin(_AgentSurface):
         ``enable_prompt_cache`` is refused (``AgentError``).
         """
         self._refuse_prompt_cache_with_injected_interface()
+        if self._context:  # a cancelled context starts nothing, not even a greeting
+            self._context.cancel.raise_if_cancelled()
         kwargs = dict(self._api_kwargs)
         if self.config.transition_config is not None:
             kwargs["transition_config"] = self.config.transition_config
@@ -398,7 +416,7 @@ class RunsMixin(_AgentSurface):
                 self._end_run_conversation(api, conv_id)
         except RunBudgetExceededError as exc:
             raise self._budget_error(exc, max_iterations) from exc
-        except (AgentTimeoutError, BudgetExhaustedError):
+        except (AgentTimeoutError, BudgetExhaustedError, RunCancelledError):
             raise
         except Exception as e:
             raise AgentError(
@@ -542,7 +560,7 @@ class RunsMixin(_AgentSurface):
                 stop_reason=stop_reason,
             )
 
-        except (AgentTimeoutError, BudgetExhaustedError):
+        except (AgentTimeoutError, BudgetExhaustedError, RunCancelledError):
             raise
         except Exception as e:
             raise AgentError(
