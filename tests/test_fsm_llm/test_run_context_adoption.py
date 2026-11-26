@@ -2110,3 +2110,68 @@ class TestOneBudgetOverARunLoop:
             )
         assert seen == [1, 2, 3, 3] and len(results) == 3
         assert t.taken == 3
+
+
+class TestDirectWorkflowEngineOnTheContext:
+    """Plan 7efd5cb4 step 9 (D-012): a DIRECT ``WorkflowEngine(context=ctx)`` (no adapter) runs the
+    same workflow as the third runner of the acceptance under the same context: its own steps and
+    the child FSM of its ``ExecutableStep`` are charged to ONE ledger, the child writes to the
+    shared log, and the token and the ledger stop it before a step starts. The engine has an async
+    API only."""
+
+    @staticmethod
+    async def _run(t: Any) -> tuple[Any, str, Any]:
+        from fsm_llm.workflows import WorkflowEngine
+
+        engine = WorkflowEngine(context=t.ctx)
+        definition = t.workflow.build_definition(t.ctx.callables, t.ctx.registry)
+        engine.register_workflow(definition)
+        iid = await asyncio.wait_for(
+            engine.start(definition.workflow_id, initial_context={"subject": "t"}), 120
+        )
+        instance = engine.get_instance(iid)
+        await engine.close()
+        return engine, iid, instance
+
+    async def test_its_steps_and_its_childs_steps_share_one_ledger_and_one_log(
+        self, three: Any
+    ) -> None:
+        """Kills: the engine not charging (taken 2), the scope not set per step (the child would
+        build a bare context: no double, no ledger), the ledger copied into the child."""
+        t = three(budget=RunBudget())
+        _, _, instance = await self._run(t)
+        assert instance.status.value == "completed"
+        assert (
+            t.taken == _FLOW_STEPS
+        )  # prep, call, then the two loop steps of the child
+        assert t.types().count("llm/request") > 0 and t.model.calls > 0
+        assert t.paired()
+
+    async def test_a_ledger_that_ends_in_the_child_fails_the_instance(
+        self, three: Any
+    ) -> None:
+        t = three(budget=RunBudget(max_steps=3))
+        _, _, instance = await self._run(t)
+        assert instance.status.value == "failed" and t.taken == 3
+        assert t.ctx.last_refusal() is not None and t.paired()
+
+    async def test_a_ledger_refusal_by_the_engine_itself_starts_no_step(
+        self, three: Any
+    ) -> None:
+        """The ledger allows only ``prep``: the refusal of step ``call`` is the engine's, and the
+        double is never asked (the child never started)."""
+        t = three(budget=RunBudget(max_steps=1))
+        _, _, instance = await self._run(t)
+        assert instance.status.value == "failed" and t.taken == 1
+        assert t.model.calls == 0 and t.types().count("llm/request") == 0
+
+    async def test_a_token_set_by_a_step_cancels_before_the_next_step(
+        self, three: Any
+    ) -> None:
+        """Kills: the engine not reading the token (the child would run and ask the double)."""
+        holder: list[Any] = []
+        t = three(on_prep=lambda: holder[0].token.cancel(), budget=RunBudget())
+        holder.append(t)
+        _, _, instance = await self._run(t)
+        assert instance.status.value == "cancelled"
+        assert t.taken == 1 and t.model.calls == 0

@@ -45,8 +45,14 @@ _RUN_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
 
 
 @contextmanager
-def run_context_scope(context: RunContext) -> Iterator[None]:
-    """Make ``context`` the parent of every ``ExecutableStep`` run inside the block (one level deeper)."""
+def run_context_scope(context: RunContext | None) -> Iterator[None]:
+    """Make ``context`` the parent of every ``ExecutableStep`` run inside the block (one level deeper).
+
+    ``None`` is a no-op: an ambient outer scope stays as it is, at its own depth.
+    """
+    if context is None:
+        yield
+        return
     token, depth = _RUN_CONTEXT.set(context), _RUN_DEPTH.set(_RUN_DEPTH.get() + 1)
     try:
         yield

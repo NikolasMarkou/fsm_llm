@@ -1259,6 +1259,11 @@
       "delta": 1,
       "reason": "plan 7efd5cb4 D-011: ledger refusal inside a child run maps to aborted/budget_spent (new token in workflows/executable.py)",
       "token": "plan-2026-11-26T022222-7efd5cb4/D-011"
+    },
+    {
+      "delta": 2,
+      "reason": "plan 7efd5cb4 step 9 (D-012): new anchor in workflows/engine/driver.py; the D-005 anchor of workflows/executable.py names D-012 as its partial supersession",
+      "token": "plan-2026-11-26T022222-7efd5cb4/D-012"
     }
   ]
 }

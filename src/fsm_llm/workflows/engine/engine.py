@@ -10,6 +10,7 @@ import asyncio
 import collections
 from concurrent.futures import Executor
 
+from fsm_llm.engine.context import RunContext
 from fsm_llm.logging import logger
 
 from ..constants import DEFAULT_MAX_COMPLETED_INSTANCES, DEFAULT_MAX_STEPS
@@ -54,6 +55,11 @@ class WorkflowEngine(
             static synchronous cycles are rejected at registration).
         executor: Executor for synchronous step callables. ``None`` uses the
             event loop's default executor.
+        context: A ``RunContext`` (plan 7efd5cb4 D-012). Its cancel token and shared ledger
+            are checked before each step (a set token CANCELS the instance, a refused charge
+            FAILS it like ``max_steps``) and it is the ambient parent of every
+            ``ExecutableStep`` child, per step (a resumed instance has it too). Nothing else
+            is read from it: no ``callables``, no limit, no grant.
     """
 
     def __init__(
@@ -63,10 +69,16 @@ class WorkflowEngine(
         max_completed_instances: int | None = DEFAULT_MAX_COMPLETED_INSTANCES,
         max_steps: int = DEFAULT_MAX_STEPS,
         executor: Executor | None = None,
+        context: RunContext | None = None,
     ):
         """Initialize the workflow engine."""
         if max_steps < 1:
             raise ValueError("max_steps must be >= 1")
+        if context is not None and not isinstance(context, RunContext):
+            raise TypeError(
+                f"context must be a RunContext, got {type(context).__name__}"
+            )
+        self._context = context
 
         # Configuration
         self.max_concurrent_workflows = max_concurrent_workflows

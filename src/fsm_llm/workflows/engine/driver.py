@@ -8,9 +8,12 @@ transition onto the next step or into a wait. The method bodies are the old ones
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from fsm_llm.constants import has_internal_prefix
+from fsm_llm.core.definitions.errors import RunBudgetExceededError
+from fsm_llm.engine.context import RunCancelledError
 from fsm_llm.logging import logger
 
 from ..constants import (
@@ -30,7 +33,7 @@ from ..models import (
     WorkflowStatus,
     WorkflowStepResult,
 )
-from ..steps.helpers import _STEP_EXECUTOR
+from ..steps.helpers import _STEP_EXECUTOR, run_context_scope
 from .helpers import _timeout_error
 from .surface import _EngineSurface
 
@@ -53,6 +56,7 @@ class DriverMixin(_EngineSurface):
         the instance is FAILED.
         """
         steps_run = 0
+        hook = self._context.step_hook() if self._context is not None else None
         while True:
             # DECISION plan-2026-11-05T134105-5ed71cf2/D-017
             # A cancel is honoured HERE, between steps, not by cancelling the
@@ -83,6 +87,15 @@ class DriverMixin(_EngineSurface):
                 self._fail(instance, error)
                 return
 
+            # DECISION plan-2026-11-26T022222-7efd5cb4/D-012
+            # The context of the engine (token, shared ledger) is checked HERE, once per step, BEFORE
+            # the step starts and after the checks above: a set token CANCELS the instance, a refused
+            # charge FAILS it like `max_steps`, and the refused step does not run (no slack, no cancel
+            # coroutine). Do NOT run the hook from a `step_started` hook (a raise is swallowed, the step
+            # is in flight), charge here and in the adapter, or set the ambient scope once per run.
+            if hook is not None and self._context_stops(instance, hook, steps_run + 1):
+                return
+
             next_step_id = await self._run_current_step(instance)
             steps_run += 1
             if next_step_id is None:
@@ -93,6 +106,22 @@ class DriverMixin(_EngineSurface):
                 logger.error(f"Error executing step {instance.current_step_id}: {e!s}")
                 self._fail(instance, e)
                 return
+
+    def _context_stops(
+        self, instance: WorkflowInstance, hook: Callable[[int], None], step: int
+    ) -> bool:
+        """Run the context hook for ``step``; True when it ended the instance (it must not run)."""
+        try:
+            hook(step)
+        except RunCancelledError as error:
+            instance.context[CONTEXT_KEY_CANCELLATION_REASON] = str(error)
+            self._set_status(instance, WorkflowStatus.CANCELLED)
+        except RunBudgetExceededError as error:
+            logger.error(str(error))
+            self._fail(instance, error)
+        else:
+            return False
+        return True
 
     async def _run_current_step(self, instance: WorkflowInstance) -> str | None:
         """Execute the instance's current step once.
@@ -136,20 +165,26 @@ class DriverMixin(_EngineSurface):
             # Execute the step. When a workflow-level deadline is set, bound the
             # step itself by the remaining budget so a single long step cannot
             # run unbounded past the deadline.
+            # The context of the engine is the ambient parent of an `ExecutableStep` child, set PER
+            # STEP so an instance resumed by an event or a timer has it too (D-012).
             token = _STEP_EXECUTOR.set(self.executor)
             try:
-                if instance.deadline is not None:
-                    remaining = (instance.deadline - datetime.now(UTC)).total_seconds()
-                    if remaining <= 0:
-                        raise _step_timeout()
-                    try:
-                        result = await asyncio.wait_for(
-                            current_step.execute(instance.context), timeout=remaining
-                        )
-                    except TimeoutError as e:
-                        raise _step_timeout() from e
-                else:
-                    result = await current_step.execute(instance.context)
+                with run_context_scope(self._context):
+                    if instance.deadline is not None:
+                        remaining = (
+                            instance.deadline - datetime.now(UTC)
+                        ).total_seconds()
+                        if remaining <= 0:
+                            raise _step_timeout()
+                        try:
+                            result = await asyncio.wait_for(
+                                current_step.execute(instance.context),
+                                timeout=remaining,
+                            )
+                        except TimeoutError as e:
+                            raise _step_timeout() from e
+                    else:
+                        result = await current_step.execute(instance.context)
             finally:
                 _STEP_EXECUTOR.reset(token)
 

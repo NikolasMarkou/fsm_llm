@@ -2435,7 +2435,7 @@ fsm_llm.workflows.WorkflowDefinition class(BaseModel)
 fsm_llm.workflows.WorkflowDefinitionError class(WorkflowError)
   def __init__(self, message: str, *, workflow_id: str | None = None, details: dict[str, Any] | None = None)
 fsm_llm.workflows.WorkflowEngine class
-  def __init__(self, *, max_concurrent_workflows: int = 100, max_completed_instances: int | None = 1000, max_steps: int = 1000, executor: Executor | None = None)
+  def __init__(self, *, max_concurrent_workflows: int = 100, max_completed_instances: int | None = 1000, max_steps: int = 1000, executor: Executor | None = None, context: RunContext | None = None)
   def add_hook(self, hook: LifecycleHook) -> None
   def advance(self, instance_id: str, user_input: str = '') -> bool
   def cancel(self, instance_id: str, reason: str = 'Cancelled by user') -> bool

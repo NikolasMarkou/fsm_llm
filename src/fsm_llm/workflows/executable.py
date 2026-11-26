@@ -25,9 +25,9 @@ Interface contract:
   (``failed/inputs_missing``), that ``requires.callables`` are bound by ``context.callables``
   (``ExecutableError``) and that the cancel token is not set (``aborted/cancelled``). It then runs
   ONE ``WorkflowEngine(max_steps=context.max_steps or DEFAULT_EXECUTABLE_MAX_STEPS)`` per run, on
-  the loop of the caller, with ``run_context_scope(context)`` around ``start`` (an ``ExecutableStep``
-  derives its child run from it: one model, one event log, one token, one registry). Builds no
-  approver and no grant; takes no model of its own.
+  the loop of the caller, built with ``context=`` (plan 7efd5cb4 D-012: the engine sets the ambient
+  scope per step, an ``ExecutableStep`` derives its child run from it: one model, one event log, one
+  token, one registry, one ledger). Builds no approver and no grant; takes no model of its own.
 - Results: COMPLETED is ``ok`` (outputs are the declared ``contract.outputs`` of the public context,
   ``{}`` when none is declared; a declared one absent is ``failed/return_keys_missing``);
   CANCELLED, or any instance that is not COMPLETED while the token is set, is ``aborted/cancelled``;
@@ -39,17 +39,15 @@ Interface contract:
   steps; this is the guard). ``handle`` is the instance id.
 - A shared ledger already spent refuses the run before its first step (``aborted/budget_spent``, no instance, plan
   7efd5cb4 D-007); a set token is read first.
-- Cancel and the shared budget: a ``step_started`` hook calls ``context.step_hook()`` (the token is
-  checked, then ``context.budget`` charged once per step) and, when either stops the run, asks
-  ``engine.cancel`` once; the engine honours it between steps (the step in flight, the one whose
-  start was refused included, finishes; later ones do not run, but on a rare loop turn one more
-  does: the request registers when the loop next yields, plan 7efd5cb4 D-006). A refused ledger charge ends
-  ``aborted/budget_spent`` (``detail["budget"]``, ``limit`` of the ledger and
-  ``detail["shared_budget"]``), read before the cancel rules; a COMPLETED instance stays ``ok``. A
-  FAILED instance during which the ledger refused a charge (a child run's) maps the same way, D-011. A
-  run of steps that never yields to the loop (an ``async`` callable with no await) cannot be
-  interrupted between steps. The engine is closed in ``finally``; an ``asyncio.CancelledError`` is
-  never caught here.
+- Cancel and the shared budget (plan 7efd5cb4 D-012): the ENGINE runs ``context.step_hook()`` before
+  each step (the token is checked, then ``context.budget`` charged once per step); a set token ends
+  the instance CANCELLED and a refused charge FAILS it, both before the step starts (no step in
+  flight, no slack, and a run of ``async`` steps that never yield is stopped too). A refused ledger
+  charge, the engine's own or a child run's (D-011: a FAILED instance during which the ledger
+  refused a charge), ends ``aborted/budget_spent`` (``detail["budget"]``, ``limit`` of the ledger
+  and ``detail["shared_budget"]``), read before the cancel rules; a COMPLETED instance stays ``ok``.
+  The adapter counts ``step_completed`` only. The engine is closed in ``finally``; an
+  ``asyncio.CancelledError`` is never caught here.
 - ``workflow_adapter(envelope, **options)``: the ``executable_kinds`` factory. It runs V2 in
   structure-only form (the loader over stub objects plus ``validate_structure()``) and refuses a
   pausing step (``WaitEventStep``, ``TimerStep``, a ``RetryStep`` around one) with
@@ -83,7 +81,7 @@ from fsm_llm.core.definitions.executable_workflow import (
 )
 from fsm_llm.core.names import NameCollisionError, NameRegistry
 from fsm_llm.core.results import Identity, RunResult
-from fsm_llm.engine.context import RunCancelledError, RunContext
+from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables.adapters import PinSink
 from fsm_llm.engine.executables.namespaces import EXECUTABLE_KINDS
 from fsm_llm.engine.executables.protocol import (
@@ -101,7 +99,6 @@ from .engine import WorkflowEngine
 from .exceptions import WorkflowTimeoutError, WorkflowValidationError
 from .loader import load_workflow
 from .models import WorkflowInstance, WorkflowStatus
-from .steps.helpers import run_context_scope
 
 __all__ = ["WorkflowBodyInstance", "WorkflowExecutable", "workflow_adapter"]
 
@@ -272,14 +269,14 @@ class WorkflowBodyInstance:
     # no grant, no model. Do NOT catch BaseException, accept an internal-prefixed input, load the probe
     # with the real registry, or register the kind from `workflows/__init__.py`.
     #
-    # DECISION plan-2026-11-26T022222-7efd5cb4/D-005
-    # The shared ledger is charged by the SAME `RunContext.step_hook()` the other runners use, from
-    # the `step_started` hook, and a refused charge asks for the stop through `engine.cancel` and a
-    # flag (a hook that raises is swallowed by the engine): the refused step is already in flight and
-    # finishes, later ones do not run (one more may, on a rare loop turn, D-006), and the mapping reads
-    # the flag first (`aborted/budget_spent`).
-    # Do NOT rely on a raise from the hook, cancel the task, take a second lock, charge at
-    # `step_completed`, or edit the engine's own step counting.
+    # DECISION plan-2026-11-26T022222-7efd5cb4/D-005 [PARTLY SUPERSEDED BY plan-2026-11-26T022222-7efd5cb4/D-012]
+    # The shared ledger is charged by the SAME `RunContext.step_hook()` the other runners use, now from
+    # the ENGINE's loop (D-012: before each step, the refused step does not run; the adapter hands the
+    # engine `context=` and keeps no hook, no scope and no flag of its own). The result mapping reads
+    # the ledger fact first (`aborted/budget_spent`).
+    # Do NOT rely on a raise from a `step_started` hook (the engine swallows it), cancel the task, take
+    # a second lock, charge at `step_completed` or here again (the ledger would count twice), or set
+    # `run_context_scope` here (the depth would count two levels).
     async def arun(
         self, inputs: Mapping[str, Any], *, context: RunContext | None = None
     ) -> RunResult:
@@ -304,7 +301,8 @@ class WorkflowBodyInstance:
             return self._stopped(Status.ABORTED, Reason.BUDGET_SPENT, identity, **spent)
         definition = owner.build_definition(context.callables, context.registry)
         engine = WorkflowEngine(
-            max_steps=context.max_steps or DEFAULT_EXECUTABLE_MAX_STEPS
+            max_steps=context.max_steps or DEFAULT_EXECUTABLE_MAX_STEPS,
+            context=context,
         )
         if owner.pins is not None:
             owner.pins.pin(owner)
@@ -329,50 +327,36 @@ class WorkflowBodyInstance:
         """Start the one instance and map how it ended."""
         steps_done = 0
         refused = False  # the engine counts every step it ran and refused the next one
-        stopping = False
         ledger: RunBudgetExceededError | None = None
-        step_hook = context.step_hook()
 
-        def hook(event: str, instance: WorkflowInstance, data: dict[str, Any]) -> Any:
-            nonlocal steps_done, refused, stopping, ledger
+        def hook(event: str, instance: WorkflowInstance, data: dict[str, Any]) -> None:
+            nonlocal steps_done, refused
             if event == "step_completed":
                 steps_done += 1
                 refused = steps_done >= engine.max_steps and bool(
                     data.get("next_step_id")
                 )
-            elif event == "step_started" and not stopping:
-                try:
-                    step_hook(steps_done + 1)
-                except RunCancelledError:
-                    reason = "the run's token was set"
-                except RunBudgetExceededError as error:
-                    ledger, reason = error, "the shared budget is spent"
-                else:
-                    return None
-                stopping = True
-                return engine.cancel(instance.instance_id, reason)
-            return None
 
         engine.register_workflow(definition)
         engine.add_hook(hook)
         before = context.last_refusal()
         timed_out: WorkflowTimeoutError | None = None
-        with run_context_scope(context):
-            try:
-                instance_id = await engine.start(
-                    definition.workflow_id,
-                    initial_context=dict(inputs),
-                    max_seconds=context.max_seconds,
-                )
-            except WorkflowTimeoutError as error:
-                timed_out, instance_id = error, error.instance_id or ""
+        try:
+            instance_id = await engine.start(
+                definition.workflow_id,
+                initial_context=dict(inputs),
+                max_seconds=context.max_seconds,
+            )
+        except WorkflowTimeoutError as error:
+            timed_out, instance_id = error, error.instance_id or ""
         instance = engine.get_instance(instance_id)
         if instance is None:
             raise timed_out or RuntimeError("the engine lost the instance of the run")
         # DECISION plan-2026-11-26T022222-7efd5cb4/D-011
-        # A FAILED instance whose run saw the ledger REFUSE a charge (the child run of an
-        # ExecutableStep: its hook is not ours) is a ledger stop. Do NOT read `budget_spent()` alone.
-        if ledger is None and instance.status is WorkflowStatus.FAILED:
+        # A FAILED instance whose run saw the ledger REFUSE a charge (the engine's own, or the child run
+        # of an ExecutableStep, whose hook is not the engine's) is a ledger stop. Do NOT read
+        # `budget_spent()` alone.
+        if instance.status is WorkflowStatus.FAILED:
             if (refusal := context.last_refusal()) is not before:
                 ledger = refusal
         return self._ended(

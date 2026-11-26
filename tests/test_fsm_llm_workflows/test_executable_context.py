@@ -23,7 +23,7 @@ from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions.executable import Contract, Requires
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.results import RunResult
-from fsm_llm.engine.context import CancelToken, RunContext
+from fsm_llm.engine.context import CancelToken, RunBudget, RunContext
 from fsm_llm.engine.executables import (
     CodeBackedExecutable,
     ExecutableRegistry,
@@ -32,9 +32,11 @@ from fsm_llm.engine.executables import adapters as adapters_module
 from fsm_llm.testing import ScriptedLLM
 from fsm_llm.workflows import (
     WorkflowEngine,
+    WorkflowEvent,
     WorkflowStatus,
     auto_step,
     create_workflow,
+    wait_event_step,
 )
 from fsm_llm.workflows.steps import ExecutableStep, ParallelStep
 from fsm_llm.workflows.steps.helpers import _RUN_CONTEXT, _RUN_DEPTH, run_context_scope
@@ -490,4 +492,211 @@ class TestThroughTheEngine:
             (context,) = probe.contexts
             assert context.cancel is token and context.max_seconds == 30.0
             assert context.parent == child_id
+        await engine.close()
+
+
+class _Chain:
+    """``s1 -> ... -> s<count>``: each step records its number (and what the ambient scope shows),
+    then runs ``hooks[i]`` when given. ``async`` actions, so the step runs in the task of the engine
+    and sees its ContextVars."""
+
+    def __init__(self, count: int, **hooks: Any) -> None:
+        self.calls: list[int] = []
+        self.depths: list[int] = []
+        self.ambient: list[RunContext | None] = []
+        workflow = create_workflow("chain", "Chain")
+        for i in range(1, count + 1):
+            workflow = workflow.with_step(
+                auto_step(
+                    f"s{i}",
+                    f"s{i}",
+                    f"s{i + 1}" if i < count else "",
+                    self._action(i, hooks.get(f"f{i}")),
+                ),
+                is_initial=i == 1,
+            )
+        self.workflow = workflow
+
+    def _action(self, i: int, extra: Any):
+        async def act(ctx: Any) -> None:
+            self.calls.append(i)
+            self.depths.append(_RUN_DEPTH.get())
+            self.ambient.append(_RUN_CONTEXT.get())
+            if extra is not None:
+                extra()
+
+        return act
+
+
+async def _start(engine: WorkflowEngine, chain: _Chain) -> str:
+    engine.register_workflow(chain.workflow)
+    return await asyncio.wait_for(engine.start("chain"), _BOUND)
+
+
+class TestEngineUnderAContext:
+    """Plan 7efd5cb4 step 9 (D-012): ``WorkflowEngine(context=)`` runs the context hook BEFORE each
+    step (cancel first, then one ledger charge per step), sets the ambient scope PER STEP, and takes
+    nothing else from the context. Doubles only; the engine has an async API only."""
+
+    async def test_every_step_is_charged_once_and_the_run_completes(self) -> None:
+        budget = RunBudget(max_steps=10)
+        chain = _Chain(4)
+        engine = WorkflowEngine(context=RunContext(budget=budget))
+        iid = await _start(engine, chain)
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert chain.calls == [1, 2, 3, 4] and budget.steps_taken == 4
+        await engine.close()
+
+    async def test_a_token_set_in_a_step_ends_the_instance_cancelled_before_the_next_charge(
+        self,
+    ) -> None:
+        token, budget = CancelToken(), RunBudget(max_steps=50)
+        chain = _Chain(4, f2=token.cancel)
+        context = RunContext(cancel=token, budget=budget)
+        engine = WorkflowEngine(context=context)
+        iid = await _start(engine, chain)
+        assert engine.get_status(iid) == WorkflowStatus.CANCELLED
+        assert chain.calls == [1, 2]  # no slack: the check precedes step 3
+        assert budget.steps_taken == 2  # a cancelled check charges nothing
+        assert engine.get_context(iid)["_cancellation_reason"]
+        # the context is dead: the NEXT run on the same engine ends at its first check
+        chain.calls.clear()
+        again = await asyncio.wait_for(engine.start("chain"), _BOUND)
+        assert engine.get_status(again) == WorkflowStatus.CANCELLED
+        assert chain.calls == [] and budget.steps_taken == 2
+        await engine.close()
+
+    async def test_a_token_set_before_the_run_runs_no_step(self) -> None:
+        token = CancelToken()
+        token.cancel()
+        chain = _Chain(3)
+        engine = WorkflowEngine(context=RunContext(cancel=token))
+        iid = await _start(engine, chain)
+        assert engine.get_status(iid) == WorkflowStatus.CANCELLED and chain.calls == []
+        await engine.close()
+
+    async def test_a_spent_ledger_fails_the_instance_like_the_step_budget(self) -> None:
+        budget = RunBudget(max_steps=2)
+        context = RunContext(budget=budget)
+        chain = _Chain(4)
+        engine = WorkflowEngine(context=context)
+        iid = await _start(engine, chain)
+        instance = engine.get_instance(iid)
+        assert instance is not None and instance.status == WorkflowStatus.FAILED
+        assert chain.calls == [1, 2]  # the refused step 3 did not run
+        assert budget.steps_taken == 2
+        refusal = context.last_refusal()
+        assert refusal is not None and (refusal.budget, refusal.limit) == ("steps", 2)
+        assert instance.error is not None and "steps" in instance.error
+        await engine.close()
+
+    async def test_the_engines_own_step_budget_keeps_its_failure_and_text(self) -> None:
+        budget = RunBudget(max_steps=50)
+        chain = _Chain(5)
+        engine = WorkflowEngine(max_steps=3, context=RunContext(budget=budget))
+        iid = await _start(engine, chain)
+        instance = engine.get_instance(iid)
+        assert instance is not None and instance.status == WorkflowStatus.FAILED
+        assert "Step budget exceeded: 3 steps" in (instance.error or "")
+        assert chain.calls == [1, 2, 3] and budget.steps_taken == 3
+        await engine.close()
+
+    async def test_a_resumed_instance_still_sees_the_context_and_is_charged(
+        self,
+    ) -> None:
+        probe, budget, token = _Probe(), RunBudget(max_steps=10), CancelToken()
+        context = RunContext(llm_interface=ScriptedLLM(), cancel=token, budget=budget)
+        workflow = (
+            create_workflow("wf", "W")
+            .with_initial_step(wait_event_step("w", "W", "go", "x"))
+            .with_step(_step(_registry(probe)))
+            .with_step(auto_step("next", "Next", next_step_id=""))
+            .with_step(auto_step("err", "Err", next_step_id=""))
+        )
+        engine = WorkflowEngine(context=context)
+        engine.register_workflow(workflow)
+        iid = await asyncio.wait_for(
+            engine.start("wf", initial_context={"subject": "t"}), _BOUND
+        )
+        assert engine.get_status(iid) == WorkflowStatus.WAITING
+        assert budget.steps_taken == 1 and probe.contexts == []
+        await asyncio.wait_for(
+            engine.process_event(WorkflowEvent(event_type="go", instance_id=iid)),
+            _BOUND,
+        )
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        (child,) = probe.contexts  # the wake-up ran in another call than `start`
+        assert child.llm_interface is context.llm_interface
+        assert child.cancel is token and child.budget is budget
+        assert budget.steps_taken == 3  # w, then x and next after the wake-up
+        await engine.close()
+
+    async def test_the_scope_is_one_level_inside_a_step_and_gone_outside(self) -> None:
+        chain = _Chain(2)
+        context = RunContext()
+        engine = WorkflowEngine(context=context)
+        assert _RUN_CONTEXT.get() is None and _RUN_DEPTH.get() == 0
+        await _start(engine, chain)
+        assert chain.depths == [1, 1] and chain.ambient == [context, context]
+        assert _RUN_CONTEXT.get() is None and _RUN_DEPTH.get() == 0
+        await engine.close()
+
+    async def test_without_a_context_no_scope_is_set_and_nothing_is_charged(
+        self,
+    ) -> None:
+        chain = _Chain(3)
+        engine = WorkflowEngine()
+        iid = await _start(engine, chain)
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        assert chain.depths == [0, 0, 0] and chain.ambient == [None, None, None]
+        await engine.close()
+
+    async def test_without_a_context_an_outer_scope_is_untouched(self) -> None:
+        chain = _Chain(2)
+        outer = RunContext(max_steps=4)
+        engine = WorkflowEngine()
+        with run_context_scope(outer):
+            await _start(engine, chain)
+        assert chain.ambient == [outer, outer] and chain.depths == [1, 1]
+        await engine.close()
+
+    async def test_children_inherit_the_interface_the_log_and_the_token(self) -> None:
+        probe, token = _Probe(), CancelToken()
+        context = RunContext(llm_interface=ScriptedLLM(), cancel=token, max_steps=6)
+        engine = WorkflowEngine(context=context)
+        engine.register_workflow(_workflow(_step(_registry(probe))))
+        iid = await asyncio.wait_for(
+            engine.start("wf", initial_context={"subject": "t"}), _BOUND
+        )
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        (child,) = probe.contexts
+        assert child.llm_interface is context.llm_interface and child.cancel is token
+        assert child.parent == "x" and child.max_steps == 6
+        await engine.close()
+
+    def test_the_context_keyword_is_typed_and_nothing_else_comes_from_it(self) -> None:
+        for bad in ("ctx", object(), {}):
+            with pytest.raises(TypeError, match="RunContext"):
+                WorkflowEngine(context=bad)  # type: ignore[arg-type]
+        with pytest.raises(TypeError):
+            WorkflowEngine(RunContext())  # type: ignore[misc]  # keyword-only
+
+    async def test_the_context_limits_do_not_move_the_engines_own(self) -> None:
+        engine = WorkflowEngine(max_steps=7, context=RunContext(max_steps=2))
+        assert engine.max_steps == 7
+        await engine.close()
+
+    async def test_no_model_is_resolved_and_no_grant_is_written(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Plan invariants 1 and 5: the engine takes the interface only to pass it on, so a context
+        with none leaves a model-free workflow on its way (no ``ModelNotConfiguredError``), and a run
+        under any context writes no approval grant into the instance context."""
+        monkeypatch.delenv("LLM_MODEL", raising=False)
+        chain = _Chain(2)
+        engine = WorkflowEngine(context=RunContext(budget=RunBudget(max_steps=5)))
+        iid = await _start(engine, chain)
+        assert engine.get_status(iid) == WorkflowStatus.COMPLETED
+        keys = set(engine.get_context(iid) or {})
+        assert not {"_approval_granted", "approval_granted"} & keys
         await engine.close()

@@ -1148,6 +1148,7 @@ _ENGINE_METHODS_OF = {
     },
     "driver": {
         "_execute_workflow_step",
+        "_context_stops",
         "_run_current_step",
         "_timeout_seconds",
         "_get_current_step",

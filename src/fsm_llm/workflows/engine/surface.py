@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from concurrent.futures import Executor
 
+    from fsm_llm.engine.context import RunContext
+
     from ..definitions import WorkflowDefinition
     from ..models import (
         EventListener,
@@ -36,6 +38,7 @@ class _EngineSurface:
         max_completed_instances: int | None
         max_steps: int
         executor: Executor | None
+        _context: RunContext | None
         workflow_definitions: dict[str, WorkflowDefinition]
         workflow_instances: dict[str, WorkflowInstance]
         event_listeners: dict[str, dict[str, EventListener]]

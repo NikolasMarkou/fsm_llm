@@ -478,9 +478,7 @@ class TestCancel:
             how, executable, context=RunContext(cancel=token, callables=names)
         )
         assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
-        assert (
-            calls[:2] == ["s1", "s2"] and "s4" not in calls
-        )  # the step in flight finishes
+        assert calls == ["s1"]  # the check precedes step 2: no step in flight, no slack
         # the NEXT call of the same caller: the token stays set, so nothing starts; a new one runs
         calls.clear()
         again = await _go(
@@ -538,23 +536,37 @@ class TestCancel:
         assert again.status is Status.OK
         assert [engine.closed for engine in spy.made] == [1, 1]
 
-    async def test_a_failing_cancel_request_is_logged_and_the_outcome_is_the_engines(
+    async def test_a_broken_cancel_request_route_does_not_matter_the_engine_reads_the_token(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Rewritten (step 9, D-012; was: a failing ``engine.cancel`` is logged and the instance
+        completes, which needed the adapter's cancel REQUEST). The token is read by the engine
+        loop itself, so ``engine.cancel`` is not on the path: with it broken, a token set by the
+        first step still ends the run cancelled before the second starts."""
+
         def boom(self: Any, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("cancel is broken")
 
         monkeypatch.setattr(WorkflowEngine, "cancel", boom)
         token = CancelToken()
-        steps = {"a": _auto("a", "b", "stop"), "b": _auto("b", "c"), "c": _auto("c")}
-        executable = _executable(_document(steps, callables=("stop",)))
-        names = _names(stop=lambda ctx: token.cancel())
+        calls: list[str] = []
+
+        def stop(ctx: Any) -> None:
+            calls.append("a")
+            token.cancel()
+
+        steps = {
+            "a": _auto("a", "b", "stop"),
+            "b": _auto("b", "c", "mark"),
+            "c": _auto("c"),
+        }
+        executable = _executable(_document(steps, callables=("stop", "mark")))
+        names = _names(stop=stop, mark=lambda ctx: calls.append("b"))
         result = await executable.arun(
             {}, context=RunContext(cancel=token, callables=names)
         )
-        # the token is set and the instance completed anyway: a set token wins only when the
-        # instance did not complete (the commit wins)
-        assert result.status is Status.OK
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert calls == ["a"]
 
 
 def _recording_chain(
@@ -579,13 +591,12 @@ def _recording_chain(
 
 
 class TestSharedLedger:
-    """Plan 7efd5cb4 step 3 (D-005, D-006): the adapter charges the ledger of the context at every
-    ``step_started`` and asks for the stop through ``engine.cancel`` (a raising hook is swallowed by
-    the engine, so the charge never relies on a raise). The step whose start the ledger refused is
-    already in flight and finishes, like a step in flight at a cancel. The request registers when
-    the loop next yields, so on a rare loop turn (Python 3.15 only, about 1 run in 25) ONE more step
-    runs: a row never pins how many steps ran after the stop, it bounds them (the chain is longer
-    than the slack) and pins every count the lock decides (the ledger)."""
+    """Plan 7efd5cb4 steps 3 and 9 (D-005, D-012): the ENGINE of the run (``WorkflowEngine(context=)``)
+    runs the context hook before each step, so a refused charge or a set token ends the instance
+    BEFORE the step starts: no step in flight, no slack (step 3 stopped through ``engine.cancel`` from
+    a ``step_started`` hook, the refused step ran and on a rare loop turn one more did, D-006: those
+    rows were rewritten with the property asserted under mutants). The ledger stop FAILS the instance
+    like the engine's own step budget and the adapter maps it ``aborted/budget_spent`` (D-011)."""
 
     _ROOM = 6  # a chain this long ends before the end even when one step of slack runs
 
@@ -602,16 +613,12 @@ class TestSharedLedger:
         context = RunContext(callables=names, budget=budget)
         result = await _go(how, executable, context=context)
         assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
-        assert calls[:3] == [1, 2, 3]  # the refused third start was in flight
-        assert (
-            len(calls) < self._ROOM
-        )  # and the stop took effect before the chain ended
-        assert (
-            budget.steps_taken == 2
-        )  # a refused charge counts nothing, a late stop charges nothing
+        assert calls == [1, 2]  # the refused third step did not start
+        assert budget.steps_taken == 2  # a refused charge counts nothing
         assert (result.detail["budget"], result.detail["limit"]) == ("steps", 2)
         assert result.detail["shared_budget"] == "steps"
-        assert result.detail["workflow_status"] == "cancelled"
+        assert result.detail["steps"] == 2
+        assert result.detail["workflow_status"] == "failed"  # the engine's own word
         assert result.handle
 
     @HOW
@@ -718,8 +725,8 @@ class TestSharedLedger:
         assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
         assert result.detail["budget"] == "seconds"
         assert result.detail["shared_budget"] == "seconds"
-        assert calls[:2] == [1, 2] and len(calls) < self._ROOM
-        assert budget.steps_taken == 1  # the clock started at the first charge
+        assert calls == [1]  # the clock started at the first charge: step 2 is refused
+        assert budget.steps_taken == 1
 
     @HOW
     async def test_two_runs_on_one_context_share_the_ledger(self, how: str) -> None:
@@ -734,8 +741,8 @@ class TestSharedLedger:
         calls.clear()
         second = await _go(how, executable, context=context)
         assert (second.status, second.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
-        # one step of room, then the second start was refused (in flight)
-        assert calls[:2] == [1, 2] and budget.steps_taken == 5
+        # one step of room, then the second step was refused before it started
+        assert calls == [1] and budget.steps_taken == 5
 
     @HOW
     async def test_a_token_set_mid_run_is_cancelled_before_the_next_charge(
@@ -754,9 +761,8 @@ class TestSharedLedger:
         result = await _go(how, executable, context=context)
         assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
         assert "shared_budget" not in result.detail
-        # s1 was charged; s2 started with the token set (in flight) and was not charged
-        assert calls[:2] == [1, 2] and len(calls) < self._ROOM
-        assert budget.steps_taken == 1
+        # s1 was charged; the check before s2 saw the token (cancel first): s2 did not start
+        assert calls == [1] and budget.steps_taken == 1
         # the NEXT call of the same caller ends at its first check and charges nothing
         calls.clear()
         again = await _go(how, executable, context=context)
@@ -764,13 +770,17 @@ class TestSharedLedger:
         assert calls == [] and budget.steps_taken == 1
 
     @HOW
-    async def test_a_ledger_stop_wins_over_a_token_set_afterwards(
+    async def test_a_ledger_refusal_is_not_relabelled_by_a_token_set_in_the_step_before(
         self, how: str
     ) -> None:
+        """Rewritten (step 9, D-012; was: a ledger stop wins over a token set afterwards, which
+        needed the refused step in flight). The hook reads the token FIRST, so a token set by the
+        step before the refusal is a cancel and charges nothing; a token set by the LAST allowed
+        step is read at the very next check as well. Kills: the charge before the cancel check."""
         calls: list[int] = []
         token = CancelToken()
         steps, names = _recording_chain(
-            self._ROOM, calls, f3=lambda ctx: token.cancel()
+            self._ROOM, calls, f2=lambda ctx: token.cancel()
         )
         executable = _executable(
             _document(steps, callables=tuple(f"f{i}" for i in range(1, self._ROOM + 1)))
@@ -778,8 +788,31 @@ class TestSharedLedger:
         budget = RunBudget(max_steps=2)
         context = RunContext(cancel=token, callables=names, budget=budget)
         result = await _go(how, executable, context=context)
-        assert token.cancelled and calls[:3] == [1, 2, 3]
-        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert calls == [1, 2] and budget.steps_taken == 2
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in result.detail
+
+    @HOW
+    async def test_each_step_of_a_run_is_one_depth_level_and_one_charge(
+        self, how: str
+    ) -> None:
+        """Plan 7efd5cb4 step 9 (D-012). The engine sets the ambient scope and charges the ledger;
+        the adapter does neither. Kills: the adapter keeping its own scope (depth 2 inside a step),
+        the ledger charged by both (steps_taken 2 per step)."""
+        depths: list[int] = []
+
+        async def act(ctx: Any) -> None:
+            depths.append(_RUN_DEPTH.get())
+
+        steps = {"s1": _auto("s1", "s2", "act"), "s2": _auto("s2", "", "act")}
+        executable = _executable(_document(steps, callables=("act",)))
+        budget = RunBudget(max_steps=10)
+        context = RunContext(callables=_names(act=act), budget=budget)
+        result = await _go(how, executable, context=context)
+        assert result.status is Status.OK
+        assert budget.steps_taken == 2
+        assert depths == [1, 1]
+        assert _RUN_DEPTH.get() == 0
 
     @HOW
     async def test_a_composed_child_run_charges_the_same_ledger(
