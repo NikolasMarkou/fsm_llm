@@ -46,6 +46,7 @@ from fsm_llm.workflows.executable import (
 )
 from fsm_llm.workflows.steps import executable as executable_step_module
 from fsm_llm.workflows.steps.helpers import _RUN_DEPTH
+from tests import run_context_rig as rig
 from tests.test_fsm_llm_workflows.test_executable_step import _fsm_doc
 
 _BOUND = 20  # seconds: a wait that would hang fails instead
@@ -539,10 +540,9 @@ class TestCancel:
     async def test_a_broken_cancel_request_route_does_not_matter_the_engine_reads_the_token(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Rewritten (step 9, D-012; was: a failing ``engine.cancel`` is logged and the instance
-        completes, which needed the adapter's cancel REQUEST). The token is read by the engine
-        loop itself, so ``engine.cancel`` is not on the path: with it broken, a token set by the
-        first step still ends the run cancelled before the second starts."""
+        """The token is read by the engine loop itself (D-012), so ``engine.cancel`` is not on the
+        path: with it broken, a token set by the first step still ends the run cancelled before
+        the second starts."""
 
         def boom(self: Any, *args: Any, **kwargs: Any) -> None:
             raise RuntimeError("cancel is broken")
@@ -591,17 +591,15 @@ def _recording_chain(
 
 
 class TestSharedLedger:
-    """Plan 7efd5cb4 steps 3 and 9 (D-005, D-012): the ENGINE of the run (``WorkflowEngine(context=)``)
-    runs the context hook before each step, so a refused charge or a set token ends the instance
-    BEFORE the step starts: no step in flight, no slack (step 3 stopped through ``engine.cancel`` from
-    a ``step_started`` hook, the refused step ran and on a rare loop turn one more did, D-006: those
-    rows were rewritten with the property asserted under mutants). The ledger stop FAILS the instance
-    like the engine's own step budget and the adapter maps it ``aborted/budget_spent`` (D-011)."""
+    """Plan 7efd5cb4 (D-005, D-012): the ENGINE of the run (``WorkflowEngine(context=)``) runs the
+    context hook before each step, so a refused charge or a set token ends the instance BEFORE the
+    step starts: no step in flight, no slack. The ledger stop FAILS the instance like the engine's
+    own step budget and the adapter maps it ``aborted/budget_spent`` (D-011)."""
 
-    _ROOM = 6  # a chain this long ends before the end even when one step of slack runs
+    _ROOM = 6  # a chain longer than every ledger or cancel point the rows use
 
     @HOW
-    async def test_a_ledger_smaller_than_the_chain_stops_it_after_the_step_in_flight(
+    async def test_a_ledger_smaller_than_the_chain_stops_it_before_the_refused_step(
         self, how: str
     ) -> None:
         calls: list[int] = []
@@ -773,10 +771,9 @@ class TestSharedLedger:
     async def test_a_ledger_refusal_is_not_relabelled_by_a_token_set_in_the_step_before(
         self, how: str
     ) -> None:
-        """Rewritten (step 9, D-012; was: a ledger stop wins over a token set afterwards, which
-        needed the refused step in flight). The hook reads the token FIRST, so a token set by the
-        step before the refusal is a cancel and charges nothing; a token set by the LAST allowed
-        step is read at the very next check as well. Kills: the charge before the cancel check."""
+        """The hook reads the token FIRST (D-012), so a token set by the step before the refusal is
+        a cancel and charges nothing; a token set by the LAST allowed step is read at the very next
+        check as well. Kills: the charge before the cancel check."""
         calls: list[int] = []
         token = CancelToken()
         steps, names = _recording_chain(
@@ -850,7 +847,7 @@ class TestSharedLedger:
     @staticmethod
     def _compose(target: str) -> tuple[Any, ExecutableRegistry]:
         registry = ExecutableRegistry()
-        registry.add_document(_chain_doc())
+        registry.add_document(rig.chain_document())
         if target == "child":
             registry.register(_FailingChild())
         return _call_workflow(registry, target), registry
@@ -956,33 +953,6 @@ class TestSharedLedger:
         )
         assert (result.status, result.reason) == (Status.FAILED, None)
         assert "(budget_spent)" in result.detail["error"] and budget.steps_taken == 1
-
-
-def _chain_doc(ident: str = "chain") -> dict[str, Any]:
-    """a -> b -> c: two loop steps, so a ledger can refuse the SECOND one inside the child."""
-    from tests.test_fsm_llm import kind_corpus as kc
-
-    return {
-        "schema": "fsm-llm/executable",
-        "kind": "fsm",
-        "id": ident,
-        "contract": {"inputs": ["topic"], "outputs": ["result"]},
-        "body": {
-            "fsm": kc._fsm(
-                "Chain",
-                "a",
-                kc._state(
-                    "a",
-                    extraction_instructions="Extract the result.",
-                    required_context_keys=["result"],
-                    response_instructions="A.",
-                    transitions=[kc._go("b")],
-                ),
-                kc._state("b", response_instructions="B.", transitions=[kc._go("c")]),
-                kc._state("c", response_instructions="C."),
-            )
-        },
-    }
 
 
 def _call_workflow(registry: ExecutableRegistry, target: str) -> Any:

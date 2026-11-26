@@ -23,6 +23,7 @@ from fsm_llm.engine.context import (
     RunContext,
 )
 from fsm_llm.testing import ScriptedLLM
+from tests.run_context_rig import SettableClock
 
 
 def test_the_module_under_test_is_this_checkout() -> None:
@@ -270,19 +271,9 @@ class TestCancelToken:
         assert token.cancelled  # a set token is never cleared by a reader
 
 
-class _Clock:
-    """A stand-in for ``fsm_llm.engine.fsm.budget._monotonic``: moves only when told."""
-
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 @pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
-    fake = _Clock()
+def clock(monkeypatch: pytest.MonkeyPatch) -> SettableClock:
+    fake = SettableClock()
     monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", fake)
     return fake
 
@@ -323,7 +314,7 @@ class TestRunBudget:
         assert ledger.spent() is None
 
     def test_the_clock_starts_at_the_first_charge_not_at_construction(
-        self, clock: _Clock
+        self, clock: SettableClock
     ) -> None:
         ledger = RunBudget(max_seconds=5)
         clock.now += 100.0  # a host that built the context early must not burn it
@@ -342,7 +333,9 @@ class TestRunBudget:
         )
         assert ledger.steps_taken == 2
 
-    def test_seconds_are_named_first_when_both_are_spent(self, clock: _Clock) -> None:
+    def test_seconds_are_named_first_when_both_are_spent(
+        self, clock: SettableClock
+    ) -> None:
         ledger = RunBudget(max_steps=1, max_seconds=5)
         ledger.charge()
         clock.now += 9.0
@@ -566,7 +559,7 @@ class TestStepHook:
         with pytest.raises(RunCancelledError):
             hook(3)
 
-    def test_budget_spent_is_a_fact_of_the_ledger(self, clock: _Clock) -> None:
+    def test_budget_spent_is_a_fact_of_the_ledger(self, clock: SettableClock) -> None:
         assert RunContext().budget_spent() is None
         context = RunContext(budget=RunBudget(max_steps=1, max_seconds=5))
         assert context.budget_spent() is None

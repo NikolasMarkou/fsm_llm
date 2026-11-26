@@ -28,8 +28,11 @@ Interface contract:
     or running, ``RunPoll(True, result)`` once finished, ``None`` when the host never saw the handle
     FOR THAT CONVERSATION (or it was evicted or dropped): the ``run_lost`` answer.
   - ``cancel(handle, *, conversation_id=None) -> bool``: set the token of a reserved or running
-    run (a pattern checks it ONCE, before the run starts, never between steps, so a cancel after
-    the start only detaches it: it may keep running and is never joined; D-058). ``False`` for an unknown, finished or foreign handle.
+    run (the token of the context derived for the run: an agent class that takes a context, all but
+    ``self_consistency``, ``swarm`` and ``meta_builder``, and ``reasoning.solve`` read it between
+    their own steps and end ``aborted/cancelled`` at the next one, never mid model call or tool;
+    the three others check it ONCE, before the run starts, so a cancel after the start only
+    detaches them: they may keep running and are never joined; D-058). ``False`` for an unknown, finished or foreign handle.
   - ``cancel_for(conversation_id) -> int``: set the token of every running run of the conversation,
     drop its reservations and finished results, and orphan the running ones (their result is
     dropped at the finish). Returns the number of running runs told to stop.

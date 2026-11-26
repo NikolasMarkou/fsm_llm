@@ -226,16 +226,6 @@ def _hooked(record: dict[str, Any], *, hooked: bool) -> dict[str, Any]:
 # ---- the agent row (plan 7efd5cb4 step 5, D-008) -------------------------------------------------
 
 
-class _Clock:
-    """A stand-in for ``fsm_llm.engine.fsm.budget._monotonic``: moves only when told."""
-
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 def _agent_tools(on_call: Any = None, *, flagged: bool = False) -> Any:
     """The scripted double's tool registry; ``on_call()`` runs inside the tool (a cancel, a clock)."""
     from fsm_llm.tools import ToolRegistry
@@ -276,12 +266,10 @@ class _Rig:
         return A.ReactAgent(tools or _agent_tools(), context=self.ctx, **kw)
 
     def types(self) -> list[str]:
-        return [e["type"] for e in rig.events_of(self.log)]
+        return rig.event_types(self.log)
 
     def paired(self) -> bool:
-        types = self.types()
-        ends = types.count("llm/response") + types.count("provider/error")
-        return types.count("llm/request") == ends
+        return rig.requests_paired(self.log)
 
 
 @pytest.fixture
@@ -438,7 +426,7 @@ class TestAgentUnderContext:
         from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
         from fsm_llm.engine.context import RunBudget
 
-        clock = _Clock()
+        clock = rig.SettableClock()
         monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", clock)
         r = _Rig(tmp_path, budget=RunBudget(max_seconds=5.0))
         agent = r.agent(_agent_tools(on_call=lambda: setattr(clock, "now", 2000.0)))
@@ -767,22 +755,13 @@ class _Solve:
         return self.ctx.budget.steps_taken
 
     def types(self) -> list[str]:
-        return [e["type"] for e in rig.events_of(self.log)]
+        return rig.event_types(self.log)
 
     def paired(self) -> bool:
-        types = self.types()
-        ends = types.count("llm/response") + types.count("provider/error")
-        return types.count("llm/request") == ends
+        return rig.requests_paired(self.log)
 
     def idle(self) -> bool:
-        """Nothing active on either API, no strategy frame left, the solve lock free."""
-        e = self.engine
-        return (
-            e.orchestrator.list_active_conversations() == []
-            and e.classifier.list_active_conversations() == []
-            and dict(e.orchestrator.fsm_manager.instances) == {}
-            and not e._solve_lock.locked()
-        )
+        return rig.engine_idle(self.engine)
 
     def solve(self, how: str = "solve", **limits: Any) -> Any:
         if how == "solve":
@@ -930,7 +909,7 @@ class TestReasoningUnderContext:
     def test_a_seconds_ledger_is_the_shared_budget_too(
         self, solve_rig: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        clock = _Clock()
+        clock = rig.SettableClock()
         monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", clock)
         r = solve_rig(budget=RunBudget(max_seconds=5.0), stop_at="conclusion")
         r.llm.on_field = lambda: setattr(clock, "now", clock.now + 100.0)
@@ -1347,33 +1326,6 @@ def _everyone() -> type:
     return Everyone
 
 
-def _chain_document() -> dict[str, Any]:
-    """The child FSM, `a -> b -> c`: two loop steps, `a` extracts ``result``."""
-    from tests.test_fsm_llm import kind_corpus as kc
-
-    return {
-        "schema": "fsm-llm/executable",
-        "kind": "fsm",
-        "id": "chain",
-        "contract": {"inputs": ["topic"], "outputs": ["result"]},
-        "body": {
-            "fsm": kc._fsm(
-                "Chain",
-                "a",
-                kc._state(
-                    "a",
-                    extraction_instructions="Extract the result.",
-                    required_context_keys=["result"],
-                    response_instructions="A.",
-                    transitions=[kc._go("b")],
-                ),
-                kc._state("b", response_instructions="B.", transitions=[kc._go("c")]),
-                kc._state("c", response_instructions="C."),
-            )
-        },
-    }
-
-
 class _Three:
     """One context over three runners: the agent, the reasoning engine and the workflow adapter."""
 
@@ -1408,7 +1360,7 @@ class _Three:
         if hitl is not None:
             names.register("hitl", hitl)
         registry = ExecutableRegistry()
-        registry.add_document(_chain_document())
+        registry.add_document(rig.chain_document())
         call = {
             "type": "ExecutableStep",
             "step_id": "call",
@@ -1471,22 +1423,13 @@ class _Three:
             return None, exc
 
     def types(self) -> list[str]:
-        return [e["type"] for e in rig.events_of(self.log)]
+        return rig.event_types(self.log)
 
     def paired(self) -> bool:
-        types = self.types()
-        return types.count("llm/request") == (
-            types.count("llm/response") + types.count("provider/error")
-        )
+        return rig.requests_paired(self.log)
 
     def idle(self) -> bool:
-        e = self.engine
-        return (
-            e.orchestrator.list_active_conversations() == []
-            and e.classifier.list_active_conversations() == []
-            and dict(e.orchestrator.fsm_manager.instances) == {}
-            and not e._solve_lock.locked()
-        )
+        return rig.engine_idle(self.engine)
 
     def close(self) -> None:
         self.engine.close()
@@ -1841,7 +1784,7 @@ class TestOneBudget:
         from fsm_llm.agents.exceptions import BudgetExhaustedError
         from fsm_llm.core.codes import Reason, Status
 
-        clock = _Clock()
+        clock = rig.SettableClock()
         monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", clock)
         ledger = RunBudget(max_seconds=5.0)  # built at 1000
         clock.now = 9000.0  # a long wait before the first run

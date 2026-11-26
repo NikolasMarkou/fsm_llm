@@ -23,6 +23,14 @@ Interface contract:
   whether a time budget was set, whether a ``before_step`` hook was given) and the step numbers that
   hook received; the hook is wrapped, never replaced, so the run is unchanged. ``spy.runs``.
 - ``StandInClock``: a ``time`` stand-in whose ``monotonic()`` is one second later on every read.
+- ``SettableClock``: a stand-in for ``fsm_llm.engine.fsm.budget._monotonic`` that moves only when a
+  row sets ``now`` (patch it in with ``monkeypatch.setattr``).
+- ``event_types(log)`` and ``requests_paired(log)``: the event types of a log in ``events_of`` order,
+  and whether every ``llm/request`` has its ``llm/response`` or ``provider/error``.
+- ``engine_idle(engine)``: nothing active on either API of a ``ReasoningEngine``, no strategy frame
+  left, the solve lock free.
+- ``chain_document(ident="chain")``: the executable envelope of the child FSM ``a -> b -> c``
+  (two loop steps; ``a`` extracts ``result``).
 """
 
 from __future__ import annotations
@@ -45,7 +53,6 @@ _UNSTABLE_KEYS = frozenset(
 )
 _TS = re.compile(r"\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?")
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-_FLOAT_SECONDS = re.compile(r"(\d+\.\d{3,})")
 
 
 def _unstable(key: str) -> bool:
@@ -127,6 +134,51 @@ def events_of(log: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def event_types(log: Any) -> list[str]:
+    return [e["type"] for e in events_of(log)]
+
+
+def requests_paired(log: Any) -> bool:
+    types = event_types(log)
+    ends = types.count("llm/response") + types.count("provider/error")
+    return types.count("llm/request") == ends
+
+
+def engine_idle(engine: Any) -> bool:
+    return (
+        engine.orchestrator.list_active_conversations() == []
+        and engine.classifier.list_active_conversations() == []
+        and dict(engine.orchestrator.fsm_manager.instances) == {}
+        and not engine._solve_lock.locked()
+    )
+
+
+def chain_document(ident: str = "chain") -> dict[str, Any]:
+    from tests.test_fsm_llm import kind_corpus as kc
+
+    return {
+        "schema": "fsm-llm/executable",
+        "kind": "fsm",
+        "id": ident,
+        "contract": {"inputs": ["topic"], "outputs": ["result"]},
+        "body": {
+            "fsm": kc._fsm(
+                "Chain",
+                "a",
+                kc._state(
+                    "a",
+                    extraction_instructions="Extract the result.",
+                    required_context_keys=["result"],
+                    response_instructions="A.",
+                    transitions=[kc._go("b")],
+                ),
+                kc._state("b", response_instructions="B.", transitions=[kc._go("c")]),
+                kc._state("c", response_instructions="C."),
+            )
+        },
+    }
+
+
 def _first_ts(log: Any, cid: str) -> tuple[str, str]:
     first = next(iter(log.read(cid)), {})
     return (str(first.get("ts", "")), cid)
@@ -143,6 +195,16 @@ class StandInClock:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(time, name)
+
+
+class SettableClock:
+    """A stand-in for ``fsm_llm.engine.fsm.budget._monotonic``: moves only when told."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
 
 
 class HookSpy:
