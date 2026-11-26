@@ -1981,7 +1981,7 @@ fsm_llm.reasoning.ReasoningClassificationResult class(TimestampedModel)
   property classification_summary
   property has_alternatives
   classmethod def validate_alternatives_unique(cls, v: list[str]) -> list[str]
-fsm_llm.reasoning.ReasoningEngine class
+fsm_llm.reasoning.ReasoningEngine class(EngineHandlers)
   def __init__(self, model: str | None = None, *, registry: ExecutableRegistry | None = None, **kwargs)
   def close(self) -> None
   def solve_problem(self, problem: str, initial_context: dict[str, Any] | None = None, *, max_steps: int | None = None, max_seconds: float | None = None) -> tuple[str, dict[str, Any]]

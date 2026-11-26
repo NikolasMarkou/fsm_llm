@@ -12,6 +12,7 @@ import pytest
 from fsm_llm.constants import MESSAGE_TRUNCATION_SUFFIX
 from fsm_llm.logging import logger
 from fsm_llm.reasoning import __main__ as cli
+from fsm_llm.reasoning.choice import _strategy_for as _choose_strategy
 from fsm_llm.reasoning.constants import ContextKeys, Defaults, ReasoningType
 from fsm_llm.reasoning.definitions import (
     ReasoningClassificationResult,
@@ -20,7 +21,6 @@ from fsm_llm.reasoning.definitions import (
     ValidationResult,
 )
 from fsm_llm.reasoning.engine import ReasoningEngine
-from fsm_llm.reasoning.engine import _strategy_for as _choose_strategy
 from fsm_llm.reasoning.exceptions import (
     ReasoningClassificationError,
 )

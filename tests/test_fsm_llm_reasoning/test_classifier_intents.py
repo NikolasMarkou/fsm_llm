@@ -20,8 +20,8 @@ from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.core.verify import FSMValidator
 from fsm_llm.logging import logger
 from fsm_llm.reasoning import ReasoningEngine
+from fsm_llm.reasoning.choice import _classification_from
 from fsm_llm.reasoning.constants import ContextKeys, ReasoningType
-from fsm_llm.reasoning.engine import _classification_from
 from fsm_llm.reasoning.strategy_files import (
     STRATEGY_ORDER,
     load_document,
