@@ -9,7 +9,7 @@ Interface contract:
 
 - ``RunContext(llm_interface=None, llm_factory=None, event_log=None, max_steps=None,
   max_seconds=None, cancel=<a fresh CancelToken>, callables=None, parent=None,
-  registry=None)``, all keyword or positional in that order, frozen, compared by identity. ``llm_interface`` and
+  registry=None, budget=None)``, all keyword or positional in that order, frozen, compared by identity. ``llm_interface`` and
   ``llm_factory`` (a zero-argument callable returning an ``LLMInterface``) are refused
   together, as ``API(llm_interface=...)`` refuses every other LLM setting beside it.
   ``event_log`` is what ``API(event_log=)`` takes (an ``EventLog`` or a path). ``max_steps``
@@ -21,8 +21,9 @@ Interface contract:
   (``engine.kinds.targets``: an ``ExecutableRegistry`` is one) that the ``API`` of a run is
   given as ``targets=``, so a body holding a ``call`` state resolves its target the way a
   bare ``API(targets=)`` does (plan baa37f40 D-021); ``None`` gives that ``API`` no resolver.
-  A violation raises ``ValueError`` (or ``TypeError`` for a wrong type of ``cancel``,
-  ``callables`` and ``registry``) at construction.
+  ``budget`` is a ``RunBudget`` (below) or ``None``. A violation raises ``ValueError`` (or
+  ``TypeError`` for a wrong type of ``cancel``, ``callables``, ``registry`` and ``budget``)
+  at construction.
 - ``resolve_llm()`` returns the interface, or calls the factory ONCE and returns its result
   (one call per run, nothing cached), or returns ``None`` (the run then resolves a model the
   way ``API`` does, from ``LLM_MODEL``).
@@ -34,9 +35,19 @@ Interface contract:
   parent's token (one cancel reaches every child); a ``CancelToken`` gives the child its OWN
   token, so cancelling it leaves the parent's untouched (the token of a delegated run, plan
   baa37f40 D-049; the parent's cancel does not reach the child by itself: the host that made
-  the token sets it). A value that is not a ``CancelToken`` raises ``TypeError``. The limits are
-  per run, not a shared ledger: the parent's remaining steps are not decremented by a child
-  (shared budgets across runs wait for phase S).
+  the token sets it). A value that is not a ``CancelToken`` raises ``TypeError``. ``max_steps`` and
+  ``max_seconds`` are per run: a child's steps are not subtracted from the parent's. ``derive``
+  shares ``budget`` by reference (one ledger for a whole tree of runs).
+- ``RunBudget(max_steps=None, max_seconds=None)``: ONE ledger shared by every runner of a
+  context (plan 7efd5cb4). ``charge()`` counts one step or raises ``RunBudgetExceededError``
+  (the next after ``max_steps``, or once ``max_seconds`` passed since the FIRST charge, never
+  since construction), ``spent()`` names the budget that forbids the next charge or ``None``,
+  ``steps_taken`` counts. The unit is the loop step of the runner that charges it. A leaf lock
+  guards the arithmetic only. It is not the engine's per-conversation ``TurnBudget``.
+- ``step_hook()`` returns a fresh ``before_step`` callable for ONE run: it raises
+  ``RunCancelledError`` when the token is set, BEFORE it charges the ledger, and charges once per
+  distinct step number (the engine offers an ended pushed frame the same number again).
+  ``budget_spent()`` is ``budget.spent()`` or ``None`` (a caller reads it after a catch).
 - ``CancelToken``: one thread-safe, set-once request. ``cancel()``, ``cancelled``,
   ``raise_if_cancelled()`` (raises ``RunCancelledError``, an ``FSMError``). A token is checked
   BETWEEN steps (the executable's ``before_step``); it never interrupts a model call in
@@ -56,18 +67,18 @@ import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fsm_llm.core.definitions.errors import FSMError
 from fsm_llm.core.names import NameRegistry
-from fsm_llm.engine.fsm.budget import check_turn_limits
+from fsm_llm.engine.fsm.budget import TurnBudget, check_turn_limits
 from fsm_llm.llm.interface import LLMInterface
 
 if TYPE_CHECKING:
     from fsm_llm.engine.kinds.targets import TargetResolver
     from fsm_llm.runtime import EventLog
 
-__all__ = ["CancelToken", "RunCancelledError", "RunContext"]
+__all__ = ["CancelToken", "RunBudget", "RunCancelledError", "RunContext"]
 
 
 class RunCancelledError(FSMError):
@@ -106,6 +117,44 @@ class CancelToken:
         return f"CancelToken(cancelled={self.cancelled})"
 
 
+# DECISION plan-2026-11-26T022222-7efd5cb4/D-004
+# The shared run budget is ONE run-level ledger, a DECLARED field of `RunContext` carried by
+# reference through `dataclasses.replace` (`derive` and `ExecutableStep` rebuild the context), charged
+# once per distinct step number by the hook of `step_hook`, under ONE leaf lock. Do NOT set it in
+# `__post_init__` (the second `replace` loses it), keep it in context data, a handler, a snapshot
+# or the engine's `_turn_budgets` (5a6a1f80 D-010), read it from the log, start its clock at
+# construction, charge per hook CALL (the ended-frame offer repeats a number), or hold the lock
+# across a hook, a raise or a log write.
+class RunBudget:
+    """The ledger of the steps and seconds of every run under one context (see above)."""
+
+    def __init__(
+        self, max_steps: int | None = None, max_seconds: float | None = None
+    ) -> None:
+        check_turn_limits(max_steps, max_seconds)
+        self.max_steps = max_steps
+        self.max_seconds = max_seconds
+        self._lock = threading.Lock()
+        self._record: TurnBudget | None = None
+
+    @property
+    def steps_taken(self) -> int:
+        with self._lock:
+            return self._record.steps_taken if self._record else 0
+
+    def spent(self) -> Literal["steps", "seconds"] | None:
+        """The budget that forbids the next charge (seconds first), or ``None``."""
+        with self._lock:
+            return self._record.spent() if self._record else None
+
+    def charge(self) -> None:
+        """Count one step, or raise ``RunBudgetExceededError`` (the count is unchanged)."""
+        with self._lock:
+            if self._record is None:
+                self._record = TurnBudget(self.max_steps, self.max_seconds)
+            self._record.charge()
+
+
 @dataclass(frozen=True, eq=False)
 class RunContext:
     """The frozen value a runner takes for one run. See the module docstring."""
@@ -119,6 +168,7 @@ class RunContext:
     callables: NameRegistry[Any] | None = None
     parent: str | None = None
     registry: TargetResolver | None = None
+    budget: RunBudget | None = None
 
     def __post_init__(self) -> None:
         if self.llm_interface is not None and self.llm_factory is not None:
@@ -148,6 +198,10 @@ class RunContext:
                 "registry must provide resolve_target(target_id, *, conversation_id=None) "
                 f"(a TargetResolver), got {type(self.registry).__name__}"
             )
+        if self.budget is not None and not isinstance(self.budget, RunBudget):
+            raise TypeError(
+                f"budget must be a RunBudget, got {type(self.budget).__name__}"
+            )
         check_turn_limits(self.max_steps, self.max_seconds)
 
     def resolve_llm(self) -> LLMInterface | None:
@@ -157,6 +211,23 @@ class RunContext:
         if self.llm_factory is not None:
             return self.llm_factory()
         return None
+
+    def step_hook(self) -> Callable[[int], None]:
+        """A fresh ``before_step`` for ONE run: the cancel check, then one charge per step."""
+        last = 0
+
+        def hook(step: int) -> None:
+            nonlocal last
+            self.cancel.raise_if_cancelled()
+            if self.budget is not None and step > last:
+                self.budget.charge()
+                last = step
+
+        return hook
+
+    def budget_spent(self) -> Literal["steps", "seconds"] | None:
+        """The shared budget that is spent (a fact for a caller after a catch), or ``None``."""
+        return self.budget.spent() if self.budget is not None else None
 
     def derive(
         self,

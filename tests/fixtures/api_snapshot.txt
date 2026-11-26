@@ -808,12 +808,19 @@ fsm_llm.engine.context.CancelToken class
   def cancel(self) -> None
   property cancelled
   def raise_if_cancelled(self) -> None
+fsm_llm.engine.context.RunBudget class
+  def __init__(self, max_steps: int | None = None, max_seconds: float | None = None) -> None
+  def charge(self) -> None
+  def spent(self) -> Literal['steps', 'seconds'] | None
+  property steps_taken
 fsm_llm.engine.context.RunCancelledError class(FSMError)
   def __init__(self, message: str = 'the run was cancelled', *, details: dict[str, Any] | None = None)
 fsm_llm.engine.context.RunContext class
-  def __init__(self, llm_interface: LLMInterface | None = None, llm_factory: Callable[[], LLMInterface] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken = <factory>, callables: NameRegistry[Any] | None = None, parent: str | None = None, registry: TargetResolver | None = None) -> None
+  def __init__(self, llm_interface: LLMInterface | None = None, llm_factory: Callable[[], LLMInterface] | None = None, event_log: EventLog | str | os.PathLike[str] | None = None, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken = <factory>, callables: NameRegistry[Any] | None = None, parent: str | None = None, registry: TargetResolver | None = None, budget: RunBudget | None = None) -> None
+  def budget_spent(self) -> Literal['steps', 'seconds'] | None
   def derive(self, *, parent: str, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken | None = None) -> RunContext
   def resolve_llm(self) -> LLMInterface | None
+  def step_hook(self) -> Callable[[int], None]
 # fsm_llm.engine.executables
 fsm_llm.engine.executables.AliasSpec class
   def __init__(self, name: str, target: str, routes: tuple[tuple[str, float], ...]) -> None

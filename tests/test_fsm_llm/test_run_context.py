@@ -14,9 +14,14 @@ from pathlib import Path
 import pytest
 
 import fsm_llm
-from fsm_llm.core.definitions import FSMError
+from fsm_llm.core.definitions import FSMError, RunBudgetExceededError
 from fsm_llm.core.names import NameRegistry
-from fsm_llm.engine.context import CancelToken, RunCancelledError, RunContext
+from fsm_llm.engine.context import (
+    CancelToken,
+    RunBudget,
+    RunCancelledError,
+    RunContext,
+)
 from fsm_llm.testing import ScriptedLLM
 
 
@@ -58,6 +63,7 @@ class TestRunContextFields:
             "callables",
             "parent",
             "registry",
+            "budget",
         }
 
     def test_unknown_keywords_are_refused(self) -> None:
@@ -262,3 +268,371 @@ class TestCancelToken:
             t.join(5)
         assert len(seen) == 8
         assert token.cancelled  # a set token is never cleared by a reader
+
+
+class _Clock:
+    """A stand-in for ``fsm_llm.engine.fsm.budget._monotonic``: moves only when told."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    fake = _Clock()
+    monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", fake)
+    return fake
+
+
+class TestRunBudget:
+    """The run-level ledger (plan 7efd5cb4 D-004): exact counts, a leaf lock, a late clock."""
+
+    def test_n_charges_are_allowed_and_the_next_raises_with_the_count_unchanged(
+        self,
+    ) -> None:
+        ledger = RunBudget(max_steps=3)
+        for _ in range(3):
+            ledger.charge()
+        assert ledger.steps_taken == 3
+        with pytest.raises(RunBudgetExceededError) as info:
+            ledger.charge()
+        assert (info.value.budget, info.value.limit, info.value.steps_done) == (
+            "steps",
+            3,
+            3,
+        )
+        assert ledger.steps_taken == 3
+        assert ledger.spent() == "steps"
+
+    def test_a_ledger_of_one_step(self) -> None:
+        ledger = RunBudget(max_steps=1)
+        assert ledger.spent() is None
+        ledger.charge()
+        assert ledger.spent() == "steps"
+        with pytest.raises(RunBudgetExceededError):
+            ledger.charge()
+
+    def test_a_ledger_with_no_limit_only_counts(self) -> None:
+        ledger = RunBudget()
+        for _ in range(50):
+            ledger.charge()
+        assert ledger.steps_taken == 50
+        assert ledger.spent() is None
+
+    def test_the_clock_starts_at_the_first_charge_not_at_construction(
+        self, clock: _Clock
+    ) -> None:
+        ledger = RunBudget(max_seconds=5)
+        clock.now += 100.0  # a host that built the context early must not burn it
+        assert ledger.spent() is None
+        ledger.charge()  # allowed: the clock starts here
+        clock.now += 4.0
+        ledger.charge()
+        clock.now += 1.0
+        assert ledger.spent() == "seconds"
+        with pytest.raises(RunBudgetExceededError) as info:
+            ledger.charge()
+        assert (info.value.budget, info.value.limit, info.value.steps_done) == (
+            "seconds",
+            5,
+            2,
+        )
+        assert ledger.steps_taken == 2
+
+    def test_seconds_are_named_first_when_both_are_spent(self, clock: _Clock) -> None:
+        ledger = RunBudget(max_steps=1, max_seconds=5)
+        ledger.charge()
+        clock.now += 9.0
+        assert ledger.spent() == "seconds"
+
+    @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "3"])
+    def test_a_bad_step_limit_is_refused_like_the_engines_own(
+        self, bad: object
+    ) -> None:
+        with pytest.raises(ValueError, match="max_steps"):
+            RunBudget(max_steps=bad)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("bad", [0, -0.5, True, float("nan"), "3"])
+    def test_a_bad_time_limit_is_refused_like_the_engines_own(
+        self, bad: object
+    ) -> None:
+        with pytest.raises(ValueError, match="max_seconds"):
+            RunBudget(max_seconds=bad)  # type: ignore[arg-type]
+
+    def test_the_lock_is_not_held_after_a_raise(self) -> None:
+        ledger = RunBudget(max_steps=1)
+        ledger.charge()
+        with pytest.raises(RunBudgetExceededError):
+            ledger.charge()
+        assert not ledger._lock.locked()
+        assert ledger.spent() == "steps"  # a reader is not blocked by the raise
+
+    @pytest.mark.parametrize("repeat", range(8))
+    def test_the_window_two_threads_one_step_exactly_one_is_accepted(
+        self, monkeypatch: pytest.MonkeyPatch, repeat: int
+    ) -> None:
+        """Two threads race for the one step; a clock that waits for the other thread
+        inside the budget check opens the window. With the lock one thread is inside at a
+        time (the barrier times out harmlessly); without it both pass the check."""
+        ledger = RunBudget(max_steps=1, max_seconds=10_000)
+        barrier = threading.Barrier(2, timeout=0.3)
+
+        def waiting_clock() -> float:
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            return 1000.0
+
+        monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", waiting_clock)
+        outcomes: list[str] = []
+        guard = threading.Lock()
+
+        def charge() -> None:
+            try:
+                ledger.charge()
+                result = "accepted"
+            except RunBudgetExceededError:
+                result = "refused"
+            with guard:
+                outcomes.append(result)
+
+        threads = [threading.Thread(target=charge) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+        assert sorted(outcomes) == ["accepted", "refused"]
+        assert ledger.steps_taken == 1
+
+    def test_many_threads_charge_exactly_the_limit(self) -> None:
+        ledger = RunBudget(max_steps=400)
+        barrier = threading.Barrier(8, timeout=10)
+        accepted: list[int] = []
+        guard = threading.Lock()
+
+        def worker() -> None:
+            barrier.wait()
+            count = 0
+            for _ in range(100):
+                try:
+                    ledger.charge()
+                    count += 1
+                except RunBudgetExceededError:
+                    pass
+            with guard:
+                accepted.append(count)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+        assert sum(accepted) == 400
+        assert ledger.steps_taken == 400
+
+
+class TestTheBudgetField:
+    """``budget`` is a DECLARED field, so ``dataclasses.replace`` carries it by reference."""
+
+    def test_it_is_the_last_declared_field_and_defaults_to_none(self) -> None:
+        fields = dataclasses.fields(RunContext)
+        assert fields[-1].name == "budget"
+        assert RunContext().budget is None
+
+    @pytest.mark.parametrize("bad", [3, "ledger", object(), {"max_steps": 3}])
+    def test_a_non_ledger_is_a_type_error_naming_it(self, bad: object) -> None:
+        with pytest.raises(TypeError, match="RunBudget"):
+            RunContext(budget=bad)  # type: ignore[arg-type]
+
+    def test_derive_shares_the_same_ledger_by_identity(self) -> None:
+        ledger = RunBudget(max_steps=5)
+        parent = RunContext(budget=ledger)
+        child = parent.derive(parent="a", max_steps=3)
+        grandchild = child.derive(parent="b")
+        assert child.budget is ledger
+        assert grandchild.budget is ledger
+        child.budget.charge()  # type: ignore[union-attr]
+        assert ledger.steps_taken == 1  # a child is charged to the parent
+
+    def test_a_second_replace_keeps_it(self) -> None:
+        """``ExecutableStep`` replaces a derived context once more; a ledger kept as an
+        undeclared attribute would be lost there."""
+        ledger = RunBudget(max_steps=5)
+        child = RunContext(budget=ledger).derive(parent="a")
+        again = dataclasses.replace(child, max_seconds=9)
+        assert again.budget is ledger
+
+    def test_the_context_stays_free_of_data_and_grants(self) -> None:
+        names = {f.name for f in dataclasses.fields(RunContext)}
+        assert not names & {"data", "context", "grant", "approval", "_approval_granted"}
+
+
+class TestStepHook:
+    """``step_hook()``: the cancel check first, then one charge per distinct step number."""
+
+    def test_it_charges_once_per_distinct_step_number(self) -> None:
+        ledger = RunBudget(max_steps=10)
+        hook = RunContext(budget=ledger).step_hook()
+        for step in (1, 2, 2, 3):  # the ended-frame offer repeats a number
+            hook(step)
+        assert ledger.steps_taken == 3
+
+    def test_a_cancelled_token_raises_before_any_charge(self) -> None:
+        ledger = RunBudget(max_steps=10)
+        context = RunContext(budget=ledger)
+        hook = context.step_hook()
+        hook(1)
+        context.cancel.cancel()
+        with pytest.raises(RunCancelledError):
+            hook(2)
+        assert ledger.steps_taken == 1  # the check ran first: nothing was charged
+
+    def test_a_cancelled_context_is_dead_for_every_later_hook(self) -> None:
+        context = RunContext(budget=RunBudget(max_steps=10))
+        context.cancel.cancel()
+        for _ in range(2):
+            with pytest.raises(RunCancelledError):
+                context.step_hook()(1)
+        assert context.budget.steps_taken == 0  # type: ignore[union-attr]
+
+    def test_two_closures_keep_their_own_last_step_over_one_ledger(self) -> None:
+        ledger = RunBudget(max_steps=10)
+        context = RunContext(budget=ledger)
+        first, second = context.step_hook(), context.step_hook()
+        assert first is not second
+        first(1)
+        first(2)
+        second(1)  # a fresh run restarts at 1 and is charged again
+        second(1)
+        assert ledger.steps_taken == 3
+
+    def test_a_spent_ledger_raises_the_engines_error_and_keeps_the_count(self) -> None:
+        context = RunContext(budget=RunBudget(max_steps=2))
+        hook = context.step_hook()
+        hook(1)
+        hook(2)
+        with pytest.raises(RunBudgetExceededError) as info:
+            hook(3)
+        assert (info.value.budget, info.value.limit, info.value.steps_done) == (
+            "steps",
+            2,
+            2,
+        )
+        with pytest.raises(RunBudgetExceededError):
+            context.step_hook()(1)  # the NEXT run is refused at its first step
+        assert context.budget.steps_taken == 2  # type: ignore[union-attr]
+
+    def test_with_no_ledger_it_only_checks_the_cancel(self) -> None:
+        context = RunContext()
+        hook = context.step_hook()
+        hook(1)
+        hook(2)
+        context.cancel.cancel()
+        with pytest.raises(RunCancelledError):
+            hook(3)
+
+    def test_budget_spent_is_a_fact_of_the_ledger(self, clock: _Clock) -> None:
+        assert RunContext().budget_spent() is None
+        context = RunContext(budget=RunBudget(max_steps=1, max_seconds=5))
+        assert context.budget_spent() is None
+        context.step_hook()(1)
+        assert context.budget_spent() == "steps"
+        other = RunContext(budget=RunBudget(max_seconds=5))
+        other.step_hook()(1)
+        clock.now += 6.0
+        assert other.budget_spent() == "seconds"
+
+
+class TestStepHookInTheRunLoop:
+    """The hook against the real run loop (doubles only): a sync hook serves both modes, and
+    the ended-frame offer repeats a step number without being a step."""
+
+    @staticmethod
+    def _pushing_run() -> tuple[object, str]:
+        from tests.test_fsm_llm.test_advance import _ScriptedLLM, _start, _trip_fsm
+        from tests.test_fsm_llm.test_run_until_terminal import _push_sub_on_entry
+
+        api, conv_id = _start(_trip_fsm(), _ScriptedLLM({"city": "Paris"}))
+        _push_sub_on_entry(api, conv_id, "plan")
+        return api, conv_id
+
+    @staticmethod
+    def _popping(api: object, conv_id: str, hook, seen: list[int]):  # type: ignore[no-untyped-def]
+        def before_step(step: int) -> None:
+            seen.append(step)
+            if api.get_stack_depth(conv_id) > 1 and api.has_conversation_ended(conv_id):  # type: ignore[attr-defined]
+                api.pop_fsm(conv_id)  # type: ignore[attr-defined]
+            hook(step)
+
+        return before_step
+
+    def test_an_ended_pushed_frame_offers_a_number_twice_and_charges_it_once(
+        self,
+    ) -> None:
+        api, conv_id = self._pushing_run()
+        ledger = RunBudget(max_steps=10)
+        seen: list[int] = []
+        hook = self._popping(api, conv_id, RunContext(budget=ledger).step_hook(), seen)
+        results = api.run_until_terminal(conv_id, max_steps=10, before_step=hook)  # type: ignore[attr-defined]
+        assert seen == [
+            1,
+            2,
+            3,
+            3,
+        ]  # step 3 is offered to pop the ended sub-FSM, then run
+        assert len(results) == 3  # the engine's own steps_done
+        assert ledger.steps_taken == 3
+
+    def test_the_async_loop_awaits_the_same_sync_hook(self) -> None:
+        import asyncio
+
+        api, conv_id = self._pushing_run()
+        ledger = RunBudget(max_steps=10)
+        seen: list[int] = []
+        hook = self._popping(api, conv_id, RunContext(budget=ledger).step_hook(), seen)
+        results = asyncio.run(
+            api.arun_until_terminal(conv_id, max_steps=10, before_step=hook)  # type: ignore[attr-defined]
+        )
+        assert seen == [1, 2, 3, 3]
+        assert len(results) == 3
+        assert ledger.steps_taken == 3
+
+    def test_a_spent_ledger_stops_the_run_before_the_step_it_forbids(self) -> None:
+        from tests.test_fsm_llm.test_advance import _ScriptedLLM, _start, _trip_fsm
+
+        llm = _ScriptedLLM({"city": "Paris"})
+        api, conv_id = _start(_trip_fsm(), llm)
+        context = RunContext(budget=RunBudget(max_steps=1))
+        with pytest.raises(RunBudgetExceededError) as info:
+            api.run_until_terminal(
+                conv_id, max_steps=10, before_step=context.step_hook()
+            )
+        assert (info.value.budget, info.value.limit) == ("steps", 1)
+        assert (
+            api.get_current_state(conv_id) == "plan"
+        )  # one step ran, the second did not
+        assert context.budget.steps_taken == 1  # type: ignore[union-attr]
+
+    def test_a_cancel_set_by_the_double_stops_the_next_step_only(self) -> None:
+        from tests.test_fsm_llm.test_advance import _ScriptedLLM, _start, _trip_fsm
+
+        context = RunContext(budget=RunBudget(max_steps=10))
+
+        class _Cancelling(_ScriptedLLM):
+            def extract_field(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+                context.cancel.cancel()
+                return super().extract_field(*args, **kwargs)
+
+        api, conv_id = _start(_trip_fsm(), _Cancelling({"city": "Paris"}))
+        with pytest.raises(RunCancelledError):
+            api.run_until_terminal(
+                conv_id, max_steps=10, before_step=context.step_hook()
+            )
+        assert (
+            api.get_current_state(conv_id) == "plan"
+        )  # step 1 committed, step 2 never began
+        assert context.budget.steps_taken == 1  # type: ignore[union-attr]
