@@ -334,6 +334,67 @@ class TestBudgets:
         assert (result.status, result.reason) == (Status.FAILED, None)
 
     @HOW
+    async def test_failures_that_take_their_error_route_still_count_toward_the_cap(
+        self, how: str
+    ) -> None:
+        """Review of plan 7d9c0955 (D-012, finding 2): the engine counts every step it runs."""
+
+        def boom(ctx: Any) -> None:
+            raise RuntimeError("no")
+
+        steps = _chain(6)
+        steps["s1"] = _auto("s1", "s2", "boom", error_step_id="s2")
+        executable = _executable(_document(steps, callables=("boom",)))
+        context = RunContext(max_steps=5, callables=_names(boom=boom))
+        result = await _go(how, executable, context=context)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert (result.detail["budget"], result.detail["limit"]) == ("max_steps", 5)
+        assert result.detail["steps"] == 5
+
+    @HOW
+    async def test_a_run_that_routes_around_a_failure_and_fits_counts_every_step(
+        self, how: str
+    ) -> None:
+        def boom(ctx: Any) -> None:
+            raise RuntimeError("no")
+
+        steps = _chain(3)
+        steps["s1"] = _auto("s1", "s2", "boom", error_step_id="s2")
+        executable = _executable(_document(steps, callables=("boom",)))
+        context = RunContext(max_steps=3, callables=_names(boom=boom))
+        result = await _go(how, executable, context=context)
+        assert result.status is Status.OK and result.detail["steps"] == 3
+
+    @HOW
+    async def test_a_failure_on_the_last_allowed_step_with_no_route_is_a_failure(
+        self, how: str
+    ) -> None:
+        def boom(ctx: Any) -> None:
+            raise RuntimeError("no")
+
+        steps = _chain(5)
+        steps["s5"] = _auto("s5", "", "boom")
+        executable = _executable(_document(steps, callables=("boom",)))
+        context = RunContext(max_steps=5, callables=_names(boom=boom))
+        result = await _go(how, executable, context=context)
+        assert (result.status, result.reason) == (Status.FAILED, None)
+        assert result.detail["steps"] == 5
+
+    @HOW
+    async def test_a_failure_routed_on_from_the_last_allowed_step_is_budget_spent(
+        self, how: str
+    ) -> None:
+        def boom(ctx: Any) -> None:
+            raise RuntimeError("no")
+
+        steps = _chain(6)
+        steps["s5"] = _auto("s5", "s6", "boom", error_step_id="s6")
+        executable = _executable(_document(steps, callables=("boom",)))
+        context = RunContext(max_steps=5, callables=_names(boom=boom))
+        result = await _go(how, executable, context=context)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+
+    @HOW
     async def test_the_default_cap_bounds_a_run_with_no_limit(self, how: str) -> None:
         executable = _executable(_document(_chain(DEFAULT_EXECUTABLE_MAX_STEPS + 1)))
         result = await _go(how, executable)

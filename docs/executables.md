@@ -361,7 +361,7 @@ A run does this, in order:
 | The instance completed and a declared output is missing | `failed` | `return_keys_missing` |
 | A declared input was not given | `failed` | `inputs_missing` |
 | `max_seconds` was spent | `aborted` | `budget_spent`, `detail.budget` `max_seconds` |
-| The instance failed with as many successful steps as the step limit | `aborted` | `budget_spent`, `detail.budget` `max_steps` |
+| The instance failed after as many steps as the step limit (every step the engine ran, a failed one included) and the last of them routed on, so the engine refused the next | `aborted` | `budget_spent`, `detail.budget` `max_steps` |
 | The cancel token was set (the instance cancelled, or failed while the token was set) | `aborted` | `cancelled` |
 | Any other failed instance (a step raised, a route was missing) | `failed` | none, the capped error text in `detail` |
 | The instance is still running or waiting after `start` | `failed` | none, `detail.workflow_status` |
@@ -373,7 +373,7 @@ Preconditions of the table and its limits:
 - **No pausing step runs.** A registry that loads a document with a `WaitEventStep`, a `TimerStep` or a `RetryStep` around one refuses it (`ExecutableDocumentError`): nothing persists a parked instance yet (roadmap E5.3), so a wait could never be resumed. The check that the instance is terminal after `start` is the guard behind that refusal.
 - **The structure check runs when a registry loads the document.** The adapter factory loads the body over stub objects and runs `validate_structure()`; `load_executable` and `fsm-llm-validate` do not, so a dangling step id is an `ExecutableDocumentError` of `registry.add_document`, not a finding of the validator.
 - **Cancel is checked between steps.** A set token (or a hook that cancels the instance) takes effect after the step in flight; an `async` callable that never awaits holds the loop until it returns, and a sync callable is not stopped in its thread. A cancel that lands after the last step leaves the run `ok`.
-- **A budget read.** A step failure right after the last allowed step reads as `budget_spent` (`max_steps`). A step budget is the engine's count of successful steps, not the number of conversation turns of a composed run.
+- **A budget read.** A step budget is the engine's count of the steps it ran (a step that failed and took its error route counts, as does one that succeeded), not the number of conversation turns of a composed run. A step that fails with no route to go on, even the last allowed one, is a plain `failed`: only a run whose next step the engine refused is `budget_spent` (`max_steps`).
 - **No `workflow/*` event.** A composed child run writes to the inherited event log, but the workflow run writes no event of its own and no instance is persisted: a delegated workflow that outlives its process ends `failed/run_lost` (see [Executables as `call` targets](#executables-as-call-targets)).
 
 ## The registry

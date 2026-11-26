@@ -32,9 +32,9 @@ Interface contract:
   ``{}`` when none is declared; a declared one absent is ``failed/return_keys_missing``);
   CANCELLED, or any instance that is not COMPLETED while the token is set, is ``aborted/cancelled``;
   a deadline (``max_seconds``) is ``aborted/budget_spent`` with ``budget`` ``max_seconds``; FAILED
-  with as many successful steps as the engine limit is ``aborted/budget_spent`` with ``budget``
-  ``max_steps`` (a failure right after the last allowed step reads the same: known limit); any other
-  FAILED is ``failed`` (no reason, the error text capped in ``detail``); an instance still RUNNING or
+  after as many steps (every step the engine ran, a failed one included) as the engine limit, the
+  last of them routed on, is ``aborted/budget_spent`` with ``budget`` ``max_steps`` (the engine
+  refused the next step); any other FAILED is ``failed`` (no reason, the error text capped in ``detail``); an instance still RUNNING or
   WAITING after ``start`` is ``failed`` with ``detail.workflow_status`` (the factory refuses pausing
   steps; this is the guard). ``handle`` is the instance id.
 - Cancel: a ``step_started`` hook asks ``engine.cancel`` once the token is set and the engine honours
@@ -306,12 +306,16 @@ class WorkflowBodyInstance:
     ) -> RunResult:
         """Start the one instance and map how it ended."""
         steps_done = 0
+        refused = False  # the engine counts every step it ran and refused the next one
         cancelling = False
 
         def hook(event: str, instance: WorkflowInstance, data: dict[str, Any]) -> Any:
-            nonlocal steps_done, cancelling
-            if event == "step_completed" and data.get("success"):
+            nonlocal steps_done, refused, cancelling
+            if event == "step_completed":
                 steps_done += 1
+                refused = steps_done >= engine.max_steps and bool(
+                    data.get("next_step_id")
+                )
             elif (
                 event == "step_started" and context.cancel.cancelled and not cancelling
             ):
@@ -334,7 +338,9 @@ class WorkflowBodyInstance:
         instance = engine.get_instance(instance_id)
         if instance is None:
             raise timed_out or RuntimeError("the engine lost the instance of the run")
-        return self._ended(instance, identity, context, steps_done, engine, timed_out)
+        return self._ended(
+            instance, identity, context, steps_done, engine, timed_out, refused
+        )
 
     def _ended(
         self,
@@ -344,6 +350,7 @@ class WorkflowBodyInstance:
         steps: int,
         engine: WorkflowEngine,
         timed_out: WorkflowTimeoutError | None,
+        refused: bool,
     ) -> RunResult:
         status = instance.status
         detail: dict[str, Any] = {
@@ -361,9 +368,7 @@ class WorkflowBodyInstance:
                 instance.instance_id,
                 **detail,
             )
-        if timed_out is not None or (
-            status is WorkflowStatus.FAILED and steps >= engine.max_steps
-        ):
+        if timed_out is not None or (status is WorkflowStatus.FAILED and refused):
             budget = (
                 ("max_seconds", context.max_seconds)
                 if timed_out
