@@ -21,6 +21,7 @@ import pytest
 
 from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.core.codes import Reason, Status
+from fsm_llm.core.definitions import RunBudgetExceededError
 from fsm_llm.core.definitions.executable import (
     ExecutableDocumentError,
     ExecutableError,
@@ -811,6 +812,162 @@ class TestSharedLedger:
         # (the child runs under `derive`, which shares the ledger by reference)
         assert budget.steps_taken == 2
 
+    # ---- plan 7efd5cb4 step 8.1 (D-011): a refusal INSIDE the child run of an ExecutableStep ----
+
+    @staticmethod
+    def _compose(target: str) -> tuple[Any, ExecutableRegistry]:
+        registry = ExecutableRegistry()
+        registry.add_document(_chain_doc())
+        if target == "child":
+            registry.register(_FailingChild())
+        return _call_workflow(registry, target), registry
+
+    @staticmethod
+    def _context(registry: ExecutableRegistry, budget: RunBudget) -> RunContext:
+        llm = ScriptedLLM(extraction_data={"result": "42"}, default_response="r")
+        return RunContext(llm_interface=llm, registry=registry, budget=budget)
+
+    @HOW
+    async def test_a_ledger_refusal_inside_the_child_run_aborts_the_workflow(
+        self, how: str
+    ) -> None:
+        """Kills: the mapping not applied (the instance reads ``failed``), a mapping applied to
+        every FAILED instance, a ledger copied by the child's context."""
+        executable, registry = self._compose("chain")
+        budget = RunBudget(
+            max_steps=2
+        )  # call (1), the child's step 1 (2), step 2 refused
+        context = self._context(registry, budget)
+        result = await _go(how, executable, {"subject": "t"}, context)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert (result.detail["budget"], result.detail["limit"]) == ("steps", 2)
+        assert result.detail["shared_budget"] == "steps" and result.handle
+        assert result.detail["workflow_status"] == "failed"  # the engine's own word
+        assert budget.steps_taken == 2 and context.last_refusal() is not None
+
+    @HOW
+    async def test_a_child_that_fails_for_its_own_reason_stays_failed(
+        self, how: str
+    ) -> None:
+        executable, registry = self._compose("child")
+        budget = RunBudget(max_steps=50)
+        result = await _go(
+            how,
+            executable,
+            {"subject": "t"},
+            RunContext(registry=registry, budget=budget),
+        )
+        assert (result.status, result.reason) == (Status.FAILED, None)
+        assert "shared_budget" not in result.detail and budget.last_refusal is None
+
+    @HOW
+    async def test_a_run_that_fails_for_its_own_reason_at_the_exact_limit_stays_failed(
+        self, how: str
+    ) -> None:
+        """Kills: a mapping that reads ``budget_spent()`` alone. Both charges are ACCEPTED (the
+        ledger is spent after them, nothing was refused) and the second step then fails."""
+
+        def boom(ctx: Any) -> None:
+            raise RuntimeError("no")
+
+        steps = {
+            "a": _auto("a", "b"),
+            "b": {
+                "type": "ConditionStep",
+                "step_id": "b",
+                "name": "b",
+                "condition": "boom",
+                "true_step_id": "c",
+                "false_step_id": "c",
+            },
+            "c": _auto("c"),
+        }
+        executable = _executable(_document(steps, callables=("boom",)))
+        budget = RunBudget(max_steps=2)
+        context = RunContext(callables=_names(boom=boom), budget=budget)
+        result = await _go(how, executable, context=context)
+        assert (result.status, result.reason) == (Status.FAILED, None)
+        assert "shared_budget" not in result.detail
+        assert budget.steps_taken == 2 and context.budget_spent() == "steps"
+        assert context.last_refusal() is None
+
+    @HOW
+    async def test_a_refusal_before_the_run_does_not_relabel_a_later_own_failure(
+        self, how: str
+    ) -> None:
+        """Kills: a mapping that reads the refusal once, after the run, instead of comparing it
+        with its value BEFORE the run. The stale refusal is planted on a ledger with room."""
+        executable, registry = self._compose("child")
+        budget = RunBudget(max_steps=50)
+        budget.last_refusal = RunBudgetExceededError("steps", 1, 1)  # an earlier run's
+        result = await _go(
+            how,
+            executable,
+            {"subject": "t"},
+            RunContext(registry=registry, budget=budget),
+        )
+        assert (result.status, result.reason) == (Status.FAILED, None)
+        assert "shared_budget" not in result.detail
+
+    @HOW
+    async def test_known_limit_a_child_refused_by_the_pre_run_check_reads_failed(
+        self, how: str
+    ) -> None:
+        """KNOWN LIMIT (plan 7efd5cb4 D-011): the ledger is spent exactly by the workflow's own
+        step, so the child is refused by its PRE-RUN check, which charges nothing and records no
+        refusal: the instance reads ``failed`` with the child's text. Only a refused CHARGE maps."""
+        executable, registry = self._compose("chain")
+        budget = RunBudget(max_steps=1)
+        result = await _go(
+            how, executable, {"subject": "t"}, self._context(registry, budget)
+        )
+        assert (result.status, result.reason) == (Status.FAILED, None)
+        assert "(budget_spent)" in result.detail["error"] and budget.steps_taken == 1
+
+
+def _chain_doc(ident: str = "chain") -> dict[str, Any]:
+    """a -> b -> c: two loop steps, so a ledger can refuse the SECOND one inside the child."""
+    from tests.test_fsm_llm import kind_corpus as kc
+
+    return {
+        "schema": "fsm-llm/executable",
+        "kind": "fsm",
+        "id": ident,
+        "contract": {"inputs": ["topic"], "outputs": ["result"]},
+        "body": {
+            "fsm": kc._fsm(
+                "Chain",
+                "a",
+                kc._state(
+                    "a",
+                    extraction_instructions="Extract the result.",
+                    required_context_keys=["result"],
+                    response_instructions="A.",
+                    transitions=[kc._go("b")],
+                ),
+                kc._state("b", response_instructions="B.", transitions=[kc._go("c")]),
+                kc._state("c", response_instructions="C."),
+            )
+        },
+    }
+
+
+def _call_workflow(registry: ExecutableRegistry, target: str) -> Any:
+    """One ExecutableStep ``call`` that runs ``target`` with the input ``subject``."""
+    step = {
+        "type": "ExecutableStep",
+        "step_id": "call",
+        "name": "call",
+        "target": target,
+        "inputs": {"topic": "subject"},
+        "success_step_id": "",
+    }
+    return registry.add_document(
+        _document(
+            {"call": step}, ident="compose", inputs=("subject",), executables=(target,)
+        )
+    )
+
 
 class _CancellingChild:
     """A code-backed-shaped executable that sets the token of the run that asked and says so."""
@@ -842,6 +999,17 @@ class _CancellingChild:
         context.cancel.cancel()
         return RunResult(
             status=Status.ABORTED, reason=Reason.CANCELLED, identity=Identity()
+        )
+
+
+class _FailingChild(_CancellingChild):
+    """The same shape, a child that fails for its OWN reason (the token and the ledger untouched)."""
+
+    async def arun(self, inputs: Any, *, context: RunContext | None = None) -> Any:
+        from fsm_llm.core.results import Identity, RunResult
+
+        return RunResult(
+            status=Status.FAILED, reason=Reason.RETURN_KEYS_MISSING, identity=Identity()
         )
 
 

@@ -42,8 +42,9 @@ Interface contract:
   context (plan 7efd5cb4). ``charge()`` counts one step or raises ``RunBudgetExceededError``
   (the next after ``max_steps``, or once ``max_seconds`` passed since the FIRST charge, never
   since construction), ``spent()`` names the budget that forbids the next charge or ``None``,
-  ``steps_taken`` counts. The unit is the loop step of the runner that charges it. A leaf lock
-  guards the arithmetic only. It is not the engine's per-conversation ``TurnBudget``.
+  ``steps_taken`` counts, ``last_refusal`` is the error of the latest REFUSED charge (``None`` before
+  one). The unit is the loop step of the runner that charges it. A leaf lock guards the arithmetic only;
+  it is not the engine's ``TurnBudget``.
 - ``step_hook()`` returns a fresh ``before_step`` callable for ONE run: it raises
   ``RunCancelledError`` when the token is set, BEFORE it charges the ledger, and charges once per
   distinct step number (the engine offers an ended pushed frame the same number again).
@@ -52,7 +53,9 @@ Interface contract:
   (what an adapter adds to the ``detail`` of a budget stop, so a ledger stop reads as the shared
   budget by a fact, never by error text). ``adopt_into(kwargs)`` fills ``llm_interface`` and
   ``event_log`` of an API-keyword dict from the context where the caller set none (the agent and
-  the reasoning engine adopt a context through it; an explicit keyword wins).
+  the reasoning engine adopt a context through it; an explicit keyword wins). ``last_refusal()``
+  is the ledger's (``None`` with no ledger): a changed object across a run means a charge was REFUSED
+  meanwhile, which a spent ledger alone does not (D-011; on a shared ledger it may be another's).
 - ``CancelToken``: one thread-safe, set-once request. ``cancel()``, ``cancelled``,
   ``raise_if_cancelled()`` (raises ``RunCancelledError``, an ``FSMError``). A token is checked
   BETWEEN steps (the executable's ``before_step``); it never interrupts a model call in
@@ -74,7 +77,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from fsm_llm.core.definitions.errors import FSMError
+from fsm_llm.core.definitions.errors import FSMError, RunBudgetExceededError
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.engine.fsm.budget import TurnBudget, check_turn_limits
 from fsm_llm.llm.interface import LLMInterface
@@ -141,6 +144,7 @@ class RunBudget:
         self.max_seconds = max_seconds
         self._lock = threading.Lock()
         self._record: TurnBudget | None = None
+        self.last_refusal: RunBudgetExceededError | None = None
 
     @property
     def steps_taken(self) -> int:
@@ -157,7 +161,11 @@ class RunBudget:
         with self._lock:
             if self._record is None:
                 self._record = TurnBudget(self.max_steps, self.max_seconds)
-            self._record.charge()
+            try:
+                self._record.charge()
+            except RunBudgetExceededError as refused:
+                self.last_refusal = refused
+                raise
 
 
 @dataclass(frozen=True, eq=False)
@@ -243,6 +251,10 @@ class RunContext:
     def budget_spent(self) -> Literal["steps", "seconds"] | None:
         """The shared budget that is spent (a fact for a caller after a catch), or ``None``."""
         return self.budget.spent() if self.budget is not None else None
+
+    def last_refusal(self) -> RunBudgetExceededError | None:
+        """The shared ledger's latest refused charge, or ``None``."""
+        return self.budget.last_refusal if self.budget is not None else None
 
     def ledger_detail(self) -> dict[str, str]:
         """The ``detail`` a stopped run adds when the shared ledger is spent, else ``{}``."""

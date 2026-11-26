@@ -1254,6 +1254,11 @@
       "delta": 1,
       "reason": "plan 7efd5cb4 step 6: D-009 anchor added in reasoning/engine.py (ReasoningEngine context=)",
       "token": "plan-2026-11-26T022222-7efd5cb4/D-009"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 7efd5cb4 D-011: ledger refusal inside a child run maps to aborted/budget_spent (new token in workflows/executable.py)",
+      "token": "plan-2026-11-26T022222-7efd5cb4/D-011"
     }
   ]
 }

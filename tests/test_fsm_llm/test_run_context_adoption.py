@@ -1534,12 +1534,6 @@ def _ledger_stop(who: str, result: Any, error: BaseException | None) -> bool:
         )
     if error is not None:
         return False
-    if result.status is Status.FAILED:
-        # the ledger refused a step of the CHILD run: the step failed with the child's own
-        # `aborted (budget_spent)` and the instance is `failed` (a known limit, pinned below)
-        return result.reason is None and "(budget_spent)" in result.detail.get(
-            "error", ""
-        )
     return (result.status, result.reason) == (
         Status.ABORTED,
         Reason.BUDGET_SPENT,
@@ -1805,21 +1799,24 @@ class TestOneBudget:
         assert (t.taken, t.model.calls) == (1, 0) and t.paired()
 
     @HOW
-    async def test_a_ledger_stop_inside_the_child_run_reads_failed_at_the_workflow_level(
+    async def test_a_ledger_stop_inside_the_child_run_is_aborted_at_the_workflow_level(
         self, how: str, three: Any
     ) -> None:
-        """KNOWN LIMIT (reported at step 8, not fixed here: tests only): the ledger refuses a step
-        of the CHILD FSM of an `ExecutableStep`. The child ends `aborted/budget_spent`, the step
-        fails with that text and the instance is `failed` with no reason: the adapter labels a
-        ledger stop `aborted/budget_spent` only when ITS OWN hook was refused. The fact is on the
-        context (`budget_spent()`), the count is exact and the child's conversation is ended."""
+        """Plan 7efd5cb4 step 8.1 (D-011; step 8 had pinned this as a known limit). The ledger
+        refuses a step of the CHILD FSM of an `ExecutableStep`: the child ends
+        `aborted/budget_spent`, the instance is `failed` for the engine, and the adapter maps it
+        to `aborted/budget_spent` with the fact of the ledger and the refusal's budget and limit.
+        The count is exact, the child's conversation is ended, the double asked nothing more."""
+        from fsm_llm.core.codes import Reason, Status
+
         t = three(
             budget=RunBudget(max_steps=3)
         )  # prep, call, the child's step 1; step 2 refused
         result, error = await t.attempt(t.flow, how)
-        assert error is None and result.status.value == "failed"
-        assert result.reason is None and result.handle
-        assert "ended aborted (budget_spent)" in result.detail["error"]
+        assert error is None and _ledger_stop("flow", result, error)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert (result.detail["budget"], result.detail["limit"]) == ("steps", 3)
+        assert result.detail["workflow_status"] == "failed" and result.handle
         assert (t.taken, t.ctx.budget_spent()) == (3, "steps") and t.paired()
 
     @HOW

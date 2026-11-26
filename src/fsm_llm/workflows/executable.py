@@ -46,6 +46,7 @@ Interface contract:
   does: the request registers when the loop next yields, plan 7efd5cb4 D-006). A refused ledger charge ends
   ``aborted/budget_spent`` (``detail["budget"]``, ``limit`` of the ledger and
   ``detail["shared_budget"]``), read before the cancel rules; a COMPLETED instance stays ``ok``. A
+  FAILED instance during which the ledger refused a charge (a child run's) maps the same way, D-011. A
   run of steps that never yields to the loop (an ``async`` callable with no await) cannot be
   interrupted between steps. The engine is closed in ``finally``; an ``asyncio.CancelledError`` is
   never caught here.
@@ -354,6 +355,7 @@ class WorkflowBodyInstance:
 
         engine.register_workflow(definition)
         engine.add_hook(hook)
+        before = context.last_refusal()
         timed_out: WorkflowTimeoutError | None = None
         with run_context_scope(context):
             try:
@@ -367,6 +369,12 @@ class WorkflowBodyInstance:
         instance = engine.get_instance(instance_id)
         if instance is None:
             raise timed_out or RuntimeError("the engine lost the instance of the run")
+        # DECISION plan-2026-11-26T022222-7efd5cb4/D-011
+        # A FAILED instance whose run saw the ledger REFUSE a charge (the child run of an
+        # ExecutableStep: its hook is not ours) is a ledger stop. Do NOT read `budget_spent()` alone.
+        if ledger is None and instance.status is WorkflowStatus.FAILED:
+            if (refusal := context.last_refusal()) is not before:
+                ledger = refusal
         return self._ended(
             instance, identity, context, steps_done, engine, timed_out, refused, ledger
         )

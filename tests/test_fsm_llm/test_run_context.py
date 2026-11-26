@@ -348,6 +348,37 @@ class TestRunBudget:
         clock.now += 9.0
         assert ledger.spent() == "seconds"
 
+    def test_the_last_refusal_is_the_error_of_the_latest_refused_charge_only(
+        self,
+    ) -> None:
+        """Plan 7efd5cb4 D-011. Kills: a refusal recorded on an ACCEPTED charge (the last one at
+        the limit), one that is never replaced, one that is set before the lock is released."""
+        ledger = RunBudget(max_steps=2)
+        assert ledger.last_refusal is None
+        ledger.charge()
+        ledger.charge()  # the last allowed charge: spent, not refused
+        assert ledger.spent() == "steps" and ledger.last_refusal is None
+        with pytest.raises(RunBudgetExceededError) as first:
+            ledger.charge()
+        assert ledger.last_refusal is first.value
+        with pytest.raises(RunBudgetExceededError) as second:
+            ledger.charge()
+        assert ledger.last_refusal is second.value is not first.value
+        assert ledger.steps_taken == 2 and not ledger._lock.locked()
+
+    def test_a_context_reads_the_last_refusal_of_its_ledger_and_none_without_one(
+        self,
+    ) -> None:
+        assert RunContext().last_refusal() is None
+        ledger = RunBudget(max_steps=1)
+        context = RunContext(budget=ledger)
+        derived = context.derive(parent="w")
+        assert context.last_refusal() is None
+        ledger.charge()
+        with pytest.raises(RunBudgetExceededError) as info:
+            ledger.charge()
+        assert context.last_refusal() is derived.last_refusal() is info.value
+
     @pytest.mark.parametrize("bad", [0, -1, True, 1.5, "3"])
     def test_a_bad_step_limit_is_refused_like_the_engines_own(
         self, bad: object

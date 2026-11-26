@@ -820,6 +820,7 @@ fsm_llm.engine.context.RunContext class
   def adopt_into(self, kwargs: dict[str, Any]) -> None
   def budget_spent(self) -> Literal['steps', 'seconds'] | None
   def derive(self, *, parent: str, max_steps: int | None = None, max_seconds: float | None = None, cancel: CancelToken | None = None) -> RunContext
+  def last_refusal(self) -> RunBudgetExceededError | None
   def ledger_detail(self) -> dict[str, str]
   def resolve_llm(self) -> LLMInterface | None
   def step_hook(self) -> Callable[[int], None]
