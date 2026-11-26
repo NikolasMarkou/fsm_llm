@@ -38,13 +38,20 @@ _RUN_CONTEXT: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar
 )
 
 
+#: How many adapter runs enclose the code that reads it: `run_context_scope` is one level.
+_RUN_DEPTH: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "fsm_llm_workflows_run_depth", default=0
+)
+
+
 @contextmanager
 def run_context_scope(context: RunContext) -> Iterator[None]:
-    """Make ``context`` the parent of every ``ExecutableStep`` run inside the block."""
-    token = _RUN_CONTEXT.set(context)
+    """Make ``context`` the parent of every ``ExecutableStep`` run inside the block (one level deeper)."""
+    token, depth = _RUN_CONTEXT.set(context), _RUN_DEPTH.set(_RUN_DEPTH.get() + 1)
     try:
         yield
     finally:
+        _RUN_DEPTH.reset(depth)
         _RUN_CONTEXT.reset(token)
 
 

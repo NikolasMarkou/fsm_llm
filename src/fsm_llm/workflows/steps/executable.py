@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import Field, field_validator, model_validator
 
-from fsm_llm.constants import has_internal_prefix
+from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH, has_internal_prefix
 from fsm_llm.core.codes import Status
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.engine.context import RunContext
@@ -26,7 +26,7 @@ from ..constants import CALLABLES_NAMESPACE
 from ..exceptions import WorkflowStepError
 from ..models import WorkflowStepResult
 from .base import WorkflowStep
-from .helpers import _RUN_CONTEXT, _error_text
+from .helpers import _RUN_CONTEXT, _RUN_DEPTH, _error_text
 
 
 class ExecutableStep(WorkflowStep):
@@ -118,6 +118,14 @@ class ExecutableStep(WorkflowStep):
     async def execute(self, context: dict[str, Any]) -> WorkflowStepResult:
         """Run the executable and map its result back into the workflow context."""
         try:
+            # DECISION plan-2026-11-25T195353-7d9c0955/D-012
+            # Composed workflow runs nest at most DEFAULT_MAX_STACK_DEPTH deep (`run_context_scope` counts
+            # them). Do NOT drop this check (a self-targeting workflow or a ParallelStep cycle recurses
+            # until the interpreter fails), repeat the literal, or name a document value in the refusal.
+            if _RUN_DEPTH.get() >= DEFAULT_MAX_STACK_DEPTH:
+                raise WorkflowStepError(
+                    f"composed workflow runs nest at most {DEFAULT_MAX_STACK_DEPTH} deep"
+                )
             # the field validator does not run on an assignment: check again at run time
             _refuse_internal_keys(self.returns)
             executable = self.registry.get(self.target)

@@ -11,12 +11,14 @@ Doubles only: a scripted model, a recording code-backed executable. No sleep dec
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from fsm_llm import API
+from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.core.codes import Status
 from fsm_llm.core.definitions.executable import Contract, Requires
 from fsm_llm.core.names import NameRegistry
@@ -35,7 +37,7 @@ from fsm_llm.workflows import (
     create_workflow,
 )
 from fsm_llm.workflows.steps import ExecutableStep, ParallelStep
-from fsm_llm.workflows.steps.helpers import _RUN_CONTEXT, run_context_scope
+from fsm_llm.workflows.steps.helpers import _RUN_CONTEXT, _RUN_DEPTH, run_context_scope
 from tests.test_fsm_llm_workflows.test_executable_step import _fsm_doc
 
 _BOUND = 10  # seconds: a wait that would hang fails instead
@@ -379,6 +381,59 @@ def _workflow(step: Any):
         .with_step(auto_step("next", "Next", next_step_id=""))
         .with_step(auto_step("err", "Err", next_step_id=""))
     )
+
+
+class TestDepth:
+    """Review of plan 7d9c0955 (D-012, finding 3): one level per adapter scope, whatever the context."""
+
+    def test_each_scope_is_one_level_and_the_depth_comes_back(self) -> None:
+        assert _RUN_DEPTH.get() == 0
+        with run_context_scope(RunContext()):
+            assert _RUN_DEPTH.get() == 1
+            with run_context_scope(RunContext()):
+                assert _RUN_DEPTH.get() == 2
+            assert _RUN_DEPTH.get() == 1
+        assert _RUN_DEPTH.get() == 0
+
+    def test_a_fresh_or_derived_context_does_not_reset_the_depth(self) -> None:
+        parent = RunContext(max_steps=5)
+        with run_context_scope(parent):
+            with run_context_scope(parent.derive(parent="s", max_steps=3)):
+                with run_context_scope(RunContext()):
+                    assert _RUN_DEPTH.get() == 3
+
+    def test_the_depth_is_reset_after_an_exception(self) -> None:
+        with pytest.raises(RuntimeError):
+            with run_context_scope(RunContext()):
+                raise RuntimeError("x")
+        assert _RUN_DEPTH.get() == 0
+
+    @pytest.mark.parametrize(("levels", "refused"), [(9, False), (10, True)])
+    async def test_a_step_below_the_limit_runs_and_at_the_limit_is_refused(
+        self, levels: int, refused: bool
+    ) -> None:
+        asked: list[str] = []
+
+        class _Registry:
+            def get(self, target: str) -> Any:
+                asked.append(target)
+                raise KeyError(target)
+
+        step = ExecutableStep(
+            step_id="e", name="e", target="t", registry=_Registry(), error_step_id="f"
+        )
+        asked.clear()  # building the step asks the registry about the target once
+        with contextlib.ExitStack() as stack:
+            for _ in range(levels):
+                stack.enter_context(run_context_scope(RunContext()))
+            result = await step.execute({})
+
+        assert result.success is False and result.next_step_id == "f"
+        assert (asked == []) is refused
+        if refused:
+            assert result.error == (
+                f"composed workflow runs nest at most {DEFAULT_MAX_STACK_DEPTH} deep"
+            )
 
 
 class TestThroughTheEngine:

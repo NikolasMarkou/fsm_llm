@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 
 import pytest
 
+from fsm_llm.constants import DEFAULT_MAX_STACK_DEPTH
 from fsm_llm.core.codes import Reason, Status
 from fsm_llm.core.definitions.executable import (
     ExecutableDocumentError,
@@ -42,6 +43,8 @@ from fsm_llm.workflows.executable import (
     WorkflowExecutable,
     workflow_adapter,
 )
+from fsm_llm.workflows.steps import executable as executable_step_module
+from fsm_llm.workflows.steps.helpers import _RUN_DEPTH
 from tests.test_fsm_llm_workflows.test_executable_step import _fsm_doc
 
 _BOUND = 20  # seconds: a wait that would hang fails instead
@@ -861,6 +864,151 @@ class TestOneBadFileStopsNothing:
 
         with pytest.raises(WorkflowValidationError):
             asyncio.run(executable.arun({}, context=context))
+
+
+# ---- composed runs nest a bounded depth (review of plan 7d9c0955, D-012, finding 3) --------------
+
+
+def _exec_step(step_id: str, target: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "type": "ExecutableStep",
+        "step_id": step_id,
+        "name": step_id,
+        "target": target,
+        "success_step_id": "",
+        **extra,
+    }
+
+
+class _Counter:
+    """A callable that counts the runs that reach it (one step per run calls it)."""
+
+    def __init__(self) -> None:
+        self.runs = 0
+
+    def __call__(self, ctx: Any) -> dict[str, Any]:
+        self.runs += 1
+        return {}
+
+
+def _nest_registry(documents: list[dict[str, Any]]) -> ExecutableRegistry:
+    registry = ExecutableRegistry()
+    for document in documents:
+        registry.add_document(document)
+    return registry
+
+
+async def _run_top(registry: ExecutableRegistry, top: str, counter: _Counter) -> Any:
+    context = RunContext(callables=_names(count=counter), registry=registry)
+    return await asyncio.wait_for(registry.get(top).arun({}, context=context), _BOUND)
+
+
+class TestComposedDepth:
+    @pytest.mark.parametrize("routed", [False, True])
+    async def test_a_workflow_that_targets_itself_stops_at_the_depth_limit(
+        self, routed: bool
+    ) -> None:
+        steps = {"c": _auto("c", "e", "count"), "e": _exec_step("e", "A")}
+        if routed:
+            steps["e"]["error_step_id"] = "f"
+            steps["f"] = _auto("f")
+        registry = _nest_registry(
+            [_document(steps, ident="A", callables=("count",), executables=("A",))]
+        )
+        counter = _Counter()
+
+        result = await _run_top(registry, "A", counter)
+
+        assert counter.runs == DEFAULT_MAX_STACK_DEPTH
+        # the refusal is the step's failure route: handled, the top run is ok; unhandled, it is not
+        assert (result.status is Status.OK) is routed
+
+    async def test_a_fan_out_cycle_runs_a_bounded_number_of_runs(self) -> None:
+        children = [_exec_step(f"x{i}", "B") for i in (1, 2)]
+        steps = {
+            "c": _auto("c", "p", "count"),
+            "p": {
+                "type": "ParallelStep",
+                "step_id": "p",
+                "name": "p",
+                "next_step_id": "",
+                "error_step_id": "f",
+                "steps": children,
+            },
+            "f": _auto("f"),
+        }
+        registry = _nest_registry(
+            [_document(steps, ident="B", callables=("count",), executables=("B",))]
+        )
+        counter = _Counter()
+
+        await _run_top(registry, "B", counter)
+
+        # a binary tree of runs, DEFAULT_MAX_STACK_DEPTH levels deep (runs counted, no clock)
+        assert counter.runs == 2**DEFAULT_MAX_STACK_DEPTH - 1
+
+    def _chain_of_workflows(self, length: int) -> ExecutableRegistry:
+        documents = []
+        for i in range(length):
+            last = i == length - 1
+            steps = {"c": _auto("c", "" if last else "e", "count")}
+            if not last:
+                steps["e"] = _exec_step("e", f"W{i + 1}")
+            documents.append(
+                _document(
+                    steps,
+                    ident=f"W{i}",
+                    callables=("count",),
+                    executables=() if last else (f"W{i + 1}",),
+                )
+            )
+        return _nest_registry(documents)
+
+    async def test_a_distinct_nest_of_exactly_the_limit_runs_to_the_end(self) -> None:
+        counter = _Counter()
+
+        result = await _run_top(
+            self._chain_of_workflows(DEFAULT_MAX_STACK_DEPTH), "W0", counter
+        )
+
+        assert result.status is Status.OK
+        assert counter.runs == DEFAULT_MAX_STACK_DEPTH
+
+    async def test_one_run_more_than_the_limit_is_refused_at_the_last_step(
+        self,
+    ) -> None:
+        counter = _Counter()
+
+        result = await _run_top(
+            self._chain_of_workflows(DEFAULT_MAX_STACK_DEPTH + 1), "W0", counter
+        )
+
+        assert result.status is Status.FAILED
+        assert counter.runs == DEFAULT_MAX_STACK_DEPTH  # the last workflow never ran
+
+    async def test_the_limit_is_the_constant_of_the_step_module(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(executable_step_module, "DEFAULT_MAX_STACK_DEPTH", 3)
+        steps = {"c": _auto("c", "e", "count"), "e": _exec_step("e", "A")}
+        registry = _nest_registry(
+            [_document(steps, ident="A", callables=("count",), executables=("A",))]
+        )
+        counter = _Counter()
+
+        await _run_top(registry, "A", counter)
+
+        assert counter.runs == 3
+
+    async def test_the_depth_is_back_to_zero_after_every_run(self) -> None:
+        steps = {"c": _auto("c", "e", "count"), "e": _exec_step("e", "A")}
+        registry = _nest_registry(
+            [_document(steps, ident="A", callables=("count",), executables=("A",))]
+        )
+
+        await _run_top(registry, "A", _Counter())
+
+        assert _RUN_DEPTH.get() == 0
 
 
 # ---- the factory (V2 in structure-only form) at the registry ------------------------------------
