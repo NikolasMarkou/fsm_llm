@@ -37,10 +37,16 @@ Interface contract:
   refused the next step); any other FAILED is ``failed`` (no reason, the error text capped in ``detail``); an instance still RUNNING or
   WAITING after ``start`` is ``failed`` with ``detail.workflow_status`` (the factory refuses pausing
   steps; this is the guard). ``handle`` is the instance id.
-- Cancel: a ``step_started`` hook asks ``engine.cancel`` once the token is set and the engine honours
-  it between steps (the step in flight finishes, later ones do not run). A run of steps that never
-  yields to the loop (an ``async`` callable with no await) cannot be interrupted between steps. The
-  engine is closed in ``finally``; an ``asyncio.CancelledError`` is never caught here.
+- Cancel and the shared budget: a ``step_started`` hook calls ``context.step_hook()`` (the token is
+  checked, then ``context.budget`` charged once per step) and, when either stops the run, asks
+  ``engine.cancel`` once; the engine honours it between steps (the step in flight, the one whose
+  start was refused included, finishes; later ones do not run, but on a rare loop turn one more
+  does: the request registers when the loop next yields, plan 7efd5cb4 D-006). A refused ledger charge ends
+  ``aborted/budget_spent`` (``detail["budget"]``, ``limit`` of the ledger and
+  ``detail["shared_budget"]``), read before the cancel rules; a COMPLETED instance stays ``ok``. A
+  run of steps that never yields to the loop (an ``async`` callable with no await) cannot be
+  interrupted between steps. The engine is closed in ``finally``; an ``asyncio.CancelledError`` is
+  never caught here.
 - ``workflow_adapter(envelope, **options)``: the ``executable_kinds`` factory. It runs V2 in
   structure-only form (the loader over stub objects plus ``validate_structure()``) and refuses a
   pausing step (``WaitEventStep``, ``TimerStep``, a ``RetryStep`` around one) with
@@ -57,6 +63,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fsm_llm.core.codes import Lifecycle, Reason, Status
+from fsm_llm.core.definitions.errors import RunBudgetExceededError
 from fsm_llm.core.definitions.executable import (
     Capability,
     Contract,
@@ -73,7 +80,7 @@ from fsm_llm.core.definitions.executable_workflow import (
 )
 from fsm_llm.core.names import NameCollisionError, NameRegistry
 from fsm_llm.core.results import Identity, RunResult
-from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.context import RunCancelledError, RunContext
 from fsm_llm.engine.executables.adapters import PinSink
 from fsm_llm.engine.executables.namespaces import EXECUTABLE_KINDS
 from fsm_llm.engine.executables.protocol import (
@@ -261,6 +268,15 @@ class WorkflowBodyInstance:
     # (D-059 of plan ace7a8c8). Outputs are the declared contract, never the whole context. No approver,
     # no grant, no model. Do NOT catch BaseException, accept an internal-prefixed input, load the probe
     # with the real registry, or register the kind from `workflows/__init__.py`.
+    #
+    # DECISION plan-2026-11-26T022222-7efd5cb4/D-005
+    # The shared ledger is charged by the SAME `RunContext.step_hook()` the other runners use, from
+    # the `step_started` hook, and a refused charge asks for the stop through `engine.cancel` and a
+    # flag (a hook that raises is swallowed by the engine): the refused step is already in flight and
+    # finishes, later ones do not run (one more may, on a rare loop turn, D-006), and the mapping reads
+    # the flag first (`aborted/budget_spent`).
+    # Do NOT rely on a raise from the hook, cancel the task, take a second lock, charge at
+    # `step_completed`, or edit the engine's own step counting.
     async def arun(
         self, inputs: Mapping[str, Any], *, context: RunContext | None = None
     ) -> RunResult:
@@ -307,20 +323,28 @@ class WorkflowBodyInstance:
         """Start the one instance and map how it ended."""
         steps_done = 0
         refused = False  # the engine counts every step it ran and refused the next one
-        cancelling = False
+        stopping = False
+        ledger: RunBudgetExceededError | None = None
+        step_hook = context.step_hook()
 
         def hook(event: str, instance: WorkflowInstance, data: dict[str, Any]) -> Any:
-            nonlocal steps_done, refused, cancelling
+            nonlocal steps_done, refused, stopping, ledger
             if event == "step_completed":
                 steps_done += 1
                 refused = steps_done >= engine.max_steps and bool(
                     data.get("next_step_id")
                 )
-            elif (
-                event == "step_started" and context.cancel.cancelled and not cancelling
-            ):
-                cancelling = True
-                return engine.cancel(instance.instance_id, "the run's token was set")
+            elif event == "step_started" and not stopping:
+                try:
+                    step_hook(steps_done + 1)
+                except RunCancelledError:
+                    reason = "the run's token was set"
+                except RunBudgetExceededError as error:
+                    ledger, reason = error, "the shared budget is spent"
+                else:
+                    return None
+                stopping = True
+                return engine.cancel(instance.instance_id, reason)
             return None
 
         engine.register_workflow(definition)
@@ -339,7 +363,7 @@ class WorkflowBodyInstance:
         if instance is None:
             raise timed_out or RuntimeError("the engine lost the instance of the run")
         return self._ended(
-            instance, identity, context, steps_done, engine, timed_out, refused
+            instance, identity, context, steps_done, engine, timed_out, refused, ledger
         )
 
     def _ended(
@@ -351,6 +375,7 @@ class WorkflowBodyInstance:
         engine: WorkflowEngine,
         timed_out: WorkflowTimeoutError | None,
         refused: bool,
+        ledger: RunBudgetExceededError | None,
     ) -> RunResult:
         status = instance.status
         detail: dict[str, Any] = {
@@ -360,6 +385,17 @@ class WorkflowBodyInstance:
         }
         if status is WorkflowStatus.COMPLETED:
             return self._completed(instance, identity, detail)
+        if ledger is not None:
+            return self._stopped(
+                Status.ABORTED,
+                Reason.BUDGET_SPENT,
+                identity,
+                instance.instance_id,
+                budget=ledger.budget,
+                limit=ledger.limit,
+                **context.ledger_detail(),
+                **detail,
+            )
         if status is WorkflowStatus.CANCELLED or context.cancel.cancelled:
             return self._stopped(
                 Status.ABORTED,

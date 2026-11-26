@@ -33,7 +33,7 @@ Interface contract:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -55,7 +55,24 @@ from fsm_llm.engine.context import RunCancelledError, RunContext
 
 from .protocol import check_input_keys, require_callables
 
-__all__ = ["CodeBackedExecutable", "CodeBackedInstance"]
+__all__ = ["CodeBackedExecutable", "CodeBackedInstance", "cause_chain"]
+
+_CAUSE_HOPS = 8
+
+
+def cause_chain(error: BaseException) -> Iterator[BaseException]:
+    """``error`` then its ``__cause__`` chain, outermost first, at most eight causes deep.
+
+    Contract: an executable that maps a stop wrapped by the code it runs (an agent chains a
+    ``RunCancelledError`` into its own ``AgentError``, a solve into ``ReasoningExecutionError``)
+    reads the chain with this one walk. It never raises and never reads ``__context__``.
+    """
+    current: BaseException | None = error
+    for _ in range(_CAUSE_HOPS + 1):
+        if current is None:
+            return
+        yield current
+        current = current.__cause__
 
 
 class CodeBackedExecutable(ABC):

@@ -47,7 +47,10 @@ Interface contract:
 - ``step_hook()`` returns a fresh ``before_step`` callable for ONE run: it raises
   ``RunCancelledError`` when the token is set, BEFORE it charges the ledger, and charges once per
   distinct step number (the engine offers an ended pushed frame the same number again).
-  ``budget_spent()`` is ``budget.spent()`` or ``None`` (a caller reads it after a catch).
+  ``budget_spent()`` is ``budget.spent()`` or ``None`` (a caller reads it after a catch);
+  ``ledger_detail()`` is ``{"shared_budget": "steps" | "seconds"}`` when it is set, else ``{}``
+  (what an adapter adds to the ``detail`` of a budget stop, so a ledger stop reads as the shared
+  budget by a fact, never by error text).
 - ``CancelToken``: one thread-safe, set-once request. ``cancel()``, ``cancelled``,
   ``raise_if_cancelled()`` (raises ``RunCancelledError``, an ``FSMError``). A token is checked
   BETWEEN steps (the executable's ``before_step``); it never interrupts a model call in
@@ -228,6 +231,11 @@ class RunContext:
     def budget_spent(self) -> Literal["steps", "seconds"] | None:
         """The shared budget that is spent (a fact for a caller after a catch), or ``None``."""
         return self.budget.spent() if self.budget is not None else None
+
+    def ledger_detail(self) -> dict[str, str]:
+        """The ``detail`` a stopped run adds when the shared ledger is spent, else ``{}``."""
+        spent = self.budget_spent()
+        return {"shared_budget": spent} if spent else {}
 
     def derive(
         self,

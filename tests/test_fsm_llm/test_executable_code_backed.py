@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from fsm_llm.engine.executables import code_backed as module
 from fsm_llm.engine.executables.code_backed import (
     CodeBackedExecutable,
     CodeBackedInstance,
+    cause_chain,
 )
 
 
@@ -272,3 +274,37 @@ class TestTheModule:
         assert executables.CodeBackedExecutable is CodeBackedExecutable
         assert "CodeBackedExecutable" in executables.__all__
         assert "CodeBackedInstance" in executables.__all__
+
+
+class TestCauseChain:
+    """The one walk an executable reads a wrapped stop with (plan 7efd5cb4 step 3, D-005)."""
+
+    @staticmethod
+    def _chain(depth: int) -> list[BaseException]:
+        errors: list[BaseException] = [RuntimeError(f"e{i}") for i in range(depth + 1)]
+        for outer, inner in pairwise(errors):
+            outer.__cause__ = inner
+        return errors
+
+    def test_it_yields_the_error_then_its_causes_outermost_first(self) -> None:
+        errors = self._chain(3)
+        assert list(cause_chain(errors[0])) == errors
+
+    def test_a_lone_error_is_its_own_chain(self) -> None:
+        error = ValueError("alone")
+        assert list(cause_chain(error)) == [error]
+
+    def test_it_stops_after_eight_causes(self) -> None:
+        errors = self._chain(12)
+        assert list(cause_chain(errors[0])) == errors[:9]
+
+    def test_it_follows_the_cause_and_never_the_context(self) -> None:
+        inner = RuntimeError("inner")
+        outer = RuntimeError("outer")
+        outer.__context__ = inner  # implicit chaining only
+        assert list(cause_chain(outer)) == [outer]
+
+    def test_a_cycle_is_bounded(self) -> None:
+        a, b = RuntimeError("a"), RuntimeError("b")
+        a.__cause__, b.__cause__ = b, a
+        assert len(list(cause_chain(a))) == 9

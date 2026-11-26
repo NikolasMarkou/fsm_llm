@@ -1239,6 +1239,11 @@
       "delta": 1,
       "reason": "plan 7efd5cb4 step 2: new anchor D-004 in engine/context.py (the run-level ledger RunBudget); no existing token moved",
       "token": "plan-2026-11-26T022222-7efd5cb4/D-004"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 7efd5cb4 step 3: new anchor D-005 in workflows/executable.py (the workflow adapter charges the shared ledger through the step hook and stops through engine.cancel); no existing token moved",
+      "token": "plan-2026-11-26T022222-7efd5cb4/D-005"
     }
   ]
 }

@@ -27,10 +27,11 @@ Interface contract:
   ``finally``; the run is ``solve_problem`` on a worker thread (``aoffload``: a cancelled await
   leaves the worker running). ``outputs`` is ``{"solution": text}``, ``answer`` the same text,
   ``detail`` holds ``reasoning_trace`` and ``summary``. A ``ReasoningExecutionError`` whose cause is
-  a ``RunBudgetExceededError`` ends ``aborted/budget_spent``, one whose cause is an
-  ``LLMResponseError`` ends ``failed/provider_error``, any other error propagates. The ``max_steps``
-  and ``max_seconds`` of the run context are the two keywords of ``solve_problem`` (plan baa37f40
-  D-032): ``None`` keeps the engine's own derived step budget and no seconds limit. The cancel token
+  a ``RunBudgetExceededError`` ends ``aborted/budget_spent`` (``detail["shared_budget"]`` names a
+  spent ``RunContext.budget``), one whose cause is a ``RunCancelledError`` ends ``aborted/cancelled``,
+  one whose cause is an ``LLMResponseError`` ends ``failed/provider_error``, any other error
+  propagates. The ``max_steps`` and ``max_seconds`` of the run context are the two keywords of
+  ``solve_problem`` (plan baa37f40 D-032): ``None`` keeps the engine's own derived step budget and no seconds limit. The cancel token
   is checked before the run starts. The identity has no instance (code-backed). ``solve_problem``
   itself stays a tuple.
 """
@@ -50,10 +51,10 @@ from fsm_llm.core.definitions.executable import (
 )
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.core.verify.executable import load_executable
-from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.context import RunCancelledError, RunContext
 from fsm_llm.engine.executables import Executable, ExecutableRegistry
 from fsm_llm.engine.executables.adapters import FsmBodyExecutable
-from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
+from fsm_llm.engine.executables.code_backed import CodeBackedExecutable, cause_chain
 
 from .constants import ContextKeys
 from .engine import ReasoningEngine
@@ -126,7 +127,7 @@ class SolveExecutable(CodeBackedExecutable):
                 self._solve, problem, initial_context or None, context
             )
         except ReasoningExecutionError as error:
-            return self._mapped(error, identity)
+            return self._mapped(error, context, identity)
         return RunResult(
             status=Status.OK,
             outputs={"solution": solution},
@@ -161,11 +162,13 @@ class SolveExecutable(CodeBackedExecutable):
         finally:
             engine.close()
 
-    def _mapped(self, error: ReasoningExecutionError, identity: Identity) -> RunResult:
+    def _mapped(
+        self, error: ReasoningExecutionError, context: RunContext, identity: Identity
+    ) -> RunResult:
         """The result of a failed solve with a known cause; raise any other."""
-        cause: BaseException | None = error
-        for _ in range(8):
-            cause = cause.__cause__ if cause is not None else None
+        for cause in cause_chain(error):
+            if isinstance(cause, RunCancelledError):
+                return self.stopped(Status.ABORTED, Reason.CANCELLED, identity)
             if isinstance(cause, RunBudgetExceededError):
                 return self.stopped(
                     Status.ABORTED,
@@ -174,6 +177,7 @@ class SolveExecutable(CodeBackedExecutable):
                     budget=cause.budget,
                     limit=cause.limit,
                     steps_done=cause.steps_done,
+                    **context.ledger_detail(),
                 )
             if isinstance(cause, LLMResponseError):
                 # the type only: a provider message can carry text the log should not

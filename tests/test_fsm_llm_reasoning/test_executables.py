@@ -30,7 +30,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.definitions.executable import Capability
 from fsm_llm.core.definitions.fsm import definition_digest
-from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.context import RunBudget, RunCancelledError, RunContext
 from fsm_llm.engine.executables import (
     DEFAULT_EXECUTABLE_MAX_STEPS,
     EXECUTABLE_SOURCES,
@@ -463,6 +463,61 @@ class TestSolve:
             .run(_solve(), context=RunContext(llm_interface=ScriptedLLM()))
         )
         assert result.reason is Reason.PROVIDER_ERROR
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    @pytest.mark.parametrize("depth", [1, 3])
+    def test_a_cancel_cause_ends_aborted_cancelled_and_closes_the_engine(
+        self, how: str, depth: int, spy_engine: type[_SpyEngine]
+    ) -> None:
+        error: BaseException = RunCancelledError()
+        for _ in range(depth - 1):
+            wrapper = RuntimeError("wrapped")
+            wrapper.__cause__ = error
+            error = wrapper
+        failure = ReasoningExecutionError("the solve stopped")
+        failure.__cause__ = error
+        spy_engine.outcome = failure
+        exe = _registry().get(SOLVE_ID)
+        context = RunContext(llm_interface=ScriptedLLM())
+        result = (
+            exe.run(_solve(), context=context)
+            if how == "sync"
+            else asyncio.run(exe.arun(_solve(), context=context))
+        )
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert result.identity.instance_identity is None
+        assert spy_engine.instances[0].closed == 1
+
+    def test_a_spent_shared_ledger_is_named_and_an_own_ceiling_is_not(
+        self, spy_engine: type[_SpyEngine]
+    ) -> None:
+        failure = ReasoningExecutionError("did not finish")
+        failure.__cause__ = RunBudgetExceededError("steps", 3, 3)
+        spy_engine.outcome = failure
+        spent = RunBudget(max_steps=3)
+        for _ in range(3):
+            spent.charge()
+        shared = (
+            _registry()
+            .get(SOLVE_ID)
+            .run(
+                _solve(), context=RunContext(llm_interface=ScriptedLLM(), budget=spent)
+            )
+        )
+        assert (shared.status, shared.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert shared.detail["shared_budget"] == "steps"
+        own = (
+            _registry()
+            .get(SOLVE_ID)
+            .run(
+                _solve(),
+                context=RunContext(
+                    llm_interface=ScriptedLLM(), budget=RunBudget(max_steps=99)
+                ),
+            )
+        )
+        assert own.reason is Reason.BUDGET_SPENT and "shared_budget" not in own.detail
+        assert set(own.detail) == {"kind", "budget", "limit", "steps_done"}
 
     def test_any_other_reasoning_error_propagates(
         self, spy_engine: type[_SpyEngine]

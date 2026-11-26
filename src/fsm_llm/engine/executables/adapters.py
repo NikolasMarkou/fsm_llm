@@ -24,8 +24,9 @@ Interface contract:
   an input key the contract does not declare, or one with an internal prefix, is a
   ``ValueError`` (after ``contract.input_templates`` are rendered from the arguments, D-033); a missing declared input returns ``failed/inputs_missing``. Then the run takes
   the interface of the context (or the API's own model resolution), its event log, the budget
-  (``max_steps`` defaults to ``DEFAULT_EXECUTABLE_MAX_STEPS``) and checks the cancel token before
-  every step. The run's own ``API`` is given ``targets=context.registry``, so a body holding a
+  (``max_steps`` defaults to ``DEFAULT_EXECUTABLE_MAX_STEPS``) and passes ``context.step_hook()``
+  as ``before_step``: the cancel token is checked, then ``context.budget`` charged, before every
+  step (a spent ledger adds ``detail["shared_budget"]``, plan 7efd5cb4 D-005). The run's own ``API`` is given ``targets=context.registry``, so a body holding a
   ``call`` state resolves its target like a bare ``API(targets=)`` does (and, with no registry in
   the context, is refused with ``MissingExecutorError`` when the run starts). Results: ``ok``; ``aborted/budget_spent`` (``RunBudgetExceededError``);
   ``aborted/cancelled`` (the token); ``failed/provider_error`` (``LLMResponseError``);
@@ -229,7 +230,7 @@ class FsmInstance:
                 conversation_id,
                 max_steps=context.max_steps or DEFAULT_EXECUTABLE_MAX_STEPS,
                 max_seconds=context.max_seconds,
-                before_step=lambda _step: context.cancel.raise_if_cancelled(),
+                before_step=context.step_hook(),
             )
             data = api.get_data(conversation_id)
             final_state = api.get_current_state(conversation_id)
@@ -251,6 +252,7 @@ class FsmInstance:
                 budget=error.budget,
                 limit=error.limit,
                 steps_done=error.steps_done,
+                **context.ledger_detail(),
             )
         except RunCancelledError:
             return self._stopped(

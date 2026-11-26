@@ -31,7 +31,7 @@ from fsm_llm.core.definitions.executable import (
 from fsm_llm.core.definitions.executable_instance import identity_of
 from fsm_llm.core.definitions.fsm import definition_digest
 from fsm_llm.core.results import RunResult
-from fsm_llm.engine.context import CancelToken, RunContext
+from fsm_llm.engine.context import CancelToken, RunBudget, RunContext
 from fsm_llm.engine.executables import (
     DEFAULT_EXECUTABLE_MAX_STEPS,
     EXECUTABLE_KINDS,
@@ -422,6 +422,113 @@ class TestCancelToken:
         # the greeting and the first step answered; no later step ran
         assert len(llm.calls("generate_response")) == 2
         assert [cid for cid, _ in recorded[0].ended] == [result.handle]
+
+
+def _go(how: str, context: RunContext, **kw: Any) -> RunResult:
+    """The same run through the sync name and through its async twin."""
+    exe = _executable(**{"fsm": _long_fsm(), "outputs": (), **kw})
+    if how == "sync":
+        return exe.run({"topic": "t"}, context=context)
+    return asyncio.run(exe.arun({"topic": "t"}, context=context))
+
+
+class TestSharedLedger:
+    """Plan 7efd5cb4 step 3 (D-004): the body is driven by the hook of the context, so one cancel
+    and one ledger reach it (the long body is three steps and four model calls: the greeting and
+    one reply per step)."""
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_ledger_smaller_than_the_body_ends_budget_spent_after_exactly_its_steps(
+        self, how: str, recorded: list[_RecordingAPI]
+    ) -> None:
+        budget, llm = RunBudget(max_steps=2), _llm()
+        result = _go(how, _context(llm, budget=budget))
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert budget.steps_taken == 2
+        assert len(llm.call_history) == 3  # the greeting and the two steps it allowed
+        assert result.detail["budget"] == "steps" and result.detail["limit"] == 2
+        assert (
+            result.detail["shared_budget"] == "steps"
+        )  # a fact of the ledger, not of the text
+        assert [cid for cid, _ in recorded[0].ended] == [result.handle]
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_ledger_as_large_as_the_body_lets_it_finish(self, how: str) -> None:
+        budget = RunBudget(max_steps=3)
+        result = _go(how, _context(budget=budget))
+        assert result.status is Status.OK and budget.steps_taken == 3
+        assert "shared_budget" not in result.detail
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_seconds_ledger_names_the_seconds_budget(
+        self, how: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = [1000.0]
+        monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", lambda: now[0])
+
+        class _Slow(ScriptedLLM):
+            def generate_response(self, request: Any) -> Any:
+                reply = super().generate_response(request)
+                if len(self.calls("generate_response")) == 2:  # the first step's reply
+                    now[0] += 60.0
+                return reply
+
+        budget = RunBudget(max_seconds=30.0)
+        result = _go(how, _context(_Slow(default_response="r"), budget=budget))
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["budget"] == "seconds"
+        assert result.detail["shared_budget"] == "seconds"
+        assert budget.steps_taken == 1
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_two_runs_on_one_context_share_the_ledger(self, how: str) -> None:
+        budget = RunBudget(max_steps=4)
+        context = _context(budget=budget)
+        assert _go(how, context).status is Status.OK and budget.steps_taken == 3
+        second = _go(how, context)  # one step of room left
+        assert (second.status, second.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert second.detail["shared_budget"] == "steps" and budget.steps_taken == 4
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_the_runs_own_ceiling_keeps_its_meaning_and_is_not_called_shared(
+        self, how: str
+    ) -> None:
+        budget = RunBudget(max_steps=100)
+        result = _go(how, _context(max_steps=2, budget=budget))
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["limit"] == 2 and "shared_budget" not in result.detail
+        assert budget.steps_taken == 2  # every step the run took was charged
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_token_set_mid_run_is_cancelled_before_the_next_charge(
+        self, how: str, recorded: list[_RecordingAPI]
+    ) -> None:
+        token, budget = CancelToken(), RunBudget(max_steps=50)
+        llm = _CancelsAfterFirstReply(token, default_response="r")
+        result = _go(how, _context(llm, cancel=token, budget=budget))
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in result.detail
+        # the first step was charged; the cancel check of the second came first and charged nothing
+        assert budget.steps_taken == 1 and len(llm.calls("generate_response")) == 2
+        assert [cid for cid, _ in recorded[0].ended] == [result.handle]
+        # the NEXT call of the same caller: the token stays set, so it ends at its first check
+        again = _go(how, _context(llm, cancel=token, budget=budget))
+        assert (again.status, again.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert budget.steps_taken == 1 and len(llm.calls("generate_response")) == 2
+        # a fresh token on the same ledger runs on (the ledger has room for the whole body)
+        fresh = _go(how, _context(_llm(), budget=budget))
+        assert fresh.status is Status.OK and budget.steps_taken == 4
+
+    def test_the_hook_of_the_step_loop_is_the_step_hook_of_the_context(
+        self, recorded: list[_RecordingAPI]
+    ) -> None:
+        budget = RunBudget(max_steps=50)
+        _go("sync", _context(budget=budget))
+        hook = recorded[0].step_calls[0]["before_step"]
+        hook(
+            99
+        )  # a distinct number of ITS closure: it charges the ledger of the context
+        assert budget.steps_taken == 4
 
 
 class TestATaskCancel:

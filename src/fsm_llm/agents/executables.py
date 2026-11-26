@@ -24,13 +24,15 @@ Interface contract:
   of plan_execute, adapt and orchestrator, ``worker_factory``, ``evaluation_fn`` of reflexion,
   ``memory``) are read from ``RunContext.callables`` when present. A name is the keyword of the
   pattern's constructor; ``tools`` and ``config`` reach ``create_agent``'s own parameters.
-- Run: the cancel token is checked before the run starts (a built-in is not interruptible between
-  steps); ``context.max_seconds`` becomes ``AgentConfig.timeout_seconds`` (the smaller of it and the host config's own, never wider); ``context.max_steps``
+- Run: the cancel token is checked before the run starts; a ``RunCancelledError`` the agent raises,
+  or that sits in the ``__cause__`` chain of its error (eight hops), ends ``aborted/cancelled``;
+  ``context.max_seconds`` becomes ``AgentConfig.timeout_seconds`` (the smaller of it and the host config's own, never wider); ``context.max_steps``
   is refused (``ValueError`` naming ``max_iterations``); the interface of the context and its event
   log are passed to the agent (a swarm takes neither: its members own theirs). The run is the
   agent's sync ``run`` on a worker thread (``aoffload``: a cancelled await leaves the worker
   running, the documented cancel hazard). ``BudgetExhaustedError`` and ``AgentTimeoutError`` end
-  ``aborted/budget_spent``; any other error propagates. The result is ``AgentResult.run_result()``
+  ``aborted/budget_spent`` (``detail["shared_budget"]`` names a spent ``RunContext.budget``, a fact
+  of the context and not of the text); any other error propagates. The result is ``AgentResult.run_result()``
   with ``identity = (template digest, None)`` (a code-backed pattern has no static instance: the
   per-run tools shape the instructions) and ``handle
   None``; ``detail`` gains ``pattern``.
@@ -79,8 +81,8 @@ from fsm_llm.core.definitions.executable import (
 )
 from fsm_llm.core.definitions.executable_instance import identity_of, instantiate_body
 from fsm_llm.core.results import Identity, RunResult
-from fsm_llm.engine.context import RunContext
-from fsm_llm.engine.executables.code_backed import CodeBackedExecutable
+from fsm_llm.engine.context import RunCancelledError, RunContext
+from fsm_llm.engine.executables.code_backed import CodeBackedExecutable, cause_chain
 from fsm_llm.engine.executables.namespaces import GENERATORS, PATTERN_AGENTS
 from fsm_llm.tools import ToolRegistry, registry_from
 
@@ -279,6 +281,14 @@ class PatternExecutable(CodeBackedExecutable):
                 identity,
                 pattern=self.pattern,
                 error=type(error).__name__,
+                **context.ledger_detail(),
+            )
+        except Exception as error:
+            # a cancel the agent wrapped in its own error is still a cancel (plan 7efd5cb4 D-005)
+            if not any(isinstance(e, RunCancelledError) for e in cause_chain(error)):
+                raise
+            return self.stopped(
+                Status.ABORTED, Reason.CANCELLED, identity, pattern=self.pattern
             )
         return self._result(outcome, identity)
 

@@ -43,7 +43,7 @@ from fsm_llm.core.definitions import (
 )
 from fsm_llm.core.definitions.executable import Capability, ExecutableError
 from fsm_llm.core.names import NameRegistry
-from fsm_llm.engine.context import RunContext
+from fsm_llm.engine.context import RunBudget, RunCancelledError, RunContext
 from fsm_llm.engine.executables import (
     EXECUTABLE_SOURCES,
     Executable,
@@ -751,6 +751,102 @@ class TestBudgetsAndErrors:
         _exe("debate").run({"task": TASK})
         assert "llm_interface" not in spy[0].kwargs
         assert "event_log" not in spy[0].kwargs
+
+
+def _chained(error: BaseException, depth: int) -> BaseException:
+    """``error`` wrapped ``depth`` times the way the shipped agents wrap a failure (an
+    ``AgentError`` chained from it), outermost first."""
+    for level in range(depth):
+        wrapper = AgentError(f"level {level} failed")
+        wrapper.__cause__ = error
+        error = wrapper
+    return error
+
+
+def _raising(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+    class _Raises(_SpyAgent):
+        def run(self, *args: Any) -> AgentResult:
+            raise error
+
+    monkeypatch.setattr(
+        module, "create_agent", lambda p, t=None, **kw: _Raises(p, t, kw)
+    )
+
+
+class TestSharedContextStops:
+    """Plan 7efd5cb4 step 3 (D-005): a cancel that reaches the executable from inside the run, and
+    the shared ledger, are mapped by a FACT of the error chain and of the context, never by text."""
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    @pytest.mark.parametrize("depth", [0, 1, 4])
+    def test_a_run_cancelled_error_at_any_depth_ends_aborted_cancelled(
+        self, how: str, depth: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _raising(monkeypatch, _chained(RunCancelledError(), depth))
+        exe = _exe("debate")
+        context = RunContext(llm_interface=_Filler())
+        run = (
+            exe.run({"task": TASK}, context=context)
+            if how == "sync"
+            else asyncio.run(exe.arun({"task": TASK}, context=context))
+        )
+        assert (run.status, run.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert (
+            run.detail["pattern"] == "debate" and run.identity.instance_identity is None
+        )
+
+    def test_the_next_run_of_the_same_executable_is_not_poisoned(
+        self, monkeypatch: pytest.MonkeyPatch, spy: list[_SpyAgent]
+    ) -> None:
+        exe = _exe("debate")
+        _raising(monkeypatch, RunCancelledError())
+        first = exe.run({"task": TASK}, context=RunContext(llm_interface=_Filler()))
+        assert first.reason is Reason.CANCELLED
+        monkeypatch.setattr(
+            module, "create_agent", lambda p, t=None, **kw: _SpyAgent(p, t, kw)
+        )
+        again = exe.run({"task": TASK}, context=RunContext(llm_interface=_Filler()))
+        assert again.status is Status.OK and again.answer == "spied"
+
+    @pytest.mark.parametrize("depth", [1, 4])
+    def test_an_error_with_no_cancel_in_its_chain_still_propagates(
+        self, depth: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _raising(monkeypatch, _chained(RuntimeError("a bug"), depth))
+        with pytest.raises(AgentError, match="level"):
+            _exe("debate").run(
+                {"task": TASK}, context=RunContext(llm_interface=_Filler())
+            )
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_spent_shared_ledger_is_named_in_the_result(
+        self, how: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        budget = RunBudget(max_steps=1)
+        budget.charge()  # the run took the step the ledger allowed; the next is refused
+        _raising(monkeypatch, BudgetExhaustedError("steps", 1))
+        exe = _exe("debate")
+        context = RunContext(llm_interface=_Filler(), budget=budget)
+        run = (
+            exe.run({"task": TASK}, context=context)
+            if how == "sync"
+            else asyncio.run(exe.arun({"task": TASK}, context=context))
+        )
+        assert (run.status, run.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert run.detail["shared_budget"] == "steps"
+        assert run.detail["error"] == "BudgetExhaustedError"
+
+    def test_the_agents_own_ceiling_is_not_called_shared(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _raising(monkeypatch, BudgetExhaustedError("iterations", 5))
+        with_room = RunContext(llm_interface=_Filler(), budget=RunBudget(max_steps=99))
+        run = _exe("debate").run({"task": TASK}, context=with_room)
+        assert run.reason is Reason.BUDGET_SPENT and "shared_budget" not in run.detail
+        bare = _exe("debate").run(
+            {"task": TASK}, context=RunContext(llm_interface=_Filler())
+        )
+        assert "shared_budget" not in bare.detail
 
 
 class TestTheAsyncName:

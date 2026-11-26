@@ -30,7 +30,7 @@ from fsm_llm.core.definitions.executable import (
 )
 from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.verify.executable import load_executable
-from fsm_llm.engine.context import CancelToken, RunContext
+from fsm_llm.engine.context import CancelToken, RunBudget, RunContext
 from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.engine.executables import registry as registry_module
 from fsm_llm.engine.executables.directory import load_directory_registry
@@ -554,6 +554,218 @@ class TestCancel:
         # the token is set and the instance completed anyway: a set token wins only when the
         # instance did not complete (the commit wins)
         assert result.status is Status.OK
+
+
+def _recording_chain(
+    count: int, calls: list[int], **hooks: Callable[[Any], None]
+) -> tuple[dict[str, Any], NameRegistry[Any]]:
+    """s1 -> ... -> s<count>, each step a sync callable that records its number (then runs
+    ``hooks[f"f<i>"]`` when given), so a row sees which steps really ran."""
+
+    def make(i: int) -> Callable[[Any], None]:
+        def act(ctx: Any) -> None:
+            calls.append(i)
+            if (extra := hooks.get(f"f{i}")) is not None:
+                extra(ctx)
+
+        return act
+
+    steps = {
+        f"s{i}": _auto(f"s{i}", f"s{i + 1}" if i < count else "", f"f{i}")
+        for i in range(1, count + 1)
+    }
+    return steps, _names(**{f"f{i}": make(i) for i in range(1, count + 1)})
+
+
+class TestSharedLedger:
+    """Plan 7efd5cb4 step 3 (D-005, D-006): the adapter charges the ledger of the context at every
+    ``step_started`` and asks for the stop through ``engine.cancel`` (a raising hook is swallowed by
+    the engine, so the charge never relies on a raise). The step whose start the ledger refused is
+    already in flight and finishes, like a step in flight at a cancel. The request registers when
+    the loop next yields, so on a rare loop turn (Python 3.15 only, about 1 run in 25) ONE more step
+    runs: a row never pins how many steps ran after the stop, it bounds them (the chain is longer
+    than the slack) and pins every count the lock decides (the ledger)."""
+
+    _ROOM = 6  # a chain this long ends before the end even when one step of slack runs
+
+    @HOW
+    async def test_a_ledger_smaller_than_the_chain_stops_it_after_the_step_in_flight(
+        self, how: str
+    ) -> None:
+        calls: list[int] = []
+        steps, names = _recording_chain(self._ROOM, calls)
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, self._ROOM + 1)))
+        )
+        budget = RunBudget(max_steps=2)
+        context = RunContext(callables=names, budget=budget)
+        result = await _go(how, executable, context=context)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert calls[:3] == [1, 2, 3]  # the refused third start was in flight
+        assert (
+            len(calls) < self._ROOM
+        )  # and the stop took effect before the chain ended
+        assert (
+            budget.steps_taken == 2
+        )  # a refused charge counts nothing, a late stop charges nothing
+        assert (result.detail["budget"], result.detail["limit"]) == ("steps", 2)
+        assert result.detail["shared_budget"] == "steps"
+        assert result.detail["workflow_status"] == "cancelled"
+        assert result.handle
+
+    @HOW
+    async def test_a_ledger_as_large_as_the_chain_lets_it_finish(
+        self, how: str
+    ) -> None:
+        calls: list[int] = []
+        steps, names = _recording_chain(4, calls)
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, 5)))
+        )
+        budget = RunBudget(max_steps=4)
+        result = await _go(
+            how, executable, context=RunContext(callables=names, budget=budget)
+        )
+        assert result.status is Status.OK and calls == [1, 2, 3, 4]
+        assert budget.steps_taken == 4 and "shared_budget" not in result.detail
+
+    @HOW
+    async def test_a_failing_step_that_takes_its_error_route_is_charged(
+        self, how: str
+    ) -> None:
+        calls: list[int] = []
+
+        def boom(ctx: Any) -> None:
+            raise RuntimeError("no")
+
+        steps, names = _recording_chain(4, calls, f2=boom)
+        steps["s2"] = _auto("s2", "s3", "f2", error_step_id="s3")
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, 5)))
+        )
+        budget = RunBudget(max_steps=10)
+        result = await _go(
+            how, executable, context=RunContext(callables=names, budget=budget)
+        )
+        # the run is on its way: all four steps ran and each was charged, the failed s2 included
+        assert result.status is Status.OK and calls == [1, 2, 3, 4]
+        assert budget.steps_taken == 4
+
+    @HOW
+    async def test_a_seconds_ledger_names_the_seconds_budget(
+        self, how: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = [1000.0]
+        monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", lambda: now[0])
+        calls: list[int] = []
+
+        def slow(ctx: Any) -> None:
+            now[0] += 60.0
+
+        steps, names = _recording_chain(self._ROOM, calls, f1=slow)
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, self._ROOM + 1)))
+        )
+        budget = RunBudget(max_seconds=30.0)
+        result = await _go(
+            how, executable, context=RunContext(callables=names, budget=budget)
+        )
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["budget"] == "seconds"
+        assert result.detail["shared_budget"] == "seconds"
+        assert calls[:2] == [1, 2] and len(calls) < self._ROOM
+        assert budget.steps_taken == 1  # the clock started at the first charge
+
+    @HOW
+    async def test_two_runs_on_one_context_share_the_ledger(self, how: str) -> None:
+        calls: list[int] = []
+        steps, names = _recording_chain(4, calls)
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, 5)))
+        )
+        budget = RunBudget(max_steps=5)
+        context = RunContext(callables=names, budget=budget)
+        assert (await _go(how, executable, context=context)).status is Status.OK
+        calls.clear()
+        second = await _go(how, executable, context=context)
+        assert (second.status, second.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        # one step of room, then the second start was refused (in flight)
+        assert calls[:2] == [1, 2] and budget.steps_taken == 5
+
+    @HOW
+    async def test_a_token_set_mid_run_is_cancelled_before_the_next_charge(
+        self, how: str
+    ) -> None:
+        calls: list[int] = []
+        token = CancelToken()
+        steps, names = _recording_chain(
+            self._ROOM, calls, f1=lambda ctx: token.cancel()
+        )
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, self._ROOM + 1)))
+        )
+        budget = RunBudget(max_steps=50)
+        context = RunContext(cancel=token, callables=names, budget=budget)
+        result = await _go(how, executable, context=context)
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in result.detail
+        # s1 was charged; s2 started with the token set (in flight) and was not charged
+        assert calls[:2] == [1, 2] and len(calls) < self._ROOM
+        assert budget.steps_taken == 1
+        # the NEXT call of the same caller ends at its first check and charges nothing
+        calls.clear()
+        again = await _go(how, executable, context=context)
+        assert (again.status, again.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert calls == [] and budget.steps_taken == 1
+
+    @HOW
+    async def test_a_ledger_stop_wins_over_a_token_set_afterwards(
+        self, how: str
+    ) -> None:
+        calls: list[int] = []
+        token = CancelToken()
+        steps, names = _recording_chain(
+            self._ROOM, calls, f3=lambda ctx: token.cancel()
+        )
+        executable = _executable(
+            _document(steps, callables=tuple(f"f{i}" for i in range(1, self._ROOM + 1)))
+        )
+        budget = RunBudget(max_steps=2)
+        context = RunContext(cancel=token, callables=names, budget=budget)
+        result = await _go(how, executable, context=context)
+        assert token.cancelled and calls[:3] == [1, 2, 3]
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+
+    @HOW
+    async def test_a_composed_child_run_charges_the_same_ledger(
+        self, how: str, tmp_path: Path
+    ) -> None:
+        registry = ExecutableRegistry()
+        registry.add_document(_fsm_doc())
+        step = {
+            "type": "ExecutableStep",
+            "step_id": "call",
+            "name": "call",
+            "target": "demo",
+            "inputs": {"topic": "subject"},
+            "success_step_id": "",
+        }
+        executable = registry.add_document(
+            _document(
+                {"call": step},
+                ident="compose",
+                inputs=("subject",),
+                executables=("demo",),
+            )
+        )
+        llm = ScriptedLLM(extraction_data={"result": "42"}, default_response="r")
+        budget = RunBudget()
+        context = RunContext(llm_interface=llm, registry=registry, budget=budget)
+        result = await _go(how, executable, {"subject": "t"}, context)
+        assert result.status is Status.OK
+        # the workflow's one step plus the one loop step of the two-state child body, ONE ledger
+        # (the child runs under `derive`, which shares the ledger by reference)
+        assert budget.steps_taken == 2
 
 
 class _CancellingChild:
