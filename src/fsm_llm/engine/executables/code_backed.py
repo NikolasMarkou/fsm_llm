@@ -23,7 +23,8 @@ Interface contract:
   instance's run. The instance checks, in order and before any model call: an input key that is
   neither declared nor optional, or that has an internal prefix, is a ``ValueError``; a missing
   declared input is ``failed/inputs_missing``; an unresolved ``requires.callables`` name raises
-  ``ExecutableError`` naming it; a set cancel token is ``aborted/cancelled``. Then it awaits the
+  ``ExecutableError`` naming it; a set cancel token is ``aborted/cancelled``; a spent ``context.budget`` is ``aborted/budget_spent`` with
+  ``detail["shared_budget"]`` (plan 7efd5cb4 D-007). Then it awaits the
   hook ``execute(inputs, objects, context, identity)`` (``objects`` is the resolved required
   names plus the present optional ones) and returns its ``RunResult``. What ``execute`` raises
   propagates unchanged.
@@ -219,4 +220,7 @@ class CodeBackedInstance:
             context.cancel.raise_if_cancelled()
         except RunCancelledError:
             return owner.stopped(Status.ABORTED, Reason.CANCELLED, identity)
+        # a spent shared ledger refuses the run before any model call (plan 7efd5cb4 D-007)
+        if spent := context.ledger_detail():
+            return owner.stopped(Status.ABORTED, Reason.BUDGET_SPENT, identity, **spent)
         return await owner.execute(inputs, objects, context, identity)

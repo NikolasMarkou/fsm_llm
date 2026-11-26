@@ -519,6 +519,51 @@ class TestSharedLedger:
         fresh = _go(how, _context(_llm(), budget=budget))
         assert fresh.status is Status.OK and budget.steps_taken == 4
 
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_spent_ledger_refuses_the_run_before_the_greeting(
+        self, how: str, recorded: list[_RecordingAPI]
+    ) -> None:
+        """Plan 7efd5cb4 step 3.1 (D-007). Kills: the check dropped (the greeting call is spent
+        and a step runs), the check after the first call, a refusal that charges again."""
+        budget, llm = RunBudget(max_steps=1), _llm()
+        budget.charge()
+        result = _go(how, _context(llm, budget=budget))
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["shared_budget"] == "steps"
+        assert llm.call_history == []  # not even the greeting
+        assert budget.steps_taken == 1  # the refusal charged nothing
+        assert recorded[0].step_calls == []  # the step loop never started
+        assert result.handle is None
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_spent_seconds_ledger_refuses_the_run_the_same_way(
+        self, how: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = [1000.0]
+        monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", lambda: now[0])
+        budget, llm = RunBudget(max_seconds=30.0), _llm()
+        budget.charge()
+        now[0] += 60.0
+        result = _go(how, _context(llm, budget=budget))
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["shared_budget"] == "seconds"
+        assert llm.call_history == [] and budget.steps_taken == 1
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_an_unspent_ledger_runs_as_before_and_a_set_token_is_read_first(
+        self, how: str
+    ) -> None:
+        budget = RunBudget(max_steps=3)
+        # the run takes exactly the ledger: unspent before it, spent after it
+        assert _go(how, _context(budget=budget)).status is Status.OK
+        assert budget.steps_taken == 3
+        token, llm = CancelToken(), _llm()
+        token.cancel()
+        both = _go(how, _context(llm, cancel=token, budget=budget))
+        assert (both.status, both.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in both.detail
+        assert llm.call_history == [] and budget.steps_taken == 3
+
     def test_the_hook_of_the_step_loop_is_the_step_hook_of_the_context(
         self, recorded: list[_RecordingAPI]
     ) -> None:

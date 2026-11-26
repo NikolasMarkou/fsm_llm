@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -763,9 +764,15 @@ def _chained(error: BaseException, depth: int) -> BaseException:
     return error
 
 
-def _raising(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+def _raising(
+    monkeypatch: pytest.MonkeyPatch,
+    error: BaseException,
+    before: Callable[[], None] | None = None,
+) -> None:
     class _Raises(_SpyAgent):
         def run(self, *args: Any) -> AgentResult:
+            if before is not None:
+                before()
             raise error
 
     monkeypatch.setattr(
@@ -823,8 +830,8 @@ class TestSharedContextStops:
         self, how: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         budget = RunBudget(max_steps=1)
-        budget.charge()  # the run took the step the ledger allowed; the next is refused
-        _raising(monkeypatch, BudgetExhaustedError("steps", 1))
+        # the run takes the step the ledger allows (it is unspent when the run starts), then stops
+        _raising(monkeypatch, BudgetExhaustedError("steps", 1), before=budget.charge)
         exe = _exe("debate")
         context = RunContext(llm_interface=_Filler(), budget=budget)
         run = (
@@ -835,6 +842,35 @@ class TestSharedContextStops:
         assert (run.status, run.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
         assert run.detail["shared_budget"] == "steps"
         assert run.detail["error"] == "BudgetExhaustedError"
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_spent_ledger_refuses_the_run_before_the_agent_is_built(
+        self, how: str, spy: list[_SpyAgent]
+    ) -> None:
+        """Plan 7efd5cb4 step 3.1 (D-007). Kills: the check dropped (an agent is built and run),
+        an unspent ledger refused, a refusal that charges, a token read after the ledger."""
+        budget = RunBudget(max_steps=1)
+        budget.charge()
+        llm = _Filler()
+        exe = _exe("debate")
+        context = RunContext(llm_interface=llm, budget=budget)
+        run = (
+            exe.run({"task": TASK}, context=context)
+            if how == "sync"
+            else asyncio.run(exe.arun({"task": TASK}, context=context))
+        )
+        assert (run.status, run.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert (
+            run.detail["shared_budget"] == "steps" and run.detail["kind"] == "pattern"
+        )
+        assert spy == [] and llm.calls == [] and budget.steps_taken == 1
+        # an unspent ledger runs as before; a set token is read first
+        roomy = RunContext(llm_interface=llm, budget=RunBudget(max_steps=5))
+        assert exe.run({"task": TASK}, context=roomy).status is Status.OK
+        context.cancel.cancel()
+        both = exe.run({"task": TASK}, context=context)
+        assert (both.status, both.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in both.detail and len(spy) == 1
 
     def test_the_agents_own_ceiling_is_not_called_shared(
         self, monkeypatch: pytest.MonkeyPatch

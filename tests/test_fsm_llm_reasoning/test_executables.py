@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -285,6 +286,7 @@ class _SpyEngine:
         "the solution",
         {"reasoning_trace": {"steps": []}, "summary": "s"},
     )
+    on_solve: ClassVar[Callable[[], None] | None] = None  # runs inside the solve
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -300,6 +302,8 @@ class _SpyEngine:
         self.solved = (problem, initial_context)
         self.limits = limits
         self.thread = threading.get_ident()
+        if self.on_solve is not None:
+            self.on_solve()
         if isinstance(self.outcome, BaseException):
             raise self.outcome
         return self.outcome
@@ -311,6 +315,7 @@ class _SpyEngine:
 @pytest.fixture
 def spy_engine(monkeypatch: pytest.MonkeyPatch) -> type[_SpyEngine]:
     _SpyEngine.instances = []
+    _SpyEngine.on_solve = None
     _SpyEngine.outcome = (
         "the solution",
         {"reasoning_trace": {"steps": []}, "summary": "s"},
@@ -492,11 +497,11 @@ class TestSolve:
         self, spy_engine: type[_SpyEngine]
     ) -> None:
         failure = ReasoningExecutionError("did not finish")
-        failure.__cause__ = RunBudgetExceededError("steps", 3, 3)
+        failure.__cause__ = RunBudgetExceededError("steps", 1, 1)
         spy_engine.outcome = failure
-        spent = RunBudget(max_steps=3)
-        for _ in range(3):
-            spent.charge()
+        spent = RunBudget(max_steps=1)
+        # the ledger is unspent when the run starts and spent by what the solve ran
+        spy_engine.on_solve = spent.charge
         shared = (
             _registry()
             .get(SOLVE_ID)
@@ -506,6 +511,7 @@ class TestSolve:
         )
         assert (shared.status, shared.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
         assert shared.detail["shared_budget"] == "steps"
+        spy_engine.on_solve = None
         own = (
             _registry()
             .get(SOLVE_ID)
@@ -518,6 +524,32 @@ class TestSolve:
         )
         assert own.reason is Reason.BUDGET_SPENT and "shared_budget" not in own.detail
         assert set(own.detail) == {"kind", "budget", "limit", "steps_done"}
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_spent_ledger_refuses_the_run_before_the_engine_is_built(
+        self, how: str, spy_engine: type[_SpyEngine]
+    ) -> None:
+        """Plan 7efd5cb4 step 3.1 (D-007). Kills: the check dropped (an engine is built and
+        solves), an unspent ledger refused, a refusal that charges, a token read after it."""
+        spent = RunBudget(max_steps=2)
+        spent.charge()
+        spent.charge()
+        exe = _registry().get(SOLVE_ID)
+        context = RunContext(llm_interface=ScriptedLLM(), budget=spent)
+        result = (
+            exe.run(_solve(), context=context)
+            if how == "sync"
+            else asyncio.run(exe.arun(_solve(), context=context))
+        )
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["shared_budget"] == "steps"
+        assert spy_engine.instances == [] and spent.steps_taken == 2
+        roomy = RunContext(llm_interface=ScriptedLLM(), budget=RunBudget(max_steps=5))
+        assert exe.run(_solve(), context=roomy).status is Status.OK
+        context.cancel.cancel()
+        both = exe.run(_solve(), context=context)
+        assert (both.status, both.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in both.detail and len(spy_engine.instances) == 1
 
     def test_any_other_reasoning_error_propagates(
         self, spy_engine: type[_SpyEngine]

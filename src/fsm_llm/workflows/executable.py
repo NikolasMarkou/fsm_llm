@@ -37,6 +37,8 @@ Interface contract:
   refused the next step); any other FAILED is ``failed`` (no reason, the error text capped in ``detail``); an instance still RUNNING or
   WAITING after ``start`` is ``failed`` with ``detail.workflow_status`` (the factory refuses pausing
   steps; this is the guard). ``handle`` is the instance id.
+- A shared ledger already spent refuses the run before its first step (``aborted/budget_spent``, no instance, plan
+  7efd5cb4 D-007); a set token is read first.
 - Cancel and the shared budget: a ``step_started`` hook calls ``context.step_hook()`` (the token is
   checked, then ``context.budget`` charged once per step) and, when either stops the run, asks
   ``engine.cancel`` once; the engine honours it between steps (the step in flight, the one whose
@@ -296,6 +298,9 @@ class WorkflowBodyInstance:
         require_callables(owner.id, owner.requires.callables, context.callables)
         if context.cancel.cancelled:
             return self._stopped(Status.ABORTED, Reason.CANCELLED, identity)
+        # a spent shared ledger refuses the run before the first step (plan 7efd5cb4 D-007)
+        if spent := context.ledger_detail():
+            return self._stopped(Status.ABORTED, Reason.BUDGET_SPENT, identity, **spent)
         definition = owner.build_definition(context.callables, context.registry)
         engine = WorkflowEngine(
             max_steps=context.max_steps or DEFAULT_EXECUTABLE_MAX_STEPS

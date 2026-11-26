@@ -184,6 +184,7 @@ class TestDeriveCancel:
             "callables",
             "parent",
             "registry",
+            "budget",  # the one field added since: the run ledger (plan 7efd5cb4 D-004)
         }
 
 

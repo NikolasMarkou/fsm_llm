@@ -294,7 +294,8 @@ class TestAnApiNeedsAResolverForACallState:
 class TestTheRunContextCarriesTheResolver:
     def test_the_field_is_last_and_defaults_to_none(self):
         names = [f.name for f in dataclasses.fields(RunContext)]
-        assert names[-1] == "registry"
+        # `budget` (the run ledger, plan 7efd5cb4 D-004) is the one field added after it
+        assert names[-2:] == ["registry", "budget"]
         assert RunContext().registry is None
 
     def test_a_resolver_is_kept_and_derive_shares_it(self):

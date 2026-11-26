@@ -25,7 +25,8 @@ Interface contract:
   ``ValueError`` (after ``contract.input_templates`` are rendered from the arguments, D-033); a missing declared input returns ``failed/inputs_missing``. Then the run takes
   the interface of the context (or the API's own model resolution), its event log, the budget
   (``max_steps`` defaults to ``DEFAULT_EXECUTABLE_MAX_STEPS``) and passes ``context.step_hook()``
-  as ``before_step``: the cancel token is checked, then ``context.budget`` charged, before every
+  as ``before_step`` (a ledger already spent refuses the run before the greeting, ``aborted/budget_spent``, plan 7efd5cb4 D-007):
+  the cancel token is checked, then ``context.budget`` charged, before every
   step (a spent ledger adds ``detail["shared_budget"]``, plan 7efd5cb4 D-005). The run's own ``API`` is given ``targets=context.registry``, so a body holding a
   ``call`` state resolves its target like a bare ``API(targets=)`` does (and, with no registry in
   the context, is refused with ``MissingExecutorError`` when the run starts). Results: ``ok``; ``aborted/budget_spent`` (``RunBudgetExceededError``);
@@ -225,6 +226,11 @@ class FsmInstance:
             if owner.setup is not None:
                 owner.setup(api)
             context.cancel.raise_if_cancelled()
+            # a spent shared ledger refuses the run before the greeting (plan 7efd5cb4 D-007)
+            if spent := context.ledger_detail():
+                return self._stopped(
+                    Status.ABORTED, Reason.BUDGET_SPENT, None, identity, **spent
+                )
             conversation_id, greeting = await api.astart_conversation(dict(inputs))
             results = await api.arun_until_terminal(
                 conversation_id,

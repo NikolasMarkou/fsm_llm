@@ -614,6 +614,50 @@ class TestSharedLedger:
         assert result.handle
 
     @HOW
+    async def test_a_spent_ledger_refuses_the_run_before_its_first_step(
+        self, how: str
+    ) -> None:
+        """Plan 7efd5cb4 step 3.1 (D-007). Kills: the check dropped (the first step runs), the
+        check after the engine starts, a refusal that charges, an unspent ledger refused."""
+        calls: list[int] = []
+        steps, names = _recording_chain(3, calls)
+        executable = _executable(
+            _document(steps, callables=("f1", "f2", "f3")),
+        )
+        budget = RunBudget(max_steps=1)
+        budget.charge()
+        result = await _go(
+            how, executable, context=RunContext(callables=names, budget=budget)
+        )
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["shared_budget"] == "steps"
+        assert calls == [] and budget.steps_taken == 1
+        assert result.handle is None  # no instance was ever started
+
+    @HOW
+    async def test_a_set_token_is_read_before_a_spent_ledger_and_an_unspent_one_runs(
+        self, how: str
+    ) -> None:
+        calls: list[int] = []
+        steps, names = _recording_chain(2, calls)
+        executable = _executable(_document(steps, callables=("f1", "f2")))
+        budget = RunBudget(max_steps=2)
+        ran = await _go(
+            how, executable, context=RunContext(callables=names, budget=budget)
+        )
+        assert ran.status is Status.OK and calls == [1, 2] and budget.steps_taken == 2
+        token = CancelToken()
+        token.cancel()
+        both = await _go(
+            how,
+            executable,
+            context=RunContext(callables=names, budget=budget, cancel=token),
+        )
+        assert (both.status, both.reason) == (Status.ABORTED, Reason.CANCELLED)
+        assert "shared_budget" not in both.detail
+        assert calls == [1, 2] and budget.steps_taken == 2
+
+    @HOW
     async def test_a_ledger_as_large_as_the_chain_lets_it_finish(
         self, how: str
     ) -> None:
