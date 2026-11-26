@@ -12,6 +12,7 @@ import os
 import re
 import stat
 import time
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,9 +69,12 @@ def prune_root(
     max_logs: int | None = None,
     blob_grace_seconds: float = 3600.0,
     dry_run: bool = False,
+    skip_ids: Collection[str] = (),
 ) -> PruneReport:
     """Prune the log root *root* (``EventLog.prune`` has the contract). ``ValueError`` for a bad
-    limit, before anything is touched; with no criterion the report is empty, nothing is read."""
+    limit, before anything is touched; with no criterion the report is empty, nothing is read.
+    A conversation id in *skip_ids* (the caller's open conversations, whose writer may be closed
+    while idle) is skipped and counted ``logs_busy`` like a held lock."""
     _non_negative("max_age_seconds", max_age_seconds, allow_none=True)
     _non_negative("max_logs", max_logs, allow_none=True, whole=True)
     _non_negative("blob_grace_seconds", blob_grace_seconds)
@@ -81,7 +85,7 @@ def prune_root(
     logs_dir = root / LOG_DIR
     picked = _candidates(logs_dir, now, max_age_seconds, max_logs)
     removed, busy, freed, gone = _prune_logs(
-        logs_dir, picked, now, max_age_seconds, dry_run
+        logs_dir, picked, now, max_age_seconds, dry_run, skip_ids
     )
     live = _mark(root, logs_dir, gone)
     if live is None:
@@ -149,10 +153,14 @@ def _prune_logs(
     now: float,
     max_age: float | None,
     dry_run: bool,
+    skip_ids: Collection[str],
 ) -> tuple[int, int, int, set[str]]:
     removed = busy = freed = 0
     gone: set[str] = set()
     for stem, by_rank in candidates:
+        if stem in skip_ids:  # live but idle: a free lock, not ours to delete
+            busy += 1
+            continue
         path = logs_dir / (stem + LOG_SUFFIX)
         with exclusive_lock(logs_dir, stem, create=not dry_run) as held:
             if not held:

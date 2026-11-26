@@ -60,6 +60,7 @@ from tests.test_fsm_llm.event_log_support import (
     child_process,
     reopen_after_kill,
     wait_ready,
+    writer_bound,  # noqa: F401  (autouse: every test runs at bound None and 0)
 )
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 from tests.test_fsm_llm.test_event_log_sessions import _CHAT

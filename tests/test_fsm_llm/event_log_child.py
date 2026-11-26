@@ -64,6 +64,18 @@ from fsm_llm.runtime import EventLog, EventType
 from fsm_llm.testing import ScriptedLLM, final_reply, tool_call_reply
 from fsm_llm.tools import ToolCall, ToolRegistry
 
+BOUND_ENV = "EVENT_LOG_TEST_BOUND"
+
+
+def open_log(directory: Path) -> EventLog:
+    """The child's ``EventLog``: ``max_open_writers`` from ``EVENT_LOG_TEST_BOUND`` ("none" or
+    a whole number) when the parent set it (``writer_bound``), else the default."""
+    bound = os.environ.get(BOUND_ENV)
+    if bound is None:
+        return EventLog(directory)
+    return EventLog(directory, max_open_writers=None if bound == "none" else int(bound))
+
+
 MESSAGES = DEFAULT_COMPLETION_MESSAGES_KEY
 RESULT = DEFAULT_COMPLETION_RESULT_KEY
 QUESTION = "What is 2 + 3?"
@@ -321,7 +333,7 @@ def stacked_finish(api: API, cid: str) -> None:
 
 def stacked_main(argv: list[str]) -> None:
     directory, ready, role = Path(argv[1]), Path(argv[2]), argv[4]
-    with EventLog(directory) as log:
+    with open_log(directory) as log:
         if role == "resume":
             api = API(chat_fsm(), llm_interface=stack_llm([]), event_log=log)
             cid, _ = api.resume(argv[5])
@@ -362,7 +374,7 @@ def registry_main(argv: list[str]) -> None:
             )
         )
     )
-    with EventLog(directory) as log:
+    with open_log(directory) as log:
         api = API.from_definition(
             tool_fsm(),
             llm_interface=ChildLLM(scripted_replies()),
@@ -390,7 +402,7 @@ def async_main(argv: list[str]) -> None:
     )
 
     async def run() -> None:
-        with EventLog(directory) as log:
+        with open_log(directory) as log:
             api = API.from_definition(tool_fsm(), llm_interface=llm, event_log=log)
             where["cid"], _ = await api.astart_conversation(
                 initial_context={MESSAGES: [{"role": "user", "content": QUESTION}]}
@@ -421,7 +433,7 @@ def main(argv: list[str]) -> None:
     if argv[3:4] == ["async"]:
         return async_main(argv)
     directory, ready = Path(argv[1]), Path(argv[2])
-    log = EventLog(directory)
+    log = open_log(directory)
     llm = ChildLLM(scripted_replies(), block_at=1)
     api = API.from_definition(tool_fsm(), llm_interface=llm, event_log=log)
     cid = start(api)

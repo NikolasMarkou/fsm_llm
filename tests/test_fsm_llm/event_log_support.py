@@ -38,6 +38,7 @@ from fsm_llm.llm import LiteLLMInterface, LLMInterface
 from fsm_llm.runtime.events import LogLockedError
 from fsm_llm.runtime.stores.jsonl import LOCK_SUFFIX
 from tests.conftest import current_timing_factor
+from tests.test_fsm_llm.event_log_child import BOUND_ENV
 from tests.test_fsm_llm.support import _child_env
 
 _T = TypeVar("_T")
@@ -113,9 +114,11 @@ def child_env() -> dict[str, str]:
     """The environment of a child process: the scrubbed ``support._child_env`` (dead model
     port, litellm cost map flag, temp and home variables) and ``PYTHONPATH`` when set.
     ``PYTHONUTF8`` stays unset on purpose."""
-    extra = (
-        {"PYTHONPATH": os.environ["PYTHONPATH"]} if "PYTHONPATH" in os.environ else {}
-    )
+    extra = {
+        name: os.environ[name]
+        for name in ("PYTHONPATH", BOUND_ENV)  # the bound of ``writer_bound``, when set
+        if name in os.environ
+    }
     return _child_env(**extra)
 
 
@@ -193,3 +196,29 @@ def wait_ready(proc: subprocess.Popen[bytes], ready: Path, err: Path) -> None:
             )
         time.sleep(POLL_SECONDS)
     pytest.fail("the child never reached its announced point")
+
+
+@pytest.fixture(
+    autouse=True, params=[None, 0], ids=["unbounded", "reopen-every-append"]
+)
+def writer_bound(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> int | None:
+    """Run a module's tests with every ``EventLog`` built there at ``max_open_writers`` None
+    and 0 (G1 of plan 77e5fef9: with 0 every append closes its writer and re-opens the log).
+
+    Import it into a test module (``from ... import writer_bound  # noqa: F401``): it is
+    autouse and parametrized, and it moves the keyword default of ``EventLog.__init__`` for the
+    test, so every ``EventLog(root)`` of the module takes the bound; it never reaches a child
+    process by the keyword, so ``BOUND_ENV`` carries it to ``child_env()`` and the child's
+    ``open_log``. Interface contract: returns the bound in force.
+    """
+    from fsm_llm.runtime import EventLog
+
+    defaults = EventLog.__init__.__kwdefaults__
+    assert defaults is not None and "max_open_writers" in defaults
+    monkeypatch.setitem(defaults, "max_open_writers", request.param)
+    monkeypatch.setenv(
+        BOUND_ENV, "none" if request.param is None else str(request.param)
+    )
+    return request.param  # type: ignore[no-any-return]

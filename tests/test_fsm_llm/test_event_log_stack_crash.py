@@ -53,6 +53,7 @@ from tests.test_fsm_llm.event_log_support import (
     child_process,
     reopen_after_kill,
     wait_ready,
+    writer_bound,  # noqa: F401  (autouse: every test runs at bound None and 0)
 )
 from tests.test_fsm_llm.test_event_log_crash import _Crash
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
@@ -458,7 +459,10 @@ class TestRealProcesses:
         # Unverified until the Windows run: msvcrt lock release after TerminateProcess.
 
     def test_a_log_held_by_another_process_refuses_a_resumer_and_still_forks(
-        self, golden: _Golden, tmp_path: Path
+        self,
+        golden: _Golden,
+        tmp_path: Path,
+        writer_bound: int | None,  # noqa: F811
     ) -> None:
         if not can_lock_in_child():
             pytest.skip("this platform cannot start a child that locks a file")
@@ -473,6 +477,17 @@ class TestRealProcesses:
                 final
             )
             held = source.read_bytes()  # what the winner (the child) left
+            if writer_bound == 0:
+                # bound 0 closes the child's writer when its first append ends, so it holds no
+                # lock while it idles: the documented loss of cross-process exclusivity of a
+                # closed writer (plan 77e5fef9 D-004), here its definition
+                with EventLog(root) as log:
+                    _stacked_api(log).resume(cid)  # not refused
+                assert proc.stdin is not None
+                proc.stdin.write(b"\n")
+                proc.stdin.close()
+                assert proc.wait(timeout=60 * current_timing_factor()) == 0
+                return
             with EventLog(root) as log:
                 api = _stacked_api(log)
                 reads: list[str] = []

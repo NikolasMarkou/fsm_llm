@@ -540,3 +540,88 @@ class TestWhatRunsWhere:
             await api.astart_conversation()
         assert Probe.checked
         api.close()
+
+
+class TestAReopenUnderChurn:
+    """Plan 77e5fef9 (bounded writers, D-004): which thread re-opens an evicted conversation.
+
+    The first write of a turn is a lane job, so a re-open normally runs on a lane thread. The
+    named limit: when more turns are in flight than ``max_open_writers``, an INLINE line append
+    of an evicted id (the plain line writes that stay on the loop) re-opens on the loop and
+    adds an ``os.open``, a lock and a full scan to the loop census. The bound must be at least
+    the number of conversations in flight; below it the loop pays a re-open."""
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _watching_opens(loop_ident: int) -> Iterator[list[tuple[bool, bool]]]:
+        """Every writer open as ``(is a re-open, on the loop thread)``."""
+        seen: list[tuple[bool, bool]] = []
+        real = jsonl.JsonlWriter._open
+
+        def recording(self: jsonl.JsonlWriter) -> None:
+            seen.append((not self._create, threading.get_ident() == loop_ident))
+            real(self)
+
+        with mock.patch.object(jsonl.JsonlWriter, "_open", recording):
+            yield seen
+
+    async def _two_conversations(
+        self, root: Path, bound: int, *, together: bool
+    ) -> tuple[list[tuple[bool, bool]], API]:
+        log = EventLog(root, max_open_writers=bound)
+        api = API.from_definition(
+            _chat(silent=False), llm_interface=_llm(), event_log=log
+        )
+        with self._watching_opens(threading.get_ident()) as opens:
+            first, _ = await api.astart_conversation()
+            second, _ = await api.astart_conversation()
+            if together:
+                await asyncio.gather(
+                    api.aconverse("my name is Ada", first),
+                    api.aconverse("my name is Ada", second),
+                )
+            else:
+                await api.aconverse("my name is Ada", first)
+                await api.aconverse("my name is Ada", second)
+        return opens, api
+
+    async def test_a_bound_at_least_the_conversations_in_flight_never_reopens(
+        self, tmp_path: Path
+    ) -> None:
+        census = Census()
+        census.loop_ident = threading.get_ident()
+        with census.watching():
+            opens, api = await self._two_conversations(tmp_path, 2, together=True)
+        assert opens == [
+            (False, False),
+            (False, False),
+        ]  # the two first opens, on lanes
+        assert dict(census.on_loop) == {}, dict(census.on_loop)  # the loop census holds
+        api.close()
+
+    async def test_a_reopen_of_a_turn_that_runs_alone_is_a_lane_job_not_the_loop(
+        self, tmp_path: Path
+    ) -> None:
+        """Bound 1, two conversations taking their turns one after the other: each turn
+        re-opens its evicted conversation, on a lane thread (never on the loop)."""
+        opens, api = await self._two_conversations(tmp_path, 1, together=False)
+        reopens = [on_loop for again, on_loop in opens if again]
+        assert len(reopens) >= 2 and not any(reopens), opens
+        assert _types(api).count("turn/end") == 2
+        api.close()
+
+    async def test_a_bound_below_the_turns_in_flight_records_where_the_loop_pays(
+        self, tmp_path: Path
+    ) -> None:
+        """The known limit as a record: how many re-opens meet the loop thread depends on the
+        interleaving (counted, never timed), so the row pins that re-opens happen, that every
+        one is recorded with its thread, and that no turn fails or loses an event."""
+        opens, api = await self._two_conversations(tmp_path, 1, together=True)
+        assert sum(again for again, _ in opens) >= 1, opens
+        assert _types(api).count("turn/end") == 2
+        log = api.event_log
+        assert log is not None
+        for cid in log.conversation_ids():
+            seqs = [e["seq"] for e in log.read(cid)]
+            assert seqs == list(range(1, len(seqs) + 1))
+        api.close()

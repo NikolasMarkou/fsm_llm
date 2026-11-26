@@ -1269,6 +1269,11 @@
       "delta": 2,
       "reason": "plan 7efd5cb4 D-013 (step 11): two new anchor tokens, engine/api/helpers.py (adopt_run_context) and engine/api/run.py (_run_rounds context hook); no existing token moved",
       "token": "plan-2026-11-26T022222-7efd5cb4/D-013"
+    },
+    {
+      "delta": 1,
+      "reason": "plan-2026-11-26T213359-77e5fef9/D-004 added: the bounded writer table of EventLog (runtime/log.py _lease): idle unpoisoned LRU eviction closed inside _guard, the lease set, a re-open that never recreates",
+      "token": "plan-2026-11-26T213359-77e5fef9/D-004"
     }
   ]
 }

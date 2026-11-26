@@ -29,11 +29,13 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
 
 from fsm_llm.llm.observer import OBSERVED_CALL_KEYS
 from fsm_llm.runtime import DECLARED_TYPES, PRODUCED_TYPES, EventLog, canonical_json
+from fsm_llm.runtime.stores.jsonl import JsonlWriter
 from tests.test_fsm_llm import event_log_parity_cells as cells
 from tests.test_fsm_llm.event_log_support import tree_bytes, tree_files
 
@@ -373,6 +375,134 @@ class TestTheApprovalCell:
         assert (
             len(tools) == 1 and tools[0]["gated"] is True
         )  # the denied call is no tool/call
+
+
+#: the table bounds that must change nothing: unbounded (the writer of before) and 0 (every append
+#: closes its writer, so EVERY append re-opens the log); the default bound is the ``runs`` table
+BOUNDS = (None, 0)
+
+
+@dataclass
+class Bounded:
+    """One cell run on a bounded log: the run, the writers opened and the writers left open."""
+
+    got: Got
+    opens: int
+    left: int
+
+
+@pytest.fixture(scope="module")
+def bounded_runs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[tuple[str, str, str, int | None], Bounded]:
+    """Every (cell, mode, level, bound) run once, at the two logged levels."""
+    table: dict[tuple[str, str, str, int | None], Bounded] = {}
+    root = tmp_path_factory.mktemp("bounded-parity")
+    real = JsonlWriter._open
+    for bound in BOUNDS:
+        for name, cell in cells.CELLS.items():
+            for mode, use_async in cells.MODES.items():
+                for level in ("values", "shape"):
+                    work = root / f"{name}-{mode}-{level}-{bound}"
+                    (work / "store").mkdir(parents=True)
+                    opened: list[int] = []
+
+                    def counting(self: JsonlWriter, _seen: list[int] = opened) -> None:
+                        _seen.append(1)
+                        real(self)
+
+                    with (
+                        mock.patch.object(JsonlWriter, "_open", counting),
+                        EventLog(
+                            work / "log", privacy=level, max_open_writers=bound
+                        ) as log,
+                    ):
+                        run = cell(log, use_async, work / "store")
+                        left = log.open_writer_count()
+                        got = _got(run, log)
+                    table[name, mode, level, bound] = Bounded(got, len(opened), left)
+    return table
+
+
+#: the fields two runs never share (a clock, a random call id) and the blobs that hold them
+_VOLATILE = {"ts", "elapsed_ms", "call_id", "conversation_id"}
+
+
+def _stable_event(event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: "<ref>" if k.endswith("_ref") else cells.scrub(v)
+        for k, v in event.items()
+        if k not in _VOLATILE
+    }
+
+
+class TestEveryAppendMayReopen:
+    """G1 (plan 77e5fef9): the bound changes nothing a caller or a reader can see. With the
+    table unbounded and with bound 0 (every append closes and re-opens its writer) a cell gives
+    the replies, data, history, snapshot, usage and provider bytes of the log-off golden and
+    writes the log the default bound writes, event for event."""
+
+    @pytest.mark.parametrize("bound", BOUNDS)
+    @pytest.mark.parametrize("level", ["values", "shape"])
+    @pytest.mark.parametrize(("name", "mode"), _every())
+    def test_a_bounded_run_is_the_run_of_the_golden_and_the_log_of_the_default(
+        self,
+        runs: dict[tuple[str, str, str], Got],
+        bounded_runs: dict[tuple[str, str, str, int | None], Bounded],
+        name: str,
+        mode: str,
+        level: str,
+        bound: int | None,
+    ) -> None:
+        got = bounded_runs[name, mode, level, bound].got
+        off, default = runs[name, mode, "off"].run, runs[name, mode, level]
+        assert got.run.outcome == off.outcome
+        assert _scrubbed(got.run.received) == _scrubbed(off.received)
+        assert got.types == default.types
+        assert [_stable_event(e) for e in got.flat] == [
+            _stable_event(e) for e in default.flat
+        ]
+        assert [cells.scrub(json.loads(b)) for b in got.prompts] == [
+            cells.scrub(json.loads(b)) for b in default.prompts
+        ]
+        for events in got.events.values():
+            assert [e["seq"] for e in events] == list(range(1, len(events) + 1))
+
+    @pytest.mark.parametrize("level", ["values", "shape"])
+    @pytest.mark.parametrize(("name", "mode"), _every())
+    def test_bound_zero_reopens_every_append_and_none_opens_once_per_conversation(
+        self,
+        bounded_runs: dict[tuple[str, str, str, int | None], Bounded],
+        name: str,
+        mode: str,
+        level: str,
+    ) -> None:
+        """Kills: 0 read as unbounded, a bound ignored (non-vacuity of the whole class)."""
+        unbounded = bounded_runs[name, mode, level, None]
+        every = bounded_runs[name, mode, level, 0]
+        conversations = len(every.got.events)
+        assert unbounded.opens == conversations  # one open per tree, never a re-open
+        assert every.left == 0
+        assert (
+            every.opens > 3 * conversations
+        )  # many appends per conversation, each opens
+
+    def test_the_comparison_can_fail(
+        self,
+        runs: dict[tuple[str, str, str], Got],
+        bounded_runs: dict[tuple[str, str, str, int | None], Bounded],
+    ) -> None:
+        got = bounded_runs["tool", "sync", "values", 0].got
+        default = runs["tool", "sync", "values"]
+        dropped = [_stable_event(e) for e in got.flat][:-1]
+        assert dropped != [_stable_event(e) for e in default.flat]
+        reset = [
+            dict(_stable_event(e), seq=1) for e in got.flat
+        ]  # a re-open restarting seq
+        assert reset != [_stable_event(e) for e in default.flat]
+        assert [_stable_event(e) for e in got.flat] == [
+            _stable_event(e) for e in default.flat
+        ]
 
 
 class TestTheFinalProducedSet:

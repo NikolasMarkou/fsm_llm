@@ -329,6 +329,11 @@ class JsonlWriter:
         """The ``seq`` of the last committed event (0 for an empty log)."""
         return self._seq
 
+    @property
+    def poisoned(self) -> bool:
+        """True after a failed write or fsync: every append raises until the writer is replaced."""
+        return self._failure is not None
+
     def _open(self) -> None:
         if self._create:
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

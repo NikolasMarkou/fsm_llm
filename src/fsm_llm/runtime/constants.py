@@ -76,3 +76,7 @@ LANE_COUNT = 4
 #: wait keeps a finished conversation from holding a writer, file or lock after the call returns;
 #: the bound only caps a hung disk, after which the caller goes on with a WARNING).
 LANE_WAIT_SECONDS = 5.0
+
+#: The open writers (two descriptors each) an ``EventLog`` keeps by default: the least recently
+#: used idle writer past it is closed and a later append re-opens it (``EventLog(max_open_writers=)``).
+DEFAULT_MAX_OPEN_WRITERS = 64

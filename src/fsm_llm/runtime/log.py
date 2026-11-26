@@ -20,8 +20,8 @@ as a session directory.
 The leaf lock ``_guard`` protects the table of writers. It is never held across an append or
 a call into another component, so the log adds no edge to the lock order of ``FSMManager``;
 it IS held while a new writer is built (taking the file lock, opening the file and scanning
-it for a torn tail), so the first append of a large log makes the first append of another
-conversation on the same ``EventLog`` wait for that scan. Imports ``core``, the kernel and
+it for a torn tail) and while an idle one is closed, so the first append of a large log makes
+the first append of another conversation on the same ``EventLog`` wait for that scan. Imports ``core``, the kernel and
 ``runtime`` modules only. Windows behavior is that of ``stores.jsonl`` and ``blobs``
 (unverified until the Windows run).
 """
@@ -33,6 +33,7 @@ import json
 import os
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from functools import partial
@@ -43,6 +44,7 @@ from fsm_llm.logging import logger
 from fsm_llm.runtime.blobs import BlobStore, blob_ref
 from fsm_llm.runtime.checkpoint import is_checkpoint, unresolved_tool_calls
 from fsm_llm.runtime.constants import (
+    DEFAULT_MAX_OPEN_WRITERS,
     ENVELOPE_KEYS,
     LEVEL_KEY,
     LOG_DIR,
@@ -159,13 +161,21 @@ class EventLog(ToolEventsMixin):
           context manager, see its docstring. ``unknown_tool_calls(conversation_id)`` reports
           the unresolved ones.
         - ``conversation_ids() -> list[str]``, ``release(conversation_id)``.
-        - Long-running hosts: every conversation id that is appended to keeps one writer open,
-          two file descriptors and the file's advisory lock, until ``release(conversation_id)``
-          (``API`` does it when a root conversation ends) or ``close()``; nothing caps the
-          number of writers. A host that starts many conversations must end them
+        - ``EventLog(root, *, max_open_writers=DEFAULT_MAX_OPEN_WRITERS)``: at most that many
+          idle writers stay open (two file descriptors and the advisory lock each); the least
+          recently used idle, unpoisoned one is closed when another is needed and a later
+          append of its id re-opens the same file (a full scan for now), so a host holds about
+          ``2 * max_open_writers`` descriptors however many conversations idle. ``None`` is
+          unbounded (the lock is held for the conversation's life), ``0`` closes a writer the
+          moment its append ends (every append re-opens); a bool, a negative or a non-int is a
+          ``ValueError``. A closed idle writer holds no lock, so another process can write,
+          resume or prune that conversation (a re-open meeting its lock is ``LogLockedError``,
+          a vanished file ``LogCorruptError``, nothing is recreated); in this log the id stays
+          LIVE (``has_writer``) until ``release(conversation_id)`` (``API`` does it when a root
+          conversation ends) or ``close()``, which refuses ``open_existing`` and skips
+          ``prune``. A host that starts many conversations must still end them
           (``API.end_conversation``) or close the API or the log. A writer or log that is
-          dropped without either is closed by the finalizer of ``JsonlWriter``, which frees
-          the descriptors and the lock when the object is collected.
+          dropped without either is closed by the finalizer of ``JsonlWriter``.
         - Recovery: a failed write POISONS the writer of that id, and every later append of
           that tree raises ``LogWriteError`` until ``release(conversation_id)`` (the next
           append reopens the file, repairs a torn tail and continues the ``seq``) or
@@ -180,8 +190,17 @@ class EventLog(ToolEventsMixin):
         *,
         privacy: PrivacyLevel | str = PrivacyLevel.VALUES,
         redact: RedactionHook | None = None,
+        max_open_writers: int | None = DEFAULT_MAX_OPEN_WRITERS,
     ) -> None:
         self._privacy = PrivacyLevel.from_string(privacy)
+        if max_open_writers is not None and (
+            type(max_open_writers) is not int or max_open_writers < 0
+        ):
+            raise ValueError(
+                "max_open_writers is None or a whole number of 0 or more, got "
+                f"{max_open_writers!r:.40}"
+            )
+        self._max_open = max_open_writers
         if redact is not None and not callable(redact):
             raise TypeError(
                 f"redact is a callable or None, got {type(redact).__name__}"
@@ -191,7 +210,13 @@ class EventLog(ToolEventsMixin):
         self._logs = self.root / LOG_DIR
         self._blobs = BlobStore(self.root)
         self._guard = threading.Lock()  # leaf lock: the table of writers only
-        self._writers: dict[str, JsonlWriter] = {}
+        self._writers: OrderedDict[str, JsonlWriter] = (
+            OrderedDict()
+        )  # least recent first
+        self._pins: dict[str, int] = {}  # appends in flight per id: never evicted
+        self._live: set[str] = (
+            set()
+        )  # appended to or opened, not released: the owner rule
         self._closed = False
         self._lanes = Lanes()  # no thread starts until the first lane_call
 
@@ -205,16 +230,78 @@ class EventLog(ToolEventsMixin):
         """True at level ``values``; a producer builds no blob when this is False."""
         return self._privacy is PrivacyLevel.VALUES
 
-    def _writer(self, conversation_id: str) -> JsonlWriter:
+    # DECISION plan-2026-11-26T213359-77e5fef9/D-004
+    # The bound is a table policy of THIS class, not a layer. A writer is evicted only when no
+    # append holds it (a pin, taken under `_guard` at the lookup and dropped after the fsync)
+    # and it is not poisoned (an eviction would heal it silently), least recently used first,
+    # and it is CLOSED INSIDE `_guard` (two `os.close`, no wait, no lane): do NOT pop it and
+    # close outside (a concurrent lease would meet the held flock: a spurious LogLockedError),
+    # do NOT wait for a lane job here (a lane thread can evict), do NOT evict a pinned or a
+    # poisoned writer. After an eviction the flock is gone, so `_live` (ids appended to and not
+    # released) is the in-process owner rule: `open_existing` refuses a live id, `has_writer`
+    # reads it, `prune` skips it, `release` and `_close_lane` forget it. A re-open of a live id
+    # is the SAME `JsonlWriter` open as a first one (lstat, O_NOFOLLOW, same-file check, lock
+    # refused never waited, torn tail cut) with `create=False`: a vanished log is
+    # `LogCorruptError`, never recreated at seq 1. See decisions.md D-004.
+    @contextmanager
+    def _lease(self, conversation_id: str) -> Iterator[JsonlWriter]:
+        """Yield the writer of *conversation_id*, pinned (never evicted) until the block ends."""
         check_conversation_id(conversation_id)
         with self._guard:
             writer = self._writers.get(conversation_id)
-            if self._closed and writer is None:  # a queued job meets its own writer
+            reopen = writer is None and conversation_id in self._live
+            if self._closed and writer is None and not reopen:
+                # a queued job meets its own writer, or re-opens a live evicted one
                 raise LogWriteError("the event log is closed")
             if writer is None:
-                writer = JsonlWriter(self._logs / f"{conversation_id}{LOG_SUFFIX}")
-                self._writers[conversation_id] = writer
-            return writer
+                self._trim(1)  # room first, so the descriptors never pass the bound
+                try:
+                    writer = self._open(conversation_id, create=not reopen)
+                except FileNotFoundError as exc:  # create=False only: the log is gone
+                    raise LogCorruptError(
+                        f"log {conversation_id}{LOG_SUFFIX} vanished while idle"
+                    ) from exc
+            else:
+                self._writers.move_to_end(conversation_id)
+            self._pins[conversation_id] = self._pins.get(conversation_id, 0) + 1
+        try:
+            yield writer
+        finally:
+            with self._guard:
+                if self._pins[conversation_id] > 1:
+                    self._pins[conversation_id] -= 1
+                else:
+                    del self._pins[conversation_id]
+                self._trim(0)
+
+    def _open(self, conversation_id: str, *, create: bool) -> JsonlWriter:
+        """Build, table and lease-mark the writer of an id (under ``_guard``)."""
+        writer = JsonlWriter(
+            self._logs / f"{conversation_id}{LOG_SUFFIX}", create=create
+        )
+        self._writers[conversation_id] = writer
+        self._live.add(conversation_id)
+        return writer
+
+    def _trim(self, room: int) -> None:
+        """Close idle writers, least recently used first, to leave *room* free slots (``_guard``)."""
+        if self._max_open is None:
+            return
+        excess = len(self._writers) - (self._max_open - room)
+        if excess <= 0:
+            return
+        for conversation_id, writer in list(self._writers.items()):
+            if excess <= 0:
+                break
+            if conversation_id not in self._pins and not writer.poisoned:
+                del self._writers[conversation_id]
+                writer.close()
+                excess -= 1
+
+    def open_writer_count(self) -> int:
+        """The writers open now, two descriptors each (at most ``max_open_writers`` idle ones)."""
+        with self._guard:
+            return len(self._writers)
 
     async def lane_call(
         self, conversation_id: str, fn: Callable[..., _T], /, *args: Any
@@ -235,9 +322,12 @@ class EventLog(ToolEventsMixin):
         self._lanes.after(conversation_id, fn)
 
     def has_writer(self, conversation_id: str) -> bool:
-        """True while this log holds the writer (and so the lock) of *conversation_id*."""
+        """True while *conversation_id* is live in this log: appended to or opened, not released.
+
+        Its writer may be closed while it idles (``max_open_writers``); the id is still owned.
+        """
         with self._guard:
-            return conversation_id in self._writers
+            return conversation_id in self._live
 
     def open_existing(self, conversation_id: str) -> int:
         """Take the writer of an EXISTING log and return its last ``seq`` (``resume`` reads after).
@@ -264,15 +354,12 @@ class EventLog(ToolEventsMixin):
         with self._guard:
             if self._closed:
                 raise LogWriteError("the event log is closed")
-            if conversation_id in self._writers:
+            if conversation_id in self._live:
                 raise LogLockedError(
                     f"log {conversation_id}{LOG_SUFFIX} already has a live writer in this EventLog"
                 )
-            writer = JsonlWriter(
-                self._logs / f"{conversation_id}{LOG_SUFFIX}", create=False
-            )
-            self._writers[conversation_id] = writer
-            return writer.last_seq
+            self._trim(1)
+            return self._open(conversation_id, create=False).last_seq
 
     def _envelope(
         self, conversation_id: str, kind: Any, frame: Any, fields: Mapping[str, Any]
@@ -316,10 +403,10 @@ class EventLog(ToolEventsMixin):
     ) -> int:
         """Append one event and return its ``seq`` (see the class contract)."""
         event = self._envelope(conversation_id, type, frame, fields)
-        writer = self._writer(conversation_id)  # checks the id
-        if checkpoint is None:
-            checkpoint = is_checkpoint(event["type"], event)
-        return writer.append(event, checkpoint=checkpoint)
+        with self._lease(conversation_id) as writer:  # checks the id
+            if checkpoint is None:
+                checkpoint = is_checkpoint(event["type"], event)
+            return writer.append(event, checkpoint=checkpoint)
 
     def append_batch(
         self,
@@ -346,9 +433,8 @@ class EventLog(ToolEventsMixin):
             )
         if checkpoint is None:
             checkpoint = any(is_checkpoint(e["type"], e) for e in envelopes)
-        return self._writer(conversation_id).append_many(
-            envelopes, checkpoint=checkpoint
-        )
+        with self._lease(conversation_id) as writer:
+            return writer.append_many(envelopes, checkpoint=checkpoint)
 
     def read(
         self, conversation_id: str, *, since_seq: int = 0
@@ -495,7 +581,8 @@ class EventLog(ToolEventsMixin):
 
         Explicit only (``runtime.retention``, plan 5a6a1f80): a log is a candidate when its file
         mtime (never ``ts``) is *max_age_seconds* old or more than *max_logs* newer logs exist,
-        and one whose writer lock is held is skipped (``logs_busy``). Then blobs no remaining
+        and one whose writer lock is held or that is live in this log is skipped
+        (``logs_busy``). Then blobs no remaining
         log or live blob names and older than *blob_grace_seconds* go. *dry_run* deletes
         nothing but still takes and gives back the non-blocking writer lock of each candidate
         that has a ``.lock`` (a writer that opens at that instant can see ``LogLockedError``).
@@ -504,12 +591,15 @@ class EventLog(ToolEventsMixin):
         ``LogCorruptError``). An empty ``.lock`` stays for every pruned log and the mark phase
         reads every live blob in full. ``ValueError`` for a negative limit.
         """
+        with self._guard:
+            live = frozenset(self._live)  # an idle live conversation has a free lock
         return prune_root(
             self.root,
             max_age_seconds=max_age_seconds,
             max_logs=max_logs,
             blob_grace_seconds=blob_grace_seconds,
             dry_run=dry_run,
+            skip_ids=live,
         )
 
     def release(self, conversation_id: str) -> None:
@@ -528,6 +618,7 @@ class EventLog(ToolEventsMixin):
     def _release_now(self, conversation_id: str) -> None:
         with self._guard:
             writer = self._writers.pop(conversation_id, None)
+            self._live.discard(conversation_id)
         if writer is not None:
             writer.close()
 
@@ -548,8 +639,9 @@ class EventLog(ToolEventsMixin):
     def _close_lane(self, lane: int) -> None:
         """Pop and close the writers of one lane, as they stand when the job runs."""
         with self._guard:
-            ids = [cid for cid in self._writers if self._lanes.lane_of(cid) == lane]
-            writers = [self._writers.pop(cid) for cid in ids]
+            ids = [cid for cid in self._live if self._lanes.lane_of(cid) == lane]
+            writers = [w for cid in ids if (w := self._writers.pop(cid, None))]
+            self._live.difference_update(ids)
         for writer in writers:
             writer.close()
 
