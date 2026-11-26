@@ -138,6 +138,8 @@ result = registry.get("route_by_amount").run(
 result.status, result.outputs, result.identity
 ```
 
+`WorkflowEngine(context=RunContext(...))` runs the context's step hook before each step: a set token cancels the instance, a spent shared ledger fails it, and the refused step never runs; an `ExecutableStep` then derives its child run from that context. The step in flight is not interrupted, and `ConversationStep` does not read the context. See `docs/executables.md`.
+
 `run` is `asyncio.run` of `arun` and refuses inside a running event loop (await `arun` there). The result is `ok`, `failed` or `aborted` (`budget_spent` for `max_steps` and `max_seconds` of the context, `cancelled` for its token); `outputs` are the declared `contract.outputs` only. A document with a step that waits (`WaitEventStep`, `TimerStep`) is refused when the registry loads it, because no instance is persisted yet. The format, its checks and the closed list of steps a model may write are in `docs/executables.md`; the dashboard's two presets, `demo_linear` and `demo_branching`, are such documents under `src/fsm_llm/monitor/workflows/`.
 
 Installing the `workflows` extra (`pip install "llm-fsm[workflows]"`) adds no packages beyond core `llm-fsm`.

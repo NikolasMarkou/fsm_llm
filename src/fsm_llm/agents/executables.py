@@ -24,11 +24,15 @@ Interface contract:
   of plan_execute, adapt and orchestrator, ``worker_factory``, ``evaluation_fn`` of reflexion,
   ``memory``) are read from ``RunContext.callables`` when present. A name is the keyword of the
   pattern's constructor; ``tools`` and ``config`` reach ``create_agent``'s own parameters.
-- Run: the cancel token is checked before the run starts; a ``RunCancelledError`` the agent raises,
-  or that sits in the ``__cause__`` chain of its error (eight hops), ends ``aborted/cancelled``;
+- Run: the cancel token is checked before the run starts and, for an agent class that takes a
+  context (all but ``self_consistency``, ``swarm`` and ``meta_builder``), between its steps; a
+  ``RunCancelledError`` the agent raises, or that sits in the ``__cause__`` chain of its error
+  (eight hops), ends ``aborted/cancelled``;
   ``context.max_seconds`` becomes ``AgentConfig.timeout_seconds`` (the smaller of it and the host config's own, never wider); ``context.max_steps``
-  is refused (``ValueError`` naming ``max_iterations``); the interface of the context and its event
-  log are passed to the agent (a swarm takes neither: its members own theirs). The run is the
+  is refused (``ValueError`` naming ``max_iterations``); an agent class that takes a context is
+  given the context itself (interface, event log, token, shared ledger), ``self_consistency``
+  and ``meta_builder`` only the interface and the event log, a swarm nothing (its members own
+  theirs). The run is the
   agent's sync ``run`` on a worker thread (``aoffload``: a cancelled await leaves the worker
   running, the documented cancel hazard). ``BudgetExhaustedError`` and ``AgentTimeoutError`` end
   ``aborted/budget_spent`` (``detail["shared_budget"]`` names a spent ``RunContext.budget``, a fact

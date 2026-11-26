@@ -2,8 +2,11 @@
 
 One frozen value that a runner takes for a run: which model to call, where to log, how long
 to run, how to stop it, which host objects a code-backed pattern may use, and which run asked.
-The first runner that takes it is the FSM-body executable of ``fsm_llm.engine.executables``;
-the others adopt it later (roadmap 1.14 proper). No ``API`` constructor reads it today.
+Runners that take it: the FSM-body and code-backed executables of ``fsm_llm.engine.executables``,
+``BaseAgent(context=)`` (every agent class but ``SelfConsistencyAgent`` and ``SwarmAgent``),
+``ReasoningEngine(context=)``, ``WorkflowEngine(context=)`` with the workflow adapter, and
+``API(context=)``, which reads it by attribute only (it imports nothing of this module). Not
+under a context: ``ConversationStep``, the ``run_procedure`` tool and the monitor jobs.
 
 Interface contract:
 
@@ -58,9 +61,9 @@ Interface contract:
   meanwhile, which a spent ledger alone does not (D-011; on a shared ledger it may be another's).
 - ``CancelToken``: one thread-safe, set-once request. ``cancel()``, ``cancelled``,
   ``raise_if_cancelled()`` (raises ``RunCancelledError``, an ``FSMError``). A token is checked
-  BETWEEN steps (the executable's ``before_step``); it never interrupts a model call in
-  flight (that reply is discarded at the next check, roadmap 4.8), and it is not an
-  ``asyncio`` cancel: a cancelled task still raises ``CancelledError`` and the engine rolls
+  BETWEEN steps (``step_hook`` is what every runner above runs before each step); it never
+  interrupts a model call, a human approval wait or a step that never yields (a reply in flight
+  is seen at the next check, roadmap 4.8), and it is not an ``asyncio`` cancel: a cancelled task still raises ``CancelledError`` and the engine rolls
   its turn back whole (plan f150ec28 D-002).
 
 Imported by name (``from fsm_llm.engine.context import RunContext``); ``fsm_llm/__init__.py``
