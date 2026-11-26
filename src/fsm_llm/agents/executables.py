@@ -285,7 +285,7 @@ class PatternExecutable(CodeBackedExecutable):
                 identity,
                 pattern=self.pattern,
                 error=type(error).__name__,
-                **context.ledger_detail(),
+                **context.ledger_detail(error),
             )
         except Exception as error:
             # a cancel the agent wrapped in its own error is still a cancel (plan 7efd5cb4 D-005)

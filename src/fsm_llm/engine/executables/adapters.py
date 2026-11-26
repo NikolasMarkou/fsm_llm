@@ -258,7 +258,7 @@ class FsmInstance:
                 budget=error.budget,
                 limit=error.limit,
                 steps_done=error.steps_done,
-                **context.ledger_detail(),
+                **context.ledger_detail(error),
             )
         except RunCancelledError:
             return self._stopped(

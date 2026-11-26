@@ -1,0 +1,292 @@
+"""The fix round of the phase review of plan 7efd5cb4 (step 17, D-015): one class per finding.
+
+Every row runs on doubles only. A row names the mutant it kills; each mutant was run on a full copy
+of the tree with this file copied in, and every row of 17.1 to 17.4 was red on a ``git archive`` of
+the parent commit.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from fsm_llm.core.definitions import RunBudgetExceededError
+from fsm_llm.engine.context import RunBudget, RunContext
+from tests.test_fsm_llm.test_run_context_adoption import _Rig, _Solve
+
+
+@pytest.fixture
+def no_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+
+
+@pytest.fixture
+def solve_rig(tmp_path: Path) -> Any:
+    made: list[_Solve] = []
+
+    def make(script: dict[str, Any] | None = None, **kw: Any) -> _Solve:
+        made.append(_Solve(tmp_path / f"r{len(made)}", script, **kw))
+        return made[-1]
+
+    yield make
+    for r in made:
+        r.close()
+
+
+def refusal_of(budget: RunBudget) -> RunBudgetExceededError:
+    """The error a REAL refused charge of *budget* raises (spends nothing when it is not full)."""
+    with pytest.raises(RunBudgetExceededError) as caught:
+        budget.charge()
+    return caught.value
+
+
+def full(max_steps: int) -> RunBudget:
+    """A ledger charged exactly to its limit: spent, and nothing was ever refused."""
+    budget = RunBudget(max_steps=max_steps)
+    for _ in range(max_steps):
+        budget.charge()
+    assert budget.last_refusal is None
+    return budget
+
+
+@pytest.mark.usefixtures("no_model")
+class TestALedgerStopIsDecidedByIdentity:
+    """17.1: a run's OWN limit is never read as the shared ledger because the ledger happens to be
+    spent too; the stop is the ledger's only when the ledger itself refused (D-015)."""
+
+    def test_the_agents_own_timeout_beside_an_exactly_spent_ledger_stays_its_own(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills M36: `_budget_error` asks `budget_spent()` (a fact read afterwards)."""
+        from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+
+        agent = _Rig(tmp_path, budget=full(2)).agent()
+        own = agent._budget_error(RunBudgetExceededError("seconds", 30.0, 2), None)
+        assert isinstance(own, AgentTimeoutError)
+        steps = agent._budget_error(RunBudgetExceededError("steps", 3, 3), None)
+        assert isinstance(steps, BudgetExhaustedError)
+        assert "loop turns" in str(steps) and "shared" not in str(steps)
+
+    def test_a_real_refusal_of_the_ledger_is_the_shared_budget_with_its_own_limit(
+        self, tmp_path: Path
+    ) -> None:
+        from fsm_llm.agents.exceptions import BudgetExhaustedError
+
+        budget = full(2)
+        agent = _Rig(tmp_path, budget=budget).agent()
+        mine = refusal_of(budget)
+        refused = agent._budget_error(mine, None)
+        assert isinstance(refused, BudgetExhaustedError)
+        assert "shared run steps" in str(refused)
+        # a concurrent runner is refused next: `last_refusal` moves on, this stop stays the ledger's
+        refusal_of(budget)
+        assert budget.last_refusal is not mine
+        assert "shared run steps" in str(agent._budget_error(mine, None))
+
+    def test_the_refusal_of_another_ledger_is_not_this_contexts(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills M43: any refusal of any ledger counts (a nested context with its own ledger)."""
+        elsewhere = refusal_of(full(1))
+        agent = _Rig(tmp_path, budget=RunBudget(max_steps=1)).agent()
+        assert "shared" not in str(agent._budget_error(elsewhere, None))
+        assert RunContext(budget=RunBudget()).stopped_by_ledger(elsewhere) is None
+        assert RunContext().stopped_by_ledger(elsewhere) is None
+
+    def test_a_cause_chain_is_read_and_a_plain_error_never_is_the_ledger(self) -> None:
+        budget = full(1)
+        ctx = RunContext(budget=budget)
+        mine = refusal_of(budget)
+        try:
+            raise ValueError("wrapped") from mine
+        except ValueError as wrapped:
+            assert ctx.stopped_by_ledger(wrapped) is mine
+        assert ctx.stopped_by_ledger(RunBudgetExceededError("steps", 1, 1)) is None
+        assert ctx.stopped_by_ledger(ValueError("x")) is None
+        assert ctx.ledger_detail(mine) == {"shared_budget": "steps"}
+        assert ctx.ledger_detail(RunBudgetExceededError("steps", 1, 1)) == {}
+        assert ctx.ledger_detail() == {"shared_budget": "steps"}  # the pre-run fact
+
+    def test_the_engines_own_steps_tie_with_the_ledger_is_the_runs_own_stop(
+        self,
+    ) -> None:
+        """Kills M40: the adapter of an FSM body adds `shared_budget` to ITS OWN step ceiling
+        because the ledger reached its limit on the same step."""
+        from fsm_llm.core.codes import Reason, Status
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from fsm_llm.testing import ScriptedLLM
+        from tests import run_context_rig as rig
+
+        long = rig._fsm_documents()["long"]
+
+        def run(ledger: int, own: int) -> Any:
+            ctx = RunContext(
+                llm_interface=ScriptedLLM(default_response="r"),
+                max_steps=own,
+                budget=RunBudget(max_steps=ledger),
+            )
+            return (
+                ExecutableRegistry().add_document(long).run({"topic": "t"}, context=ctx)
+            )
+
+        tie = run(ledger=2, own=2)
+        assert (tie.status, tie.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert (tie.detail["budget"], tie.detail["limit"]) == ("steps", 2)
+        assert "shared_budget" not in tie.detail
+        refused = run(ledger=2, own=3)
+        assert refused.detail["shared_budget"] == "steps"
+        assert refused.detail["limit"] == 2
+
+    def test_an_agent_executable_reads_the_ledger_only_from_its_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills M41: `PatternExecutable.execute` adds the ledger fact to its own timeout."""
+        from fsm_llm import agents as A
+        from fsm_llm.agents.exceptions import AgentTimeoutError, BudgetExhaustedError
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from tests import pattern_runs as pr
+
+        registry = ExecutableRegistry()
+        registry.load_sources()
+        ledgers: list[RunBudget] = []
+
+        def context() -> RunContext:
+            ledgers.append(RunBudget(max_steps=2))
+            return RunContext(llm_interface=pr.ScriptedModel(), budget=ledgers[-1])
+
+        def own(self: Any, *a: Any, **k: Any) -> Any:
+            ledgers[-1].charge()
+            ledgers[-1].charge()  # exactly spent, nothing refused
+            raise AgentTimeoutError(30.0)
+
+        monkeypatch.setattr(A.DebateAgent, "run", own)
+        result = registry.get("debate").run({"task": "t"}, context=context())
+        assert result.detail["error"] == "AgentTimeoutError"
+        assert "shared_budget" not in result.detail
+
+        def refused(self: Any, *a: Any, **k: Any) -> Any:
+            ledgers[-1].charge()
+            ledgers[-1].charge()
+            raise BudgetExhaustedError("shared run steps", 2) from refusal_of(
+                ledgers[-1]
+            )
+
+        monkeypatch.setattr(A.DebateAgent, "run", refused)
+        result = registry.get("debate").run({"task": "t"}, context=context())
+        assert result.detail["shared_budget"] == "steps"
+
+
+@pytest.mark.usefixtures("no_model")
+class TestTheReasoningRunnersReadTheLedgerByIdentity:
+    """17.1 for the reasoning engine, its classifier, its executable and the reason tool."""
+
+    def test_the_orchestrators_own_170_steps_beside_a_spent_ledger_keep_their_text(
+        self, solve_rig: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills M37: the message of an unfinished solve says `shared run budget` for the
+        orchestrator's OWN error because the ledger is spent."""
+        from fsm_llm.reasoning import ReasoningExecutionError
+
+        r = solve_rig(budget=RunBudget(max_steps=50))
+
+        def own(conversation_id: str, **kwargs: Any) -> Any:
+            while r.ctx.budget_spent() is None:
+                r.ctx.budget.charge()  # type: ignore[union-attr]
+            raise RunBudgetExceededError("steps", 170, 170)
+
+        monkeypatch.setattr(r.engine.orchestrator, "run_until_terminal", own)
+        with pytest.raises(ReasoningExecutionError) as caught:
+            r.solve()
+        assert "within 170 steps" in str(caught.value)
+        assert "shared run budget" not in str(caught.value)
+
+    def test_the_classifiers_own_ten_steps_beside_a_spent_ledger_keep_their_text(
+        self, solve_rig: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills M38: the classifier re-raises its OWN budget error as the ledger's."""
+        from fsm_llm.reasoning.constants import ContextKeys
+        from fsm_llm.reasoning.exceptions import ReasoningClassificationError
+        from tests.test_fsm_llm_reasoning import test_engine_scripted as sc
+
+        r = solve_rig(budget=RunBudget(max_steps=3))
+
+        def own(conversation_id: str, **kwargs: Any) -> Any:
+            while r.ctx.budget_spent() is None:
+                r.ctx.budget.charge()  # type: ignore[union-attr]
+            raise RunBudgetExceededError("steps", 10, 10)
+
+        monkeypatch.setattr(r.engine.classifier, "run_until_terminal", own)
+        with pytest.raises(ReasoningClassificationError, match="10 steps"):
+            r.engine._classify_problem({ContextKeys.PROBLEM_STATEMENT: sc._PROBLEM})
+
+    def test_the_solve_executable_adds_the_ledger_only_for_its_refusal(
+        self, solve_rig: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills M42: `SolveExecutable._mapped` adds the fact to the engine's own budget error."""
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from fsm_llm.reasoning import ReasoningEngine, ReasoningExecutionError
+        from fsm_llm.reasoning.executables import SOLVE_ID
+        from tests.test_fsm_llm_reasoning import test_engine_scripted as sc
+
+        r = solve_rig(budget=RunBudget(max_steps=50))
+        registry = ExecutableRegistry()
+        registry.load_sources()
+
+        def stop(cause: Any) -> Any:
+            def solve(self: Any, *a: Any, **k: Any) -> Any:
+                while r.ctx.budget_spent() is None:
+                    r.ctx.budget.charge()  # type: ignore[union-attr]
+                raise ReasoningExecutionError("did not finish") from cause()
+
+            return solve
+
+        fresh = lambda: RunContext(  # noqa: E731
+            llm_interface=r.llm, budget=RunBudget(max_steps=2)
+        )
+        own = fresh()
+        r.ctx = own
+        monkeypatch.setattr(
+            ReasoningEngine,
+            "solve_problem",
+            stop(lambda: RunBudgetExceededError("steps", 170, 170)),
+        )
+        result = registry.get(SOLVE_ID).run({"problem": sc._PROBLEM}, context=own)
+        assert (result.detail["budget"], result.detail["limit"]) == ("steps", 170)
+        assert "shared_budget" not in result.detail
+        real = fresh()
+        r.ctx = real
+        monkeypatch.setattr(
+            ReasoningEngine,
+            "solve_problem",
+            stop(lambda: refusal_of(real.budget)),  # type: ignore[arg-type]
+        )
+        result = registry.get(SOLVE_ID).run({"problem": sc._PROBLEM}, context=real)
+        assert result.detail["shared_budget"] == "steps"
+
+    def test_a_spent_ledger_beside_a_plain_failure_is_a_failed_reason_observation(
+        self,
+    ) -> None:
+        """Kills M39: the reason tool re-raises ANY failure once the ledger is spent."""
+        from fsm_llm import agents as A
+        from fsm_llm.agents.constants import ContextKeys
+        from fsm_llm.reasoning import ReasoningExecutionError
+        from tests import pattern_runs as pr
+        from tests.test_fsm_llm.test_run_context_adoption import (
+            TestReasoningReactUnderContext as T,
+        )
+
+        budget = RunBudget(max_steps=1)
+        ctx = RunContext(llm_interface=T._models()(), budget=budget)
+        agent = A.ReasoningReactAgent(pr._tools(), config=pr._config(), context=ctx)
+        budget.charge()  # exactly spent, nothing refused
+
+        def boom(*_a: Any, **_k: Any) -> Any:
+            raise ReasoningExecutionError("the inner solve failed on its own")
+
+        agent._reasoning_engine.solve_problem = boom  # type: ignore[method-assign]
+        execute = agent._make_reasoning_tool_executor(agent._call_handlers(agent.tools))
+        state = {ContextKeys.TOOL_NAME: "reason", ContextKeys.TOOL_INPUT: {"x": "1"}}
+        state[ContextKeys.TASK] = pr._TASK
+        assert execute(dict(state))[ContextKeys.TOOL_STATUS] == "failed"

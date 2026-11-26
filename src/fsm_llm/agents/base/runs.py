@@ -266,16 +266,15 @@ class RunsMixin(_AgentSurface):
         Interface contract (same callers as ``_run_budgets``): the seconds
         budget maps to ``AgentTimeoutError(config.timeout_seconds)``, the
         steps budget to ``BudgetExhaustedError`` citing the step ceiling; a spent
-        ``RunContext`` ledger (``context.budget_spent()``) gives a ``BudgetExhaustedError`` that
+        ``RunContext`` ledger (``context.stopped_by_ledger(exc)``) gives a ``BudgetExhaustedError`` that
         names the shared budget, never ``max_iterations``. Returns the error; the caller raises
         it ``from exc``.
         """
         # the shared ledger is told apart by a fact of the context, never by the text of the error
-        shared = self._context.budget_spent() if self._context else None
-        if shared:
+        if self._context and (refusal := self._context.stopped_by_ledger(exc)):
             return BudgetExhaustedError(
-                f"shared run {shared}",
-                exc.limit,
+                f"shared run {refusal.budget}",
+                refusal.limit,
                 detail="the RunContext budget is spent",
             )
         if exc.budget == "seconds":

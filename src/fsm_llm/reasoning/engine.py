@@ -393,7 +393,7 @@ class ReasoningEngine(EngineHandlers):
                 # DECISION plan-2026-10-01T093600-944e2692/D-054 (D-014): an
                 # unfinished solve raises, never returns a fallback string as the
                 # solution.
-                shared = self._context.budget_spent() if self._context else None
+                shared = self._context and self._context.stopped_by_ledger(e)
                 raise self._failed_solve(
                     conversation_id,
                     f"Reasoning did not finish within the shared run budget ({e.limit} {e.budget})"

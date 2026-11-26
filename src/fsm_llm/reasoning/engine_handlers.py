@@ -173,7 +173,7 @@ class EngineHandlers:
             self.classifier.end_conversation(conversation_id)
             conversation_id = None  # Mark as cleaned up
         except RunBudgetExceededError as e:
-            if self._context is not None and self._context.budget_spent():
+            if self._context and self._context.stopped_by_ledger(e):
                 raise  # the shared ledger, not the classifier's own steps
             raise ReasoningClassificationError(
                 "Classification did not converge after "

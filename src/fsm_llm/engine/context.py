@@ -51,11 +51,11 @@ Interface contract:
 - ``step_hook()`` returns a fresh ``before_step`` callable for ONE run: it raises
   ``RunCancelledError`` when the token is set, BEFORE it charges the ledger, and charges once per
   distinct step number (the engine offers an ended pushed frame the same number again).
-  ``budget_spent()`` is ``budget.spent()`` or ``None`` (a caller reads it after a catch);
-  ``ledger_detail()`` is ``{"shared_budget": "steps" | "seconds"}`` when it is set, else ``{}``
-  (what an adapter adds to the ``detail`` of a budget stop, so a ledger stop reads as the shared
-  budget by a fact, never by error text). ``adopt_into(kwargs)`` fills ``llm_interface`` and
-  ``event_log`` of an API-keyword dict from the context where the caller set none (the agent and
+  ``budget_spent()`` is ``budget.spent()`` or ``None`` (a fact before a run);
+  ``stopped_by_ledger(error)`` is the ``LedgerRefusal`` of THIS ledger that is the error or a cause
+  of it, else ``None`` (the one test of a ledger stop: a run's own limit never reads as one);
+  ``ledger_detail(error=None)`` is ``{"shared_budget": "steps" | "seconds"}`` for such a stop (no
+  error: when the ledger is spent now), else ``{}``, never by error text. ``adopt_into(kwargs)`` fills ``llm_interface`` and ``event_log`` of an API-keyword dict from the context where the caller set none (the agent and
   the reasoning engine adopt a context through it; an explicit keyword wins). ``last_refusal()``
   is the ledger's (``None`` with no ledger): a changed object across a run means a charge was REFUSED
   meanwhile, which a spent ledger alone does not (D-011; on a shared ledger it may be another's).
@@ -136,6 +136,12 @@ class CancelToken:
 # or the engine's `_turn_budgets` (5a6a1f80 D-010), read it from the log, start its clock at
 # construction, charge per hook CALL (the ended-frame offer repeats a number), or hold the lock
 # across a hook, a raise or a log write.
+class LedgerRefusal(RunBudgetExceededError):
+    """The refusal of ONE ``RunBudget`` (``ledger``): what tells a ledger stop from a run's own."""
+
+    ledger: RunBudget | None = None
+
+
 class RunBudget:
     """The ledger of the steps and seconds of every run under one context (see above)."""
 
@@ -147,7 +153,7 @@ class RunBudget:
         self.max_seconds = max_seconds
         self._lock = threading.Lock()
         self._record: TurnBudget | None = None
-        self.last_refusal: RunBudgetExceededError | None = None
+        self.last_refusal: LedgerRefusal | None = None
 
     @property
     def steps_taken(self) -> int:
@@ -167,8 +173,10 @@ class RunBudget:
             try:
                 self._record.charge()
             except RunBudgetExceededError as refused:
-                self.last_refusal = refused
-                raise
+                error = LedgerRefusal(refused.budget, refused.limit, refused.steps_done)
+                error.ledger = self
+                self.last_refusal = error
+                raise error from None
 
 
 @dataclass(frozen=True, eq=False)
@@ -255,12 +263,30 @@ class RunContext:
         """The shared budget that is spent (a fact for a caller after a catch), or ``None``."""
         return self.budget.spent() if self.budget is not None else None
 
-    def last_refusal(self) -> RunBudgetExceededError | None:
+    def last_refusal(self) -> LedgerRefusal | None:
         """The shared ledger's latest refused charge, or ``None``."""
         return self.budget.last_refusal if self.budget is not None else None
 
-    def ledger_detail(self) -> dict[str, str]:
-        """The ``detail`` a stopped run adds when the shared ledger is spent, else ``{}``."""
+    def stopped_by_ledger(self, error: BaseException | None) -> LedgerRefusal | None:
+        """The refusal of THIS context's ledger that is *error* or one of its causes, else ``None``.
+
+        The one test of "the shared ledger stopped this run": by the identity of what raised, never
+        by ``budget_spent()`` (a run's own limit can end on the step the ledger fills up).
+        """
+        for _ in range(9):
+            if error is None or self.budget is None:
+                return None
+            if isinstance(error, LedgerRefusal) and error.ledger is self.budget:
+                return error
+            error = error.__cause__
+        return None
+
+    def ledger_detail(self, error: BaseException | None = None) -> dict[str, str]:
+        """The ``detail`` a stopped run adds for the shared ledger, else ``{}``: with *error*, only
+        when ``stopped_by_ledger(error)``; with none, when the ledger is spent now (before a run)."""
+        if error is not None:
+            refusal = self.stopped_by_ledger(error)
+            return {"shared_budget": refusal.budget} if refusal else {}
         spent = self.budget_spent()
         return {"shared_budget": spent} if spent else {}
 

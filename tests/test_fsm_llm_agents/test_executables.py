@@ -41,6 +41,7 @@ from fsm_llm.core.definitions import (
     DataExtractionResponse,
     FieldExtractionResponse,
     ResponseGenerationResponse,
+    RunBudgetExceededError,
 )
 from fsm_llm.core.definitions.executable import Capability, ExecutableError
 from fsm_llm.core.names import NameRegistry
@@ -850,8 +851,17 @@ class TestSharedContextStops:
         self, how: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         budget = RunBudget(max_steps=1)
-        # the run takes the step the ledger allows (it is unspent when the run starts), then stops
-        _raising(monkeypatch, BudgetExhaustedError("steps", 1), before=budget.charge)
+        error = BudgetExhaustedError("steps", 1)
+
+        def spend() -> None:
+            """The run takes the step the ledger allows (it is unspent when the run starts), then
+            the ledger REFUSES the next: that refusal is the cause of the agent's error (D-015)."""
+            budget.charge()
+            with pytest.raises(RunBudgetExceededError) as refused:
+                budget.charge()
+            error.__cause__ = refused.value
+
+        _raising(monkeypatch, error, before=spend)
         exe = _exe("debate")
         context = RunContext(llm_interface=_Filler(), budget=budget)
         run = (

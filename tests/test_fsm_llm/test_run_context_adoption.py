@@ -455,7 +455,11 @@ class TestAgentUnderContext:
         spent = RunBudget(max_steps=1)
         spent.charge()
         full = _Rig(tmp_path / "s", budget=spent).agent(config=one)
-        assert "shared run steps" in str(full._budget_error(engine_error, None))
+        # a spent ledger alone is a fact, not a stop: only its own refusal reads as shared (D-015)
+        assert str(full._budget_error(engine_error, None)) == text
+        with pytest.raises(RunBudgetExceededError) as refused:
+            spent.charge()
+        assert "shared run steps" in str(full._budget_error(refused.value, None))
 
     def test_the_context_is_refused_where_it_cannot_be_honoured(
         self, tmp_path: Path
@@ -1157,8 +1161,14 @@ class TestReasoningReactUnderContext:
         agent = self._agent(ctx)
         engine = agent._reasoning_engine
 
+        cause: list[
+            BaseException
+        ] = []  # the refusal the ledger raises, once it has one
+
         def boom(*_a: Any, **_k: Any) -> Any:
-            raise ReasoningExecutionError("the inner solve stopped")
+            raise ReasoningExecutionError("the inner solve stopped") from (
+                cause[0] if cause else None
+            )
 
         engine.solve_problem = boom  # type: ignore[method-assign]
         handlers = agent._call_handlers(agent.tools)
@@ -1169,8 +1179,11 @@ class TestReasoningReactUnderContext:
         assert failed[ContextKeys.TOOL_STATUS] == "failed"
         if kind == "cancel":
             ctx.cancel.cancel()
-        else:
+        else:  # the ledger REFUSES a charge (D-015: a spent ledger alone is no stop)
             ctx.budget.charge()  # type: ignore[union-attr]
+            with pytest.raises(RunBudgetExceededError) as refused:
+                ctx.budget.charge()  # type: ignore[union-attr]
+            cause.append(refused.value)
         with pytest.raises(ReasoningExecutionError, match="inner solve stopped"):
             execute(dict(state))
 

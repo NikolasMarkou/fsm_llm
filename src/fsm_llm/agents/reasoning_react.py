@@ -361,7 +361,9 @@ class ReasoningReactAgent(BaseAgent):
 
             except Exception as e:
                 ctx = self._context
-                if ctx is not None and (ctx.cancel.cancelled or ctx.budget_spent()):
+                if ctx is not None and (
+                    ctx.cancel.cancelled or ctx.stopped_by_ledger(e)
+                ):
                     raise  # a stop of the context (a fact), not a failed tool: no observation
                 logger.opt(exception=True).warning(
                     "Reasoning failed, recording error: {}", e

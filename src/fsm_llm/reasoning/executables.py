@@ -172,7 +172,7 @@ class SolveExecutable(CodeBackedExecutable):
                     budget=cause.budget,
                     limit=cause.limit,
                     steps_done=cause.steps_done,
-                    **context.ledger_detail(),
+                    **context.ledger_detail(cause),
                 )
             if isinstance(cause, LLMResponseError):
                 # the type only: a provider message can carry text the log should not

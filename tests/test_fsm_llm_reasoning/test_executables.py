@@ -511,8 +511,16 @@ class TestSolve:
         failure.__cause__ = RunBudgetExceededError("steps", 1, 1)
         spy_engine.outcome = failure
         spent = RunBudget(max_steps=1)
-        # the ledger is unspent when the run starts and spent by what the solve ran
-        spy_engine.on_solve = spent.charge
+
+        # the ledger is unspent when the run starts; what the solve ran fills it and the ledger
+        # REFUSES the next charge, which is the cause of the failure (D-015)
+        def spend() -> None:
+            spent.charge()
+            with pytest.raises(RunBudgetExceededError) as refused:
+                spent.charge()
+            failure.__cause__ = refused.value
+
+        spy_engine.on_solve = staticmethod(spend)  # type: ignore[assignment]
         shared = (
             _registry()
             .get(SOLVE_ID)
