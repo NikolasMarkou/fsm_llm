@@ -66,8 +66,12 @@ from fsm_llm.core.definitions.executable import (
     WorkflowEnvelope,
 )
 from fsm_llm.core.definitions.executable_instance import identity_of, render_inputs
-from fsm_llm.core.definitions.executable_workflow import walk_steps, workflow_names
-from fsm_llm.core.names import NameRegistry
+from fsm_llm.core.definitions.executable_workflow import (
+    RESERVED_NAME_PREFIX,
+    walk_steps,
+    workflow_names,
+)
+from fsm_llm.core.names import NameCollisionError, NameRegistry
 from fsm_llm.core.results import Identity, RunResult
 from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables.adapters import PinSink
@@ -93,8 +97,8 @@ __all__ = ["WorkflowBodyInstance", "WorkflowExecutable", "workflow_adapter"]
 
 # the names the host-bound fields of an ExecutableStep resolve under while a definition loads: a
 # fixed pair, registered after the host's own names (a collision is a NameCollisionError)
-_REGISTRY_NAME = "$run.registry"
-_CALLABLES_NAME = "$run.callables"
+_REGISTRY_NAME = f"{RESERVED_NAME_PREFIX}registry"
+_CALLABLES_NAME = f"{RESERVED_NAME_PREFIX}callables"
 _ERROR_CHARS = 300
 
 
@@ -195,13 +199,21 @@ class WorkflowExecutable:
         envelope = self.envelope
         steps = copy.deepcopy(envelope.body.steps)
         objects: NameRegistry[Any] = NameRegistry(CALLABLES_NAMESPACE)
-        for name, obj in callables.items() if callables is not None else ():
-            objects.register(name, obj)
         if not callable(getattr(registry, "get", None)):
             registry = _NoRegistry()
-        objects.register(_REGISTRY_NAME, registry)
-        if callables is not None:
-            objects.register(_CALLABLES_NAME, callables)
+        try:
+            for name, obj in callables.items() if callables is not None else ():
+                objects.register(name, obj)
+            objects.register(_REGISTRY_NAME, registry)
+            if callables is not None:
+                objects.register(_CALLABLES_NAME, callables)
+        except NameCollisionError as error:
+            raise WorkflowValidationError(
+                "a callable name collides with a name the run binds",
+                validation_errors=[
+                    f"names starting with {RESERVED_NAME_PREFIX!r} are the run's own"
+                ],
+            ) from error
         for step, _, _ in walk_steps(steps):
             if isinstance(step, dict) and step.get("type") == "ExecutableStep":
                 step["registry"] = _REGISTRY_NAME

@@ -240,6 +240,92 @@ class TestV3NamesAreReadFromTheBody:
         ]
 
 
+class TestV3ReservedAndBlankNames:
+    """Review of plan 7d9c0955 (D-012, finding 1): a name the adapter binds itself is refused here."""
+
+    @pytest.mark.parametrize("name", ["$run.callables", "$run.registry", "$run.x"])
+    def test_a_callable_name_with_the_reserved_prefix_is_refused(self, name):
+        doc = _wf({"a": _auto(action=name)}, callables=[name])
+
+        envelope, result = load_executable(doc)
+
+        assert envelope is None and not result.is_valid
+        (line,) = _lines(result, "names")
+        assert f"callables name {name!r}" in line and "'$run.'" in line
+
+    def test_a_target_with_the_reserved_prefix_is_refused(self):
+        steps = {"a": _step("ExecutableStep", target="$run.registry")}
+
+        envelope, result = load_executable(_wf(steps, executables=["$run.registry"]))
+
+        assert envelope is None
+        (line,) = _lines(result, "names")
+        assert "executables name '$run.registry'" in line
+
+    def test_the_name_is_refused_nested_and_by_the_validator_cli(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        import fsm_llm.core.verify.cli as cli_module
+
+        monkeypatch.setattr(cli_module, "setup_cli_logging", lambda level: 0)
+        steps = {"a": _step("RetryStep", step=_auto("deep", action="$run.callables"))}
+        doc = _wf(steps, callables=["$run.callables"])
+        path = tmp_path / "wf.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
+        code = cli_module.main(str(path))
+
+        assert code == 1
+        assert json.loads(capsys.readouterr().out)["is_valid"] is False
+
+    def test_a_blank_name_is_refused(self):
+        doc = _wf({"a": _auto(action=" ")}, callables=[" "])
+
+        envelope, result = load_executable(doc)
+
+        assert envelope is None and len(_lines(result, "names")) == 1
+
+    @pytest.mark.parametrize("name", ["$runx", "run.callables", "$run", "x$run.y"])
+    def test_a_near_miss_is_a_name_like_any_other(self, name):
+        assert _loads(_wf({"a": _auto(action=name)}, callables=[name]))
+
+    def test_the_prefix_is_defined_once_in_core_and_the_adapter_builds_from_it(self):
+        import ast
+        import pathlib
+
+        from fsm_llm.core.definitions import executable_workflow as definitions
+
+        assert definitions.RESERVED_NAME_PREFIX == "$run."
+        root = pathlib.Path(definitions.__file__).parents[2]
+        for path in root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            docstrings = {
+                id(node.body[0].value)
+                for node in ast.walk(tree)
+                if isinstance(
+                    node,
+                    (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+                )
+                and node.body
+                and isinstance(node.body[0], ast.Expr)
+            }
+            literals = [
+                n.value
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Constant)
+                and isinstance(n.value, str)
+                and "$run." in n.value
+                and id(n) not in docstrings
+            ]
+            if (
+                path.name == "executable_workflow.py"
+                and path.parent.name == "definitions"
+            ):
+                assert literals == ["$run."]
+            else:
+                assert literals == [], path
+
+
 # ---------------------------------------------------------------- V4 and the host-bound rule
 
 

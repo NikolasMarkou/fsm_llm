@@ -9,7 +9,8 @@ model. Per step of the sequence:
 
 - V3 names: the callable names and executable targets the BODY uses against ``requires`` (a used
   name missing from the claim is an error, a claimed name no step uses a warning), a named-object
-  field that holds no text, then the caller's resolver. A claim is never what decides.
+  field that holds no text, a name that is blank or starts with the reserved ``$run.`` prefix (the
+  adapter binds names of its own under it), then the caller's resolver. A claim is never what decides.
 - V4: a workflow takes no variables, so a ``{{name}}`` anywhere in the steps is filled by nothing.
 - V5: one info line (no flow analysis exists for workflows; structure is the adapter's).
 - Host-bound, EVERY origin: a step that sets ``registry`` or ``callables`` (they bind to the run
@@ -37,6 +38,7 @@ from fsm_llm.core.definitions.executable import (
 )
 from fsm_llm.core.definitions.executable_workflow import (
     NAMED_OBJECT_FIELDS,
+    RESERVED_NAME_PREFIX,
     walk_steps,
     workflow_names,
 )
@@ -118,6 +120,16 @@ def workflow_findings(
                 f"requires.{category} names {_shown(n)} and no step uses it",
             )
             for n in sorted(claim - set(names))
+        ]
+        out += [
+            (
+                "names",
+                "error",
+                f"the body uses {category} name {_shown(n)}: a name is not blank and does "
+                f"not start with {RESERVED_NAME_PREFIX!r}, which the run binds itself",
+            )
+            for n in names
+            if not n.strip() or n.startswith(RESERVED_NAME_PREFIX)
         ]
     for step, _, owner in walk_steps(steps):
         where = f"step {_shown(owner)}"

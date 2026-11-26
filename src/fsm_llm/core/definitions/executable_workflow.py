@@ -41,6 +41,7 @@ __all__ = [
     "MAX_STEP_NESTING",
     "MAX_WORKFLOW_STEPS",
     "NAMED_OBJECT_FIELDS",
+    "RESERVED_NAME_PREFIX",
     "STEP_CALLABLE_EXCLUDE_FIELDS",
     "WORKFLOW_FIELD_VERSIONS",
     "WorkflowBody",
@@ -59,6 +60,9 @@ STEP_CALLABLE_EXCLUDE_FIELDS = frozenset(
 #: ``ExecutableStep``'s ``registry`` and ``callables`` (``Field(exclude=True)``, so the default dump
 #: never carried them). Read by ``serialize(callables=)``, by ``load_workflow`` and by V3 and V7.
 NAMED_OBJECT_FIELDS = STEP_CALLABLE_EXCLUDE_FIELDS | {"agent", "registry", "callables"}
+
+#: The prefix of the names the adapter binds itself while a definition loads: a document names none.
+RESERVED_NAME_PREFIX = "$run."
 
 #: Most step documents a body holds, counted through every nesting, and the deepest nesting of
 #: ``step`` and ``steps`` (a top-level step is level 1).

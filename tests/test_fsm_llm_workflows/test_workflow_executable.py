@@ -12,6 +12,7 @@ no provider, no network, no sleep decides a row (a wait that never ends is bound
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
@@ -27,12 +28,16 @@ from fsm_llm.core.definitions.executable import (
     parse_executable,
 )
 from fsm_llm.core.names import NameRegistry
+from fsm_llm.core.verify.executable import load_executable
 from fsm_llm.engine.context import CancelToken, RunContext
 from fsm_llm.engine.executables import ExecutableRegistry
+from fsm_llm.engine.executables import registry as registry_module
+from fsm_llm.engine.executables.directory import load_directory_registry
 from fsm_llm.engine.executables.protocol import DEFAULT_EXECUTABLE_MAX_STEPS
 from fsm_llm.testing import ScriptedLLM
 from fsm_llm.workflows import WorkflowEngine, WorkflowStatus
 from fsm_llm.workflows import executable as wfexec
+from fsm_llm.workflows.exceptions import WorkflowValidationError
 from fsm_llm.workflows.executable import (
     WorkflowExecutable,
     workflow_adapter,
@@ -718,6 +723,83 @@ class TestComposition:
         result = await _go(how, executable, context=context)
         assert result.status is Status.OK and marks == [1]
         assert WorkflowStatus.COMPLETED.value == result.detail["workflow_status"]
+
+
+# ---- one bad document stops nothing (review of plan 7d9c0955, D-012, finding 1) ----------------
+
+
+def _write_documents(directory: Path, bad_action: str) -> None:
+    bad = _document({"a": _auto("a", "", action=bad_action)}, callables=(bad_action,))
+    (directory / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
+    good = _document(_chain(2), ident="good")
+    (directory / "good.json").write_text(json.dumps(good), encoding="utf-8")
+
+
+class TestOneBadFileStopsNothing:
+    @pytest.mark.parametrize("name", ["$run.callables", "$run.registry", " "])
+    def test_a_directory_with_a_bad_file_serves_the_good_one_and_warns_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+    ) -> None:
+        _write_documents(tmp_path, name)
+        warned: list[str] = []
+        registry = ExecutableRegistry([tmp_path])
+        monkeypatch.setattr(registry_module.logger, "warning", warned.append)
+
+        report = registry.reload()
+
+        assert [e.id for e in registry.list()] == ["good"]
+        assert list(report.failed) and all("bad.json" in key for key in report.failed)
+        assert len(warned) == 1 and "bad.json" in warned[0]
+
+    def test_load_executable_reports_the_document(self) -> None:
+        document = _document(
+            {"a": _auto("a", "", action="$run.callables")},
+            callables=("$run.callables",),
+        )
+
+        envelope, result = load_executable(document)
+
+        assert envelope is None and not result.is_valid
+
+    def test_the_directory_loader_of_the_monitor_process_serves_the_good_file(
+        self, tmp_path: Path
+    ) -> None:
+        _write_documents(tmp_path, "$run.callables")
+
+        registry = load_directory_registry(tmp_path, [], prog="fsm-llm-monitor")
+
+        assert [e.id for e in registry.list(kind="workflow")] == ["good"]
+
+    @pytest.mark.parametrize("name", ["$run.callables", "$run.registry"])
+    def test_the_factory_alone_refuses_the_document_as_an_executable_error(
+        self, name: str
+    ) -> None:
+        envelope = parse_executable(
+            _document({"a": _auto("a", "", action=name)}, callables=(name,))
+        )
+
+        with pytest.raises(ExecutableError) as caught:
+            workflow_adapter(envelope)
+
+        assert len(str(caught.value)) < 400
+
+    def test_a_host_registry_holding_a_reserved_name_is_a_validation_error(
+        self,
+    ) -> None:
+        executable = _executable(_document(_chain(1)))
+        host = _names(**{"$run.registry": lambda c: None})
+
+        with pytest.raises(WorkflowValidationError) as caught:
+            executable.build_definition(host)
+
+        assert "$run.registry" not in str(caught.value)
+
+    def test_a_run_with_such_a_host_registry_is_refused_not_crashed(self) -> None:
+        executable = _executable(_document(_chain(1)))
+        context = RunContext(callables=_names(**{"$run.callables": lambda c: None}))
+
+        with pytest.raises(WorkflowValidationError):
+            asyncio.run(executable.arun({}, context=context))
 
 
 # ---- the factory (V2 in structure-only form) at the registry ------------------------------------
