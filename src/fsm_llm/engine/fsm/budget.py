@@ -36,8 +36,7 @@ _monotonic = time.monotonic
 
 
 class EndedFrameOffer(int):
-    """The number ``_run_rounds`` hands ``before_step`` when it OFFERS an ended pushed frame (the
-    number of the next step, which never runs when nobody pops): a hook that counts steps skips it."""
+    """The number ``_run_rounds`` hands ``before_step`` to OFFER an ended pushed frame: no step yet."""
 
 
 def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:

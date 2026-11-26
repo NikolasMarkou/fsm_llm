@@ -271,11 +271,7 @@ class RunContext:
         return self.budget.last_refusal if self.budget is not None else None
 
     def stopped_by_ledger(self, error: BaseException | None) -> LedgerRefusal | None:
-        """The refusal of THIS context's ledger that is *error* or one of its causes, else ``None``.
-
-        The one test of "the shared ledger stopped this run": by the identity of what raised, never
-        by ``budget_spent()`` (a run's own limit can end on the step the ledger fills up).
-        """
+        """THIS ledger's own refusal that is *error* or one of its causes (never read from ``budget_spent()``)."""
         for _ in range(9):
             if error is None or self.budget is None:
                 return None
@@ -285,8 +281,7 @@ class RunContext:
         return None
 
     def ledger_detail(self, error: BaseException | None = None) -> dict[str, str]:
-        """The ``detail`` a stopped run adds for the shared ledger, else ``{}``: with *error*, only
-        when ``stopped_by_ledger(error)``; with none, when the ledger is spent now (before a run)."""
+        """The ledger ``detail`` of a stop (*error* is the ledger's refusal) or, with none, of a spent ledger."""
         if error is not None:
             refusal = self.stopped_by_ledger(error)
             return {"shared_budget": refusal.budget} if refusal else {}

@@ -279,7 +279,10 @@ def create_agent(
         config = config_with(
             config
             if config is not None
-            else default_agent_config(kwargs.get("llm_interface")),
+            else default_agent_config(
+                kwargs.get("llm_interface")
+                or getattr(kwargs.get("context"), "llm_interface", None)
+            ),
             instructions=system_prompt,
         )
     if config is not None:

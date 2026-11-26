@@ -400,11 +400,15 @@ class TestRunBudget:
     ) -> None:
         """Two threads race for the one step; a clock that waits for the other thread
         inside the budget check opens the window. With the lock one thread is inside at a
-        time (the barrier times out harmlessly); without it both pass the check."""
+        time (the barrier times out harmlessly); without it both pass the check. The verdict
+        does not rest on that timeout: the clock also records whether the ledger's lock is held
+        while the check runs, which no thread schedule can change (D-015)."""
         ledger = RunBudget(max_steps=1, max_seconds=10_000)
         barrier = threading.Barrier(2, timeout=0.3)
+        held: list[bool] = []
 
         def waiting_clock() -> float:
+            held.append(ledger._lock.locked())
             try:
                 barrier.wait()
             except threading.BrokenBarrierError:
@@ -429,6 +433,9 @@ class TestRunBudget:
             thread.start()
         for thread in threads:
             thread.join(10)
+        assert held and all(
+            held
+        )  # every check ran under the lock, whatever the schedule
         assert sorted(outcomes) == ["accepted", "refused"]
         assert ledger.steps_taken == 1
 

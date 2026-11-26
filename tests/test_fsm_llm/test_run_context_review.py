@@ -395,3 +395,80 @@ class TestACompletedInstanceStaysOk:
             result = asyncio.run(executable.arun({}, context=context))
         assert token.cancelled and result.status is Status.OK
         assert result.detail["workflow_status"] == "completed"
+
+
+@pytest.mark.usefixtures("no_model")
+class TestCreateAgentReadsTheInterfaceOfTheContext:
+    """17.5b: `create_agent(system_prompt=..., context=ctx)` builds the default config it needs for
+    the instructions from the interface of the context, as `BaseAgent` does; with no `LLM_MODEL` it
+    no longer raises `ModelNotConfiguredError` for a context that holds an interface."""
+
+    def test_a_system_prompt_with_a_context_interface_and_no_model_builds(self) -> None:
+        """Kills M50: the default config is built from the `llm_interface` keyword only."""
+        from fsm_llm.agents import create_agent
+        from tests import pattern_runs as pr
+        from tests.test_fsm_llm.test_run_context_adoption import _agent_tools
+
+        context = RunContext(llm_interface=pr.ScriptedModel())
+        agent = create_agent(
+            "react", _agent_tools(), system_prompt="Cite sources.", context=context
+        )
+        assert agent.config.instructions == "Cite sources."
+
+    def test_no_interface_anywhere_is_still_the_usual_refusal(self) -> None:
+        from fsm_llm.agents import create_agent
+        from fsm_llm.core.definitions import ModelNotConfiguredError
+        from tests.test_fsm_llm.test_run_context_adoption import _agent_tools
+
+        with pytest.raises(ModelNotConfiguredError):
+            create_agent(
+                "react", _agent_tools(), system_prompt="x", context=RunContext()
+            )
+
+
+class TestTheApiDuckCheck:
+    """17.5c: `API(context=)` needs callables where it calls and says so; the refusals read right."""
+
+    @pytest.mark.parametrize("name", ["step_hook", "resolve_llm"])
+    def test_a_name_that_is_called_must_be_callable(self, name: str) -> None:
+        """Kills M51: `hasattr` only (a `step_hook = None` passed and failed inside the run loop)."""
+        from fsm_llm import API
+        from tests.test_fsm_llm.test_run_context_adoption import _Duck
+        from tests.test_fsm_llm.test_run_until_terminal import (
+            _ScriptedLLM,
+            _trip_fsm,
+        )
+
+        duck = _Duck(_ScriptedLLM())
+        setattr(duck, name, None)
+        with pytest.raises(TypeError, match=name):
+            API.from_definition(_trip_fsm(), context=duck)
+
+    def test_the_refusal_names_the_type_and_never_echoes_the_object(self) -> None:
+        from fsm_llm import API
+        from tests.test_fsm_llm.test_run_until_terminal import _trip_fsm
+
+        class Odd:
+            def __repr__(self) -> str:
+                return "SECRET-REPR"
+
+        with pytest.raises(TypeError, match="Odd") as caught:
+            API.from_definition(_trip_fsm(), context=Odd())
+        assert "SECRET-REPR" not in str(caught.value)
+
+    def test_a_start_refused_for_a_spent_ledger_says_nothing_was_started(self) -> None:
+        """Kills M52: the start refusal reads "Run stopped before the conversation ended"."""
+        from fsm_llm import API
+        from tests.test_fsm_llm.test_run_until_terminal import (
+            _ScriptedLLM,
+            _trip_fsm,
+        )
+
+        api = API.from_definition(
+            _trip_fsm(plan_speaks=True),
+            context=RunContext(llm_interface=_ScriptedLLM(), budget=full(1)),
+        )
+        with pytest.raises(RunBudgetExceededError, match="not started") as caught:
+            api.start_conversation({})
+        assert "before the conversation ended" not in str(caught.value)
+        assert (caught.value.budget, caught.value.limit) == ("steps", 1)

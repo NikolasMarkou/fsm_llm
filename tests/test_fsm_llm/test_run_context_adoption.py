@@ -1988,11 +1988,15 @@ class TestThreeThreadsOneLedger:
         accepted: list[int] = []
         armed = threading.Event()
         window = threading.Barrier(3, timeout=0.3)
+        held: list[
+            bool
+        ] = []  # was the ledger's lock held at each armed check (no clock decides)
 
         class Racy(TurnBudget):
             def spent(self) -> Any:
                 verdict = super().spent()  # the check is done ...
                 if armed.is_set():
+                    held.append(ledger._lock.locked())
                     try:
                         window.wait()  # ... and the others have done theirs
                     except threading.BrokenBarrierError:
@@ -2035,6 +2039,9 @@ class TestThreeThreadsOneLedger:
         t = three(budget=ledger)
         outcomes = _on_three_threads(t)
         assert arrivals == [_GATE_PREFIX]
+        assert held and all(
+            held
+        )  # every armed check ran under the lock, whatever the schedule
         assert (
             len(accepted) == 1
         )  # exactly one of the three released charges was accepted

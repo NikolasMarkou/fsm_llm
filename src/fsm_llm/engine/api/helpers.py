@@ -238,8 +238,17 @@ def adopt_run_context(
     """Check *context*; return the ``(llm_interface, event_log, targets)`` ``API`` uses (D-013)."""
     if context is None:
         return llm_interface, event_log, targets
-    if missing := [n for n in _CONTEXT_NAMES if not hasattr(context, n)]:
-        raise TypeError(f"context must provide {', '.join(missing)}, got {context!r}")
+    called = ("resolve_llm", "step_hook")  # names the API calls: present is not enough
+    if missing := [
+        n
+        for n in _CONTEXT_NAMES
+        if not hasattr(context, n)
+        or (n in called and not callable(getattr(context, n)))
+    ]:
+        raise TypeError(
+            f"context must provide {', '.join(missing)} (callable: resolve_llm, step_hook), "
+            f"got {type(context).__name__}"
+        )
     offered = (context.resolve_llm(), context.event_log, context.registry)
     names = ("llm_interface", "event_log", "targets")
     given = (llm_interface, event_log, targets)
@@ -257,7 +266,9 @@ def refuse_stopped_context(context: Any) -> None:
     context.cancel.raise_if_cancelled()
     if (budget := context.budget) and (spent := budget.spent()):
         limit = getattr(budget, f"max_{spent}")
-        raise RunBudgetExceededError(spent, limit, budget.steps_taken)
+        error = RunBudgetExceededError(spent, limit, budget.steps_taken)
+        error.args = (f"The context's {spent} budget of {limit} is spent: not started",)
+        raise error
 
 
 def _narrowed(name: str, given: Any, ceiling: Any) -> Any:
