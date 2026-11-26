@@ -363,3 +363,35 @@ class TestTheMetaBuilderRefusesAContext:
         model = pr.ScriptedModel()
         assert MetaBuilderAgent(llm_interface=model) is not None
         assert MetaBuilderAgent(llm_interface=model, context=None) is not None
+
+
+class TestACompletedInstanceStaysOk:
+    """17.4: the commit wins. An instance that COMPLETED is `ok` even when its token was set by
+    the last step (nothing is left to cancel, and the outputs are real); only an instance that did
+    not complete reads the token (the row step 9 deleted with its old-design neighbours)."""
+
+    @pytest.mark.parametrize("how", ["run", "arun"])
+    def test_a_token_set_by_the_last_step_leaves_the_run_ok(self, how: str) -> None:
+        """Kills M49: `_ended` reads the token BEFORE the COMPLETED branch."""
+        from fsm_llm.core.codes import Status
+        from fsm_llm.engine.context import CancelToken
+        from tests.test_fsm_llm_workflows.test_workflow_executable import (
+            _auto,
+            _document,
+            _executable,
+            _names,
+        )
+
+        token = CancelToken()
+        executable = _executable(
+            _document({"a": _auto("a", "", "stop")}, callables=("stop",))
+        )
+        context = RunContext(
+            cancel=token, callables=_names(stop=lambda _ctx: token.cancel())
+        )
+        if how == "run":
+            result = executable.run({}, context=context)
+        else:
+            result = asyncio.run(executable.arun({}, context=context))
+        assert token.cancelled and result.status is Status.OK
+        assert result.detail["workflow_status"] == "completed"
