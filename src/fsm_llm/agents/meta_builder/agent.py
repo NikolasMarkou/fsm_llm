@@ -68,6 +68,10 @@ class MetaBuilderAgent(
         **api_kwargs: Any,
     ) -> None:
         reject_misplaced_kwargs(type(self).__name__, api_kwargs)
+        if api_kwargs.get("context") is not None:  # no step seam to honour it
+            raise TypeError(
+                "MetaBuilderAgent does not accept context= (not a RunContext run)"
+            )
         # A plain AgentConfig (create_agent, the builder) becomes a
         # MetaBuilderConfig here; see MetaBuilderConfig.from_agent_config.
         self.meta_config = (

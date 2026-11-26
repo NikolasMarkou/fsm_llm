@@ -316,11 +316,6 @@ def reject_misplaced_kwargs(pattern: str, api_kwargs: Mapping[str, Any]) -> None
     # later with "multiple values" (API-02). Do NOT reject unknown kwargs in
     # general: `seed`, `timeout`, `caching`, `handlers`, `llm_interface`, ... are
     # legitimate API/litellm passthrough. See decisions.md D-003.
-    if api_kwargs.get("context") is not None:  # only the meta builder lands here
-        raise TypeError(
-            f"{pattern} does not accept context=: a run of it is not under a RunContext "
-            "(it would reach the API it builds, not the run)"
-        )
     misplaced = sorted(
         k for k in api_kwargs if k in MISPLACED_AGENT_KWARGS or k in _HITL_CTOR_KWARGS
     )
