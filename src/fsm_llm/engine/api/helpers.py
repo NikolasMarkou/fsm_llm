@@ -18,6 +18,7 @@ from fsm_llm.core.definitions import (
     FSMDefinition,
     FSMError,
     MissingExecutorError,
+    RunBudgetExceededError,
 )
 from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.engine.fsm.manager import FSMManager
@@ -221,3 +222,59 @@ def llm_settings_for(api_kwargs: Mapping[str, Any], **settings: Any) -> dict[str
     if api_kwargs.get("llm_interface") is not None:
         return {}
     return dict(settings)
+
+
+_CONTEXT_NAMES = "resolve_llm step_hook event_log registry cancel budget max_steps max_seconds".split()
+
+
+# DECISION plan-2026-11-26T022222-7efd5cb4/D-013
+# `API` reads a context ONLY by these names (the `check_targets` precedent) and imports nothing of
+# `engine.context`. A context beside a keyword naming the same thing is REFUSED, never merged. Do NOT
+# import `RunContext` at run time, read `callables` (no host object, no grant) or fold its limits
+# into the lifetime `TurnBudget` (they narrow each run-loop call).
+def adopt_run_context(
+    context: Any, *, llm_interface: Any, event_log: Any, targets: Any
+) -> tuple[Any, ...]:
+    """Check *context*; return the ``(llm_interface, event_log, targets)`` ``API`` uses (D-013)."""
+    if context is None:
+        return llm_interface, event_log, targets
+    if missing := [n for n in _CONTEXT_NAMES if not hasattr(context, n)]:
+        raise TypeError(f"context must provide {', '.join(missing)}, got {context!r}")
+    offered = (context.resolve_llm(), context.event_log, context.registry)
+    names = ("llm_interface", "event_log", "targets")
+    given = (llm_interface, event_log, targets)
+    pairs = {n: (a, b) for n, a, b in zip(names, offered, given, strict=True)}
+    both = [n for n, (a, b) in pairs.items() if None not in (a, b)]
+    if both:
+        raise ValueError(f"API(context=...) already supplies {both}: drop the keyword")
+    return tuple(b if b is not None else a for a, b in pairs.values())
+
+
+def refuse_stopped_context(context: Any) -> None:
+    """A set token or a spent ledger of *context* raises before a model call; nothing is charged."""
+    if context is None:
+        return
+    context.cancel.raise_if_cancelled()
+    if (budget := context.budget) and (spent := budget.spent()):
+        limit = getattr(budget, f"max_{spent}")
+        raise RunBudgetExceededError(spent, limit, budget.steps_taken)
+
+
+def _narrowed(name: str, given: Any, ceiling: Any) -> Any:
+    if None not in (given, ceiling) and given > ceiling:
+        raise ValueError(f"{name}={given!r} is above the context's {ceiling!r}")
+    return ceiling if given is None else given
+
+
+def context_run(context: Any, max_steps: int, max_seconds: float | None) -> Any:
+    """``(max_steps, max_seconds, hook)`` of ONE run-loop call: each limit the smaller of the
+    caller's and the context's (a larger caller value is a ``ValueError``), the hook a fresh
+    ``context.step_hook()``; ``None`` passes the limits through with no hook."""
+    if context is None:
+        return max_steps, max_seconds, None
+    seconds = _narrowed("max_seconds", max_seconds, context.max_seconds)
+    return (
+        _narrowed("max_steps", max_steps, context.max_steps),
+        seconds,
+        context.step_hook(),
+    )

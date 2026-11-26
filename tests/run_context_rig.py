@@ -4,7 +4,7 @@ Three packages need the same doubles (agents, the reasoning engine, the workflow
 live here once: a capturing model double, an ``EventLog`` object over a temp directory, a spy on the
 one run loop body (``fsm_llm.engine.api.run._run_rounds``, so every ``run_until_terminal*`` of every
 runner is seen once), and a stand-in clock. ``collect_sections(work_dir)`` runs the parity matrix
-(PG-agent, PG-reasoning, PG-workflow, PG-adapters) with NO ``context=`` anywhere and returns plain
+(PG-agent, PG-reasoning, PG-workflow, PG-adapters, PG-api) with NO ``context=`` anywhere and returns plain
 JSON data: ``tests/test_fsm_llm/test_run_context_adoption.py`` compares the tree to
 ``tests/fixtures/run_context_parity_golden.json``, which an out-of-repo script wrote by running
 this very function on a ``git archive`` of the plan base 51366ed3 (the golden is the parent's, never
@@ -797,6 +797,124 @@ def adapter_section(work_dir: Path) -> dict[str, Any]:
     return {name: _adapter_case(work_dir, name, make) for name, make in cases.items()}
 
 
+# ---- PG-api (step 11) -------------------------------------------------------------------------
+
+
+def _api_requests(llm: Any) -> list[dict[str, str]]:
+    """Every request a ``_ScriptedLLM`` of ``test_advance`` was asked, as one row per request."""
+    rows: list[dict[str, str]] = []
+    for call, requests in (
+        ("extract_field", llm.field_requests),
+        ("extract_bulk", llm.bulk_requests),
+        ("generate_response", llm.response_requests),
+        ("generate_response_stream", getattr(llm, "stream_requests", [])),
+    ):
+        rows += [request_row(call, json.loads(r.model_dump_json())) for r in requests]
+    return rows
+
+
+def _api_case(
+    work_dir: Path,
+    name: str,
+    run: Callable[[Any, str, Any], dict[str, Any]],
+    *,
+    llm_class: str = "scripted",
+    plan_speaks: bool = False,
+    **api_kwargs: Any,
+) -> dict[str, Any]:
+    """One bounded-run case of a bare ``API``: ``run(api, conversation_id, llm)`` is the body."""
+    from tests.test_fsm_llm.test_advance import (
+        _ScriptedLLM,
+        _start,
+        _StreamingLLM,
+        _trip_fsm,
+    )
+
+    def body(log: Any) -> dict[str, Any]:
+        llm = (_StreamingLLM if llm_class == "stream" else _ScriptedLLM)(
+            {"city": "Paris"}
+        )
+        api, conversation_id = _start(
+            _trip_fsm(plan_speaks=plan_speaks), llm, event_log=log, **api_kwargs
+        )
+        out: dict[str, Any] = {}
+        try:
+            out["result"] = run(api, conversation_id, llm)
+        except Exception as exc:
+            out["error"] = error_of(exc)
+        out["requests"] = _api_requests(llm)
+        out["final_state"] = api.get_current_state(conversation_id)
+        api.close()
+        return out
+
+    return record_case(work_dir, name, body)
+
+
+def api_section(work_dir: Path) -> dict[str, Any]:
+    """PG-api: a bare ``API`` run loop (sync, async, stream, a popping hook, a spent budget)."""
+    from tests.test_fsm_llm.test_run_until_terminal import _push_sub_on_entry
+
+    def outcome(results: Any) -> dict[str, Any]:
+        return {
+            "steps_done": len(results),
+            "path": [[r.state_before, r.state_after] for r in results],
+            "replies": [r.response for r in results],
+        }
+
+    def run_plain(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        return outcome(api.run_until_terminal(cid, max_steps=10))
+
+    def run_hooked(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        return outcome(
+            api.run_until_terminal(cid, max_steps=10, before_step=lambda n: None)
+        )
+
+    def run_budget(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        return outcome(api.run_until_terminal(cid, max_steps=1))
+
+    def run_async_loop(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        coro = api.arun_until_terminal(cid, max_steps=10, before_step=lambda n: None)
+        return outcome(run_async(coro))
+
+    def run_stream(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        return {"chunks": list(api.run_until_terminal_stream(cid, max_steps=10))}
+
+    def run_popping(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        _push_sub_on_entry(api, cid, "plan")
+
+        def pop(step: int) -> None:
+            if api.get_stack_depth(cid) > 1 and api.has_conversation_ended(cid):
+                api.pop_fsm(cid)
+
+        return outcome(api.run_until_terminal(cid, max_steps=10, before_step=pop))
+
+    def converse(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        return {
+            "reply": api.converse("Paris", cid),
+            "ended": api.has_conversation_ended(cid),
+        }
+
+    def converse_twice(api: Any, cid: str, llm: Any) -> dict[str, Any]:
+        api.converse("Paris", cid)
+        return {"reply": api.converse("again", cid)}
+
+    cases: dict[str, Any] = {
+        "run_plain": _api_case(work_dir, "run_plain", run_plain),
+        "run_hooked": _api_case(work_dir, "run_hooked", run_hooked, plan_speaks=True),
+        "run_budget_spent": _api_case(work_dir, "run_budget_spent", run_budget),
+        "arun_hooked": _api_case(work_dir, "arun_hooked", run_async_loop),
+        "run_stream": _api_case(
+            work_dir, "run_stream", run_stream, llm_class="stream", plan_speaks=True
+        ),
+        "run_popping_hook": _api_case(work_dir, "run_popping_hook", run_popping),
+        "converse": _api_case(work_dir, "converse", converse, plan_speaks=True),
+        "converse_lifetime_budget": _api_case(
+            work_dir, "converse_lifetime_budget", converse_twice, max_steps=1
+        ),
+    }
+    return cases
+
+
 # ---- the matrix -------------------------------------------------------------------------------
 
 
@@ -808,4 +926,5 @@ def collect_sections(work_dir: Path) -> dict[str, dict[str, Any]]:
         "PG-reasoning": reasoning_section(work_dir / "reasoning"),
         "PG-workflow": workflow_section(work_dir / "workflow"),
         "PG-adapters": adapter_section(work_dir / "adapters"),
+        "PG-api": api_section(work_dir / "api"),
     }

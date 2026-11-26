@@ -378,6 +378,14 @@ def _reasoning_context_with_a_double(tmp_path: Path) -> None:
     ReasoningEngine(context=RunContext(llm_interface=_double())).close()
 
 
+def _core_api_context_with_a_double(tmp_path: Path) -> None:
+    """Plan 7efd5cb4 D-013: `API(context=)` supplies the interface, no model is resolved."""
+    context = RunContext(llm_interface=_double())
+    api = API.from_definition(_FSM, context=context)
+    api.start_conversation()
+    api.close()
+
+
 def _agents_graph(tmp_path: Path) -> None:
     (
         AgentGraphBuilder()
@@ -408,6 +416,9 @@ def _meta_artifact_builder(tmp_path: Path) -> None:
 
 _NO_MODEL_NEEDED: dict[str, Any] = {
     "core: API.from_definition(llm_interface=) converses": _core_api,
+    "core: API.from_definition(context=) with an interface": (
+        _core_api_context_with_a_double
+    ),
     "core: FSMManager(llm_interface=)": _core_fsm_manager,
     "core: Classifier(llm_interface=)": _core_classifier,
     "agents: default_agent_config(injected interface)": _agents_config_injected,
@@ -585,6 +596,10 @@ def _need_reasoning_engine_context_without_interface(tmp_path: Path) -> None:
     ReasoningEngine(context=RunContext())
 
 
+def _need_api_context_without_interface(tmp_path: Path) -> None:
+    API.from_definition(_FSM, context=RunContext())
+
+
 def _need_judge_without_backend(tmp_path: Path) -> None:
     default_llm_judge()
 
@@ -632,6 +647,9 @@ _MODEL_REQUIRED: dict[str, Any] = {
     "reasoning: ReasoningEngine()": _need_reasoning_engine,
     "reasoning: ReasoningEngine(context=RunContext()) names no interface": (
         _need_reasoning_engine_context_without_interface
+    ),
+    "core: API(context=RunContext()) names no interface": (
+        _need_api_context_without_interface
     ),
     "agents: default_llm_judge() without a backend": _need_judge_without_backend,
     "synthesis: FSMSynthesizer(model=resolve_model())": _need_synthesizer_by_model,

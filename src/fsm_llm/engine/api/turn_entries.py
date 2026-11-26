@@ -33,7 +33,7 @@ from .events import (
     start_event_id,
     start_event_scope,
 )
-from .helpers import _unexpected_error
+from .helpers import _unexpected_error, refuse_stopped_context
 from .stack import FSMStackFrame
 from .surface import _ApiSurface
 
@@ -262,6 +262,8 @@ class TurnEntriesMixin(_ApiSurface):
     ) -> tuple[str, str]:
         """The async twin of ``start_conversation``: the greeting awaits its model call."""
         try:
+            if not _suppress_start:  # a stopped context makes no greeting call
+                refuse_stopped_context(self._context)
             # Start conversation using enhanced FSM manager
             # a logged start mints its id here so the greeting can be logged (start_event_id)
             minted = start_event_id(self, _suppress_start, _conversation_id)

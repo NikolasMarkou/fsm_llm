@@ -1264,6 +1264,11 @@
       "delta": 2,
       "reason": "plan 7efd5cb4 step 9 (D-012): new anchor in workflows/engine/driver.py; the D-005 anchor of workflows/executable.py names D-012 as its partial supersession",
       "token": "plan-2026-11-26T022222-7efd5cb4/D-012"
+    },
+    {
+      "delta": 2,
+      "reason": "plan 7efd5cb4 D-013 (step 11): two new anchor tokens, engine/api/helpers.py (adopt_run_context) and engine/api/run.py (_run_rounds context hook); no existing token moved",
+      "token": "plan-2026-11-26T022222-7efd5cb4/D-013"
     }
   ]
 }

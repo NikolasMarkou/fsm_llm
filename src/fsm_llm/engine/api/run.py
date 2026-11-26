@@ -30,6 +30,7 @@ from fsm_llm.core.definitions import (
 from fsm_llm.engine.fsm.budget import _check_run_budgets
 
 from .calls import settle
+from .helpers import context_run
 from .surface import _ApiSurface
 
 #: ``before_step``: called with the number of the next step; an async hook may return an
@@ -89,6 +90,7 @@ async def _run_rounds(
     max_seconds: float | None,
     before_step: _BeforeStep | None,
     seconds_exempt: frozenset[str] = frozenset(),
+    context_hook: _BeforeStep | None = None,
 ) -> AsyncGenerator[int, None]:
     """Yield 1, 2, ... once for each step a bounded run is allowed to take.
 
@@ -155,8 +157,13 @@ async def _run_rounds(
         check_seconds()
         if steps_done >= max_steps:
             raise RunBudgetExceededError("steps", max_steps, steps_done)
-        if before_step is not None:
-            await _call_hook(before_step, steps_done + 1)
+        # DECISION plan-2026-11-26T022222-7efd5cb4/D-013: the context hook runs BEFORE the caller's
+        # at each STEP, not at the ended-frame offer above (a charge there counts a step that never
+        # runs). Do NOT fold it into `before_step`.
+        hooks = [h for h in (context_hook, before_step) if h is not None]
+        for hook in hooks:
+            await _call_hook(hook, steps_done + 1)
+        if hooks:
             if api.has_conversation_ended(conversation_id):
                 return
             check_seconds()
@@ -369,13 +376,16 @@ class RunMixin(_ApiSurface):
         """The async twin of ``run_until_terminal``: each step awaits ``aadvance``, and an
         async ``before_step`` (one that returns an awaitable) is awaited."""
         _check_run_budgets(max_steps, max_seconds)
+        max_steps, max_seconds, hook = context_run(
+            self._context, max_steps, max_seconds
+        )
         exempt = self._checked_exempt_states(
             conversation_id, seconds_exempt_states, before_step
         )
         results: list[AdvanceResult] = []
         async with aclosing(
             _run_rounds(
-                self, conversation_id, max_steps, max_seconds, before_step, exempt
+                self, conversation_id, max_steps, max_seconds, before_step, exempt, hook
             )
         ) as rounds:
             async for _ in rounds:
@@ -454,6 +464,9 @@ class RunMixin(_ApiSurface):
         id are checked now) that returns a lazy async generator, each step an
         ``aadvance_stream``."""
         _check_run_budgets(max_steps, max_seconds)
+        max_steps, max_seconds, hook = context_run(
+            self._context, max_steps, max_seconds
+        )
         # Existence check at call time, holding no lock afterwards. An ended
         # conversation (terminal, or already closed and remembered) is valid
         # and streams nothing; an unknown ID raises ``ValueError`` here.
@@ -463,12 +476,10 @@ class RunMixin(_ApiSurface):
 
         # Lazy nested closure, as in ``converse_stream`` (anchor
         # plan-2026-07-21T082818-4c63deac/D-002 there).
+        rounds_args = (self, conversation_id, max_steps, max_seconds, before_step)
+
         async def _stream() -> AsyncGenerator[str, None]:
-            async with aclosing(
-                _run_rounds(
-                    self, conversation_id, max_steps, max_seconds, before_step, exempt
-                )
-            ) as rounds:
+            async with aclosing(_run_rounds(*rounds_args, exempt, hook)) as rounds:
                 async for _ in rounds:
                     with _closed_conversation_ends_run(self, conversation_id):
                         async with aclosing(

@@ -2,7 +2,7 @@
 
 Invariant 8 of the plan: with ``context=`` unset every runner is byte for byte what it was at the
 plan base 51366ed3. ``tests/run_context_rig.collect_sections`` runs the parity matrix (PG-agent,
-PG-reasoning, PG-workflow, PG-adapters: request bytes as sha256 of the normalised JSON, the stable
+PG-reasoning, PG-workflow, PG-adapters, and PG-api from step 11: request bytes as sha256 of the normalised JSON, the stable
 fields of every event, the results, the errors, the step numbers every ``before_step`` hook
 received) and ``tests/fixtures/run_context_parity_golden.json`` holds what the same function
 returned on a ``git archive`` of the base. The golden is the PARENT's, written by an out-of-repo
@@ -38,7 +38,7 @@ from tests import run_context_rig as rig
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN_PATH = REPO / "tests" / "fixtures" / "run_context_parity_golden.json"
 GOLDEN: dict[str, dict[str, Any]] = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
-SECTIONS = ("PG-adapters", "PG-agent", "PG-reasoning", "PG-workflow")
+SECTIONS = ("PG-adapters", "PG-agent", "PG-api", "PG-reasoning", "PG-workflow")
 
 
 def test_the_module_under_test_is_this_checkout() -> None:
@@ -79,6 +79,19 @@ class TestTheGoldenIsNotVacuous:
     def test_every_section_is_there_and_holds_cases(self) -> None:
         assert tuple(sorted(GOLDEN)) == SECTIONS
         assert all(len(GOLDEN[name]) >= 5 for name in SECTIONS)
+
+    def test_the_api_section_reached_the_loop_the_hook_and_the_budgets(self) -> None:
+        api = GOLDEN["PG-api"]
+        assert api["run_plain"]["result"]["steps_done"] == 2
+        assert api["run_plain"]["runs"][0]["hook"] is False
+        assert api["run_hooked"]["runs"][0]["steps"] == [1, 2]
+        assert api["run_popping_hook"]["runs"][0]["steps"] == [1, 2, 3, 3]
+        assert api["run_budget_spent"]["error"]["type"] == "RunBudgetExceededError"
+        assert api["converse_lifetime_budget"]["error"]["type"] == (
+            "RunBudgetExceededError"
+        )
+        assert api["run_stream"]["result"]["chunks"]
+        assert api["arun_hooked"]["requests"]
 
     def test_every_case_holds_a_result_or_an_error(self) -> None:
         for name in SECTIONS:
@@ -2175,3 +2188,644 @@ class TestDirectWorkflowEngineOnTheContext:
         _, _, instance = await self._run(t)
         assert instance.status.value == "cancelled"
         assert t.taken == 1 and t.model.calls == 0
+
+
+# ---- API(context=) (plan 7efd5cb4 step 11, D-013) ------------------------------------------------
+
+
+def _api_pieces() -> Any:
+    """The offline FSM helpers of ``test_advance`` and the context classes (imported late: the
+    module is large and the other classes need none of them)."""
+    from fsm_llm.engine.context import CancelToken, RunBudget, RunContext
+    from tests.test_fsm_llm import test_advance as adv
+
+    return adv, CancelToken, RunBudget, RunContext
+
+
+def _asked(llm: Any) -> int:
+    """Model requests a ``_ScriptedLLM`` of ``test_advance`` was asked since its last reset."""
+    return len(llm.field_requests) + len(llm.bulk_requests) + len(llm.response_requests)
+
+
+class _Duck:
+    """NOT a ``RunContext``: exactly the attributes ``API`` reads, and ``callables`` that raise."""
+
+    def __init__(self, llm: Any, **over: Any) -> None:
+        _, CancelToken, _, _ = _api_pieces()
+        self.llm = llm
+        self.event_log = over.get("event_log")
+        self.registry = over.get("registry")
+        self.cancel = over.get("cancel", CancelToken())
+        self.budget = over.get("budget")
+        self.max_steps = over.get("max_steps")
+        self.max_seconds = over.get("max_seconds")
+        self.steps: list[int] = []
+        self.hooks = 0
+
+    def resolve_llm(self) -> Any:
+        return self.llm
+
+    def step_hook(self) -> Any:
+        self.hooks += 1
+        return self.steps.append
+
+    @property
+    def callables(self) -> Any:
+        raise AssertionError("the API read the callables of the context")
+
+
+def _ctx_api(
+    llm: Any | None = None, *, fsm: dict[str, Any] | None = None, **context: Any
+) -> tuple[Any, str, Any, Any]:
+    """``(api, conversation_id, llm, context)``: an ``API`` built with ``context=`` over a scripted
+    double, a conversation started and the double's request lists cleared."""
+    from fsm_llm import API
+
+    adv, _, _, RunContext = _api_pieces()
+    llm = llm or adv._ScriptedLLM({"city": "Paris"})
+    ctx = RunContext(llm_interface=llm, **context)
+    api = API.from_definition(fsm or adv._trip_fsm(), context=ctx)
+    cid, _ = api.start_conversation()
+    llm.reset()
+    return api, cid, llm, ctx
+
+
+def _run_loop(api: Any, cid: str, how: str, **kw: Any) -> Any:
+    """One bounded run through the sync name, the async twin, or either stream; chunks or results."""
+    import asyncio
+
+    kw.setdefault("max_steps", 10)
+    if how == "run":
+        return api.run_until_terminal(cid, **kw)
+    if how == "arun":
+        return asyncio.run(api.arun_until_terminal(cid, **kw))
+    if how == "stream":
+        return list(api.run_until_terminal_stream(cid, **kw))
+
+    async def collect() -> list[str]:
+        return [c async for c in api.arun_until_terminal_stream(cid, **kw)]
+
+    return asyncio.run(collect())
+
+
+_LOOPS = ("run", "arun", "stream", "astream")
+
+
+@pytest.mark.usefixtures("no_model")
+class TestApiTakesAContext:
+    """The keyword, the duck check and the merge: what an ``API`` adopts and what it refuses."""
+
+    def test_the_interface_and_the_log_object_are_the_contexts(
+        self, tmp_path: Path
+    ) -> None:
+        from fsm_llm.runtime import EventLog
+
+        with EventLog(tmp_path / "logs") as log:
+            api, cid, llm, _ = _ctx_api(event_log=log)
+            assert api.llm_interface is llm and api._event_log is log
+            assert api._owns_event_log is False and log.conversation_ids() == [cid]
+            api.close()
+            assert log.conversation_ids() == [cid]  # a shared log is left open
+
+    def test_the_registry_is_the_targets(self) -> None:
+        class Resolver:
+            def resolve_target(self, target_id: str, *, conversation_id: Any = None):
+                raise KeyError(target_id)
+
+        resolver = Resolver()
+        api, _, _, _ = _ctx_api(registry=resolver)
+        assert api._targets is resolver
+        assert _ctx_api()[0]._targets is None
+
+    def test_a_factory_is_called_once_for_the_api(self) -> None:
+        from fsm_llm import API
+
+        adv, _, _, RunContext = _api_pieces()
+        made: list[Any] = []
+
+        def factory() -> Any:
+            made.append(adv._ScriptedLLM({"city": "Paris"}))
+            return made[-1]
+
+        api = API.from_definition(
+            adv._trip_fsm(), context=RunContext(llm_factory=factory)
+        )
+        cid, _ = api.start_conversation()
+        api.run_until_terminal(cid, max_steps=5)
+        api.run_until_terminal(cid, max_steps=5)
+        assert len(made) == 1 and api.llm_interface is made[0]
+
+    def test_a_context_with_no_interface_leaves_the_model_to_resolve_model(
+        self,
+    ) -> None:
+        from fsm_llm import API, FSMError
+        from fsm_llm.llm import LiteLLMInterface, ModelNotConfiguredError
+
+        adv, _, _, RunContext = _api_pieces()
+        with pytest.raises(ModelNotConfiguredError) as info:
+            API.from_definition(adv._trip_fsm(), context=RunContext())
+        assert isinstance(info.value, FSMError)
+        api = API.from_definition(
+            adv._trip_fsm(), context=RunContext(), model="ollama_chat/some-model"
+        )
+        assert isinstance(api.llm_interface, LiteLLMInterface)
+
+    def test_a_context_with_no_interface_takes_an_explicit_interface_and_its_log(
+        self, tmp_path: Path
+    ) -> None:
+        """A context that supplies nothing for a name does not refuse the caller's own."""
+        from fsm_llm import API
+        from fsm_llm.runtime import EventLog
+
+        adv, _, _, RunContext = _api_pieces()
+        llm = adv._ScriptedLLM({"city": "Paris"})
+        with EventLog(tmp_path / "logs") as log:
+            api = API.from_definition(
+                adv._trip_fsm(), llm_interface=llm, context=RunContext(event_log=log)
+            )
+            assert api.llm_interface is llm and api._event_log is log
+
+    @pytest.mark.parametrize(
+        ("keyword", "name"),
+        [
+            ("llm_interface", "llm_interface"),
+            ("model", "model"),
+            ("temperature", "temperature"),
+            ("event_log", "event_log"),
+            ("targets", "targets"),
+        ],
+    )
+    def test_an_overlap_is_refused_and_the_context_never_silently_wins(
+        self, keyword: str, name: str, tmp_path: Path
+    ) -> None:
+        """Kills: a context that wins (or loses) silently beside the caller's own setting."""
+        from fsm_llm import API
+        from fsm_llm.runtime import EventLog
+
+        adv, _, _, RunContext = _api_pieces()
+
+        class Resolver:
+            def resolve_target(self, target_id: str, *, conversation_id: Any = None):
+                raise KeyError(target_id)
+
+        mine = {
+            "llm_interface": adv._ScriptedLLM(),
+            "model": "ollama_chat/other",
+            "temperature": 0.5,
+            "event_log": EventLog(tmp_path / "mine"),
+            "targets": Resolver(),
+        }[keyword]
+        context = RunContext(
+            llm_interface=adv._ScriptedLLM(),
+            event_log=EventLog(tmp_path / "theirs"),
+            registry=Resolver(),
+        )
+        with pytest.raises(ValueError) as info:
+            API.from_definition(adv._trip_fsm(), context=context, **{keyword: mine})
+        text = str(info.value)
+        assert name in text
+        if keyword in ("llm_interface", "event_log", "targets"):
+            assert "context" in text  # the refusal this plan adds names both sides
+        context.event_log.close()  # type: ignore[union-attr]
+        if keyword == "event_log":
+            mine.close()  # type: ignore[union-attr]
+
+    def test_a_factory_context_beside_an_explicit_interface_is_refused(self) -> None:
+        from fsm_llm import API
+
+        adv, _, _, RunContext = _api_pieces()
+        with pytest.raises(ValueError, match="llm_interface"):
+            API.from_definition(
+                adv._trip_fsm(),
+                llm_interface=adv._ScriptedLLM(),
+                context=RunContext(llm_factory=adv._ScriptedLLM),
+            )
+
+    def test_a_context_that_is_not_one_is_refused_naming_what_is_missing(self) -> None:
+        from unittest.mock import Mock
+
+        from fsm_llm import API
+
+        adv, _, _, _ = _api_pieces()
+        llm = adv._ScriptedLLM()
+        with pytest.raises(TypeError, match="resolve_llm"):
+            API.from_definition(
+                adv._trip_fsm(), llm_interface=llm, context=Mock(spec=[])
+            )
+        with pytest.raises(TypeError, match="step_hook"):
+            API.from_definition(
+                adv._trip_fsm(), llm_interface=llm, context=Mock(spec=["resolve_llm"])
+            )
+        with pytest.raises(TypeError, match="context"):
+            API.from_definition(adv._trip_fsm(), llm_interface=llm, context="ctx")
+
+    def test_context_none_is_no_context(self) -> None:
+        from fsm_llm import API
+
+        adv, _, _, _ = _api_pieces()
+        llm = adv._ScriptedLLM({"city": "Paris"})
+        api = API.from_definition(adv._trip_fsm(), llm_interface=llm, context=None)
+        cid, _ = api.start_conversation()
+        assert len(api.run_until_terminal(cid, max_steps=5)) == 2
+
+    def test_a_duck_context_works_and_its_callables_are_never_read(self) -> None:
+        """The API imports no ``RunContext``: any object with the names serves, and no grant or
+        host object of ``callables`` can reach a turn (the property raises when touched)."""
+        from fsm_llm import API
+
+        adv, _, _, _ = _api_pieces()
+        llm = adv._ScriptedLLM({"city": "Paris"})
+        duck = _Duck(llm)
+        api = API.from_definition(adv._trip_fsm(), context=duck)
+        cid, _ = api.start_conversation()
+        assert len(api.run_until_terminal(cid, max_steps=5)) == 2
+        assert duck.steps == [1, 2] and duck.hooks == 1
+
+
+@pytest.mark.usefixtures("no_model")
+class TestApiRunLoopsComposeTheContextHook:
+    """``run_until_terminal``, ``arun_until_terminal`` and both streams run ONE fresh context hook
+    per call, before the caller's own ``before_step``, at each step and not at the ended-frame
+    offer; the ledger counts the steps and a set token stops the run before the step."""
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_the_ledger_counts_the_steps_of_a_run(self, how: str) -> None:
+        """Kills: the hook dropped from a loop (taken 0), a charge per call (the ended frame)."""
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=10)
+        api, cid, _, _ = _ctx_api(budget=ledger)
+        _run_loop(api, cid, how)
+        assert ledger.steps_taken == 2
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_the_context_hook_runs_before_the_callers_at_every_step(
+        self, how: str
+    ) -> None:
+        """Kills M33: the context hook after the caller's (the caller sees taken == step - 1)."""
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=10)
+        api, cid, _, _ = _ctx_api(budget=ledger)
+        seen: list[tuple[int, int]] = []
+
+        def caller(step: int) -> None:
+            seen.append((step, ledger.steps_taken))
+
+        _run_loop(api, cid, how, before_step=caller)
+        assert seen == [(1, 1), (2, 2)]
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_a_token_set_before_the_run_stops_it_before_any_step(
+        self, how: str
+    ) -> None:
+        """Kills: an unhooked loop (the run would ask the double) and M33 (the caller's hook runs
+        first on a cancelled run)."""
+        from fsm_llm.engine.context import RunCancelledError
+
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=10)
+        api, cid, llm, ctx = _ctx_api(budget=ledger)
+        ctx.cancel.cancel()
+        called: list[int] = []
+        with pytest.raises(RunCancelledError):
+            _run_loop(api, cid, how, before_step=called.append)
+        assert _asked(llm) == 0 and ledger.steps_taken == 0 and called == []
+        assert api.get_current_state(cid) == "collect"
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_a_token_set_during_a_step_ends_the_run_at_the_next_check(
+        self, how: str
+    ) -> None:
+        from fsm_llm.engine.context import RunCancelledError
+
+        adv, _, RunBudget, _ = _api_pieces()
+        holder: list[Any] = []
+
+        class Cancelling(adv._ScriptedLLM):
+            def extract_field(self, request: Any) -> Any:
+                holder[0].cancel.cancel()
+                return super().extract_field(request)
+
+        ledger = RunBudget(max_steps=10)
+        api, cid, llm, ctx = _ctx_api(Cancelling({"city": "Paris"}), budget=ledger)
+        holder.append(ctx)
+        with pytest.raises(RunCancelledError):
+            _run_loop(api, cid, how)
+        frozen = _asked(llm)
+        assert (
+            api.get_current_state(cid) == "plan"
+        )  # step 1 committed, step 2 never began
+        assert ledger.steps_taken == 1
+        with pytest.raises(RunCancelledError):  # the NEXT run on the dead context
+            _run_loop(api, cid, how)
+        assert _asked(llm) == frozen and ledger.steps_taken == 1
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_a_spent_ledger_stops_the_run_before_the_step_it_forbids(
+        self, how: str
+    ) -> None:
+        from fsm_llm import RunBudgetExceededError
+
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=1)
+        api, cid, _, _ = _ctx_api(budget=ledger)
+        with pytest.raises(RunBudgetExceededError) as info:
+            _run_loop(api, cid, how)
+        assert (info.value.budget, info.value.limit) == ("steps", 1)
+        assert api.get_current_state(cid) == "plan" and ledger.steps_taken == 1
+
+    def test_one_ledger_over_two_conversations_of_two_apis(self) -> None:
+        """Exact sharing: 2 + 1 steps are allowed by a ledger of 3 and the 4th is refused."""
+        from fsm_llm import API, RunBudgetExceededError
+
+        adv, _, RunBudget, RunContext = _api_pieces()
+        ledger = RunBudget(max_steps=3)
+        llm_a, llm_b = (adv._ScriptedLLM({"city": "Paris"}) for _ in range(2))
+        first = API.from_definition(
+            adv._trip_fsm(), context=RunContext(llm_interface=llm_a, budget=ledger)
+        )
+        second = API.from_definition(
+            adv._trip_fsm(), context=RunContext(llm_interface=llm_b, budget=ledger)
+        )
+        cid_a, _ = first.start_conversation()
+        cid_b, _ = second.start_conversation()
+        assert len(first.run_until_terminal(cid_a, max_steps=10)) == 2
+        with pytest.raises(RunBudgetExceededError):
+            second.run_until_terminal(cid_b, max_steps=10)
+        assert ledger.steps_taken == 3 and second.get_current_state(cid_b) == "plan"
+
+    @pytest.mark.parametrize("how", ["run", "arun"])
+    def test_the_ended_frame_offer_to_a_hook_that_pops_is_not_charged(
+        self, how: str
+    ) -> None:
+        """Kills a composition INTO ``before_step``: the offer of an ended pushed frame would be
+        charged as a step that never runs (taken 4 for 3 steps)."""
+        from tests.test_fsm_llm.test_run_until_terminal import _push_sub_on_entry
+
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=10)
+        api, cid, _, _ = _ctx_api(budget=ledger)
+        _push_sub_on_entry(api, cid, "plan")
+        offers: list[int] = []
+
+        def pop(step: int) -> None:
+            offers.append(step)
+            if api.get_stack_depth(cid) > 1 and api.has_conversation_ended(cid):
+                api.pop_fsm(cid)
+
+        results = _run_loop(api, cid, how, before_step=pop)
+        assert offers == [1, 2, 3, 3] and len(results) == 3
+        assert ledger.steps_taken == 3
+
+    @pytest.mark.parametrize("how", ["run", "arun"])
+    @pytest.mark.parametrize("caller", [False, True])
+    def test_an_ended_frame_nobody_pops_is_not_charged(
+        self, how: str, caller: bool
+    ) -> None:
+        """Kills M35: with the hook folded into ``before_step`` the run offers the ended pushed
+        frame to it, charges a step that never runs, and returns (taken 3 for 2 steps)."""
+        from tests.test_fsm_llm.test_run_until_terminal import _push_sub_on_entry
+
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=10)
+        api, cid, _, _ = _ctx_api(budget=ledger)
+        _push_sub_on_entry(api, cid, "plan")
+        kw = {"before_step": (lambda n: None)} if caller else {}
+        results = _run_loop(api, cid, how, **kw)
+        assert len(results) == 2 and api.get_stack_depth(cid) == 2
+        assert ledger.steps_taken == 2
+
+    def test_with_no_ledger_and_no_caller_hook_the_loop_still_checks_the_token(
+        self,
+    ) -> None:
+        from fsm_llm.engine.context import RunCancelledError
+
+        api, cid, llm, ctx = _ctx_api()
+        ctx.cancel.cancel()
+        with pytest.raises(RunCancelledError):
+            api.run_until_terminal(cid, max_steps=3)
+        assert _asked(llm) == 0
+
+    def test_each_run_takes_a_fresh_closure(self) -> None:
+        """Kills a closure kept on the API: the second run would not be charged from step 1."""
+        from fsm_llm import RunBudgetExceededError
+
+        _, _, RunBudget, _ = _api_pieces()
+        ledger = RunBudget(max_steps=10)
+        api, cid, _, _ = _ctx_api(budget=ledger)
+        with pytest.raises(RunBudgetExceededError):  # the call's own limit of one step
+            api.run_until_terminal(cid, max_steps=1)
+        api.run_until_terminal(cid, max_steps=1)
+        assert ledger.steps_taken == 2
+
+
+@pytest.mark.usefixtures("no_model")
+class TestApiNarrowsEachRunNotTheLifetime:
+    """O-4 of D-002: the limits of the context narrow each run-loop CALL; the lifetime turn budget
+    of the conversation is the constructor's and is never read from the context."""
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_an_explicit_steps_value_above_the_contexts_is_refused_at_the_call(
+        self, how: str
+    ) -> None:
+        api, cid, llm, _ = _ctx_api(max_steps=2)
+        with pytest.raises(ValueError, match="max_steps"):
+            _run_loop(api, cid, how, max_steps=3)
+        assert _asked(llm) == 0 and api.get_current_state(cid) == "collect"
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_a_smaller_or_equal_steps_value_is_the_callers(self, how: str) -> None:
+        from fsm_llm import RunBudgetExceededError
+
+        api, cid, _, _ = _ctx_api(max_steps=2)
+        with pytest.raises(RunBudgetExceededError) as info:
+            _run_loop(api, cid, how, max_steps=1)
+        assert (info.value.budget, info.value.limit) == ("steps", 1)
+        api2, cid2, _, _ = _ctx_api(max_steps=2)
+        _run_loop(api2, cid2, how, max_steps=2)
+        assert api2.has_conversation_ended(cid2)
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_the_seconds_of_the_context_apply_when_the_caller_names_none(
+        self, how: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills: the context seconds ignored (the run would finish) and widening by the caller."""
+        from fsm_llm import RunBudgetExceededError
+        from tests.conftest import bind_api_clock
+        from tests.test_fsm_llm.test_run_until_terminal import _FakeClock, _SlowLLM
+
+        clock = _FakeClock()
+        bind_api_clock(monkeypatch, clock)
+        llm = _SlowLLM(clock, 6.0, fields={"city": "Paris"})
+        api, cid, _, _ = _ctx_api(llm, max_seconds=5.0)
+        with pytest.raises(RunBudgetExceededError) as info:
+            _run_loop(api, cid, how)
+        assert (info.value.budget, info.value.limit) == ("seconds", 5.0)
+        assert api.get_current_state(cid) == "plan"
+
+    @pytest.mark.parametrize("how", _LOOPS)
+    def test_a_seconds_value_above_the_contexts_is_refused_at_the_call(
+        self, how: str
+    ) -> None:
+        api, cid, llm, _ = _ctx_api(max_seconds=5.0)
+        with pytest.raises(ValueError, match="max_seconds"):
+            _run_loop(api, cid, how, max_seconds=6.0)
+        assert _asked(llm) == 0
+
+    def test_a_context_with_no_limit_changes_nothing(self) -> None:
+        api, cid, _, _ = _ctx_api()
+        assert len(api.run_until_terminal(cid, max_steps=10, max_seconds=100.0)) == 2
+
+    def test_the_lifetime_turn_budget_is_never_read_from_the_context(self) -> None:
+        """Kills M32: the context limit merged into the lifetime ``TurnBudget`` (the second
+        ``converse`` below would raise, and ``_turn_budget`` would not be ``(None, None)``)."""
+        from tests.test_fsm_llm.test_run_until_terminal import _loop_fsm
+
+        api, cid, _, _ = _ctx_api(fsm=_loop_fsm(), max_steps=1, max_seconds=5.0)
+        assert api._turn_budget == (None, None)
+        for text in ("Paris", "again", "and again"):
+            api.converse(text, cid)
+
+    def test_an_explicit_lifetime_budget_of_the_api_still_applies(self) -> None:
+        from fsm_llm import API, RunBudgetExceededError
+
+        adv, _, _, RunContext = _api_pieces()
+        llm = adv._ScriptedLLM({"city": "Paris"})
+        api = API.from_definition(
+            adv._trip_fsm(),
+            context=RunContext(llm_interface=llm, max_steps=10),
+            max_steps=1,
+        )
+        cid, _ = api.start_conversation()
+        api.converse("Paris", cid)
+        with pytest.raises(RunBudgetExceededError):
+            api.converse("again", cid)
+
+
+def _speaking_start_fsm() -> dict[str, Any]:
+    """One state that speaks at its start: the greeting is one model call."""
+    adv, _, _, _ = _api_pieces()
+    return {
+        "name": "hello",
+        "description": "Greets",
+        "initial_state": "hello",
+        "states": {"hello": adv._state("hello", speaks=True)},
+    }
+
+
+@pytest.mark.usefixtures("no_model")
+class TestApiRefusesAStoppedContextBeforeTheGreeting:
+    """A cancelled or spent context spends no model call, not even the greeting."""
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_set_token_starts_nothing(self, how: str) -> None:
+        import asyncio
+
+        from fsm_llm import API
+        from fsm_llm.engine.context import RunCancelledError
+
+        adv, _, _, RunContext = _api_pieces()
+        llm = adv._ScriptedLLM()
+        ctx = RunContext(llm_interface=llm)
+        api = API.from_definition(_speaking_start_fsm(), context=ctx)
+        ctx.cancel.cancel()
+        with pytest.raises(RunCancelledError):
+            if how == "sync":
+                api.start_conversation()
+            else:
+                asyncio.run(api.astart_conversation())
+        assert _asked(llm) == 0 and api.list_active_conversations() == []
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    def test_a_spent_ledger_starts_nothing(self, how: str) -> None:
+        import asyncio
+
+        from fsm_llm import API, RunBudgetExceededError
+
+        adv, _, RunBudget, RunContext = _api_pieces()
+        llm = adv._ScriptedLLM()
+        ledger = RunBudget(max_steps=1)
+        ledger.charge()
+        api = API.from_definition(
+            _speaking_start_fsm(), context=RunContext(llm_interface=llm, budget=ledger)
+        )
+        with pytest.raises(RunBudgetExceededError) as info:
+            if how == "sync":
+                api.start_conversation()
+            else:
+                asyncio.run(api.astart_conversation())
+        assert (info.value.budget, info.value.limit) == ("steps", 1)
+        assert _asked(llm) == 0 and ledger.steps_taken == 1
+
+    def test_an_unspent_context_greets_and_charges_nothing(self) -> None:
+        from fsm_llm import API
+
+        adv, _, RunBudget, RunContext = _api_pieces()
+        llm = adv._ScriptedLLM()
+        ledger = RunBudget(max_steps=3)
+        api = API.from_definition(
+            _speaking_start_fsm(), context=RunContext(llm_interface=llm, budget=ledger)
+        )
+        _, greeting = api.start_conversation()
+        assert greeting and len(llm.response_requests) == 1 and ledger.steps_taken == 0
+
+    def test_a_restore_of_a_snapshot_makes_no_model_call_and_is_not_refused(
+        self,
+    ) -> None:
+        """A suppressed start (restore, resume) has no greeting: the check is the greeting's."""
+        adv, _, _, RunContext = _api_pieces()
+        from fsm_llm import API
+
+        llm = adv._ScriptedLLM()
+        ctx = RunContext(llm_interface=llm)
+        api = API.from_definition(_speaking_start_fsm(), context=ctx)
+        cid, _ = api.start_conversation()
+        llm.reset()
+        ctx.cancel.cancel()
+        cid2, text = api.start_conversation(_suppress_start=True)
+        assert cid2 != cid and text == "" and _asked(llm) == 0
+
+
+class TestApiImportsNoRunContext:
+    """The layering rule held by a test and not only by ``lint-imports`` (M31)."""
+
+    def test_the_api_modules_name_no_engine_context_import_at_run_time(self) -> None:
+        import ast
+
+        root = REPO / "src" / "fsm_llm" / "engine" / "api"
+        bad: list[str] = []
+        for path in sorted(root.glob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            guarded = {
+                id(node)
+                for top in ast.walk(tree)
+                if isinstance(top, ast.If) and "TYPE_CHECKING" in ast.dump(top.test)
+                for node in ast.walk(top)
+            }
+            for node in ast.walk(tree):
+                names = []
+                if isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""]
+                elif isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                if (
+                    any("engine.context" in n for n in names)
+                    and id(node) not in guarded
+                ):
+                    bad.append(f"{path.name}:{node.lineno}")
+        assert bad == []
+
+    def test_importing_the_api_loads_no_context_module(self) -> None:
+        import os
+        import subprocess
+        import sys
+
+        code = (
+            "import sys, fsm_llm.engine.api.conversation as c;"
+            f"assert c.__file__.startswith({str(REPO / 'src')!r}), c.__file__;"
+            "assert 'fsm_llm.engine.context' not in sys.modules, 'loaded'"
+        )
+        env = {**os.environ, "PYTHONPATH": str(REPO / "src")}
+        done = subprocess.run(
+            [sys.executable, "-c", code], env=env, capture_output=True, text=True
+        )
+        assert done.returncode == 0, done.stderr

@@ -42,6 +42,7 @@ class _ApiSurface:
         fsm_manager: FSMManager
         _executors: Mapping[str, StateExecutor]
         _targets: TargetResolver | None
+        _context: Any
         _temp_fsm_definitions: dict[str, FSMDefinition]
         _pending_push_ids: set[str]
         _call_marks: CallMarks

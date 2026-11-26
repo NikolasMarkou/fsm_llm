@@ -142,6 +142,7 @@ from .helpers import (
     _require_classifier_interface,
     _require_state_executors,
     _require_target_resolver,
+    adopt_run_context,
 )
 from .lifecycle import MAX_ENDED_CONVERSATIONS_CACHE, LifecycleMixin
 from .registration import HandlerRegistrationMixin
@@ -194,6 +195,7 @@ class API(
         event_log: EventLog | str | os.PathLike[str] | None = None,
         max_steps: int | None = None,
         max_seconds: float | None = None,
+        context: Any = None,
         **llm_kwargs,
     ):
         """
@@ -250,8 +252,15 @@ class API(
                 a resume start a fresh budget from it. An int of at least 1.
             max_seconds: Default lifetime wall-clock budget, as ``max_steps``; a
                 number above 0.
+            context: Optional ``RunContext`` (read by attribute): its interface, log and registry
+                (as ``targets``) fill what the caller left unset (a clash is a ``ValueError``);
+                each run loop takes its step hook and its limits narrow the call, not the lifetime.
             **llm_kwargs: Additional LLM parameters
         """
+        self._context = context
+        llm_interface, event_log, targets = adopt_run_context(
+            context, llm_interface=llm_interface, event_log=event_log, targets=targets
+        )
         # Handle LLM interface initialization
         if llm_interface is not None:
             if not isinstance(llm_interface, LLMInterface):
