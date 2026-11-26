@@ -339,3 +339,27 @@ class TestTheOfferOfAnEndedFrameIsNoStep:
         ctx.cancel.cancel()
         with pytest.raises(RunCancelledError):
             hook(EndedFrameOffer(3))
+
+
+class TestTheMetaBuilderRefusesAContext:
+    """17.3: `MetaBuilderAgent` is not a `BaseAgent` and a run of it is not under a context in this
+    release, so `context=` is refused by name at construction, not swallowed into the `API`s it
+    builds later (partial adoption: a set token refused `start()`, the ledger was never charged)."""
+
+    @pytest.mark.parametrize("value", ["anything", RunContext()])
+    def test_the_keyword_is_a_type_error_naming_it(self, value: Any) -> None:
+        """Kills M48: `context` not in the refusal (it is forwarded to every API built later)."""
+        from fsm_llm.agents import MetaBuilderAgent
+        from tests import pattern_runs as pr
+
+        with pytest.raises(TypeError, match="context") as caught:
+            MetaBuilderAgent(llm_interface=pr.ScriptedModel(), context=value)
+        assert "RunContext" in str(caught.value)
+
+    def test_no_context_builds_as_before(self) -> None:
+        from fsm_llm.agents import MetaBuilderAgent
+        from tests import pattern_runs as pr
+
+        model = pr.ScriptedModel()
+        assert MetaBuilderAgent(llm_interface=model) is not None
+        assert MetaBuilderAgent(llm_interface=model, context=None) is not None
