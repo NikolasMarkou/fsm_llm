@@ -12,12 +12,20 @@ decision and the section it moves).
 
 The comparer is shown able to FAIL: ``TestTheComparerCanFail`` plants a changed request byte, an
 extra hook call, an extra event and a dropped result field in a copy of the golden, and every one
-is reported. Later steps of the plan add the acceptance class to this file.
+is reported.
+
+The file also holds one class per runner (the agent, the reasoning engine) and the cross-runner
+acceptance (step 8): ``TestOneLog``, ``TestOneCancel``, ``TestOneBudget``,
+``TestOneBudgetOverARunLoop``, ``TestThreeThreadsOneLedger`` and ``TestNoGrant`` run an agent, a
+reasoning solve and a workflow instance (the workflow adapter, a step that runs an FSM executable
+as a child) under ONE context and pin: one log, one cancellation, one ledger, no grant. The sweep
+class at the end requires every run loop of the three packages to pass ``before_step``.
 """
 
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -1263,3 +1271,845 @@ class TestEveryRunLoopPassesTheHook:
             (5, True),
             (7, False),
         ]
+
+
+# ---- the cross-runner acceptance (plan 7efd5cb4 step 8): the done-when, literally -----------------
+#
+# ONE context, three runners: an agent run, a reasoning solve and a workflow instance (the workflow
+# adapter, a step that runs an FSM executable as a child). They write to ONE log (an `EventLog`
+# OBJECT), stop on ONE cancellation and share ONE ledger. Every count is exact: a scripted double,
+# no clock, no sleep; a thread waits only on an `Event` or a `Barrier` with a timeout. The engine of
+# a reasoning solve has no async API, so its async twin runs `solve_problem` on a worker thread.
+
+import asyncio
+import threading
+
+#: the steps of each runner under the rig below (agent: react; solve: deductive orchestrator and the
+#: classifier loop; workflow: prep and call, then the child FSM `a -> b -> c`)
+_AGENT_STEPS, _SOLVE_STEPS, _FLOW_STEPS = 3, 10, 4
+_TOTAL = _AGENT_STEPS + _SOLVE_STEPS + _FLOW_STEPS
+
+
+def _everyone() -> type:
+    """The ONE interface of the acceptance rig: the agent's, the solve's and the child FSM's."""
+    from tests import pattern_runs as pr
+
+    class Everyone(pr.ScriptedModel):
+        """``ScriptedModel`` answers the agent and the child FSM; the scripted solve answers the
+        fields of the reasoning script. ``triggers`` maps a field name to a callable that runs when
+        that field is asked (a cancel, a clock): the way a double acts INSIDE a runner."""
+
+        def __init__(self, triggers: dict[str, Any] | None = None) -> None:
+            super().__init__()
+            self.inner = sc._ScriptedLLM(sc._VALID_SCRIPT)
+            self.triggers = triggers or {}
+
+        @property
+        def calls(self) -> int:
+            return (
+                len(self.log) + len(self.inner.requests) + len(self.inner.completions)
+            )
+
+        def _fire(self, names: Any) -> None:
+            for name in names:
+                if name in self.triggers:
+                    self.triggers[name]()
+
+        def extract_field(self, request: Any) -> Any:
+            self._fire([request.field_name])
+            if request.field_name in sc._VALID_SCRIPT:
+                return self.inner.extract_field(request)
+            return super().extract_field(request)
+
+        def extract_bulk_data(self, request: Any) -> Any:
+            names = pr._BULK_NAME.findall(request.system_prompt)
+            self._fire(names)
+            if any(n in sc._VALID_SCRIPT for n in names):
+                return self.inner.extract_bulk_data(request)
+            return super().extract_bulk_data(request)
+
+        def complete(self, request: Any) -> Any:
+            return self.inner.complete(request)
+
+    return Everyone
+
+
+def _chain_document() -> dict[str, Any]:
+    """The child FSM, `a -> b -> c`: two loop steps, `a` extracts ``result``."""
+    from tests.test_fsm_llm import kind_corpus as kc
+
+    return {
+        "schema": "fsm-llm/executable",
+        "kind": "fsm",
+        "id": "chain",
+        "contract": {"inputs": ["topic"], "outputs": ["result"]},
+        "body": {
+            "fsm": kc._fsm(
+                "Chain",
+                "a",
+                kc._state(
+                    "a",
+                    extraction_instructions="Extract the result.",
+                    required_context_keys=["result"],
+                    response_instructions="A.",
+                    transitions=[kc._go("b")],
+                ),
+                kc._state("b", response_instructions="B.", transitions=[kc._go("c")]),
+                kc._state("c", response_instructions="C."),
+            )
+        },
+    }
+
+
+class _Three:
+    """One context over three runners: the agent, the reasoning engine and the workflow adapter."""
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        *,
+        triggers: dict[str, Any] | None = None,
+        on_prep: Any = None,
+        on_tool: Any = None,
+        hitl: Any = None,
+        path_log: bool = False,
+        **context: Any,
+    ) -> None:
+        from fsm_llm import agents as A
+        from fsm_llm.core.names import NameRegistry
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from fsm_llm.runtime import EventLog
+        from tests import pattern_runs as pr
+        from tests.test_fsm_llm_workflows.test_workflow_executable import (
+            _auto,
+            _document,
+        )
+
+        self.model = _everyone()(triggers)
+        self.path = tmp_path
+        self.log = EventLog(tmp_path / "logs")
+        shared = tmp_path if path_log else self.log
+        self.token = context.pop("cancel", None) or CancelToken()
+        names: NameRegistry[Any] = NameRegistry("callables")
+        names.register("prep", lambda ctx: on_prep() if on_prep else None)
+        if hitl is not None:
+            names.register("hitl", hitl)
+        registry = ExecutableRegistry()
+        registry.add_document(_chain_document())
+        call = {
+            "type": "ExecutableStep",
+            "step_id": "call",
+            "name": "call",
+            "target": "chain",
+            "inputs": {"topic": "subject"},
+            "returns": {"final": "result"},
+            "success_step_id": "",
+        }
+        self.workflow = registry.add_document(
+            _document(
+                {"prep": _auto("prep", "call", "prep"), "call": call},
+                ident="compose",
+                inputs=("subject",),
+                outputs=("final",),
+                callables=("prep",),
+                executables=("chain",),
+            )
+        )
+        self.registry = registry
+        self.ctx = RunContext(
+            llm_interface=self.model,
+            event_log=shared,
+            cancel=self.token,
+            callables=names,
+            registry=registry,
+            **context,
+        )
+        self.agent = A.ReactAgent(
+            _agent_tools(on_call=on_tool), config=pr._config(), context=self.ctx
+        )
+        self.engine = ReasoningEngine(context=self.ctx)
+
+    @property
+    def taken(self) -> int:
+        assert self.ctx.budget is not None
+        return self.ctx.budget.steps_taken
+
+    async def agent_run(self, how: str) -> Any:
+        from tests import pattern_runs as pr
+
+        if how == "sync":
+            return await asyncio.to_thread(self.agent.run, pr._TASK)
+        return await self.agent.arun(pr._TASK)
+
+    async def solve(self, how: str) -> Any:
+        # no async API on the engine: both twins run the sync body on a worker thread
+        return await asyncio.to_thread(self.engine.solve_problem, sc._PROBLEM)
+
+    async def flow(self, how: str) -> Any:
+        inputs = {"subject": "t"}
+        if how == "sync":
+            return await asyncio.to_thread(self.workflow.run, inputs, context=self.ctx)
+        return await self.workflow.arun(inputs, context=self.ctx)
+
+    async def attempt(self, run: Any, how: str) -> tuple[Any, BaseException | None]:
+        try:
+            return await run(how), None
+        except Exception as exc:
+            return None, exc
+
+    def types(self) -> list[str]:
+        return [e["type"] for e in rig.events_of(self.log)]
+
+    def paired(self) -> bool:
+        types = self.types()
+        return types.count("llm/request") == (
+            types.count("llm/response") + types.count("provider/error")
+        )
+
+    def idle(self) -> bool:
+        e = self.engine
+        return (
+            e.orchestrator.list_active_conversations() == []
+            and e.classifier.list_active_conversations() == []
+            and dict(e.orchestrator.fsm_manager.instances) == {}
+            and not e._solve_lock.locked()
+        )
+
+    def close(self) -> None:
+        self.engine.close()
+        self.log.close()
+
+
+@pytest.fixture
+def three(tmp_path: Path) -> Any:
+    made: list[_Three] = []
+
+    def make(**kw: Any) -> _Three:
+        made.append(_Three(tmp_path / f"t{len(made)}", **kw))
+        return made[-1]
+
+    yield make
+    for t in made:
+        t.close()
+
+
+HOW = pytest.mark.parametrize("how", ["sync", "async"])
+
+
+_ORDERS = [
+    ("agent_run", "solve", "flow"),
+    ("flow", "agent_run", "solve"),
+    ("solve", "flow", "agent_run"),
+]
+
+
+def _cancelled(who: str, result: Any, error: BaseException | None) -> bool:
+    """Did runner ``who`` end because the token of the context was set?"""
+    from fsm_llm.core.codes import Reason, Status
+
+    if who == "agent_run":
+        return isinstance(error, RunCancelledError)
+    if who == "solve":
+        return isinstance(error, ReasoningExecutionError) and (
+            RunCancelledError in _solve_chain(error)
+        )
+    return error is None and (result.status, result.reason) == (
+        Status.ABORTED,
+        Reason.CANCELLED,
+    )
+
+
+def _ledger_stop(who: str, result: Any, error: BaseException | None) -> bool:
+    """Did runner ``who`` end because the shared ledger refused a step (named as such)?"""
+    from fsm_llm.agents.exceptions import BudgetExhaustedError
+    from fsm_llm.core.codes import Reason, Status
+
+    if who == "agent_run":
+        return isinstance(error, BudgetExhaustedError) and (
+            "shared run steps" in str(error)
+        )
+    if who == "solve":
+        return isinstance(error, ReasoningExecutionError) and any(
+            isinstance(c, RunBudgetExceededError) for c in cause_chain(error)
+        )
+    if error is not None:
+        return False
+    if result.status is Status.FAILED:
+        # the ledger refused a step of the CHILD run: the step failed with the child's own
+        # `aborted (budget_spent)` and the instance is `failed` (a known limit, pinned below)
+        return result.reason is None and "(budget_spent)" in result.detail.get(
+            "error", ""
+        )
+    return (result.status, result.reason) == (
+        Status.ABORTED,
+        Reason.BUDGET_SPENT,
+    ) and result.detail.get("shared_budget") == "steps"
+
+
+def _roots(t: _Three) -> dict[str, list[str]]:
+    """The event types of every conversation tree of the log, by the state it started in."""
+    roots: dict[str, list[str]] = {}
+    for cid in t.log.conversation_ids():
+        events = list(t.log.read(cid))
+        first = next(e["state"] for e in events if e.get("state"))
+        roots[first] = [e["type"] for e in events]
+    return roots
+
+
+class TestOneLog:
+    """Row 1: the runners of one context write to the ONE ``EventLog`` object of it."""
+
+    @HOW
+    async def test_every_runner_writes_its_trees_to_the_one_log(
+        self, how: str, three: Any
+    ) -> None:
+        t = three(budget=RunBudget())
+        agent, e1 = await t.attempt(t.agent_run, how)
+        solved, e2 = await t.attempt(t.solve, how)
+        flow, e3 = await t.attempt(t.flow, how)
+        assert (e1, e2, e3) == (None, None, None)  # no LogLockedError, no refusal
+        assert agent.stop_reason == "answered"
+        assert solved[0] == sc._VALID_SCRIPT["final_solution"]
+        assert flow.outputs == {"final": "text"}
+        roots = _roots(t)
+        # the agent root, the orchestrator and the classifier roots, the child tree of the workflow
+        assert sorted(roots) == ["a", "analyze_domain", "problem_analysis", "think"]
+        assert all("llm/request" in types for types in roots.values())
+        assert t.paired() and len(t.log.conversation_ids()) == 4
+        assert t.idle()
+
+    @HOW
+    async def test_a_path_valued_log_gives_each_runner_a_log_of_its_own(
+        self, how: str, three: Any
+    ) -> None:
+        """The runners say it: a PATH is not an object, so each runner opens its own ``EventLog``
+        on it (the recommended form is an object, row above). Four trees, four files."""
+        t = three(budget=RunBudget(), path_log=True)
+        for run in (t.agent_run, t.solve, t.flow):
+            _result, error = await t.attempt(run, how)
+            assert error is None
+        logs = sorted((t.path / "logs").glob("*.jsonl"))
+        assert len(logs) == 4
+
+
+class TestOneCancel:
+    """Row 2: ONE token. A set token stops every runner at its next check, none asks the model
+    again, the conversations are ended and every request has its end. The step in flight when
+    the token is set ends first (the cancel is cooperative and between steps)."""
+
+    @HOW
+    async def test_a_token_set_before_the_runs_stops_all_three_before_any_model_call(
+        self, how: str, three: Any
+    ) -> None:
+        """Kills: any runner outside the cancel (it would ask the double); the pre-run check
+        dropped from the agent, the engine or the workflow adapter."""
+        t = three(budget=RunBudget())
+        t.token.cancel()
+        for who in ("agent_run", "solve", "flow"):
+            result, error = await t.attempt(getattr(t, who), how)
+            assert _cancelled(who, result, error), who
+        assert t.model.calls == 0 and t.taken == 0
+        assert t.types().count("llm/request") == 0 and t.idle()
+        t.engine.close()  # still closable after a cancelled solve
+
+    @HOW
+    async def test_a_token_set_inside_the_agent_run_stops_the_two_runners_that_follow(
+        self, how: str, three: Any
+    ) -> None:
+        """The double (the tool of the agent) sets the token during step 1: the agent ends at
+        step 2's check, BEFORE the charge; then the solve and the workflow end at their first
+        check with the double's count unchanged."""
+        t = three(on_tool=lambda: t.token.cancel(), budget=RunBudget())
+        result, error = await t.attempt(t.agent_run, how)
+        assert _cancelled("agent_run", result, error)
+        frozen = t.model.calls
+        assert frozen > 0 and t.taken == 1  # the check goes before the charge of step 2
+        for who in ("solve", "flow"):
+            result, error = await t.attempt(getattr(t, who), how)
+            assert _cancelled(who, result, error), who
+        assert (t.model.calls, t.taken) == (frozen, 1)
+        assert t.paired() and t.idle()
+
+    @HOW
+    @pytest.mark.parametrize(
+        ("who", "trigger", "taken", "calls"),
+        [
+            ("agent_run", None, 1, None),
+            ("solve", "problem_domain", 2, 11),
+            ("solve", "conclusion", 7, 35),
+            ("flow", "result", 3, None),
+        ],
+        ids=["agent_tool", "solve_classifier", "solve_strategy", "workflow_child"],
+    )
+    async def test_a_token_set_during_each_runner_stops_that_runner_at_its_next_check(
+        self,
+        how: str,
+        who: str,
+        trigger: str | None,
+        taken: int,
+        calls: int | None,
+        three: Any,
+    ) -> None:
+        """Kills: the hook not passed to that runner (M25), the cancel swallowed (M13), the
+        token replaced by a new one in a nested run (M27: the child FSM of the workflow would run
+        to its end), the charge before the check (M2). The conversation is ended, every request
+        has its end, and the NEXT call of the runner ends at its first check."""
+        holder: list[_Three] = []
+        cancel = lambda: holder[0].token.cancel()  # noqa: E731
+        t = three(
+            triggers={trigger: cancel} if trigger else None,
+            on_tool=cancel if who == "agent_run" else None,
+            budget=RunBudget(),
+        )
+        holder.append(t)
+        result, error = await t.attempt(getattr(t, who), how)
+        assert _cancelled(who, result, error), (result, error)
+        assert t.taken == taken
+        if calls is not None:
+            assert t.model.calls == calls
+        assert t.idle() and t.paired()
+        frozen = (t.model.calls, t.taken)
+        result, error = await t.attempt(getattr(t, who), how)
+        assert _cancelled(who, result, error)
+        assert (t.model.calls, t.taken) == frozen
+
+
+class TestOneBudget:
+    """Row 3: ONE ledger. ``budget.steps_taken`` is the sum of the exact counts of the runners
+    (the engine loop steps of the agent, of the solve and its classifier, of the child FSM, and
+    the steps of the workflow itself); a spent ledger refuses the next run at its first step."""
+
+    @HOW
+    async def test_the_ledger_equals_the_sum_of_the_three_exact_counts(
+        self, how: str, three: Any
+    ) -> None:
+        """Kills: a runner outside the ledger (M25, M20: the classifier's 3 steps), a ledger
+        copied by ``derive`` (M4, M26: the child FSM's 2 steps are lost) or lost by the second
+        ``replace`` (M3), a charge per call (M1)."""
+        t = three(budget=RunBudget())
+        counts = []
+        with rig.HookSpy() as spy:
+            for run in (t.agent_run, t.solve, t.flow):
+                result, error = await t.attempt(run, how)
+                assert error is None
+                counts.append(t.taken)
+        flow = result
+        assert counts == [_AGENT_STEPS, _AGENT_STEPS + _SOLVE_STEPS, _TOTAL]
+        loops = [run["steps"] for run in spy.runs]
+        # agent, orchestrator (7), classifier (3), the child FSM (2): every loop hooked, once a step
+        assert [len(s) for s in loops] == [3, 7, 3, 2]
+        assert all(s == list(range(1, len(s) + 1)) for s in loops)
+        assert flow.detail["steps"] == 2  # the workflow's own steps, no loop under them
+        assert t.taken == sum(len(s) for s in loops) + flow.detail["steps"] == 17
+
+    def test_a_derived_context_shares_the_same_ledger_by_identity(
+        self, three: Any
+    ) -> None:
+        t = three(budget=RunBudget(max_steps=5))
+        child = t.ctx.derive(parent="w", max_steps=2)
+        grandchild = child.derive(parent="x")
+        assert child.budget is t.ctx.budget is grandchild.budget
+        assert dataclasses.replace(child, max_seconds=3.0).budget is t.ctx.budget
+
+    @HOW
+    async def test_a_ledger_as_large_as_the_three_runs_lets_all_three_finish(
+        self, how: str, three: Any
+    ) -> None:
+        """Kills: ``spent()`` off by one (M7) on the full side: the last charge is allowed."""
+        t = three(budget=RunBudget(max_steps=_TOTAL))
+        for run in (t.agent_run, t.solve, t.flow):
+            _result, error = await t.attempt(run, how)
+            assert error is None
+        assert t.taken == _TOTAL and t.ctx.budget_spent() == "steps"
+        assert t.paired() and t.idle()
+
+    @HOW
+    @pytest.mark.parametrize("order", _ORDERS, ids=lambda o: "-".join(o))
+    async def test_a_ledger_of_total_minus_one_stops_exactly_the_last_runner_mid_run(
+        self, how: str, order: tuple[str, ...], three: Any
+    ) -> None:
+        """Kills: ``spent()`` off by one (M7) on the empty side; a runner that ignores the
+        ledger. The count is exactly total - 1 whichever runner comes last; the refused step
+        asked the double nothing; the stopped runner's conversations are ended."""
+        t = three(budget=RunBudget(max_steps=_TOTAL - 1))
+        stopped = []
+        for who in order:
+            result, error = await t.attempt(getattr(t, who), how)
+            if error is not None or (
+                getattr(result, "status", None) is not None
+                and result.status.value != "ok"
+            ):
+                stopped.append(who)
+                assert _ledger_stop(who, result, error), (who, result, error)
+        assert stopped == [order[-1]]
+        assert t.taken == _TOTAL - 1 and t.ctx.budget_spent() == "steps"
+        assert t.paired() and t.idle()
+
+    @HOW
+    async def test_a_further_run_is_refused_at_its_first_step_and_asks_the_double_nothing(
+        self, how: str, three: Any
+    ) -> None:
+        """Kills: no pre-run check (a greeting or a first step is spent), a refusal that
+        charges, a runner that reads no ledger. The reasoning run goes through the executable
+        (the engine alone spends its greeting on a spent ledger: a known limit, recorded)."""
+        from fsm_llm.core.codes import Reason, Status
+        from fsm_llm.engine.executables import ExecutableRegistry
+        from fsm_llm.reasoning.executables import SOLVE_ID
+
+        t = three(budget=RunBudget(max_steps=_TOTAL))
+        for run in (t.agent_run, t.solve, t.flow):
+            _result, error = await t.attempt(run, how)
+            assert error is None
+        frozen = (t.model.calls, t.taken, t.types().count("llm/request"))
+        assert frozen[1] == _TOTAL
+
+        result, error = await t.attempt(t.agent_run, how)
+        assert _ledger_stop("agent_run", result, error)
+        result, error = await t.attempt(t.flow, how)
+        assert _ledger_stop("flow", result, error) and result.handle is None
+        solve_registry = ExecutableRegistry()
+        solve_registry.load_sources()
+        solve = solve_registry.get(SOLVE_ID)
+        if how == "sync":
+            done = await asyncio.to_thread(
+                solve.run, {"problem": sc._PROBLEM}, context=t.ctx
+            )
+        else:
+            done = await solve.arun({"problem": sc._PROBLEM}, context=t.ctx)
+        assert (done.status, done.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert done.detail["shared_budget"] == "steps"
+        assert (t.model.calls, t.taken, t.types().count("llm/request")) == frozen
+
+    @HOW
+    async def test_the_engine_alone_on_a_spent_ledger_names_the_shared_budget(
+        self, how: str, three: Any
+    ) -> None:
+        spent = RunBudget(max_steps=1)
+        spent.charge()
+        t = three(budget=spent)
+        result, error = await t.attempt(t.solve, how)
+        assert _ledger_stop("solve", result, error)
+        assert "170" not in str(error) and t.taken == 1 and t.idle()
+
+    @HOW
+    async def test_a_workflow_step_refused_by_the_ledger_is_aborted_and_asks_the_double_nothing(
+        self, how: str, three: Any
+    ) -> None:
+        """The workflow's OWN hook: step 1 (`prep`) is charged, step 2 (`call`) is refused and the
+        stop is `aborted/budget_spent` with the fact of the ledger; the child it starts is refused
+        before any model call (the pre-run check), so the double was never asked."""
+        t = three(budget=RunBudget(max_steps=1))
+        result, error = await t.attempt(t.flow, how)
+        assert error is None and _ledger_stop("flow", result, error)
+        assert result.detail["shared_budget"] == "steps"
+        assert (t.taken, t.model.calls) == (1, 0) and t.paired()
+
+    @HOW
+    async def test_a_ledger_stop_inside_the_child_run_reads_failed_at_the_workflow_level(
+        self, how: str, three: Any
+    ) -> None:
+        """KNOWN LIMIT (reported at step 8, not fixed here: tests only): the ledger refuses a step
+        of the CHILD FSM of an `ExecutableStep`. The child ends `aborted/budget_spent`, the step
+        fails with that text and the instance is `failed` with no reason: the adapter labels a
+        ledger stop `aborted/budget_spent` only when ITS OWN hook was refused. The fact is on the
+        context (`budget_spent()`), the count is exact and the child's conversation is ended."""
+        t = three(
+            budget=RunBudget(max_steps=3)
+        )  # prep, call, the child's step 1; step 2 refused
+        result, error = await t.attempt(t.flow, how)
+        assert error is None and result.status.value == "failed"
+        assert result.reason is None and result.handle
+        assert "ended aborted (budget_spent)" in result.detail["error"]
+        assert (t.taken, t.ctx.budget_spent()) == (3, "steps") and t.paired()
+
+    @HOW
+    async def test_a_seconds_ledger_starts_at_its_first_charge_and_stops_every_runner(
+        self, how: str, three: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills: the clock started at construction (M6: the first charge would find 8000 s
+        spent). The clock is a stand-in that moves only when the double moves it: no sleep."""
+        from fsm_llm.agents.exceptions import BudgetExhaustedError
+        from fsm_llm.core.codes import Reason, Status
+
+        clock = _Clock()
+        monkeypatch.setattr("fsm_llm.engine.fsm.budget._monotonic", clock)
+        ledger = RunBudget(max_seconds=5.0)  # built at 1000
+        clock.now = 9000.0  # a long wait before the first run
+        jump = lambda: setattr(clock, "now", clock.now + 100.0)  # noqa: E731
+        t = three(budget=ledger, triggers={"conclusion": jump})
+        result, error = await t.attempt(t.agent_run, how)
+        assert error is None and result.stop_reason == "answered"
+        # the solve: the double moves the clock inside the strategy; the next check refuses it
+        _solved, error = await t.attempt(t.solve, how)
+        assert isinstance(error, ReasoningExecutionError)
+        spent = next(
+            c for c in cause_chain(error) if isinstance(c, RunBudgetExceededError)
+        )
+        assert (spent.budget, spent.limit) == ("seconds", 5.0)
+        assert t.ctx.budget_spent() == "seconds" and t.idle()
+        frozen = (t.model.calls, t.taken)
+        # then both others are refused at their first check, the double is not asked
+        result, error = await t.attempt(t.agent_run, how)
+        assert isinstance(error, BudgetExhaustedError)
+        assert "shared run seconds" in str(error)
+        result, error = await t.attempt(t.flow, how)
+        assert error is None
+        assert (result.status, result.reason) == (Status.ABORTED, Reason.BUDGET_SPENT)
+        assert result.detail["shared_budget"] == "seconds"
+        assert (t.model.calls, t.taken) == frozen and t.paired()
+
+
+class TestNoGrant:
+    """Invariant 1 across the three runners: a context carries no grant and no approver."""
+
+    @staticmethod
+    def _spy(monkeypatch: pytest.MonkeyPatch) -> list[set[str]]:
+        """Every key set any ``API.update_context`` of the process was asked to write."""
+        from fsm_llm import API
+
+        writes: list[set[str]] = []
+        original = API.update_context
+
+        def spy(self: Any, conversation_id: str, update: dict[str, Any]) -> Any:
+            writes.append(set(update))
+            return original(self, conversation_id, update)
+
+        monkeypatch.setattr(API, "update_context", spy)
+        return writes
+
+    def test_the_spy_sees_a_grant_when_an_agent_with_its_own_approver_writes_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The negative control: the spy is able to FAIL (a HITL agent writes the driver grant)."""
+        from fsm_llm import agents as A
+        from fsm_llm.agents.constants import ContextKeys
+        from fsm_llm.policy import HumanInTheLoop
+        from tests import pattern_runs as pr
+
+        writes = self._spy(monkeypatch)
+        agent = A.ReactAgent(
+            _agent_tools(flagged=True),
+            config=pr._config(),
+            llm_interface=pr.ScriptedModel(),
+            hitl=HumanInTheLoop(
+                approval_policy=lambda c, x: True, approval_callback=lambda q: True
+            ),
+        )
+        agent.run(pr._TASK)
+        assert any(ContextKeys.DRIVER_APPROVAL in keys for keys in writes)
+
+    @HOW
+    async def test_no_runner_of_a_context_consults_an_approver_or_writes_a_grant(
+        self, how: str, three: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills: ``callables`` consumed by a runner (M12: the agent would hold the approver and
+        ask it), a grant written for a context run, a grant in a result. The context holds an
+        approver under ``hitl`` in ITS ``callables`` and a ledger: neither is a grant."""
+        from fsm_llm.agents.constants import ContextKeys
+        from fsm_llm.policy import HumanInTheLoop
+
+        asked: list[str] = []
+        hitl = HumanInTheLoop(
+            approval_policy=lambda c, x: asked.append("policy") or True,
+            approval_callback=lambda q: asked.append("callback") or True,
+        )
+        writes = self._spy(monkeypatch)
+        t = three(budget=RunBudget(), hitl=hitl)
+        _agent, e1 = await t.attempt(t.agent_run, how)
+        solved, e2 = await t.attempt(t.solve, how)
+        flow, e3 = await t.attempt(t.flow, how)
+        assert (e1, e2, e3) == (None, None, None)
+        assert asked == []
+        assert not any(ContextKeys.DRIVER_APPROVAL in keys for keys in writes)
+        held = [
+            *vars(t.agent).values(),
+            *t.agent._api_kwargs.values(),
+            *vars(t.engine).values(),
+            *t.engine.api_kwargs.values(),
+        ]
+        assert not any(v is hitl for v in held)
+        assert t.agent.hitl is None and t.agent._hitl_active is False
+        for data in (solved[1]["final_context"], flow.outputs):
+            assert ContextKeys.DRIVER_APPROVAL not in data
+            assert not any(v is t.ctx or v is hitl for v in data.values())
+        # nothing in the context or its children is a data member: the declared fields only
+        fields = {f.name for f in dataclasses.fields(RunContext)}
+        assert fields == {
+            "llm_interface",
+            "llm_factory",
+            "event_log",
+            "max_steps",
+            "max_seconds",
+            "cancel",
+            "callables",
+            "parent",
+            "registry",
+            "budget",
+        }
+        assert {f.name for f in dataclasses.fields(t.ctx.derive(parent="w"))} == fields
+
+
+def _on_three_threads(t: _Three) -> dict[str, tuple[Any, BaseException | None]]:
+    """The three runners, one thread each, started together; ``{runner: (result, error)}``."""
+    from tests import pattern_runs as pr
+
+    outcomes: dict[str, tuple[Any, BaseException | None]] = {}
+    guard = threading.Lock()
+    bodies = {
+        "agent_run": lambda: t.agent.run(pr._TASK),
+        "solve": lambda: t.engine.solve_problem(sc._PROBLEM),
+        "flow": lambda: t.workflow.run({"subject": "t"}, context=t.ctx),
+    }
+
+    def work(name: str) -> None:
+        try:
+            result, error = bodies[name](), None
+        except Exception as exc:
+            result, error = None, exc
+        with guard:
+            outcomes[name] = (result, error)
+
+    threads = [threading.Thread(target=work, args=(n,), daemon=True) for n in bodies]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()  # every wait inside a runner is bounded (a barrier with a timeout)
+    return outcomes
+
+
+#: the steps the ledger holds when each runner first asks for its step 2: the agent's step 1, the
+#: solve's (orchestrator step 1 and the classifier's first step), the workflow's `prep`
+_GATE_PREFIX = 4
+
+
+class TestThreeThreadsOneLedger:
+    """Row 4: the three runners on three threads, one ledger, 8 of 8 repeats.
+
+    The lock is proven here the way the WINDOW row of ``test_run_context.py`` proves it: a
+    stand-in clock that waits for the other threads INSIDE the budget check opens the window. The
+    three runners are held at their first step 2 (a ``Barrier`` with a timeout), then released
+    together onto a ledger with room for exactly one more step: with the lock one is accepted and
+    two are refused; without it all three pass the check and the ledger overshoots."""
+
+    @pytest.mark.parametrize("repeat", range(8))
+    def test_three_runners_on_three_threads_count_exactly_the_sum(
+        self, repeat: int, three: Any
+    ) -> None:
+        t = three(budget=RunBudget(max_steps=_TOTAL))
+        outcomes = _on_three_threads(t)
+        assert {n: e for n, (_r, e) in outcomes.items()} == {
+            "agent_run": None,
+            "solve": None,
+            "flow": None,
+        }
+        assert t.taken == _TOTAL and t.paired() and t.idle()
+        assert len(t.log.conversation_ids()) == 4
+
+    @pytest.mark.parametrize("repeat", range(8))
+    def test_released_together_onto_one_free_step_exactly_one_is_accepted(
+        self, repeat: int, three: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The WINDOW row of ``test_run_context.py``, with the real runners. The three are held
+        at their first step 2 (a ``Barrier`` with a timeout) and released together onto a ledger
+        with room for ONE more step. The ledger's record waits for the other two threads right
+        AFTER its check and before it counts: with the lock one thread is inside at a time (the
+        wait times out harmlessly, once), without it all three pass the check. Kills: the lock
+        removed (M5): three charges accepted, the ledger over its limit."""
+        from fsm_llm.engine.fsm.budget import TurnBudget
+
+        seen: set[int] = set()
+        arrivals: list[int] = []
+        accepted: list[int] = []
+        armed = threading.Event()
+        window = threading.Barrier(3, timeout=0.3)
+
+        class Racy(TurnBudget):
+            def spent(self) -> Any:
+                verdict = super().spent()  # the check is done ...
+                if armed.is_set():
+                    try:
+                        window.wait()  # ... and the others have done theirs
+                    except threading.BrokenBarrierError:
+                        pass
+                return verdict
+
+        ledger = RunBudget(max_steps=_GATE_PREFIX + 1)
+        ledger._record = Racy(_GATE_PREFIX + 1, None)
+        charge = ledger.charge
+
+        def counting_charge() -> None:
+            charge()
+            if armed.is_set():
+                accepted.append(1)
+
+        monkeypatch.setattr(ledger, "charge", counting_charge)
+
+        def at_the_gate() -> (
+            None
+        ):  # once, in the last thread to arrive, before the release
+            arrivals.append(ledger.steps_taken)
+            armed.set()
+
+        gate = threading.Barrier(3, timeout=20, action=at_the_gate)
+        original = RunContext.step_hook
+
+        def gated(self: RunContext) -> Any:
+            hook = original(self)
+            owner = threading.get_ident()
+
+            def wrapped(step: int) -> None:
+                if step == 2 and owner not in seen:
+                    seen.add(owner)
+                    gate.wait()
+                hook(step)
+
+            return wrapped
+
+        monkeypatch.setattr(RunContext, "step_hook", gated)
+        t = three(budget=ledger)
+        outcomes = _on_three_threads(t)
+        assert arrivals == [_GATE_PREFIX]
+        assert (
+            len(accepted) == 1
+        )  # exactly one of the three released charges was accepted
+        assert ledger.steps_taken == _GATE_PREFIX + 1
+        for who, (result, error) in outcomes.items():
+            assert _ledger_stop(who, result, error), (who, result, error)
+        assert t.paired() and t.idle()
+
+
+class TestOneBudgetOverARunLoop:
+    """The ledger of the context counts STEPS, not hook calls: a run loop that offers one step
+    number twice (the ended pushed frame it asks the hook to pop) is charged once."""
+
+    @pytest.mark.parametrize("how", ["sync", "async"])
+    async def test_a_loop_that_offers_a_number_twice_is_charged_once_on_the_shared_ledger(
+        self, how: str, three: Any
+    ) -> None:
+        """Kills: a charge per hook call (M1). The same ledger the three runners share counts
+        this loop's engine steps (3) and not its four hook calls."""
+        from tests.test_fsm_llm.test_advance import _ScriptedLLM, _start, _trip_fsm
+        from tests.test_fsm_llm.test_run_until_terminal import _push_sub_on_entry
+
+        t = three(budget=RunBudget())
+        api, conv_id = _start(_trip_fsm(), _ScriptedLLM({"city": "Paris"}))
+        _push_sub_on_entry(api, conv_id, "plan")
+        hook = t.ctx.step_hook()
+        seen: list[int] = []
+
+        def before_step(step: int) -> None:
+            seen.append(step)
+            if api.get_stack_depth(conv_id) > 1 and api.has_conversation_ended(conv_id):
+                api.pop_fsm(conv_id)
+            hook(step)
+
+        if how == "sync":
+            results = await asyncio.to_thread(
+                api.run_until_terminal, conv_id, max_steps=10, before_step=before_step
+            )
+        else:
+            results = await api.arun_until_terminal(
+                conv_id, max_steps=10, before_step=before_step
+            )
+        assert seen == [1, 2, 3, 3] and len(results) == 3
+        assert t.taken == 3
