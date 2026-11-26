@@ -735,7 +735,7 @@ class TestEveryProducerGoesThroughPutJson:
             yield path, ast.parse(path.read_text(encoding="utf-8"))
 
     def test_no_module_outside_the_log_reaches_the_blob_store_but_put_json(self):
-        inner = {"log.py", "blobs.py"}
+        inner = {"log.py", "blobs.py", "tool_events.py"}
         for path, tree in self._modules():
             if path.name in inner and path.parent.name == "runtime":
                 continue
@@ -752,12 +752,16 @@ class TestEveryProducerGoesThroughPutJson:
                     assert node.id != "BlobStore" or path.name == "__init__.py", path
 
     def test_inside_the_log_only_three_methods_touch_the_store(self):
-        path = Path(fsm_llm.__file__).parent / "runtime" / "log.py"
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # EventLog and its ToolEventsMixin (runtime/tool_events.py, plan 77e5fef9 step 2)
+        runtime = Path(fsm_llm.__file__).parent / "runtime"
         methods = {
             m.name: m
-            for cls in tree.body
-            if isinstance(cls, ast.ClassDef) and cls.name == "EventLog"
+            for module, name in (
+                ("log", "EventLog"),
+                ("tool_events", "ToolEventsMixin"),
+            )
+            for cls in ast.parse((runtime / f"{module}.py").read_text("utf-8")).body
+            if isinstance(cls, ast.ClassDef) and cls.name == name
             for m in cls.body
             if isinstance(m, ast.FunctionDef)
         }

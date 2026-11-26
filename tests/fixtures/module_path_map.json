@@ -1192,6 +1192,7 @@
     "fsm_llm.runtime.stores.jsonl",
     "fsm_llm.runtime.stores.session",
     "fsm_llm.runtime.stores.stack",
+    "fsm_llm.runtime.tool_events",
     "fsm_llm.runtime.usage",
     "fsm_llm.simulation",
     "fsm_llm.simulation.driver",
