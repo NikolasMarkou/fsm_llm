@@ -7,6 +7,7 @@ the parent commit.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -290,3 +291,51 @@ class TestTheReasoningRunnersReadTheLedgerByIdentity:
         state = {ContextKeys.TOOL_NAME: "reason", ContextKeys.TOOL_INPUT: {"x": "1"}}
         state[ContextKeys.TASK] = pr._TASK
         assert execute(dict(state))[ContextKeys.TOOL_STATUS] == "failed"
+
+
+class TestTheOfferOfAnEndedFrameIsNoStep:
+    """17.2: `step_hook` used as a caller's `before_step` charges the step a run takes, never the
+    offer of an ended pushed frame nobody pops (D-015). One rule for every use of the hook."""
+
+    @pytest.mark.parametrize("how", ["run", "arun"])
+    @pytest.mark.parametrize("limit", [None, 2])
+    def test_a_pushed_frame_nobody_pops_costs_two_steps_and_two_charges(
+        self, how: str, limit: int | None
+    ) -> None:
+        """Kills M45: the hook charges the offer (ledger 3 for 2 steps, and a ledger of 2 raises
+        in the state of the frame instead of ending normally)."""
+        from tests.test_fsm_llm.test_run_until_terminal import (
+            _push_sub_on_entry,
+            _ScriptedLLM,
+            _start,
+            _trip_fsm,
+        )
+
+        api, cid = _start(_trip_fsm(), _ScriptedLLM({"city": "Paris"}))
+        _push_sub_on_entry(api, cid, "plan")
+        budget = RunBudget(max_steps=limit)
+        hook = RunContext(budget=budget).step_hook()
+        if how == "run":
+            results = api.run_until_terminal(cid, max_steps=10, before_step=hook)
+        else:
+            results = asyncio.run(
+                api.arun_until_terminal(cid, max_steps=10, before_step=hook)
+            )
+        assert len(results) == 2 and budget.steps_taken == 2
+        assert budget.last_refusal is None
+
+    def test_the_offer_is_checked_for_the_token_and_charged_nothing(self) -> None:
+        from fsm_llm.engine.context import RunCancelledError
+        from fsm_llm.engine.fsm.budget import EndedFrameOffer
+
+        ctx = RunContext(budget=RunBudget())
+        hook = ctx.step_hook()
+        hook(1)
+        hook(EndedFrameOffer(2))
+        assert ctx.budget.steps_taken == 1  # type: ignore[union-attr]
+        hook(2)  # the step the pop made possible: charged now, once
+        hook(2)
+        assert ctx.budget.steps_taken == 2  # type: ignore[union-attr]
+        ctx.cancel.cancel()
+        with pytest.raises(RunCancelledError):
+            hook(EndedFrameOffer(3))

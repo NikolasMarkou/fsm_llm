@@ -35,6 +35,11 @@ from fsm_llm.core.definitions import RunBudgetExceededError
 _monotonic = time.monotonic
 
 
+class EndedFrameOffer(int):
+    """The number ``_run_rounds`` hands ``before_step`` when it OFFERS an ended pushed frame (the
+    number of the next step, which never runs when nobody pops): a hook that counts steps skips it."""
+
+
 def _check_run_budgets(max_steps: int, max_seconds: float | None) -> None:
     """Validate the budgets of a bounded run; raise ``ValueError`` if invalid.
 

@@ -27,7 +27,7 @@ from fsm_llm.core.definitions import (
     RunBudgetExceededError,
     checked_key_names,
 )
-from fsm_llm.engine.fsm.budget import _check_run_budgets
+from fsm_llm.engine.fsm.budget import EndedFrameOffer, _check_run_budgets
 
 from .calls import settle
 from .helpers import context_run
@@ -150,7 +150,7 @@ async def _run_rounds(
             if await _settle_ended_call_child(api, conversation_id):
                 continue
             if before_step is None or not await _hook_popped_ended_frame(
-                api, conversation_id, before_step, steps_done + 1
+                api, conversation_id, before_step, EndedFrameOffer(steps_done + 1)
             ):
                 return
             continue

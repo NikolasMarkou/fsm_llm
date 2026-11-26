@@ -50,7 +50,7 @@ Interface contract:
   it is not the engine's ``TurnBudget``.
 - ``step_hook()`` returns a fresh ``before_step`` callable for ONE run: it raises
   ``RunCancelledError`` when the token is set, BEFORE it charges the ledger, and charges once per
-  distinct step number (the engine offers an ended pushed frame the same number again).
+  distinct step number, but never for the offer of an ended pushed frame (``EndedFrameOffer``).
   ``budget_spent()`` is ``budget.spent()`` or ``None`` (a fact before a run);
   ``stopped_by_ledger(error)`` is the ``LedgerRefusal`` of THIS ledger that is the error or a cause
   of it, else ``None`` (the one test of a ledger stop: a run's own limit never reads as one);
@@ -82,7 +82,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from fsm_llm.core.definitions.errors import FSMError, RunBudgetExceededError
 from fsm_llm.core.names import NameRegistry
-from fsm_llm.engine.fsm.budget import TurnBudget, check_turn_limits
+from fsm_llm.engine.fsm.budget import EndedFrameOffer, TurnBudget, check_turn_limits
 from fsm_llm.llm.interface import LLMInterface
 
 if TYPE_CHECKING:
@@ -247,13 +247,16 @@ class RunContext:
             kwargs["event_log"] = self.event_log
 
     def step_hook(self) -> Callable[[int], None]:
-        """A fresh ``before_step`` for ONE run: the cancel check, then one charge per step."""
+        """A fresh ``before_step`` for ONE run: the cancel check, then one charge per step (never
+        for an ``EndedFrameOffer``, which only checks the token)."""
         last = 0
 
         def hook(step: int) -> None:
             nonlocal last
             self.cancel.raise_if_cancelled()
             if self.budget is not None and step > last:
+                if isinstance(step, EndedFrameOffer):
+                    return  # an offer is no step: charged when the pop makes it one
                 self.budget.charge()
                 last = step
 
