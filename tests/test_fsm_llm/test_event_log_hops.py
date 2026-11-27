@@ -46,8 +46,20 @@ from tests.test_fsm_llm.event_log_support import (
     reopen_after_kill,
     wait_ready,
 )
-from tests.test_fsm_llm.test_async_cancel import _gate_is_free, _prepare, _seen
-from tests.test_fsm_llm.test_async_engine import _CID, _SCENARIOS
+from tests.test_fsm_llm.test_async_cancel import (
+    _cancel,
+    _gate_is_free,
+    _next,
+    _Parking,
+    _prepare,
+    _seen,
+)
+from tests.test_fsm_llm.test_async_engine import (
+    _CID,
+    _SCENARIOS,
+    _collect,
+    _stream_api,
+)
 from tests.test_fsm_llm.test_event_log_census import _chat, _llm
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 from tests.test_fsm_llm.test_event_log_lanes import (
@@ -836,3 +848,214 @@ class TestACloseWithJobsStillQueued:
         assert not api.event_log.has_writer(_CID)
         with EventLog(root) as other:  # no writer, file or lock is left
             assert other.open_existing(_CID) >= 1
+
+
+# ----------------------------------------------------------------------------------------------
+# Plan 77e5fef9 step 5 (S2a, D-007): the joined reply of a streamed turn is a deferred lane job
+# ----------------------------------------------------------------------------------------------
+
+#: the lane hops of one streamed turn of the chat FSM (the greeting excluded): turn/start, the
+#: extraction record, the stream request, turn/end and one more. Measured on the parent of
+#: step 5 (HEAD e3cf7db6), where the reply write is inline and has no hop of its own.
+STREAM_TURN_HOPS = 5
+
+
+async def _stream_logged(root: Path, cls: type = _Parking) -> tuple[API, Any, str]:
+    api, llm = _stream_api(cls, event_log=EventLog(root))
+    cid, _ = await api.astart_conversation(_conversation_id=_CID)
+    return api, llm, cid
+
+
+def _stream_ends(api: API) -> list[dict[str, Any]]:
+    return [e for e in _events(api) if e["type"] == "llm/response" and e.get("stream")]
+
+
+class TestTheHopsOfAStreamedTurn:
+    async def test_a_streamed_turn_has_the_hops_it_had_before_the_deferral(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills (M26): an awaited ``lane_call`` in the ``finally`` of the stream (a new hop is
+        a new cancel point in a generator whose cancel rules are pinned)."""
+        hops = Hops()
+        with hops.installed():
+            api, _, cid = await _stream_logged(tmp_path)
+            hops.arm(-1)
+            assert await _collect(api.aconverse_stream("hi", cid)) == ["a", "b", "c"]
+            assert hops.count == STREAM_TURN_HOPS
+            api.close()
+
+    async def test_a_cancel_parked_at_every_hop_of_a_streamed_turn(
+        self, tmp_path: Path
+    ) -> None:
+        """The sweep of the plain turn over a stream: every request keeps its end, the gate is
+        free, a rolled-back turn is rolled back whole, a committed turn stays committed, and the
+        NEXT streamed turn of the same caller works and logs its own reply."""
+        hops = Hops()
+        for k in range(1, STREAM_TURN_HOPS + 1):
+            with hops.installed():
+                api, _, cid = await _stream_logged(tmp_path / f"k{k}")
+                before = _seen(api, cid)
+                hops.arm(k)
+                task = await _cancel_at(hops, _collect(api.aconverse_stream("hi", cid)))
+                await _barrier(api.event_log, _CID)
+                assert hops.ran.is_set(), f"k={k}: the orphan job never ran"
+                _every_request_has_its_end([e["type"] for e in _events(api)])
+                assert _gate_is_free(api, cid), f"k={k}"
+                assert task.cancelled(), f"k={k}"
+                if k < STREAM_TURN_HOPS:
+                    assert _seen(api, cid) == before, f"k={k}"
+                    TestTheSweepOfTheHops._the_log_shows_a_rolled_back_turn(api, before)
+                else:  # the end write of a committed turn: the cancel raises, the turn stays
+                    ends = [e for e in _events(api) if e["type"] == "turn/end"]
+                    assert ends[-1]["outcome"] == "committed", f"k={k}"
+                hops.arm(-1)
+                before_second = len(_stream_ends(api))
+                assert await _collect(api.aconverse_stream("hi", cid)) == [
+                    "a",
+                    "b",
+                    "c",
+                ]
+                await _barrier(api.event_log, _CID)
+                assert len(_stream_ends(api)) == before_second + 1, f"k={k}"
+                _every_request_has_its_end([e["type"] for e in _events(api)])
+            api.close()
+
+
+class TestAStreamedReplyKeepsItsEnd:
+    """Every ``llm/request`` of a stream has an end after a drain, however the stream ended,
+    sync twin and async: finished, ``aclose``, a cancelled consumer, ``athrow(CancelledError)``,
+    a consumer that breaks, a provider error. The flags are the base's (D-007 e)."""
+
+    @staticmethod
+    def _stream_rows(api: API) -> list[tuple[str, bool | None]]:
+        return [
+            (e["type"], e.get("abandoned"))
+            for e in _events(api)
+            if e.get("stream") and e["type"] != "llm/request"
+        ]
+
+    @pytest.mark.parametrize(
+        ("how", "ending"),
+        [
+            ("finish", [("llm/response", False)]),
+            ("aclose", [("llm/response", True)]),
+            ("break", [("llm/response", True)]),
+            ("athrow", [("llm/response", True)]),
+            ("cancel", [("llm/response", True)]),
+        ],
+    )
+    async def test_every_way_a_stream_ends_leaves_one_end_per_request(
+        self, tmp_path: Path, how: str, ending: list[tuple[str, bool | None]]
+    ) -> None:
+        """Kills (M24, M27): ``_done`` flipped inside the job (an ``llm/response`` AND a
+        ``provider/error``), the write dropped on abandonment or on a rolled-back cancel."""
+        api, llm, cid = await _stream_logged(tmp_path)
+        stream = api.aconverse_stream("hi", cid)
+        if how == "finish":
+            assert await _collect(stream) == ["a", "b", "c"]
+        elif how == "cancel":
+            assert await stream.__anext__() == "a"
+            llm.park(1)
+            await _cancel(llm, _next(stream))
+        else:
+            assert await stream.__anext__() == "a"
+            if how == "athrow":
+                with pytest.raises((asyncio.CancelledError, StopAsyncIteration)):
+                    await stream.athrow(asyncio.CancelledError())
+            if how == "break":
+                async for _ in stream:
+                    break
+            await stream.aclose()
+        await _barrier(api.event_log, _CID)
+        kinds = [e["type"] for e in _events(api)]
+        _every_request_has_its_end(kinds)
+        assert self._stream_rows(api) == ending, kinds
+        assert _gate_is_free(api, cid)
+        api.close()
+
+    async def test_a_stream_that_raised_ends_in_a_provider_error_only(
+        self, tmp_path: Path
+    ) -> None:
+        class Broken(_Parking):
+            async def agenerate_response_stream(self, request):
+                yield "a"
+                raise RuntimeError("PRIVATE")
+
+        api, _, cid = await _stream_logged(tmp_path, Broken)
+        with pytest.raises(FSMError):
+            await _collect(api.aconverse_stream("hi", cid))
+        await _barrier(api.event_log, _CID)
+        _every_request_has_its_end([e["type"] for e in _events(api)])
+        assert self._stream_rows(api) == [("provider/error", None)]
+        api.close()
+
+    @pytest.mark.parametrize("how", ["finish", "close"])
+    async def test_the_sync_stream_writes_the_same_ends(
+        self, tmp_path: Path, how: str
+    ) -> None:
+        """The sync twin (``iterate_sync``, ``SYNC`` set: inline, no lane): the same rows."""
+        api, _ = _stream_api(event_log=EventLog(tmp_path))
+
+        def drive() -> None:
+            cid, _ = api.start_conversation(_conversation_id=_CID)
+            stream = api.converse_stream("hi", cid)
+            if how == "finish":
+                assert list(stream) == ["a", "b", "c"]
+            else:
+                assert next(stream) == "a"
+                stream.close()
+
+        await asyncio.to_thread(drive)
+        _every_request_has_its_end([e["type"] for e in _events(api)])
+        assert self._stream_rows(api) == [("llm/response", how == "close")]
+        api.close()
+
+
+class TestTheNextCallSeesTheReply:
+    """Deferral changes WHEN, never WHETHER or in what ORDER (LESSONS 3f4530d3): the next call
+    of the same caller meets the earlier stream reply."""
+
+    async def test_a_turn_right_after_a_stream_logs_the_reply_before_its_turn_start(
+        self, tmp_path: Path
+    ) -> None:
+        api, _, cid = await _stream_logged(tmp_path)
+        for n in range(8):
+            await _collect(api.aconverse_stream("hi", cid))
+            await api.aconverse("again", cid)
+            events = _events(api)
+            responses = [e["seq"] for e in _stream_ends(api)]
+            starts = [e["seq"] for e in events if e["type"] == "turn/start"]
+            ends = [e["seq"] for e in events if e["type"] == "turn/end"]
+            assert len(responses) == n + 1 and len(starts) == len(ends) == 2 * (n + 1)
+            assert starts[2 * n] < responses[n] < ends[2 * n] < starts[2 * n + 1], n
+        api.close()
+
+    async def test_resume_right_after_end_conversation_finds_the_reply(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills (M28): a ``release`` that does not queue behind the reply job (the writer is
+        gone before the line, or the lock is still held: the 30-of-30 failure of plan 3f4530d3)."""
+        for n in range(30):
+            api, _, cid = await _stream_logged(tmp_path / f"log{n}")
+            await _collect(api.aconverse_stream("hi", cid))
+            state = api.get_current_state(cid)
+            api.end_conversation(cid)
+            assert not api.event_log.has_writer(cid), n
+            api.resume(cid)
+            assert api.get_current_state(cid) == state, n
+            assert len(_stream_ends(api)) == 1, n
+            api.close()
+
+    async def test_a_new_event_log_reads_the_reply_right_after_close(
+        self, tmp_path: Path
+    ) -> None:
+        api, _, cid = await _stream_logged(tmp_path)
+        await _collect(api.aconverse_stream("hi", cid))
+        api.event_log.close()
+        again = EventLog(tmp_path)
+        try:
+            ends = [e["type"] for e in again.read(cid)]
+            assert ends[-2:] == ["llm/response", "turn/end"], ends
+        finally:
+            again.close()
+        api.close()

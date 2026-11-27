@@ -1279,6 +1279,11 @@
       "delta": 1,
       "reason": "plan-2026-11-26T213359-77e5fef9/D-005 added: the tail-read re-open of an evicted writer (runtime/stores/jsonl.py _tail): a bounded window from the end, the recorded seq and file identity checked, fail closed, a first open and resume keep the full scan",
       "token": "plan-2026-11-26T213359-77e5fef9/D-005"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 77e5fef9 D-007: the anchor of the deferred stream_done write (runtime/calls.py)",
+      "token": "plan-2026-11-26T213359-77e5fef9/D-007"
     }
   ]
 }

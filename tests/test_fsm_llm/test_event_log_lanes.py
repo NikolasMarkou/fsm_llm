@@ -24,11 +24,14 @@ from typing import Any
 import pytest
 
 from fsm_llm.aio import run_sync
-from fsm_llm.runtime import EventLog, LogWriteError
+from fsm_llm.core.definitions import ResponseGenerationRequest
+from fsm_llm.runtime import EventLog, LogWriteError, bind, llm_call
 from fsm_llm.runtime import lanes as lanes_module
+from fsm_llm.runtime.calls import LlmCall, allm_call
 from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import jsonl, read_events
 from fsm_llm.runtime.stores.jsonl import JsonlWriter
+from fsm_llm.testing import ScriptedLLM
 from tests.conftest import current_timing_factor
 
 CAP_SECONDS = 20.0  # only caps a hang; no assertion reads a duration
@@ -616,3 +619,274 @@ class TestShutdownRunsTheFinalJobBehindTheQueue:
         assert order[-2:] == ["job", f"final {busy}"]
         with pytest.raises(LogWriteError):
             await lanes.lane_call("a", lambda: None)
+
+
+ROOT = "stream-root"
+
+
+def _asked() -> ResponseGenerationRequest:
+    return ResponseGenerationRequest(system_prompt="Greet.", user_message="hi")
+
+
+def _responses(log: EventLog) -> list[dict[str, Any]]:
+    return [e for e in log.read(ROOT) if e["type"] == "llm/response"]
+
+
+async def _park(log: EventLog) -> tuple[asyncio.Future[Any], threading.Event]:
+    """Hold the lane of ROOT with a job that waits on the returned gate (set it to release)."""
+    entered, gate = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        entered.set()
+        gate.wait(CAP_SECONDS)
+
+    task = asyncio.ensure_future(log.lane_call(ROOT, hold))
+    assert await asyncio.to_thread(entered.wait, CAP_SECONDS), "the lane never parked"
+    return task, gate
+
+
+class TestADeferredStreamReply:
+    """Plan 77e5fef9 step 5 (S2a, D-007): the joined reply of a streamed call is ONE job queued
+    behind the tree's lane jobs. Every row parks the lane on an ``Event`` (no clock) and reads
+    what the log holds while the job waits."""
+
+    async def test_the_reply_is_queued_behind_a_parked_job_and_written_on_a_lane(
+        self, log: EventLog
+    ) -> None:
+        """Kills: the blob and the line written inline on the loop (a line in the log while
+        the lane is parked, a loop thread name), a write on any thread but the lane."""
+        threads: list[str] = []
+        real = log.append
+
+        def recording(*args: Any, **kwargs: Any) -> int:
+            if args[1] == "llm/response":
+                threads.append(threading.current_thread().name)
+            return real(*args, **kwargs)
+
+        llm = ScriptedLLM()
+        with bind(log, ROOT):
+            async with allm_call(llm, "response_stream", _asked(), stream=True) as call:
+                parked, gate = await _park(log)
+                pool = _pool_of(log, ROOT)
+                log.append = recording  # type: ignore[method-assign]
+                call.stream_done("abc", abandoned=False)
+                assert _responses(log) == [], "the reply was written on the loop"
+                assert _queued(pool) == 1
+                gate.set()
+                await parked
+                await log.lane_call(ROOT, lambda: None)  # FIFO: the job has run
+        (response,) = _responses(log)
+        assert [e["type"] for e in log.read(ROOT)] == ["llm/request", "llm/response"]
+        assert response["abandoned"] is False and response["stream"] is True
+        assert response["request_seq"] == 1
+        assert log.get_json(response["response_ref"])["text"] == "abc"
+        assert len(threads) == 1 and threads[0].startswith(LANE_PREFIX), threads
+
+    async def test_the_flags_and_the_link_are_decided_before_the_job_is_queued(
+        self, log: EventLog
+    ) -> None:
+        """Kills: ``abandoned`` or the request link read inside the job (the loop has moved
+        on: the observer's last request and the exhausted flag change before it runs)."""
+        from fsm_llm.llm import LiteLLMInterface
+
+        llm = LiteLLMInterface(model="gpt-4o", api_key="sk-unused")
+        await log.lane_call(ROOT, lambda: None)  # a lane thread has served the tree
+        with bind(log, ROOT) as scope:
+            with llm_call(llm, "response_stream", _asked(), stream=True) as call:
+                scope.observer.last_request_seq = 7
+                parked, gate = await _park(log)
+                call.stream_done("ab")  # abandoned None: read from the chunk state NOW
+                call._exhausted = True  # what a late read would see
+                scope.observer.last_request_seq = 9999
+                gate.set()
+                await parked
+                await log.lane_call(ROOT, lambda: None)
+        (response,) = _responses(log)
+        assert response["abandoned"] is True and response["request_seq"] == 7
+
+    async def test_the_job_runs_in_a_copy_of_the_callers_context(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: a bare ``lane_after`` job (the redaction hook of the reply blob would not see
+        a ContextVar the caller set, as the hook of an ``aresponse`` job does)."""
+        tenant: contextvars.ContextVar[str] = contextvars.ContextVar("tenant")
+        seen: list[tuple[str, str]] = []
+
+        def hook(kind: object, value: Any) -> Any:
+            seen.append((str(getattr(kind, "value", kind)), tenant.get("<none>")))
+            return value
+
+        with EventLog(tmp_path, redact=hook) as redacting:
+            tenant.set("acme")
+            with bind(redacting, ROOT):
+                async with allm_call(
+                    ScriptedLLM(), "response_stream", _asked(), stream=True
+                ) as call:
+                    call.stream_done("abc", abandoned=False)
+                    await redacting.lane_call(ROOT, lambda: None)
+        assert seen and all(who == "acme" for _, who in seen), seen
+        assert any(kind == "response" for kind, _ in seen), seen
+
+    @pytest.mark.parametrize("how", ["release", "close"])
+    async def test_release_and_close_wait_for_the_queued_reply(
+        self, tmp_path: Path, how: str
+    ) -> None:
+        """Kills: a ``release`` or ``close`` that does not queue behind the job (it returns
+        while the lane is parked and the writer is gone before the line: the end-then-resume
+        loss of plan 3f4530d3)."""
+        event_log = EventLog(tmp_path)
+        with bind(event_log, ROOT):
+            async with allm_call(
+                ScriptedLLM(), "response_stream", _asked(), stream=True
+            ) as call:
+                parked, gate = await _park(event_log)
+                pool = _pool_of(event_log, ROOT)
+                call.stream_done("abc", abandoned=False)
+                finished = threading.Event()
+
+                def finish() -> None:
+                    getattr(event_log, how)(*([ROOT] if how == "release" else []))
+                    finished.set()
+
+                thread, out = _run_in_thread(finish)
+                _until(lambda: finished.is_set() or _queued(pool) >= 2, "the queue")
+                assert not finished.is_set(), (
+                    f"{how} returned before the reply was written"
+                )
+                assert (
+                    _queued(pool) >= 2
+                )  # the reply job, then the release or close job
+                gate.set()
+                await parked
+                _until(finished.is_set, f"{how} to return")
+                thread.join(CAP_SECONDS)
+        assert out == [None]
+        again = EventLog(tmp_path)
+        try:
+            assert [e["type"] for e in again.read(ROOT)] == [
+                "llm/request",
+                "llm/response",
+            ]
+        finally:
+            again.close()
+
+    async def test_a_log_closed_while_the_job_waits_still_gets_the_line(
+        self, tmp_path: Path
+    ) -> None:
+        """``close`` queues its writers' close behind the jobs, so a queued reply still meets its
+        writer. Kills: a job that is dropped when the log is closed (a request without its end)."""
+        event_log = EventLog(tmp_path)
+        with bind(event_log, ROOT):
+            async with allm_call(
+                ScriptedLLM(), "response_stream", _asked(), stream=True
+            ) as call:
+                parked, gate = await _park(event_log)
+                call.stream_done("abc", abandoned=True)
+                closing, out = _run_in_thread(event_log.close)
+                _until(lambda: event_log._closed, "the log to be marked closed")
+                gate.set()
+                await parked
+                _until(lambda: not closing.is_alive(), "close to return")
+        assert out == [None]
+        again = EventLog(tmp_path)
+        try:
+            assert [e["type"] for e in again.read(ROOT)] == [
+                "llm/request",
+                "llm/response",
+            ]
+        finally:
+            again.close()
+
+    async def test_a_reply_after_the_log_is_closed_is_a_warning_not_an_error(
+        self, tmp_path: Path
+    ) -> None:
+        """The closed log refuses the line; the finally of the stream must raise nothing."""
+        from unittest.mock import patch
+
+        event_log = EventLog(tmp_path)
+        with bind(event_log, ROOT):
+            async with allm_call(
+                ScriptedLLM(), "response_stream", _asked(), stream=True
+            ) as call:
+                event_log.close()
+                with patch("fsm_llm.runtime.log.logger") as warned:
+                    call.stream_done("abc", abandoned=False)
+        assert warned.warning.called
+        assert "llm/response not written" in warned.warning.call_args.args[0]
+
+    async def test_a_reply_blob_that_cannot_be_written_is_an_unrecorded_line_and_a_warning(
+        self, log: EventLog
+    ) -> None:
+        """The failure rules of the inline write hold on the lane: ``response_fields`` turns a
+        failed blob into ``unrecorded`` with one WARNING and the stream's ``finally`` raises
+        nothing. Kills: a job whose failure escapes (a ``Future`` exception, a lost line)."""
+        from unittest.mock import patch
+
+        with bind(log, ROOT):
+            async with allm_call(
+                ScriptedLLM(), "response_stream", _asked(), stream=True
+            ) as call:
+                with (
+                    patch.object(log, "put_json", side_effect=OSError("disk full")),
+                    patch("fsm_llm.runtime.scope.logger") as warned,
+                ):
+                    call.stream_done("abc", abandoned=False)
+                    await log.lane_call(ROOT, lambda: None)
+        (response,) = _responses(log)
+        assert response["unrecorded"] is True and "response_ref" not in response
+        assert "reply not recorded" in warned.warning.call_args.args[0]
+
+    async def test_a_stream_before_any_lane_job_of_the_tree_runs_inline_a_named_limit(
+        self, log: EventLog
+    ) -> None:
+        """``Lanes.after`` runs a function inline when no lane thread ever served the tree: a
+        turn never gets here (its request is a lane job); a bare call does and the line is on
+        disk at once, on the calling thread."""
+        threads: list[str] = []
+        real = log.append
+
+        def recording(*args: Any, **kwargs: Any) -> int:
+            threads.append(threading.current_thread().name)
+            return real(*args, **kwargs)
+
+        log.append = recording  # type: ignore[method-assign]
+        with bind(log, ROOT):
+            with llm_call(ScriptedLLM(), "response_stream", _asked(), stream=True) as c:
+                c.stream_done("abc", abandoned=False)
+        assert [e["type"] for e in log.read(ROOT)] == ["llm/request", "llm/response"]
+        assert set(threads) == {threading.current_thread().name}
+        assert _pool_of(log, ROOT) is None  # no lane thread was started for the tree
+
+    async def test_a_sync_mode_caller_writes_inline_even_with_a_started_lane(
+        self, log: EventLog
+    ) -> None:
+        """``SYNC`` (a ``run_sync`` caller) never queues. The lane is parked, so a queued job
+        could not have written the line. Kills: a deferral that ignores ``SYNC``."""
+        await log.lane_call(ROOT, lambda: None)
+        parked, gate = await _park(log)
+
+        def drive() -> None:
+            async def body() -> None:
+                with bind(log, ROOT):
+                    with llm_call(
+                        ScriptedLLM(), "response_stream", _asked(), stream=True
+                    ) as call:
+                        call.stream_done("abc", abandoned=False)
+
+            run_sync(body())
+
+        try:
+            await asyncio.to_thread(drive)
+            assert len(_responses(log)) == 1, "the sync caller's reply was queued"
+        finally:
+            gate.set()
+            await parked
+
+    def test_no_public_name_was_added(self) -> None:
+        """A review rule as a row: the deferral is a closure handed to ``lane_after``."""
+        public = {n for n in dir(LlmCall) if not n.startswith("_")}
+        assert public == {"response", "aresponse", "stream", "astream", "stream_done"}
+        assert {n for n in dir(EventLog) if n.startswith("lane")} == {
+            "lane_call",
+            "lane_after",
+        }

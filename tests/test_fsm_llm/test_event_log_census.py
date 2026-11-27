@@ -625,3 +625,160 @@ class TestAReopenUnderChurn:
             seqs = [e["seq"] for e in log.read(cid)]
             assert seqs == list(range(1, len(seqs) + 1))
         api.close()
+
+
+def _streaming_llm() -> ScriptedLLM:
+    return ScriptedLLM(
+        extraction_data={"name": "Ada"},
+        responses={"chat": "Hi", "bye": "Bye"},
+        stream_chunks=["B", "ye"],
+    )
+
+
+def _stream_api(root: Path, *, interface: Any = None) -> API:
+    return API.from_definition(
+        _chat(silent=False),
+        llm_interface=interface or _streaming_llm(),
+        event_log=EventLog(root),
+    )
+
+
+async def _async_stream(api: API, census: Census) -> list[str]:
+    """Start, then ONE streamed turn (Pass 2 streams the reply), the census over both."""
+    census.loop_ident = threading.get_ident()
+    with census.watching():
+        cid, _ = await api.astart_conversation()
+        return [c async for c in api.aconverse_stream("my name is Ada", cid)]
+
+
+def _sync_stream(api: API, census: Census) -> list[str]:
+    with census.watching():
+        cid, _ = api.start_conversation()
+        return list(api.converse_stream("my name is Ada", cid))
+
+
+class TestAStreamedTurn:
+    """Plan 77e5fef9 step 5 (S2a, D-007): the joined reply of a streamed turn is a lane job."""
+
+    async def test_a_streamed_async_turn_blocks_the_loop_on_no_log_io(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: the reply blob and the ``llm/response`` line written on the loop in the
+        ``finally`` of the stream (the parent counted mkdir, open, dirsync, temp file, fsync
+        and replace there)."""
+        census = Census()
+        api = _stream_api(tmp_path)
+        assert await _async_stream(api, census) == ["B", "ye"]
+        assert _types(api).count("llm/response") >= 2
+        assert dict(census.on_loop) == {}, dict(census.on_loop)
+        api.close()
+
+    async def test_the_async_totals_and_the_event_order_equal_the_sync_stream(
+        self, tmp_path: Path
+    ) -> None:
+        """G3. Non-vacuity: the durability moved to a lane, none of it was dropped, and after
+        the drain (``close``) the types come in the sync order (response before ``turn/end``)."""
+        asynchronous, synchronous = Census(), Census()
+        api = _stream_api(tmp_path / "a")
+        assert await _async_stream(api, asynchronous) == ["B", "ye"]
+        other = _stream_api(tmp_path / "s")
+        assert await asyncio.to_thread(_sync_stream, other, synchronous) == ["B", "ye"]
+        api.close()
+        other.close()
+        assert synchronous.total["fsync"] >= 10
+        assert asynchronous.durable() == synchronous.durable()
+        types = _types(api)
+        assert types == _types(other)
+        assert types[-2:] == ["llm/response", "turn/end"]
+        assert _log_bytes(api) == _log_bytes(other)
+
+    async def test_a_lane_after_that_runs_inline_turns_the_census_red(
+        self, tmp_path: Path
+    ) -> None:
+        """The mutant, kept as a row (M23): the reply written inline puts its blob on the loop."""
+
+        def inline(self: Lanes, root_id: str, fn: Any) -> None:
+            fn()
+
+        census = Census()
+        api = _stream_api(tmp_path)
+        with mock.patch.object(Lanes, "after", inline):
+            await _async_stream(api, census)
+        assert sum(census.on_loop.values()) >= 5, dict(census.on_loop)
+        api.close()
+
+    async def test_a_parked_fsync_of_the_reply_does_not_stop_the_loop(
+        self, tmp_path: Path
+    ) -> None:
+        """No clock. The first fsync AFTER the first chunk (the reply blob) parks on an Event
+        a LOOP task sets after ``TICKS`` ticks. On a lane the loop ticks; inline it starves."""
+        entered, released, chunked = (threading.Event() for _ in range(3))
+        starved: list[bool] = []
+        real = os.fsync
+        loop_ident = threading.get_ident()
+
+        def parked(fd: int) -> None:
+            if chunked.is_set() and not entered.is_set():
+                entered.set()
+                if not released.wait(PARK_CAP_SECONDS):
+                    starved.append(threading.get_ident() == loop_ident)
+            real(fd)
+
+        async def ticker() -> None:
+            while not entered.is_set():
+                await asyncio.sleep(0)
+            for _ in range(TICKS):
+                await asyncio.sleep(0)
+            released.set()
+
+        api = _stream_api(tmp_path)
+        with (
+            mock.patch.object(os, "fsync", parked),
+            mock.patch.object(jsonl, "_fsync", parked),
+        ):
+            task = asyncio.create_task(ticker())
+            cid, _ = await api.astart_conversation()
+            async for _chunk_text in api.aconverse_stream("my name is Ada", cid):
+                chunked.set()
+            await task
+        assert starved == [], "the reply blob parked the loop thread itself"
+        assert entered.is_set() and released.is_set()
+        api.close()
+
+    async def test_an_observed_interface_stream_does_no_io_on_the_loop(
+        self, tmp_path: Path
+    ) -> None:
+        """The provider path (``source`` provider): the observer logs the request, the reply of
+        the stream is the same deferred job. Totals equal the sync transport."""
+        from fsm_llm.llm import LiteLLMInterface
+        from tests.test_fsm_llm.event_log_support import _chunk
+
+        def reply(**kwargs: Any) -> Any:
+            if kwargs.get("stream"):
+                return iter([_chunk("B"), _chunk("ye")])
+            return _provider_reply(**kwargs)
+
+        async def areply(**kwargs: Any) -> Any:
+            return reply(**kwargs)
+
+        provider = "fsm_llm.llm.providers.litellm"
+        asynchronous, synchronous = Census(), Census()
+        with (
+            mock.patch(f"{provider}.completion", side_effect=reply),
+            mock.patch(f"{provider}.acompletion", side_effect=areply),
+            mock.patch(f"{provider}.get_supported_openai_params", return_value=[]),
+        ):
+            make = lambda root: _stream_api(  # noqa: E731
+                root, interface=LiteLLMInterface(model="gpt-4o", api_key="sk-unused")
+            )
+            api, other = make(tmp_path / "a"), make(tmp_path / "s")
+            assert await _async_stream(api, asynchronous) == ["B", "ye"]
+            assert await asyncio.to_thread(_sync_stream, other, synchronous) == [
+                "B",
+                "ye",
+            ]
+        api.close()
+        other.close()
+        assert dict(asynchronous.on_loop) == {}, dict(asynchronous.on_loop)
+        assert asynchronous.durable() == synchronous.durable()
+        assert _types(api) == _types(other)  # the provider replies carry random ids

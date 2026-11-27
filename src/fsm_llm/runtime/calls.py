@@ -29,11 +29,13 @@ Imports ``llm`` (the observer seam), ``core`` and ``runtime`` modules only, neve
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from functools import partial
 from typing import Any
 
+from fsm_llm.aio import SYNC
 from fsm_llm.llm.interface import interface_model
 from fsm_llm.llm.observer import install_observer, is_observed, reset_observer
 from fsm_llm.llm.purpose import resolve_purpose
@@ -197,31 +199,53 @@ class LlmCall:
             if close is not None:
                 close()
 
+    # DECISION plan-2026-11-26T213359-77e5fef9/D-007
+    # [PARTLY SUPERSEDES clause 6 of D-017 of plan 3f4530d3: the joined reply is no longer
+    # written on the loop.] In async mode the blob and the `llm/response` line are ONE job
+    # queued behind the jobs already queued for the tree (`lane_after`, FIFO: after the
+    # `llm/request`, before the `turn/end` the manager queues once the generator closes). Every
+    # flag and the link are decided HERE, on the loop, before the job exists. Do NOT await a
+    # lane call in this `finally` (a new cancel point in a generator whose cancel, `athrow`
+    # and abandonment rules are pinned), read `_done`, `_exhausted` or the request link inside
+    # the job (the loop moves on), split the blob from the line, skip the write on abandonment
+    # or cancel (an `llm/request` without its end), run it inline outside `SYNC` mode, or add a
+    # public name. A reader inside the turn may not see the line until the lane drains
+    # (`release`, `close`, the next awaited write); a consumer cannot, `turn/end` is behind it.
+    # See decisions.md D-007.
     def stream_done(self, text: str, *, abandoned: bool | None = None) -> None:
         """Record the joined reply of a streamed call (once), and whether the reader gave up.
 
         *abandoned* ``None`` (the default) is read from ``stream``: abandoned unless the
         chunks ran out. A stream that raised writes no ``llm/response`` here: its
         ``provider/error`` is the outcome (``llm_call`` writes it when the error escapes).
+        The write runs inline in sync mode and as one queued lane job otherwise.
         """
-        if self._scope is None or self._done or self._errored:
+        scope = self._scope
+        if scope is None or self._done or self._errored:
             return
         self._done = True
         if abandoned is None:
             abandoned = not self._exhausted
         body = {"source": self._source, "response_type": "stream", "text": text}
-        fields = response_fields(self._scope.log, body, wrap=None)
-        write_quietly(
-            self._scope,
-            EventType.LLM_RESPONSE,
-            request_seq=self._link(),
-            source=self._source,
-            call_type=self._call_type,
-            purpose=self._purpose,
-            stream=True,
-            abandoned=bool(abandoned),
-            **fields,
-        )
+        line = {
+            "request_seq": self._link(),
+            "source": self._source,
+            "call_type": self._call_type,
+            "purpose": self._purpose,
+            "stream": True,
+            "abandoned": bool(abandoned),
+        }
+
+        def write() -> None:
+            fields = response_fields(scope.log, body, wrap=None)
+            write_quietly(scope, EventType.LLM_RESPONSE, **line, **fields)
+
+        if SYNC.get():
+            write()
+        else:
+            scope.log.lane_after(
+                scope.root_id, partial(contextvars.copy_context().run, write)
+            )
 
     def _failed(self, error: BaseException) -> None:
         if self._scope is None or self._done:
