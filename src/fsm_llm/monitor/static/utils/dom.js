@@ -180,7 +180,7 @@ export function showDrawerDetailView() {
 export function hashInstances(items) {
     let h = items.length;
     for (const item of items) {
-        const s = `${item.instance_id}:${item.status}`;
+        const s = `${item.instance_id}:${item.status}:${item.conversation_count}:${item.active_workflows}`;
         for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
     }
     return h;

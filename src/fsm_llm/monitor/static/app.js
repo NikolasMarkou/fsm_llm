@@ -180,9 +180,6 @@ const ACTIONS = {
     'go-to-conv':        (el) => conversations.showConversationInDrawer(el.dataset.instanceId, el.dataset.convId),
     'ctrl-page-prev':    () => control.ctrlPagePrev(),
     'ctrl-page-next':    () => control.ctrlPageNext(),
-    'toggle-trace-step': (el) => control.toggleTraceStep(el),
-    'expand-all-trace':  () => control.toggleAllTraceSteps(true),
-    'collapse-all-trace':() => control.toggleAllTraceSteps(false),
 
     // Conversations
     'send-chat':         () => conversations.sendChatMessage(),

@@ -86,7 +86,7 @@ WebSocket message fields consumed (any subset may be present in one message):
 | --- | --- |
 | `type === 'metrics'` + `data` | `updateMetrics(data)` |
 | `events` | `updateEvents(events)`; activity-type events schedule refreshes |
-| `instances` | if `hashInstances` changed: set `state.instances`, `renderInstanceGrid()`, and `renderUnifiedTable()` on the control page |
+| `instances` | if `hashInstances` changed (a count-only change included): set `state.instances`, `renderInstanceGrid()`, and `renderUnifiedTable()` on the control page |
 | `agent_updates` | `updateRunningAgents(updates)` (per agent: progress fields and `log_entries`) |
 | `workflow_updates` (ids of running workflows) | dashboard: `refreshActivityTable` (key `dash-activity-wf`, 3 s); control with a workflow selected: `refreshDetailPanel(id, 'workflow')` (key `ctrl-detail-wf`, 2 s) |
 | `logs` (non-empty) | `appendLogs(logs)` |
@@ -111,7 +111,7 @@ Dispatch handler names: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `
 
 ## Dependencies
 
-- `../utils/dom.js`: `hashInstances(items)` (hash over `instance_id:status`), `$` (lookup by element id), `openDialog`/`closeDialog` (modal show/hide with focus restore).
+- `../utils/dom.js`: `hashInstances(items)` (hash over `instance_id:status:conversation_count:active_workflows`), `$` (lookup by element id), `openDialog`/`closeDialog` (modal show/hide with focus restore).
 - Server endpoints: `GET /api/auth`, the `/ws` WebSocket, and whatever REST paths callers pass to `fetchJson`/`postJson`. The server accepts the key as `X-API-Key` (or `Authorization: Bearer`) and gates mutating routes.
 - Browser APIs only: `fetch`, `Headers`, `WebSocket`, `sessionStorage`.
 

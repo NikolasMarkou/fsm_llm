@@ -1422,7 +1422,6 @@ class TestRedaction:
         call.tool_name = "login"
         call.parameters = {"user": "ada", "password": "p"}
         trace.tool_calls = [call]
-        trace.steps = []
         agent.result = MagicMock(
             answer="ok",
             success=True,
@@ -1434,6 +1433,53 @@ class TestRedaction:
         result = mgr.get_agent_result("a1")
         assert "api_key" not in result["final_context"]
         assert result["tools_used"][0]["parameters"] == {"user": "ada"}
+
+    def test_get_agent_result_has_no_trace_steps_key(self):
+        """A finished run's result carries what the drawer reads (answer, success,
+        tools_used, final_context) and no ``trace_steps``: ``AgentTrace`` has no
+        steps, so the key was an always-empty list nothing read (plan 9283c1fd
+        step 5)."""
+        from fsm_llm.agents.definitions import AgentResult, AgentTrace
+        from fsm_llm.tools.models import ToolCall
+
+        mgr = _manager()
+        agent = ManagedAgent("a1")
+        agent.result = AgentResult(
+            answer="ok",
+            stop_reason="answered",
+            final_context={"answer": "ok"},
+            trace=AgentTrace(
+                tool_calls=[ToolCall(tool_name="lookup", parameters={"q": "x"})],
+                total_iterations=1,
+            ),
+        )
+        agent.status = "completed"
+        mgr._instances["a1"] = agent
+        result = mgr.get_agent_result("a1")
+        assert "trace_steps" not in result
+        assert result["answer"] == "ok" and result["success"] is True
+        assert result["total_iterations"] == 1
+        assert result["tools_used"] == [
+            {"tool_name": "lookup", "parameters": {"q": "x"}}
+        ]
+        assert result["final_context"] == {"answer": "ok"}
+
+    def test_no_trace_steps_reader_in_the_monitor_tree(self):
+        """Nothing under ``fsm_llm/monitor`` (python, js, html, css, md) names
+        ``trace_steps``: the producer and its one reader went together."""
+        from pathlib import Path
+
+        import fsm_llm.monitor as monitor_pkg
+
+        root = Path(monitor_pkg.__file__).parent
+        hits = [
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file()
+            and path.suffix in {".py", ".js", ".html", ".css", ".md"}
+            and "trace_steps" in path.read_text(encoding="utf-8")
+        ]
+        assert hits == []
 
 
 class TestCancelAgent:

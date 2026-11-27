@@ -1025,6 +1025,81 @@ class TestDrawerDirectOpen:
         assert out["drawer_already_selected"] == ["/api/conversations/c"]
 
 
+class TestInstanceList:
+    """Plan 9283c1fd step 5 (B3, O1, the dead trace path): `refreshInstances`, `hashInstances`
+    and the drawer of a finished agent, over the stub DOM (no browser)."""
+
+    def test_a_failed_first_fetch_leaves_no_spinner_and_one_toast(self, probe):
+        out = probe("instance_list")["failed_first"]
+        assert out == {
+            "grid": "",
+            "spinner": False,
+            "toasts": ["Failed to refresh instances"],
+        }
+
+    def test_an_empty_monitor_polled_twice_never_keeps_the_spinner(self, probe):
+        out = probe("instance_list")
+        assert out["empty_first"] == "" and out["empty_second"] == ""
+        assert out["empty_hint"] == "block"
+
+    def test_an_older_slow_reply_never_overwrites_a_newer_one(self, probe):
+        out = probe("instance_list")
+        assert out["late_ok"] == {
+            "ids": ["new"],
+            "grid_old": False,
+            "grid_new": True,
+            "spinner": False,
+        }
+
+    def test_an_older_failure_after_a_newer_success_toasts_nothing(self, probe):
+        out = probe("instance_list")["late_fail"]
+        assert out == {"ids": ["new2"], "toasts": [], "spinner": False}
+
+    def test_only_the_latest_request_clears_the_spinner(self, probe):
+        out = probe("instance_list")
+        assert out["latest_clears"] == {"grid": "", "toasts": []}
+        assert out["superseded_keeps_spinner"] == {
+            "whileLatestOut": True,
+            "afterLatest": "",
+        }
+
+    def test_a_count_change_alone_refreshes_the_grid_and_the_table(self, probe):
+        out = probe("instance_list")
+        assert out["counts_before"] == {
+            "grid": ["0 conversations", "0 active"],
+            "table": ["0 convs", "0 active"],
+        }
+        assert out["conversation_count_change"] == {
+            "grid": ["3 conversations", "0 active"],
+            "table": ["3 convs", "0 active"],
+        }
+        assert out["active_workflows_change"] == {
+            "grid": ["3 conversations", "2 active"],
+            "table": ["3 convs", "2 active"],
+        }
+
+    def test_the_websocket_gate_passes_a_count_change(self, probe):
+        out = probe("instance_list")["ws_gate"]
+        # first list, the same list again (gated), a count change, a new instance, its count change
+        assert out == {"paints": [1, 1, 2, 4], "count": 2}
+
+    def test_a_finished_agent_drawer_has_the_tool_call_fallback_and_no_trace_block(
+        self, probe
+    ):
+        out = probe("instance_list")["agent_drawer"]
+        assert out["tool_calls"] and out["escaped"]
+        assert out["same_with_steps_in_result"] is True
+        assert out["trace_block"] is False
+        assert out["result_fetches"] == 0  # the result route fed only the trace block
+
+    def test_no_page_or_action_table_names_the_deleted_trace_handlers(self):
+        names = ("toggle-trace-step", "expand-all-trace", "collapse-all-trace")
+        names += ("toggleTraceStep", "toggleAllTraceSteps", "_TRACE_STATES")
+        for path in _STATIC.rglob("*.js"):
+            text = path.read_text(encoding="utf-8")
+            assert [n for n in names if n in text] == [], path.name
+
+
 class TestJsonColouring:
     """Plan 51fde95b step 14 (D-040): `utils/json_highlight.js` and every page that shows JSON."""
 

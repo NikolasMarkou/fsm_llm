@@ -297,17 +297,26 @@ export function onInstSearchInput() {
     scheduleRefresh('inst-search', renderInstanceGrid, 250);
 }
 
+const _LOADING = '<div class="loading-spinner">Loading instances...</div>';
+let _instanceRequest = 0;
+
 export async function refreshInstances() {
+    const mine = ++_instanceRequest;
     const grid = $('instances-grid');
-    if (grid && state.instances.length === 0 && !grid.innerHTML) {
-        grid.innerHTML = '<div class="loading-spinner">Loading instances...</div>';
-    }
+    if (grid && state.instances.length === 0 && !grid.innerHTML) grid.innerHTML = _LOADING;
     try {
-        state.instances = await fetchJson('/api/instances');
+        const items = await fetchJson('/api/instances');
+        if (mine !== _instanceRequest) return;
+        state.instances = items;
         renderInstanceGrid();
     } catch (e) {
+        if (mine !== _instanceRequest) return;
         console.error('refreshInstances:', e);
         showToast('Failed to refresh instances', 'error');
+    } finally {
+        // The latest request ends the spinner on every outcome (the hash early return of
+        // the render leaves it behind on an empty monitor); a superseded one leaves it to the latest.
+        if (mine === _instanceRequest && grid && grid.innerHTML === _LOADING) grid.innerHTML = '';
     }
 }
 

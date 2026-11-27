@@ -33,8 +33,6 @@ let _queuedKey = null;
 let _lastDetailHtml = '';
 let _lastAgentUpdateSig = '';
 
-const _TRACE_STATES = ['think', 'act', 'conclude', 'error'];
-
 // --- Filter & Search ---
 
 export function filterControlInstances(filter, btn) {
@@ -358,7 +356,6 @@ function _paintDetail(contentEl, html) {
     const drawerScroll = drawer ? { top: drawer.scrollTop, atBottom: _atBottom(drawer) } : null;
     const inner = [...contentEl.querySelectorAll('.chat-container')]
         .map(el => ({ top: el.scrollTop, atBottom: _atBottom(el) }));
-    const expanded = _captureTraceState(contentEl);
     const form = _captureFormState(contentEl);
     const opened = [...contentEl.querySelectorAll('details')].map(d => d.open);
 
@@ -370,7 +367,6 @@ function _paintDetail(contentEl, html) {
         const prev = inner[i];
         el.scrollTop = (!prev || prev.atBottom) ? el.scrollHeight : prev.top;
     });
-    _restoreTraceState(contentEl, expanded);
     contentEl.querySelectorAll('details').forEach((d, i) => { if (opened[i]) d.open = true; });
     _restoreFormState(contentEl, form);
     if (drawer && drawerScroll) {
@@ -701,25 +697,6 @@ export async function sendWorkflowEvent(instanceId) {
 
 // --- Agent Detail ---
 
-function _captureTraceState(contentEl) {
-    const expanded = [];
-    contentEl?.querySelectorAll('.trace-step .step-body').forEach((el, idx) => {
-        if (el.style.display === 'block') expanded.push(idx);
-    });
-    return expanded;
-}
-
-function _restoreTraceState(contentEl, expanded) {
-    if (!contentEl || !expanded.length) return;
-    const bodies = contentEl.querySelectorAll('.trace-step .step-body');
-    for (const i of expanded) {
-        if (bodies[i]) {
-            bodies[i].style.display = 'block';
-            bodies[i].closest('.trace-step')?.querySelector('.step-header')?.setAttribute('aria-expanded', 'true');
-        }
-    }
-}
-
 function _extractTaskText(raw) {
     if (!raw) return '';
     if (typeof raw !== 'string') return String(_fmtVal(raw));
@@ -920,7 +897,7 @@ async function _buildAgentDetail(instanceId) {
         }
 
         if (data.status !== 'running') {
-            html += await _buildAgentTrace(instanceId, data);
+            html += _buildAgentTrace(data);
             return html;
         }
 
@@ -942,56 +919,9 @@ function _renderToolCalls(toolsUsed) {
     return html;
 }
 
-export function toggleAllTraceSteps(expand) {
-    document.querySelectorAll('#ctrl-drawer-content .trace-step .step-body').forEach(el => {
-        el.style.display = expand ? 'block' : 'none';
-        el.closest('.trace-step')?.querySelector('.step-header[aria-expanded]')
-            ?.setAttribute('aria-expanded', expand ? 'true' : 'false');
-    });
-}
-
-/** Toggle one trace step (data-action="toggle-trace-step" on its header). */
-export function toggleTraceStep(headerEl) {
-    const body = headerEl?.closest('.trace-step')?.querySelector('.step-body');
-    if (!body) return;
-    const open = body.style.display !== 'block';
-    body.style.display = open ? 'block' : 'none';
-    headerEl.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-async function _buildAgentTrace(instanceId, statusData) {
+function _buildAgentTrace(statusData) {
     let html = '';
-    try {
-        const result = await fetchJson(`/api/agent/${encodeURIComponent(instanceId)}/result`);
-        if (result.trace_steps?.length) {
-            html += `<div class="panel-title panel-title-flex">Execution Trace (${result.trace_steps.length} steps)`;
-            html += '<div class="flex-row-gap-4">';
-            html += '<button class="btn btn-sm" data-action="expand-all-trace">Expand</button>';
-            html += '<button class="btn btn-sm" data-action="collapse-all-trace">Collapse</button>';
-            html += '</div></div>';
-            let iteration = 0;
-            for (const step of result.trace_steps) {
-                const st = String(step.state || '');
-                if (st === 'think') iteration++;
-                const stepCls = _TRACE_STATES.includes(st) ? st : 'other';
-                const stateColorClass = st === 'think' ? 'state-think' : st === 'act' ? 'state-act' : st === 'conclude' ? 'state-conclude' : 'state-default';
-                const stepIcon = st === 'think' ? '&#9679;' : st === 'act' ? '&#9654;' : st === 'conclude' ? '&#10003;' : '&#8226;';
-                html += `<div class="trace-step step-${stepCls}">`;
-                html += `<div class="step-header" data-action="toggle-trace-step" role="button" tabindex="0" aria-expanded="false"><span class="${stateColorClass}">${stepIcon} ${esc(st.toUpperCase())}`;
-                if (st === 'think') html += ` #${iteration}`;
-                if (step.tool_name) html += ` &mdash; ${esc(step.tool_name)}`;
-                html += '</span></div>';
-                html += '<div class="step-body">';
-                if (step.reasoning) html += `<div><b>Reasoning:</b> ${esc(step.reasoning)}</div>`;
-                if (step.tool_input) html += `<div><b>Input:</b> ${_valHtml(step.tool_input)}</div>`;
-                if (step.tool_result) html += `<div><b>Result:</b> ${_valHtml(step.tool_result)}</div>`;
-                html += '</div></div>';
-            }
-        } else if (statusData.tools_used?.length) {
-            html += _renderToolCalls(statusData.tools_used);
-        }
-    } catch { /* trace fetch failed, skip */ }
-
+    if (statusData.tools_used?.length) html += _renderToolCalls(statusData.tools_used);
     if (statusData.success !== undefined) html += renderResultBanner(statusData.success);
     return html;
 }

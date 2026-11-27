@@ -57,7 +57,7 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 - `highlightText(text, query): string` - regex-escapes the raw query, splits the raw text on case-insensitive matches, escapes every part and wraps the matches in `span.search-highlight` (so `amp` never matches inside `&amp;`).
 - `renderPagination(el, page, totalPages, action): void` - hides `el` for one page, else fills it with Prev/Next buttons whose `data-action` is `<action>-prev` / `<action>-next`.
 - `showDrawerDetailView(): void` - shows the Control drawer's detail view and hides the conversation sub-view.
-- `hashInstances(items): number` - 32-bit rolling hash seeded with `items.length` over `instance_id:status` of each item. Change detection only.
+- `hashInstances(items): number` - 32-bit rolling hash seeded with `items.length` over `instance_id:status:conversation_count:active_workflows` of each item. Change detection only.
 - `numVal(id, fallback)`, `intVal(id, fallback)` - `parseFloat` / `parseInt(..., 10)` of an input's value; non-finite or missing element -> fallback.
 - `copyToClipboard(text): Promise<true>` - `navigator.clipboard.writeText`, on error falls back to hidden textarea + `document.execCommand('copy')`.
 
@@ -108,7 +108,7 @@ Edge: `{ from, to, label? }`. `from`/`to` are node ids; edges whose ends are not
 
 Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `text.edge-label`, then per node `rect.node-rect.node-<nodeClass>[.initial|.terminal]`, `text.node-label`, `text.node-subtitle`.
 
-`hashInstances` items: objects with `instance_id` and `status`.
+`hashInstances` items: objects with `instance_id`, `status` and, when present, `conversation_count` and `active_workflows` (a missing one hashes as `undefined`).
 
 ## Invariants and constraints
 

@@ -452,7 +452,7 @@ class AgentsMixin(_InstanceSurface):
         return result
 
     def get_agent_result(self, instance_id: str) -> dict[str, Any]:
-        """Get final agent result (if complete) with full trace steps."""
+        """Get the final agent result (if complete)."""
         inst = self._get_agent(instance_id)
         # Snapshot under one lock so status/result/error agree, and distinguish
         # "not finished yet" from "finished with no result / failed"
@@ -474,18 +474,4 @@ class AgentsMixin(_InstanceSurface):
                 getattr(inst_result, "final_context", None) or {}
             ),
         }
-        trace = getattr(inst_result, "trace", None)
-        if trace:
-            # Full trace steps for visualization
-            result["trace_steps"] = [
-                {
-                    "state": getattr(s, "state", ""),
-                    "reasoning": getattr(s, "reasoning", ""),
-                    "tool_name": getattr(s, "tool_name", ""),
-                    "tool_input": redact_context(getattr(s, "tool_input", "")),
-                    "tool_result": getattr(s, "observation", ""),
-                    "timestamp": str(getattr(s, "timestamp", "")),
-                }
-                for s in getattr(trace, "steps", [])
-            ]
         return result

@@ -1442,10 +1442,7 @@ button.btn:disabled {
     background: var(--surface-hover);
 }
 
-.trace-step.step-think { border-left-color: var(--primary); }
 .trace-step.step-act { border-left-color: var(--warning); }
-.trace-step.step-conclude { border-left-color: var(--success); }
-.trace-step.step-error { border-left-color: var(--danger); }
 
 .trace-step .step-header {
     display: flex;
