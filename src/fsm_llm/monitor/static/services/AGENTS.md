@@ -76,7 +76,7 @@ sequenceDiagram
 
 ## Data shapes
 
-Initial `state` fields: `ws` (`null`), `currentPage` (`'dashboard'`), `presets`, `agentTypes` (`null` until loaded), `wsRetryDelay` (3000), `capabilities` (`{fsm: true, workflows: false, agents: false}`), `instances` (`[]`), `selectedConvId`, `selectedConvInstanceId`, `selectedDetailId`, `selectedDetailType`, `detailPollTimer`, `refreshTimers` (`{}`), `autoScrollLogs` (`true`; `pages/settings.js` sets it from the server config's `auto_scroll_logs`), `_lastContextData`. Pages also add fields ad hoc (for example `state.workflowPresets` in `pages/launch.js`).
+Initial `state` fields: `ws` (`null`), `currentPage` (`'dashboard'`), `presets`, `agentTypes` (`null` until loaded), `wsRetryDelay` (3000), `capabilities` (`{fsm: true, workflows: true, agents: true}`: advisory, the server refuses a launch it cannot run; `pages/launch.js` keeps the last known value when `/api/capabilities` fails), `instances` (`[]`), `selectedConvId`, `selectedConvInstanceId`, `selectedDetailId`, `selectedDetailType`, `detailPollTimer`, `refreshTimers` (`{}`), `autoScrollLogs` (`true`; `pages/settings.js` sets it from the server config's `auto_scroll_logs`), `_lastContextData`. Pages also add fields ad hoc (for example `state.workflowPresets` in `pages/launch.js`).
 
 WebSocket auth message sent on open: `{"type": "auth", "api_key": "<stored key or empty string>"}`.
 

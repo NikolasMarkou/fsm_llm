@@ -2,7 +2,7 @@
 
 import { state, DEFAULT_AGENT_TYPE } from '../services/state.js';
 import { fetchJson, postJson, loadAgentTypes, agentRow, toolsRequired } from '../services/api.js';
-import { $, esc, numVal, intVal, fillSelect, showError, showStatus, openDialog, closeDialog } from '../utils/dom.js';
+import { $, esc, numVal, intVal, fillSelect, showError, showStatus, showToast, launchedNotStartedText, openDialog, closeDialog } from '../utils/dom.js';
 
 // Forward references (set by app.js)
 let _showPage, _refreshInstances, _showConversationInDrawer;
@@ -23,7 +23,12 @@ export function showLaunchModal() {
     _clearLaunchStatuses();
 }
 
+// Bumped by every close: a launch captures it at its click and its 500 ms window acts only on the same
+// open modal (D-006 of plan 1f0925d2). A plain counter, so a close and a reopen cancel it too.
+let _modalEpoch = 0;
+
 export function closeLaunchModal() {
+    _modalEpoch++;
     closeDialog($('launch-modal'));
 }
 
@@ -42,7 +47,9 @@ async function checkCapabilities() {
         if (wfUnavail) wfUnavail.style.display = state.capabilities.workflows ? 'none' : 'block';
         if (agentUnavail) agentUnavail.style.display = state.capabilities.agents ? 'none' : 'block';
     } catch (e) {
+        // Keep the last known flags (permissive by default): the server answers a launch it cannot run with a 400.
         console.error('checkCapabilities:', e);
+        showToast(`Could not check the installed extensions: ${e.message}. Launching is still tried.`, 'error');
     }
 }
 
@@ -169,8 +176,18 @@ function _resetter(btn, label) {
     return () => { if (btn) { btn.disabled = false; btn.textContent = label; } };
 }
 
+/** The 500 ms window after a launch (the button stays disabled in it): close the modal and show Control only if
+ *  the modal the click came from is still open, then run `after`; the button comes back in every case. */
+function _afterLaunch(epoch, resetBtn, after) {
+    setTimeout(() => {
+        if (epoch === _modalEpoch) { closeLaunchModal(); _showPage?.('control'); after?.(); }
+        resetBtn();
+    }, 500);
+}
+
 export async function doLaunchFSM(btn) {
     const _resetBtn = _resetter(btn, 'Launch FSM');
+    const epoch = _modalEpoch;
     if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
 
     const source = $('launch-fsm-source').value;
@@ -186,30 +203,32 @@ export async function doLaunchFSM(btn) {
         catch { showError('launch-fsm-status', 'Invalid JSON'); _resetBtn(); return; }
     }
 
+    let data;
     try {
-        const data = await postJson('/api/fsm/launch', body);
-        showStatus('launch-fsm-status', `Launched: ${data.label || data.instance_id}`, 'success');
-        _refreshInstances?.();
-
-        const startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, { initial_context: {} });
-        if (startData) {
-            // The button stays disabled until the modal is closed (no second POST in the 500 ms window).
-            setTimeout(() => {
-                closeLaunchModal();
-                _showPage?.('control');
-                if (startData.conversation_id) _showConversationInDrawer?.(data.instance_id, startData.conversation_id);
-                _resetBtn();
-            }, 500);
-            return;
-        }
+        data = await postJson('/api/fsm/launch', body);
     } catch (e) {
         showError('launch-fsm-status', `Launch failed: ${e.message}`);
+        _resetBtn();
+        return;
     }
-    _resetBtn();
+    // The instance exists from here on: a failure below is never "Launch failed" (a retry would make a second one).
+    showStatus('launch-fsm-status', `Launched: ${data.label || data.instance_id}`, 'success');
+    _refreshInstances?.();
+    let startData = null;
+    try {
+        startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, { initial_context: {} });
+    } catch (e) {
+        showError('launch-fsm-status', launchedNotStartedText(data, e));
+    }
+    // The button stays disabled until the window ends (no second POST inside it).
+    _afterLaunch(epoch, _resetBtn, () => {
+        if (startData?.conversation_id) _showConversationInDrawer?.(data.instance_id, startData.conversation_id);
+    });
 }
 
 export async function doLaunchWorkflow(btn) {
     const _resetBtn = _resetter(btn, 'Launch Workflow');
+    const epoch = _modalEpoch;
     if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
 
     if (!state.capabilities.workflows) {
@@ -232,7 +251,7 @@ export async function doLaunchWorkflow(btn) {
         const data = await postJson('/api/workflow/launch', body);
         showStatus('launch-wf-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
-        setTimeout(() => { closeLaunchModal(); _showPage?.('control'); _resetBtn(); }, 500);
+        _afterLaunch(epoch, _resetBtn);
         return;
     } catch (e) {
         showError('launch-wf-status', `Launch failed: ${e.message}`);
@@ -263,10 +282,13 @@ const TOOL_TEMPLATES = [
 function populateToolTemplates() {
     const select = $('launch-tool-template');
     if (!select) return;
-    select.innerHTML = '<option value="">-- Add a tool from templates --</option>';
-    for (const t of TOOL_TEMPLATES) {
-        select.innerHTML += `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.description)}</option>`;
-    }
+    const options = [['', '-- Add a tool from templates --'], ...TOOL_TEMPLATES.map(t => [t.name, `${t.name} — ${t.description}`])];
+    select.replaceChildren(...options.map(([value, text]) => {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = text;
+        return opt;
+    }));
 }
 
 export function addToolFromTemplate() {
@@ -335,6 +357,7 @@ export function onAgentTypeChange() {
 
 export async function doLaunchAgent(btn) {
     const _resetBtn = _resetter(btn, 'Launch Agent');
+    const epoch = _modalEpoch;
     if (btn) { btn.disabled = true; btn.textContent = 'Launching...'; }
 
     if (!state.capabilities.agents) {
@@ -367,7 +390,7 @@ export async function doLaunchAgent(btn) {
         const data = await postJson('/api/agent/launch', body);
         showStatus('launch-agent-status', `Launched: ${data.label || data.instance_id}`, 'success');
         _refreshInstances?.();
-        setTimeout(() => { closeLaunchModal(); _showPage?.('control'); _resetBtn(); }, 500);
+        _afterLaunch(epoch, _resetBtn);
         return;
     } catch (e) {
         showError('launch-agent-status', `Launch failed: ${e.message}`);

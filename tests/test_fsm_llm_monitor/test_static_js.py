@@ -547,6 +547,94 @@ class TestEventLogView:
         assert out["path"] == "/api/eventlog/a%20b%2Fc"
 
 
+class TestLaunchFlows:
+    """Plan 1f0925d2 step 5 (F1, D-006): a created instance is never a failed launch; no stale timer."""
+
+    def test_a_failed_first_start_says_the_instance_was_launched(self, probe):
+        out = probe("stale_state")["fsm_partial"]
+        text = out["after"]["status"]
+        assert "Launch failed" not in text
+        assert "Launched: L1, but starting the first conversation failed" in text
+        assert "LLM operation timed out" in text
+        # G4: the button stays disabled in the window; one launch POST; then Control, modal closed.
+        assert out["after"]["disabled"] is True
+        assert (out["launches"], out["ran"], out["pages"]) == (1, 1, ["control"])
+        assert (out["modal"], out["disabled"]) == ("none", False)
+
+    def test_a_refused_first_post_is_still_launch_failed(self, probe):
+        out = probe("stale_state")["fsm_first_failed"]
+        assert "Launch failed: bad preset" in out["status"]
+        assert (out["disabled"], out["timers"], out["pages"], out["posts"]) == (
+            False,
+            0,
+            [],
+            1,
+        )
+
+    @pytest.mark.parametrize("name", ["fsm", "workflow", "agent"])
+    def test_a_close_in_the_window_cancels_the_navigation(self, probe, name):
+        out = probe("stale_state")
+        assert out[f"{name}_stays_open"]["pages"] == ["control"]
+        for mode in ("closed", "closed_and_reopened"):
+            row = out[f"{name}_{mode}"]
+            assert row["pages"] == [] and row["drawer"] == 0, mode
+            assert row["disabled_in_window"] is True and row["disabled"] is False
+        assert out[f"{name}_closed"]["modal"] == "none"
+        assert out[f"{name}_closed_and_reopened"]["modal"] == "flex"
+
+    def test_a_close_while_the_start_is_in_flight_navigates_nowhere(self, probe):
+        out = probe("stale_state")["fsm_closed_during_start"]
+        assert (out["pages"], out["drawer"], out["disabled"]) == ([], 0, False)
+
+    def test_a_failed_capabilities_fetch_blocks_nothing_and_is_shown_once(self, probe):
+        out = probe("stale_state")["capabilities"]
+        assert out["defaults"] == {"fsm": True, "workflows": True, "agents": True}
+        assert out["kept"] == out["defaults"]
+        assert out["toasts"] == 1
+        assert out["workflow_posts"] == 1
+        assert "not installed" not in out["workflow_status"]
+
+    def test_the_tool_template_options_are_built_with_textcontent(self, probe):
+        out = probe("stale_state")["tool_templates"]
+        assert out["count"] == 16 and out["innerHTML"] == ""
+        assert out["first"] == ["", "-- Add a tool from templates --"]
+        assert out["search"] == [
+            "search",
+            "search \u2014 Search the web for information on a topic",
+        ]
+
+    def test_the_builder_fsm_launch_keeps_the_launched_wording(self, probe):
+        out = probe("stale_state")["builder_partial"]
+        assert "Launch failed" not in out["status"]
+        assert (
+            "Launched: L1, but starting the first conversation failed" in out["status"]
+        )
+        assert (out["disabled"], out["pages_before"]) == (True, [])
+        assert (out["pages"], out["disabled_after"], out["launches"]) == (
+            ["control"],
+            False,
+            1,
+        )
+
+    def test_two_clicks_on_the_builder_launch_make_one_fsm(self, probe):
+        out = probe("stale_state")["builder_double"]
+        assert out["inFlight"] == {"disabled": True, "launches": 1}
+        assert (out["launches"], out["disabled_after"]) == (1, False)
+
+    def test_a_refused_builder_launch_re_enables_the_button_for_a_retry(self, probe):
+        out = probe("stale_state")["builder_first_failed"]
+        assert out["disabled"] is True and out["disabled_after"] is False
+        assert "Launch failed: bad definition" in out["status"]
+        assert (out["timers"], out["retry_launches"]) == (0, 2)
+
+    def test_the_launch_page_has_one_timer_and_builds_no_options_with_markup(self):
+        text = (_STATIC / "pages" / "launch.js").read_text(encoding="utf-8")
+        assert (
+            text.count("setTimeout(") == 1
+        )  # _afterLaunch: every path shares its guard
+        assert "innerHTML +=" not in text
+
+
 class TestJsonColouring:
     """Plan 51fde95b step 14 (D-040): `utils/json_highlight.js` and every page that shows JSON."""
 

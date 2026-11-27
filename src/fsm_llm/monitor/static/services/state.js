@@ -10,7 +10,8 @@ export const state = {
     presets: null,
     agentTypes: null,
     wsRetryDelay: 3000,
-    capabilities: { fsm: true, workflows: false, agents: false },
+    // Advisory (D-006 of plan 1f0925d2): permissive until /api/capabilities answers; the server refuses with a 400 text.
+    capabilities: { fsm: true, workflows: true, agents: true },
     instances: [],
     selectedConvId: null,
     selectedConvInstanceId: null,

@@ -33,6 +33,11 @@ export function showStatus(elementId, msg, color) {
     if (el) el.innerHTML = msg ? `<span class="status-msg status-${color}">${esc(msg)}</span>` : '';
 }
 
+/** Status text of a launch that made the instance but failed to start its first conversation (never "Launch failed"). */
+export function launchedNotStartedText(data, e) {
+    return `Launched: ${data.label || data.instance_id}, but starting the first conversation failed: ${e.message}`;
+}
+
 export function showToast(msg, type) {
     document.querySelector('.toast')?.remove();
     const toast = document.createElement('div');
@@ -196,8 +201,7 @@ export function intVal(id, fallback) {
 /**
  * Fill a select from agent type rows in groups `[{label, rows}]` (a falsy label means no optgroup).
  * Options are built with createElement and textContent only, never markup from server data (pinned by
- * test_agent_selects.py::test_the_scripts_set_option_text_with_textcontent_only: do not use innerHTML here,
- * `populateToolTemplates` does for author data). Keeps the
+ * test_agent_selects.py::test_the_scripts_set_option_text_with_textcontent_only: do not use innerHTML here). Keeps the
  * current value when it is still offered, else `preferred`, else the first option; no rows at all
  * leaves one disabled option reading `emptyText`.
  */

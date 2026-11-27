@@ -1,7 +1,7 @@
 // FSM-LLM Monitor — Builder Page (Meta-Agent)
 
 import { fetchJson, postJson, loadAgentTypes, toolsRequired } from '../services/api.js';
-import { $, esc, intVal, jsonViewHtml, numVal, showError, showStatus, showToast, copyToClipboard } from '../utils/dom.js';
+import { $, esc, intVal, jsonViewHtml, numVal, showError, showStatus, showToast, copyToClipboard, launchedNotStartedText } from '../utils/dom.js';
 import { highlightJsonIn, renderJson } from '../utils/json_highlight.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
@@ -539,26 +539,45 @@ export function launchBuilderResult() {
     showError('builder-status', `Unknown artifact type: ${_artifactType}`);
 }
 
-function _launchBuilderFSM() {
+// One FSM launch at a time (D-006 of plan 1f0925d2): the flag is the guard, the disabled button its sign
+// (an Apply of Edit JSON re-syncs the button, so the button alone is not a guard).
+let _fsmLaunching = false;
+
+async function _launchBuilderFSM() {
+    if (_fsmLaunching) return;
     let parsed;
     try { parsed = JSON.parse(_artifact); } catch { showError('builder-status', 'Invalid JSON'); return; }
 
+    const launchBtn = $('builder-launch-btn');
     const model = $('builder-model').value.trim() || undefined;
     const temp = numVal('builder-temp', 0.5);
+    const release = () => { _fsmLaunching = false; if (launchBtn) launchBtn.disabled = false; };
+    _fsmLaunching = true;
+    if (launchBtn) launchBtn.disabled = true;
 
-    postJson('/api/fsm/launch', { fsm_json: parsed, model, temperature: temp, label: parsed.name || 'Built FSM' })
-        .then(data => {
-            showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
-            _refreshInstances?.();
-            return postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, {}).then(startData => {
-                setTimeout(() => {
-                    _showPage?.('control');
-                    // Open the new conversation, as the Launch modal does.
-                    if (startData?.conversation_id) showConversationInDrawer(data.instance_id, startData.conversation_id);
-                }, 500);
-            });
-        })
-        .catch(e => showError('builder-status', `Launch failed: ${e.message}`));
+    let data;
+    try {
+        data = await postJson('/api/fsm/launch', { fsm_json: parsed, model, temperature: temp, label: parsed.name || 'Built FSM' });
+    } catch (e) {
+        showError('builder-status', `Launch failed: ${e.message}`);
+        release();
+        return;
+    }
+    // The instance exists from here on: a failing start is never "Launch failed" (a retry would make a second FSM).
+    showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
+    _refreshInstances?.();
+    let startData = null;
+    try {
+        startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, {});
+    } catch (e) {
+        showError('builder-status', launchedNotStartedText(data, e));
+    }
+    setTimeout(() => {
+        release();
+        _showPage?.('control');
+        // Open the new conversation, as the Launch modal does.
+        if (startData?.conversation_id) showConversationInDrawer(data.instance_id, startData.conversation_id);
+    }, 500);
 }
 
 function _launchBuilderWorkflow() {
