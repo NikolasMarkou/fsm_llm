@@ -80,13 +80,45 @@ export function statusBadge(status) {
 // --- Dialog focus management ---
 
 const _returnFocus = new Map();
+const _open = [];  // the dialogs and drawers opened with openDialog, the top one last
+
+function _focusables(el) {
+    const cands = el.querySelectorAll('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
+    return [...cands].filter(c => !c.disabled && c.getClientRects().length > 0);
+}
 
 function _firstFocusable(el) {
-    const cands = el.querySelectorAll('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
-    for (const c of cands) {
-        if (!c.disabled && c.getClientRects().length > 0) return c;
-    }
-    return null;
+    return _focusables(el)[0] ?? null;
+}
+
+// DECISION plan-2026-11-27T201735-9283c1fd/D-007: Tab and Shift+Tab stay inside the TOP open dialog (O4).
+// One module stack and one document keydown listener that exists only while the stack is not empty; closeDialog
+// is the one place that pops. Do NOT trap with `inert` on the page behind alone (no browser proof, older engines
+// lack it), do NOT leave the listener after the last close, do NOT let a closed dialog trap (pop it in closeDialog
+// even when it is already hidden), do NOT trap the bottom dialog of a stack (the API key modal opens over the
+// launch modal on a 401), do NOT preventDefault when the browser's own Tab move stays inside.
+function _trap(e) {
+    if (e.key !== 'Tab') return;
+    const top = _open[_open.length - 1];
+    const list = _focusables(top);
+    if (!list.length) { e.preventDefault(); top.setAttribute('tabindex', '-1'); top.focus(); return; }
+    const at = list.indexOf(document.activeElement);
+    const to = e.shiftKey ? (at <= 0 ? list[list.length - 1] : null) : (at < 0 || at === list.length - 1 ? list[0] : null);
+    if (to) { e.preventDefault(); to.focus(); }
+}
+
+function _pushOpen(el) {
+    const at = _open.indexOf(el);
+    if (at >= 0) _open.splice(at, 1);
+    else if (!_open.length) document.addEventListener('keydown', _trap);
+    _open.push(el);
+}
+
+function _popOpen(el) {
+    const at = _open.indexOf(el);
+    if (at < 0) return;
+    _open.splice(at, 1);
+    if (!_open.length) document.removeEventListener('keydown', _trap);
 }
 
 function _isHidden(el) {
@@ -103,6 +135,7 @@ export function openDialog(el, display = 'flex', focusTarget = null) {
     const wasHidden = _isHidden(el);
     el.style.display = display;
     if (!wasHidden) return;
+    _pushOpen(el);
     const active = document.activeElement;
     _returnFocus.set(el, active && active !== document.body ? active : null);
     const target = focusTarget || _firstFocusable(el);
@@ -111,7 +144,9 @@ export function openDialog(el, display = 'flex', focusTarget = null) {
 
 /** Hide a dialog opened with openDialog() and restore the previous focus. */
 export function closeDialog(el) {
-    if (!el || _isHidden(el)) return;
+    if (!el) return;
+    _popOpen(el);
+    if (_isHidden(el)) return;
     el.style.display = 'none';
     const prev = _returnFocus.get(el);
     _returnFocus.delete(el);

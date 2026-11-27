@@ -101,7 +101,7 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 - A row of `loadAgentTypes()` (`services/api.js`) with `needs_tools` and no `tool_names` requires at least one tool in both launch paths (`toolsRequired(id)`; the Builder refusal names Edit JSON as the way to add one); a row that `takes_tools` shows the tools form.
 - Launch FSM also starts one conversation (`initial_context: {}`) and, after 500 ms, opens it in the drawer, provided the launch modal is still the one that launched it (see the `launch.js` row). The builder's FSM and agent launches share one guard, `_launching`: one launch per click series, the button disabled for the whole flight and the 500 ms window after a success, and re-enabled at once after a failed POST. The redirect to Control (and the new conversation of an FSM launch) is one `_afterLaunch` timer that moves only while `_sessionToken` and `state.currentPage` are those of the click: a Reset, a new start or another page inside the window cancels the move, never the release.
 - Settings validates `refresh_interval` 0.5..60 and `max_events`/`max_log_lines` integers 10..100000 before POST, marking bad fields `aria-invalid`. The API key is stored in sessionStorage only (via `services/auth.js`).
-- Modals and the drawer open with `openDialog` (focus moves in) and close with `closeDialog` (focus restored).
+- Modals and the drawer open with `openDialog` (focus moves in) and close with `closeDialog` (focus restored); Tab stays inside the open one.
 
 ## Dependencies
 

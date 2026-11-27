@@ -420,6 +420,103 @@ class TestKeyPromptLateClose:
         assert 'id="set-api-key"' in html  # the way back in after a dismissal
 
 
+class TestDialogFocusTrap:
+    """Plan 9283c1fd step 9 (O4, D-007): Tab and Shift+Tab stay inside the open dialog or drawer.
+
+    Proven over the stub DOM only (a keydown handed to the registered listeners): no real browser
+    ran here, so a browser's own Tab order is not claimed.
+    """
+
+    @pytest.fixture
+    def trap(self, probe):
+        return probe("dialog_focus")["trap"]
+
+    def test_tab_on_the_last_wraps_to_the_first(self, trap):
+        assert trap["opened"] == {"focused": "ta", "listeners": 1}
+        assert trap["tab_on_last_wraps_to_first"] == {
+            "prevented": True,
+            "focused": "ta",
+        }
+
+    def test_shift_tab_on_the_first_wraps_to_the_last(self, trap):
+        # the last focusable, not the hidden or disabled elements after it
+        assert trap["shift_tab_on_first_wraps_to_last"] == {
+            "prevented": True,
+            "focused": "tc",
+        }
+
+    def test_tab_in_the_middle_is_left_to_the_browser(self, trap):
+        stayed = {"prevented": False, "focused": "tb"}
+        assert trap["tab_in_middle_not_prevented"] == {
+            "tab": stayed,
+            "shift": stayed,
+            "listeners": 1,
+        }
+
+    def test_tab_with_focus_outside_enters_the_dialog(self, trap):
+        assert trap["tab_with_focus_outside_enters_dialog"] == {
+            "tab": {"prevented": True, "focused": "ta"},
+            "shift": {"prevented": True, "focused": "tc"},
+        }
+
+    def test_an_empty_dialog_keeps_focus_on_the_container(self, trap):
+        held = {"prevented": True, "focused": "ctrl-drawer"}
+        assert trap["empty_dialog_keeps_focus_on_container"] == {
+            "tab": held,
+            "shift": held,
+            "tabindex": "-1",
+        }
+
+    def test_the_drawer_traps_like_a_dialog(self, trap):
+        assert trap["drawer_traps_like_a_dialog"] == {
+            "wrap": {"prevented": True, "focused": "dx"},
+            "back": {"prevented": True, "focused": "dy"},
+        }
+
+    def test_stacked_dialogs_the_top_traps_then_the_lower_after_it_closes(self, trap):
+        assert trap["stacked_dialogs_top_traps_then_lower_after_close"] == {
+            "top": {"prevented": True, "focused": "k1"},
+            "lowerFocusEntersTop": {"prevented": True, "focused": "k1"},
+            "lower": {"prevented": True, "focused": "ta"},
+            "listeners": 1,
+        }
+
+    def test_the_stack_survives_a_dialog_closed_out_of_order(self, trap):
+        assert trap["stack_survives_out_of_order_close"] == {
+            "top": {"prevented": True, "focused": "k1"},
+            "listeners": 1,
+        }
+
+    def test_a_dialog_hidden_by_hand_is_popped_and_never_stacked_twice(self, trap):
+        assert trap["hidden_by_hand_is_popped"] == {"reopened": 0, "closed": 0}
+
+    def test_a_dialog_opened_twice_is_one_listener(self, trap):
+        assert trap["reopen_one_listener"] == 1
+
+    def test_closing_removes_the_listener_and_a_closed_dialog_traps_nothing(self, trap):
+        closed = trap["close_removes_listener"]
+        assert closed["listeners"] == 0 and closed["adds"] == closed["removes"] > 0
+        assert closed["after_close"]["prevented"] is False
+
+    def test_the_focus_return_of_a_closed_dialog_is_unchanged(self, trap):
+        assert trap["existing_focus_return_unchanged"] == {
+            "focused": "t-out",
+            "listeners": 0,
+            "display": "none",
+        }
+
+    def test_every_dialog_the_trap_covers_is_a_modal_dialog_in_the_template(self):
+        html = (_STATIC.parent / "templates" / "index.html").read_text(encoding="utf-8")
+        for dialog_id in (
+            "ctrl-drawer",
+            "shortcuts-overlay",
+            "launch-modal",
+            "apikey-modal",
+        ):
+            tag = re.search(rf'<div id="{dialog_id}"[^>]*>', html).group(0)
+            assert 'role="dialog"' in tag and 'aria-modal="true"' in tag
+
+
 _HOSTILE = "<img src=x onerror=alert(1)>"
 
 

@@ -1309,6 +1309,11 @@
       "delta": 1,
       "reason": "plan 9283c1fd step 2: new anchors plan-2026-11-27T201735-9283c1fd/D-005 in monitor/instance_manager/fsm.py (end_conversation claim, one lock scope) and plan-2026-11-27T201735-9283c1fd/D-006 in monitor/instance_manager/manager.py (config setter sink swap order); no existing token moved or lost",
       "token": "plan-2026-11-27T201735-9283c1fd/D-006"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 9283c1fd step 9: new anchor plan-2026-11-27T201735-9283c1fd/D-007 in monitor/static/utils/dom.js (dialog focus trap)",
+      "token": "plan-2026-11-27T201735-9283c1fd/D-007"
     }
   ]
 }

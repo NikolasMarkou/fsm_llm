@@ -9,7 +9,7 @@ The ES modules used by the monitor dashboard (`fsm-llm-monitor`, a FastAPI app i
 
 Consumers (import sites): `static/app.js`, `static/services/auth.js`, `static/services/ws.js`, and `static/pages/` `builder.js`, `control.js`, `conversations.js`, `dashboard.js`, `launch.js`, `logs.js`, `settings.js`, `visualizer.js`. `graph.js` is used by `builder.js` and `visualizer.js`; `markdown.js` by `builder.js` and `conversations.js`; `json_highlight.js` by `builder.js`, `conversations.js`, `control.js` and `eventlog.js` (and by `dom.js`, for the class name); `format.js` by `control.js`, `dashboard.js`, `logs.js`.
 
-State: `dom.js` keeps one module-level `Map` (`_returnFocus`) for dialog focus restore. `graph.js` mutates the node objects passed in. Everything else is stateless.
+State: `dom.js` keeps one module-level `Map` (`_returnFocus`) for dialog focus restore and one array (`_open`, the dialogs opened with `openDialog`, the top one last) for the focus trap. `graph.js` mutates the node objects passed in. Everything else is stateless.
 
 ## Architecture
 
@@ -49,8 +49,9 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 - `safeClass(value, fallback = 'unknown'): string` (module-private, used by `statusBadge`) - lowercases and strips everything outside `[a-z0-9_-]`; empty -> fallback.
 - `levelClass(level): string` - lowercased level if in `trace, debug, info, success, warning, error, critical`, else `'info'`.
 - `statusBadge(status): string` - `<span class="badge badge-<safeClass(status)>">` with escaped upper-case text; null or `''` -> `unknown`.
-- `openDialog(el, display = 'flex', focusTarget = null)` - sets `el.style.display`. Only when the element was hidden: records `document.activeElement` (unless it is `body`) and focuses `focusTarget` or the first visible, enabled focusable descendant.
-- `closeDialog(el)` - no-op if hidden; sets `display: none`, restores and forgets the recorded focus if that element is still in the document.
+- `openDialog(el, display = 'flex', focusTarget = null)` - sets `el.style.display`. Only when the element was hidden: records `document.activeElement` (unless it is `body`) and focuses `focusTarget` or the first visible, enabled focusable descendant, and pushes `el` on the open stack (the first push registers one `keydown` listener on `document`).
+- `closeDialog(el)` - pops `el` from the open stack first (the last pop removes the listener), then, if the element is not hidden, sets `display: none`, restores and forgets the recorded focus if that element is still in the document.
+- Focus trap (plan 9283c1fd step 9, D-007; anchor beside `_trap` in `dom.js`): while any dialog or drawer is open, Tab and Shift+Tab stay inside the TOP one (the API key modal over the launch modal traps alone, the lower one traps again when it closes). The focusables are the visible, enabled elements the first-focus selector matches. Tab on the last, or with focus outside the list, goes to the first; Shift+Tab on the first, or outside, goes to the last; `preventDefault` runs only when the code moved focus, so a Tab in the middle is the browser's own; a dialog with no focusable keeps focus on itself (`tabindex="-1"` set by the code). Never an `inert`-only trap, never a listener left after the last close, never a closed dialog on the stack. The probe `dialog_focus.mjs` hands a keydown to the registered listeners over the stub DOM; a real browser's Tab order is not shown by it, so check it by hand in one.
 - `renderResultBanner(success): string` - `div.result-banner.success|failure` with fixed text `Agent completed successfully` / `Agent failed`.
 - `jsonViewHtml(text, tag = 'span'): string` - `<tag class="json-view">` holding the escaped text, the marker that `highlightJsonIn` finds.
 - `renderLLMData(obj): string` - `div.llm-kv` rows; skips null values; objects as pretty JSON in `pre.json-view`; non-object -> `No data`, no rows -> `Empty`.
@@ -117,7 +118,7 @@ Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `t
 - Edges: self-loops are a cubic arc above the node; a node pair with more than one edge gets quadratic curves offset +12 then -12 px; other edges are straight lines. Arrow marker id is `arrow-<svgId>`, so several graphs can share a page.
 - The viewBox is the larger of content and container size; content is centered when the container is larger. `minWidth`/`minHeight` are set only when content exceeds the container.
 - `json_highlight.js` builds nodes with `textContent` only: never `innerHTML` for a token or for the fallback (a probe records every `innerHTML` write and every created tag), so a JSON string holding `<script>` or HTML stays text. The page text is the source of truth and the coloured nodes must hold exactly the same characters. Only object or array values are marked `json-view` (a plain string that happens to read as a number would be coloured as one). The colours are CSS variables in `:root` of `style.css` (the dashboard has one dark theme; a test checks the 4.5:1 contrast and that no second theme appeared).
-- `openDialog`/`closeDialog` must be used as a pair on the same element for focus restore to work.
+- `openDialog`/`closeDialog` must be used as a pair on the same element for focus restore and the focus trap to work: a dialog hidden by writing `style.display` directly stays on the open stack and keeps trapping.
 
 ## Dependencies
 
