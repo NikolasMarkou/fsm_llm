@@ -22,6 +22,8 @@ let _clearedKeys = new Set();
 // Timestamp of the newest record of ANY level at Clear (server time, UTC isoformat): a rebuild drops older
 // records too, which the keys miss when a pill lowers the minimum level (those were never fetched).
 let _clearedBefore = '';
+// The request Clear sent for that cursor (it never rejects): a rebuild waits for it before it filters.
+let _clearCursorPending = Promise.resolve();
 
 function _logKey(r) {
     return `${r.timestamp}|${r.level}|${r.module}:${r.line}|${r.message}`;
@@ -94,12 +96,16 @@ export function onLogSearchInput() {
 
 // --- Log Entry HTML ---
 
+/** The text of an entry as it is shown: the highlight and both filters (refresh and append) read this one string. */
+function _logText(r) {
+    return `${r.module}:${r.line}${r.conversation_id ? ` [${r.conversation_id}]` : ''} ${r.message}`;
+}
+
 function _logEntryHtml(r, filter) {
     const ts = formatTime(r.timestamp);
     const levelLower = levelClass(r.level);
     const dotHtml = `<span class="log-level-dot ${levelLower}"></span>`;
-    const conv = r.conversation_id ? ` [${r.conversation_id}]` : '';
-    const msgText = `${r.module}:${r.line}${conv} ${r.message}`;
+    const msgText = _logText(r);
     const msgHtml = filter ? highlightText(msgText, filter) : esc(msgText);
     const entryClass = (levelLower === 'error' || levelLower === 'critical') ? ' error' : '';
     return `<div class="entry${entryClass}"><span class="ts log-${levelLower}">${esc(ts)}</span><span class="type log-type-col log-${levelLower}">${dotHtml}${esc(r.level)}</span><span class="msg text-dim">${msgHtml}</span></div>`;
@@ -178,7 +184,7 @@ export function clearLogs() {
     // Cleared records stay marked as seen so the periodic sync does not
     // bring them back, and refreshLogs drops them; the error badge restarts from zero.
     _clearedKeys = new Set(_seenKeys);
-    _learnClearCursor();
+    _clearCursorPending = _learnClearCursor();
     _logErrorCount = 0;
     _updateLogSidebarBadge();
 }
@@ -215,7 +221,7 @@ function _renderLogs(logs) {
     for (let i = logs.length - 1; i >= 0; i--) {
         const r = logs[i];
         if (!activeLevels.includes(r.level)) continue;
-        if (filter && !String(r.message ?? '').toLowerCase().includes(filter)) continue;
+        if (filter && !_logText(r).toLowerCase().includes(filter)) continue;
         html += _logEntryHtml(r, filter);
     }
 
@@ -307,6 +313,7 @@ export async function syncLogs() {
 }
 
 export async function refreshLogs() {
+    await _clearCursorPending;
     const activeLevels = getActiveLogLevels();
     const minLevel = getMinLogLevel();
     const filter = $('log-filter')?.value.trim().toLowerCase();
@@ -327,7 +334,7 @@ export async function refreshLogs() {
 
         _updateLogPillCounts(logs, true);
         logs = logs.filter(r => activeLevels.includes(r.level));
-        if (filter) logs = logs.filter(r => String(r.message ?? '').toLowerCase().includes(filter));
+        if (filter) logs = logs.filter(r => _logText(r).toLowerCase().includes(filter));
 
         const stream = $('log-stream');
         if (!stream) return;

@@ -801,6 +801,52 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     lv.cursor_failed = visible();
     route.custom = real;
     result.logs_clear_levels = lv;
+    // Clear waits for its cursor (B5a): a pill toggled while the cursor reply is held rebuilds nothing until it lands
+    const hr = (n, level) => ({ timestamp: `2026-11-27T11:00:0${n}Z`, level, module: 'hm', line: n, message: `hold${n}` });
+    server = [hr(1, 'INFO'), hr(2, 'DEBUG')];                   // DEBUG is off: that record was never fetched
+    await logs.refreshLogs();
+    const hold = { shown_before: visible() };
+    let landed;
+    const cursorHeld = new Promise(r => { landed = r; });
+    route.custom = async url => {
+        if (!url.includes('limit=1&')) return real(url);
+        const answer = real(url);
+        await cursorHeld;
+        return answer;
+    };
+    logs.clearLogs();
+    logs.toggleLogPill(debugPill); await flush();               // Debug on, the cursor reply still held
+    hold.during = visible();
+    landed(); await flush();
+    hold.after_landing = visible();
+    logs.toggleLogPill(debugPill); await flush();               // Debug off again
+    route.custom = real;
+    result.logs_clear_pending = hold;
+    // The search matches what the entry shows: module:line, [conversation id] and message, on the refresh and the append path
+    const sr = (n, extra = {}) => ({ timestamp: `2026-11-27T12:00:0${n}Z`, level: 'INFO', module: 'mod.x', line: n, message: `srec${n}`, ...extra });
+    server = [sr(1, { conversation_id: 'conv-abc-123' }), sr(2, { module: 'other.y' }), sr(3, { message: 'has a(b inside' })];
+    const search = {};
+    const find = async text => { el('log-filter').value = text; await logs.refreshLogs(); return visible(); };
+    search.module = await find('mod.x');
+    search.module_highlight = markup.includes('<span class="search-highlight">mod.x</span>:1');
+    search.conversation = await find('conv-abc');
+    search.conversation_upper = await find('CONV-ABC');
+    search.conversation_highlight = markup.includes('<span class="search-highlight">conv-abc</span>-123]');
+    search.message = await find('srec2');
+    search.line_and_message = await find('other.y:2 srec2');
+    search.no_match = await find('nothing-here');
+    search.regex_chars = await find('a(b');
+    search.regex_highlight = markup.includes('<span class="search-highlight">a(b</span>');
+    search.regex_toasts = toasts().filter(t => t.includes('Failed to load logs')).length;
+    el('log-filter').value = 'conv-xyz';
+    await logs.refreshLogs();
+    search.append_before = visible();
+    logs.appendLogs([sr(4, { conversation_id: 'conv-xyz-9' }), sr(5)]);
+    search.append_by_conversation = visible();
+    logs.appendLogs([sr(6, { module: 'conv-xyz.mod' })]);
+    search.append_by_module = visible();
+    el('log-filter').value = '';
+    result.logs_search = search;
     document.querySelectorAll = realAll;
 }
 // --- opening a conversation straight in the drawer makes no request for the hidden detail panel ---

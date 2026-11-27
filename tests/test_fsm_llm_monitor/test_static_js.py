@@ -1077,6 +1077,106 @@ class TestLogsClearAcrossLevels:
         assert probe("stale_state")["logs_clear_levels"]["cursor_failed"] == 0
 
 
+class TestLogsClearWaitsAndSearchMatchesWhatIsShown:
+    """Plan 9283c1fd step 7 (B5a, B5b): Clear waits for its cursor before a rebuild filters, and the
+    search reads the one text the entry shows (module:line, [conversation id], message)."""
+
+    def test_a_pill_toggled_while_the_clear_cursor_is_held_shows_nothing_old(
+        self, probe
+    ):
+        out = probe("stale_state")["logs_clear_pending"]
+        assert out["shown_before"] == 1
+        assert out["during"] == 0  # the rebuild waits for the cursor
+        assert out["after_landing"] == 0  # and drops the record from before the Clear
+
+    def test_the_search_matches_the_module_and_the_conversation_id_and_the_message(
+        self, probe
+    ):
+        out = probe("stale_state")["logs_search"]
+        assert out["module"] == 2 and out["module_highlight"] is True
+        assert out["conversation"] == 1 and out["conversation_upper"] == 1
+        assert out["conversation_highlight"] is True
+        assert out["message"] == 1 and out["line_and_message"] == 1
+        assert out["no_match"] == 0
+
+    def test_a_search_with_regex_characters_matches_and_highlights_and_never_fails(
+        self, probe
+    ):
+        out = probe("stale_state")["logs_search"]
+        assert out["regex_chars"] == 1 and out["regex_highlight"] is True
+        assert out["regex_toasts"] == 0
+
+    def test_the_websocket_append_path_filters_with_the_same_text(self, probe):
+        out = probe("stale_state")["logs_search"]
+        assert out["append_before"] == 0
+        assert out["append_by_conversation"] == 1 and out["append_by_module"] == 2
+
+    def test_the_highlight_and_both_filters_read_one_function(self):
+        text = (_STATIC / "pages" / "logs.js").read_text(encoding="utf-8")
+        assert (
+            text.count("_logText(") >= 4
+        )  # the definition, the highlight, two filters
+        assert "r.message ?? ''" not in text  # no filter reads the message alone
+
+
+class TestMarkdownFencesAndItalicRuns:
+    """Plan 9283c1fd step 7 (B6a, B6b); `markdown.mjs` and `markdown_blocks.mjs` stay as they were."""
+
+    CODE = '<pre class="md-code-block"><code>*a* **b** _c_ __d__</code></pre>'
+
+    @pytest.mark.parametrize(
+        "info",
+        ["c++", "c#", "ts-node", "objective-c", "js  ", "js", ""],
+    )
+    def test_a_fence_with_any_info_string_is_a_code_block_and_the_body_stays_raw(
+        self, probe, info
+    ):
+        assert probe("markdown_fences")["fence"][info] == self.CODE
+
+    @pytest.mark.parametrize(
+        "info",
+        ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>"],
+    )
+    def test_a_hostile_info_string_is_dropped_never_emitted(self, probe, info):
+        html = probe("markdown_fences")["fence"][info]
+        assert html == self.CODE
+        assert "<script" not in html and "<img" not in html and "alert" not in html
+
+    def test_a_fence_info_string_with_a_trailing_space_before_crlf_is_a_block(
+        self, probe
+    ):
+        out = probe("markdown_fences")
+        assert out["fence_crlf_info"] == (
+            '<pre class="md-code-block"><code>int x;</code></pre>'
+        )
+        assert "<code>int *p;</code>" in out["fence_after_text"]
+        assert "<em>" not in out["fence_after_text"]
+
+    def test_a_backtick_in_the_info_string_is_not_a_fence(self, probe):
+        html = probe("markdown_fences")["backtick_in_info"]
+        assert "md-code-block" not in html and html.endswith("```</p>")
+
+    def test_the_nested_fence_inside_backticks_is_unchanged(self, probe):
+        assert probe("markdown_fences")["nested_unchanged"] == (
+            '<p>`a <pre class="md-code-block"><code>x&lt;b&gt;</code></pre><p> b`</p>'
+        )
+
+    def test_runs_of_italic_all_render(self, probe):
+        out = probe("markdown_fences")
+        assert out["italic_pair"] == "<p><em>a</em> <em>b</em></p>"
+        assert out["italic_three"] == "<p><em>a</em> <em>b</em> <em>c</em></p>"
+        assert out["italic_lines"] == "<p><em>a</em><br><em>b</em></p>"
+        assert out["italic_punct"] == "<p>(<em>a</em>), <em>b</em>.</p>"
+
+    def test_identifiers_with_underscores_stay_text(self, probe):
+        assert probe("markdown_fences")["identifiers"] == [
+            "<p>snake_case_here</p>",
+            "<p>foo_bar_baz</p>",
+            "<p>http://x/a_b_c</p>",
+            "<p>a_b_ c</p>",
+        ]
+
+
 class TestDrawerDirectOpen:
     """A conversation opened straight in the drawer fetches no hidden detail."""
 

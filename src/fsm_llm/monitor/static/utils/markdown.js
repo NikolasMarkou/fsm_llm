@@ -15,8 +15,8 @@ export function renderMarkdown(text) {
     const stash = [];
     const hold = html => `\u0000${stash.push(html) - 1}\u0000`;
 
-    // Fenced code blocks
-    s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) =>
+    // Fenced code blocks. The info string (c++, ts-node, trailing spaces, anything but a backtick) is dropped, never emitted.
+    s = s.replace(/```[^\n`]*\n([\s\S]*?)```/g, (_m, code) =>
         hold(`<pre class="md-code-block"><code>${code.trim()}</code></pre>`));
 
     // Inline code (a span never swallows a placeholder: a fenced block inside backticks stays one)
@@ -33,7 +33,7 @@ export function renderMarkdown(text) {
 
     // Italic
     s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-    s = s.replace(/(^|[^a-zA-Z0-9])_([^_\n]+)_([^a-zA-Z0-9]|$)/g, '$1<em>$2</em>$3');
+    s = s.replace(/(^|[^a-zA-Z0-9])_([^_\n]+)_(?![a-zA-Z0-9])/g, '$1<em>$2</em>');
 
     // Unordered lists
     s = s.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
