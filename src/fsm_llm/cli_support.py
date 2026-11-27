@@ -35,6 +35,7 @@ __all__ = [
     "apply_env_file",
     "escape_unencodable_output",
     "exit_main",
+    "load_env_file",
     "positive_seconds",
     "report_error",
     "report_issues",
@@ -99,19 +100,39 @@ def add_env_file(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def load_env_file(path: str | os.PathLike[str]) -> None:
+    """``load_env(path)`` with a one-line failure for every CLI.
+
+    Interface contract: raises ``FileNotFoundError`` for a path that is not a
+    file (the ``load_env`` text) and, for a file that cannot be read or decoded,
+    one that names the path and the class of failure (``permission denied`` or
+    ``not UTF-8 text``) and never a byte of the file; other errors pass through.
+    """
+    try:
+        load_env(path)
+    except (PermissionError, UnicodeDecodeError) as exc:
+        why = (
+            "permission denied"
+            if isinstance(exc, PermissionError)
+            else "not UTF-8 text"
+        )
+        raise FileNotFoundError(f"Cannot read .env file at {path}: {why}") from None
+
+
 def apply_env_file(args: argparse.Namespace) -> None:
-    """Read ``args.env_file`` (when given) with ``fsm_llm.load_env``.
+    """Read ``args.env_file`` (when given) with ``load_env_file``.
 
     Interface contract: a no-op when the flag is absent or ``None``. The file
     fills only variables the process has not set (an empty or whitespace-only
     one counts as not set, as for ``resolve_model``), so the model precedence
     is the ``--model`` flag, the process environment, the file, then
     ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a path that is
-    not a file; every caller turns it into one stderr line and exit 1.
+    not a file or cannot be read or decoded (:func:`load_env_file`); every
+    caller turns it into one stderr line and exit 1.
     """
     path = getattr(args, "env_file", None)
     if path is not None:
-        load_env(path)
+        load_env_file(path)
 
 
 def report_issues(

@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from .cli_support import escape_unencodable_output
+from .cli_support import escape_unencodable_output, load_env_file
 from .constants import (
     CLI_EXIT_FAILURE,
     CLI_EXIT_INTERRUPTED,
@@ -19,7 +19,6 @@ from .constants import (
 from .context.filtering import redacting_json_default
 from .core.redaction import redact_context
 from .engine.api.conversation import API
-from .env import load_env
 from .llm import DEFAULT_MAX_TOKENS, resolve_model
 from .logging import logger, setup_file_logging
 
@@ -59,8 +58,8 @@ def main(
     file). The model is *model*, then the process environment (which an
     *env_file* fills only where the process has no value; a blank value
     counts as none), else
-    ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a missing
-    *env_file*. Returns the exit code.
+    ``ModelNotConfiguredError``. Raises ``FileNotFoundError`` for a missing,
+    unreadable or non-UTF-8 *env_file*. Returns the exit code.
     """
 
     # DECISION plan-2026-11-12T073150-d454fd62/D-005
@@ -69,7 +68,7 @@ def main(
     # Do NOT search for a .env here and do NOT call python-dotenv directly: a
     # stale file silently supplied the model and keys before this change.
     if env_file is not None:
-        load_env(env_file)
+        load_env_file(env_file)
 
     # Enable logging for CLI usage (the library disables it by default): file
     # logging enables the library loggers itself.

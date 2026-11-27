@@ -41,13 +41,14 @@ import pytest
 import fsm_llm
 from fsm_llm import cli_support
 from fsm_llm.core.definitions import ModelNotConfiguredError
+from tests.conftest import posix_only, skip_if_root, symlink_or_skip
 from tests.test_fsm_llm.support import _child_env
 
 _REPO = Path(fsm_llm.__file__).resolve().parents[2]
 _DATASET = _REPO / "evaluation" / "datasets" / "simple_greeting_cases.json"
 _MESSAGE = ModelNotConfiguredError.DEFAULT_MESSAGE
 _NEEDS_A_MODEL = ("reasoning", "eval", "meta")
-_ALL = (*_NEEDS_A_MODEL, "monitor")
+_ALL = ("fsm-llm", *_NEEDS_A_MODEL, "monitor")
 
 
 @pytest.fixture(autouse=True)
@@ -148,6 +149,11 @@ def _call(cli: str, args: list[str], monkeypatch, capsys, *, probe: bool = False
             import fsm_llm.agents.meta_cli as mod
 
             code = mod.main(args)
+        elif cli == "fsm-llm":
+            import fsm_llm.__main__ as mod
+
+            monkeypatch.setattr(sys, "argv", ["fsm-llm", "--fsm", "x.json", *args])
+            code = mod.main_cli()
         else:
             import fsm_llm.monitor.__main__ as mod
 
@@ -192,6 +198,129 @@ class TestEnvFileFlagOnEachCli:
         assert code == 1, err
         assert "Traceback" not in err
         assert len(_lines(err)) == 1, err
+
+
+@pytest.mark.parametrize("cli", _ALL)
+class TestUnreadableEnvFile:
+    """An env file that exists and cannot be read or decoded is one stderr
+    line and exit 1 for every model CLI, with the path and the class of failure
+    and never a byte of the file (plan 9283c1fd G4, D-008, D-011)."""
+
+    _MARK = "SECRETMARK"
+
+    def test_a_missing_file_keeps_its_text(self, cli, tmp_path, monkeypatch, capsys):
+        missing = tmp_path / "no.env"
+        _, _, err = _call(cli, ["--env-file", str(missing)], monkeypatch, capsys)
+        assert f"No .env file at {missing}" in err
+
+    def test_a_non_utf8_file_is_one_line_and_exit_1(
+        self, cli, tmp_path, monkeypatch, capsys
+    ):
+        env_file = tmp_path / "binary.env"
+        env_file.write_bytes(b"\xff\xfe" + self._MARK.encode() + b"=\x80\x81\n")
+        code, out, err = _call(cli, ["--env-file", str(env_file)], monkeypatch, capsys)
+        assert code == 1, err
+        assert "MODEL=" not in out
+        assert "Traceback" not in err
+        assert len(_lines(err)) == 1, err
+        assert "binary.env" in err
+        assert "not UTF-8 text" in err
+        assert self._MARK not in err + out
+
+    @posix_only("a mode 000 file needs POSIX permission bits")
+    def test_an_unreadable_file_is_one_line_and_exit_1(
+        self, cli, tmp_path, monkeypatch, capsys
+    ):
+        skip_if_root()
+        env_file = tmp_path / "locked.env"
+        env_file.write_text(f"{self._MARK}=1\n", encoding="utf-8")
+        env_file.chmod(0)
+        try:
+            try:
+                env_file.read_bytes()
+            except PermissionError:
+                pass
+            else:
+                pytest.skip("this account can read a mode 000 file")
+            code, out, err = _call(
+                cli, ["--env-file", str(env_file)], monkeypatch, capsys
+            )
+        finally:
+            env_file.chmod(0o600)
+        assert code == 1, err
+        assert "MODEL=" not in out
+        assert "Traceback" not in err
+        assert len(_lines(err)) == 1, err
+        assert "locked.env" in err
+        assert "permission denied" in err
+        assert self._MARK not in err + out
+
+
+class TestMonitorEventLogPath:
+    """``--event-log`` names a directory of logs: an existing path that is not
+    one is refused at startup (plan 9283c1fd G4 gap 2), a missing path and a
+    directory start as before. The server is the probe of ``_install_probe``:
+    reaching it prints ``MODEL=`` and exits 0."""
+
+    def test_a_file_is_refused_before_the_server_starts(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        target = tmp_path / "events.jsonl"
+        target.write_text("{}\n", encoding="utf-8")
+        code, out, err = _call(
+            "monitor", ["--event-log", str(target)], monkeypatch, capsys, probe=True
+        )
+        assert code == 1, err
+        assert "MODEL=" not in out
+        assert "Traceback" not in err
+        assert len(_lines(err)) == 1, err
+        assert "--event-log" in err
+        assert "events.jsonl" in err
+        assert "not a directory" in err
+
+    def test_the_refusal_comes_before_the_server_import(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import fsm_llm.monitor.__main__ as mod
+
+        target = tmp_path / "events.jsonl"
+        target.write_text("{}\n", encoding="utf-8")
+        # a None entry makes ``from .server import ...`` fail: were the check
+        # after that import, stderr would be the dependency hint, not one line
+        monkeypatch.setitem(sys.modules, "fsm_llm.monitor.server", None)
+        monkeypatch.setattr(
+            sys, "argv", ["fsm-llm-monitor", "--no-browser", "--event-log", str(target)]
+        )
+        with pytest.raises(SystemExit) as stop:
+            mod.main_cli()
+        err = capsys.readouterr().err
+        assert stop.value.code == 1, err
+        assert len(_lines(err)) == 1, err
+        assert "not a directory" in err
+
+    def test_a_missing_path_and_a_directory_start(self, tmp_path, monkeypatch, capsys):
+        (tmp_path / "logs-dir").mkdir()
+        for name in ("not-there", "logs-dir"):
+            code, out, err = _call(
+                "monitor",
+                ["--event-log", str(tmp_path / name)],
+                monkeypatch,
+                capsys,
+                probe=True,
+            )
+            assert code == 0, err
+            assert _model_line(out) == "MODEL=<unset>"
+
+    def test_a_symlink_to_a_directory_starts(self, tmp_path, monkeypatch, capsys):
+        real = tmp_path / "real-logs"
+        real.mkdir()
+        link = tmp_path / "link-logs"
+        symlink_or_skip(link, real, target_is_directory=True)
+        code, out, err = _call(
+            "monitor", ["--event-log", link.as_posix()], monkeypatch, capsys, probe=True
+        )
+        assert code == 0, err
+        assert _model_line(out) == "MODEL=<unset>"
 
 
 @pytest.mark.parametrize("cli", _NEEDS_A_MODEL)
@@ -533,3 +662,50 @@ class TestSharedHelpers:
             cli_support.apply_env_file(
                 argparse.Namespace(env_file=str(tmp_path / "no.env"))
             )
+
+    def test_load_env_file_translates_the_two_unreadable_cases(self, tmp_path):
+        binary = tmp_path / "binary.env"
+        binary.write_bytes(b"\xff\xfeSECRETMARK=\x80\n")
+        with pytest.raises(FileNotFoundError) as caught:
+            cli_support.load_env_file(binary)
+        assert str(binary) in str(caught.value)
+        assert "not UTF-8 text" in str(caught.value)
+        assert "SECRETMARK" not in str(caught.value)
+        assert caught.value.__cause__ is None
+
+    def test_load_env_file_names_a_refused_read(self, monkeypatch, tmp_path):
+        def refuse(path, **kwargs):
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr(cli_support, "load_env", refuse)
+        target = tmp_path / "locked.env"
+        with pytest.raises(FileNotFoundError, match="permission denied") as caught:
+            cli_support.load_env_file(target)
+        assert str(target) in str(caught.value)
+        assert caught.value.__cause__ is None
+        assert caught.value.__suppress_context__
+
+    def test_load_env_file_leaves_other_errors_and_success_alone(
+        self, monkeypatch, tmp_path
+    ):
+        env_file = tmp_path / "my.env"
+        env_file.write_text("FSM_LLM_UNIT_ROW=1\n", encoding="utf-8")
+        assert cli_support.load_env_file(env_file) is None
+        assert os.environ["FSM_LLM_UNIT_ROW"] == "1"
+
+        def explode(path, **kwargs):
+            raise OSError("disk on fire")
+
+        monkeypatch.setattr(cli_support, "load_env", explode)
+        with pytest.raises(OSError, match="disk on fire") as caught:
+            cli_support.load_env_file(env_file)
+        assert not isinstance(caught.value, FileNotFoundError)
+
+    def test_apply_turns_an_undecodable_file_into_file_not_found(self, tmp_path):
+        binary = tmp_path / "binary.env"
+        binary.write_bytes(b"\xff\xfe\n")
+        with pytest.raises(FileNotFoundError, match="not UTF-8 text"):
+            cli_support.apply_env_file(argparse.Namespace(env_file=str(binary)))
+
+    def test_load_env_file_is_exported(self):
+        assert "load_env_file" in cli_support.__all__

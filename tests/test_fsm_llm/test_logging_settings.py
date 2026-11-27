@@ -100,7 +100,7 @@ class TestLevelIsNormalised:
         env = {"LLM_MODEL": "test-model", ENV_LOG_LEVEL: "info"}
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("fsm_llm.runner.load_env"),
+            patch("fsm_llm.runner.load_env_file"),
             patch("fsm_llm.runner.API.from_file", return_value=api),
         ):
             assert runner.main("/tmp/t.json", 5, 1000) == 0
@@ -366,7 +366,7 @@ class TestUnknownEnvFormatDoesNotCrashTheCommands:
         env = {"LLM_MODEL": "test-model", ENV_LOG_FORMAT: "text"}
         with (
             patch.dict(os.environ, env, clear=True),
-            patch("fsm_llm.runner.load_env"),
+            patch("fsm_llm.runner.load_env_file"),
             patch("fsm_llm.runner.API.from_file", return_value=api),
         ):
             assert runner.main("/tmp/t.json", 5, 1000) == 0

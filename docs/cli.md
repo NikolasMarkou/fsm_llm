@@ -21,8 +21,8 @@ that wants a default keeps `LLM_MODEL` in its own `.env` (gitignored; `make moni
 **`--env-file PATH`.** Importing `fsm_llm` reads no `.env` file. The five model CLIs
 (`fsm-llm`, `fsm-llm-eval`, `fsm-llm-meta`, `fsm-llm-monitor`, `python -m fsm_llm.reasoning`)
 take one flag, `--env-file PATH`, that loads the file into the environment first. A variable the
-process already has wins; a blank one counts as unset; a missing file is one stderr line and
-exit 1. The CLIs that call no model (`fsm-llm-validate`, `fsm-llm-visualize`, `fsm-llm-okf`,
+process already has wins; a blank one counts as unset; a missing, unreadable or non-UTF-8 file is one
+stderr line and exit 1 (the line names the path and the class of failure, never a byte of the file). The CLIs that call no model (`fsm-llm-validate`, `fsm-llm-visualize`, `fsm-llm-okf`,
 `fsm-llm-skills`) do not take it.
 
 **Exit codes.** 0 is success, 1 is a failure, 130 is Ctrl-C. A usage error exits 2 (argparse),

@@ -138,6 +138,10 @@ def main_cli() -> None:
     registry = None
     try:
         apply_env_file(args)
+        # EventLog(path) is lazy: a file here would start a server whose log page 500s
+        log = args.event_log
+        if log and os.path.exists(log) and not os.path.isdir(log):
+            raise FileNotFoundError(f"--event-log {log}: not a directory")
         if args.executables:
             from fsm_llm.agents import executables as patterns
             from fsm_llm.engine.executables.directory import load_directory_registry

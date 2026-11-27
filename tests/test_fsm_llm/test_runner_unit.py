@@ -60,7 +60,7 @@ class TestRunnerUsesAPI:
     def test_runner_main_requires_llm_model_env(self):
         """runner.main() should raise ModelNotConfiguredError if LLM_MODEL is missing."""
         with patch.dict(os.environ, {}, clear=True):
-            with patch("fsm_llm.runner.load_env"):
+            with patch("fsm_llm.runner.load_env_file"):
                 with pytest.raises(ModelNotConfiguredError, match="LLM_MODEL"):
                     from fsm_llm.runner import main
 
@@ -80,7 +80,7 @@ class TestRunnerUsesAPI:
         }
 
         with patch.dict(os.environ, env, clear=True):
-            with patch("fsm_llm.runner.load_env"):
+            with patch("fsm_llm.runner.load_env_file"):
                 with patch(
                     "fsm_llm.runner.API.from_file", return_value=mock_api
                 ) as mock_from_file:
@@ -116,7 +116,7 @@ class TestRunnerUsesAPI:
         env = {"LLM_MODEL": "test-model"}
 
         with patch.dict(os.environ, env, clear=True):
-            with patch("fsm_llm.runner.load_env"):
+            with patch("fsm_llm.runner.load_env_file"):
                 with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
                     with patch("fsm_llm.runner.setup_file_logging"):
                         with patch("builtins.input", return_value="test input"):
@@ -139,7 +139,7 @@ class TestRunnerUsesAPI:
         env = {"LLM_MODEL": "test-model"}
 
         with patch.dict(os.environ, env, clear=True):
-            with patch("fsm_llm.runner.load_env"):
+            with patch("fsm_llm.runner.load_env_file"):
                 with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
                     with patch("fsm_llm.runner.setup_file_logging"):
                         with patch("builtins.input", return_value="exit"):
@@ -318,7 +318,7 @@ class TestRunnerJsonDumpsSurvivesNonJsonNativeContextValues:
         env = {"LLM_MODEL": "test-model"}
         with _library_records("DEBUG"):
             with patch.dict(os.environ, env, clear=True):
-                with patch("fsm_llm.runner.load_env"):
+                with patch("fsm_llm.runner.load_env_file"):
                     with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
                         with patch("fsm_llm.runner.setup_file_logging"):
                             with patch("builtins.input", return_value="hi"):
@@ -422,7 +422,7 @@ class TestRunnerPrintsToTerminal:
         env = {"LLM_MODEL": "test-model"}
         feed = iter(inputs)
         with patch.dict(os.environ, env, clear=True):
-            with patch("fsm_llm.runner.load_env"):
+            with patch("fsm_llm.runner.load_env_file"):
                 with patch("fsm_llm.runner.API.from_file", return_value=api):
                     with patch("builtins.input", side_effect=lambda _p="": next(feed)):
                         from fsm_llm import runner
@@ -750,7 +750,7 @@ class TestStep13RunnerRedaction:
         mock_api.get_data.side_effect = [per_turn_data, final_data]
 
         with patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True):
-            with patch("fsm_llm.runner.load_env"):
+            with patch("fsm_llm.runner.load_env_file"):
                 with patch("fsm_llm.runner.API.from_file", return_value=mock_api):
                     with patch("fsm_llm.runner.setup_file_logging"):
                         with patch("builtins.input", return_value="hi"):
@@ -818,7 +818,7 @@ class TestRunnerPrintsNothingForASilentReply:
         lines: list[str] = []
         with (
             patch.dict(os.environ, {"LLM_MODEL": "test-model"}, clear=True),
-            patch("fsm_llm.runner.load_env"),
+            patch("fsm_llm.runner.load_env_file"),
             patch("fsm_llm.runner.API.from_file", return_value=mock_api),
             patch("fsm_llm.runner.setup_file_logging"),
             patch("builtins.input", return_value="hello"),

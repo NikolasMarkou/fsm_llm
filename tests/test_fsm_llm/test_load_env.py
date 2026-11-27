@@ -363,13 +363,13 @@ class TestRunnerModelAndEnvFile:
             _run_main()
         assert "LLM_MODEL" not in os.environ
 
-    def test_load_env_is_not_called_without_an_env_file(self, clean_env):
-        with patch("fsm_llm.runner.load_env") as loader:
+    def test_load_env_file_is_not_called_without_an_env_file(self, clean_env):
+        with patch("fsm_llm.runner.load_env_file") as loader:
             _run_main(model="arg-model")
         loader.assert_not_called()
 
-    def test_load_env_is_called_with_the_given_path(self, clean_env):
-        with patch("fsm_llm.runner.load_env") as loader:
+    def test_load_env_file_is_called_with_the_given_path(self, clean_env):
+        with patch("fsm_llm.runner.load_env_file") as loader:
             _run_main(model="arg-model", env_file="some.env")
         loader.assert_called_once_with("some.env")
 
