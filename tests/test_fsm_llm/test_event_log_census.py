@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import copy
 import json
 import os
 import stat
@@ -782,3 +783,134 @@ class TestAStreamedTurn:
         assert dict(asynchronous.on_loop) == {}, dict(asynchronous.on_loop)
         assert asynchronous.durable() == synchronous.durable()
         assert _types(api) == _types(other)  # the provider replies carry random ids
+
+
+_SILENT_KID: dict[str, Any] = kc._fsm(
+    "SilentKid",
+    "quiet",
+    kc._state("quiet", response_instructions="", transitions=[kc._go("end")]),
+    kc._state("end", response_instructions=""),
+)  # its greeting makes no model call: the only blobs of its push are the push's own
+_TALKING_KID: dict[str, Any] = kc._fsm(
+    "TalkingKid",
+    "quiet",
+    kc._state("quiet", response_instructions="Say hello.", transitions=[kc._go("end")]),
+    kc._state("end", response_instructions="Say bye."),
+)  # its greeting is a model call: two lane hops before the frame is appended
+
+
+def _push_api(root: Path) -> API:
+    """The census root with a model that also answers the greeting of the pushed child."""
+    llm = ScriptedLLM(
+        extraction_data={"name": "Ada"},
+        responses={"chat": "Hi", "bye": "Bye", "quiet": "Q", "end": "E"},
+    )
+    return API.from_definition(
+        _chat(silent=False), llm_interface=llm, event_log=EventLog(root)
+    )
+
+
+async def _async_push(api: API, census: Census) -> str:
+    """Start (a lane thread serves the tree), then ONE awaited push of a silent child, the
+    census over the push alone, then the drain (``release``: the deferred job has run)."""
+    cid, _ = await api.astart_conversation()
+    census.loop_ident = threading.get_ident()
+    with census.watching():
+        await api.apush_fsm(cid, copy.deepcopy(_SILENT_KID))
+        assert api.event_log is not None
+        api.event_log.release(cid)
+    return cid
+
+
+def _sync_push(api: API, census: Census) -> str:
+    cid, _ = api.start_conversation()
+    with census.watching():
+        api.push_fsm(cid, copy.deepcopy(_SILENT_KID))
+    return cid
+
+
+class TestAnAsyncPush:
+    """Plan 77e5fef9 step 6 (S2b, D-008): the three blobs and the line of ``stack/push`` are a
+    lane job, the loop does no log I/O for a push."""
+
+    async def test_an_awaited_push_blocks_the_loop_on_no_log_io(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills (M29): the push written on the loop (the parent counted mkdir 3, open 9,
+        dirsync 6, tempfile 3, fsync 3, replace 3 there)."""
+        census = Census()
+        api = _push_api(tmp_path)
+        await _async_push(api, census)
+        assert "stack/push" in _types(api)
+        assert dict(census.on_loop) == {}, dict(census.on_loop)
+        api.close()
+
+    async def test_the_async_totals_and_the_event_order_equal_the_sync_push(
+        self, tmp_path: Path
+    ) -> None:
+        """G3. The durability moved to a lane and none was dropped (three blobs, one checkpoint
+        line), and after the drain the log holds the sync run's types in the sync order."""
+        asynchronous, synchronous = Census(), Census()
+        api = _push_api(tmp_path / "a")
+        await _async_push(api, asynchronous)
+        other = _push_api(tmp_path / "s")
+        await asyncio.to_thread(_sync_push, other, synchronous)
+        api.close()
+        other.close()
+        assert synchronous.total["replace"] == 3 and synchronous.total["fsync"] >= 3
+        assert asynchronous.durable() == synchronous.durable()
+        assert _types(api) == _types(other)
+        assert _types(api)[-1] == "stack/push"
+
+    async def test_a_lane_after_that_runs_inline_turns_the_census_red(
+        self, tmp_path: Path
+    ) -> None:
+        """The mutant, kept as a row (M29): the push written inline puts its blobs on the loop."""
+
+        def inline(self: Lanes, root_id: str, fn: Any) -> None:
+            fn()
+
+        census = Census()
+        api = _push_api(tmp_path)
+        with mock.patch.object(Lanes, "after", inline):
+            await _async_push(api, census)
+        assert census.on_loop["replace"] == 3 and census.on_loop["fsync"] >= 3
+        api.close()
+
+    async def test_a_parked_fsync_of_the_push_does_not_stop_the_loop(
+        self, tmp_path: Path
+    ) -> None:
+        """No clock. The first fsync of the push parks on an Event a LOOP task sets after
+        ``TICKS`` ticks: on a lane the loop ticks, inline it starves (the row fails)."""
+        entered, released, armed = (threading.Event() for _ in range(3))
+        starved: list[bool] = []
+        real = os.fsync
+        loop_ident = threading.get_ident()
+
+        def parked(fd: int) -> None:
+            if armed.is_set() and not entered.is_set():
+                entered.set()
+                if not released.wait(PARK_CAP_SECONDS):
+                    starved.append(threading.get_ident() == loop_ident)
+            real(fd)
+
+        async def ticker() -> None:
+            while not entered.is_set():
+                await asyncio.sleep(0)
+            for _ in range(TICKS):
+                await asyncio.sleep(0)
+            released.set()
+
+        api = _push_api(tmp_path)
+        cid, _ = await api.astart_conversation()
+        with (
+            mock.patch.object(os, "fsync", parked),
+            mock.patch.object(jsonl, "_fsync", parked),
+        ):
+            task = asyncio.create_task(ticker())
+            armed.set()
+            await api.apush_fsm(cid, copy.deepcopy(_SILENT_KID))
+            await task
+        assert starved == [], "the push blob parked the loop thread itself"
+        assert entered.is_set() and released.is_set()
+        api.close()

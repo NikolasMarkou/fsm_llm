@@ -680,3 +680,35 @@ class TestARunLoopSettlesAnEndedCallChild:
         assert flow.depth() == 1 and flow.record() == _final("ok", None)
         assert flow.api.get_data(flow.cid)["answer"] == "solved why"
         assert flow.api._call_marks.ending == set()
+
+
+class TestAnAsyncCallRun:
+    """Plan 77e5fef9 step 6 (D-008): ``settle`` pushes the child of a call state through
+    ``apush_fsm``, whose ``stack/push`` is one deferred lane job in async mode; the pop of the
+    same run is inline. After a drain the log holds the one push before the one pop and the
+    events of the sync run in the sync order."""
+
+    async def test_the_async_run_logs_one_push_before_one_pop_in_the_sync_order(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills (M29, M31): a push written after the child's events or after the pop, and a
+        deferral that loses or doubles the push."""
+        sync_log = EventLog(tmp_path / "sync")
+        sync_cid = _play(_api(sync_log))
+        async_log = EventLog(tmp_path / "async")
+        api = _api(async_log)
+        cid, _ = await api.astart_conversation({"topic": "why"})
+        await api.aadvance(cid)
+        await api.arun_until_terminal(cid, max_steps=10)
+        async_log.release(cid)
+        sync_log.release(sync_cid)
+        _assert_finished(api, async_log, cid, "the async run")
+
+        def shape(log: EventLog, root: str) -> list[tuple[Any, ...]]:
+            return [(e["type"], e["frame"], e.get("depth")) for e in log.read(root)]
+
+        assert shape(async_log, cid) == shape(sync_log, sync_cid)
+        kinds = [e["type"] for e in async_log.read(cid)]
+        assert kinds.index("stack/push") < kinds.index("stack/pop")
+        for log in (sync_log, async_log):
+            log.close()

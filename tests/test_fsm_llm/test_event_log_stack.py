@@ -12,7 +12,9 @@ Unverified until the Windows run: the byte-level tampering helper opens a blob i
 
 from __future__ import annotations
 
+import asyncio
 import copy
+import threading
 from collections.abc import Iterator
 from typing import Any
 from unittest.mock import patch
@@ -22,6 +24,7 @@ import pytest
 from fsm_llm import API
 from fsm_llm.engine.events import record_state
 from fsm_llm.runtime import EventLog, EventType, LogCorruptError
+from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import (
     StackProjection,
     fold_session,
@@ -646,7 +649,9 @@ class TestTheLiveStackRecords:
         api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
         cid, _ = api.start_conversation()
         with (
-            patch("fsm_llm.engine.api.events.state_ref_of", side_effect=OSError("x")),
+            patch(
+                "fsm_llm.engine.api.events.state_ref_later", side_effect=OSError("x")
+            ),
             patch("fsm_llm.engine.api.events.logger") as warned,
         ):
             api.push_fsm(cid, copy.deepcopy(_KID))
@@ -692,10 +697,11 @@ class TestTheLogOffAndTheLoggedStateRead:
         api = API(copy.deepcopy(_ROOT), llm_interface=_llm())
         with (
             patch("fsm_llm.engine.api.events.state_ref_of") as read,
+            patch("fsm_llm.engine.api.events.state_ref_later") as read_later,
             patch("fsm_llm.engine.api.events.filter_context") as filtered,
         ):
             _scenario(api)
-        assert not read.called and not filtered.called
+        assert not read.called and not read_later.called and not filtered.called
 
     def test_record_state_writes_a_pushed_frame_under_the_root_id(self, log: EventLog):
         api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
@@ -712,3 +718,184 @@ class TestTheLogOffAndTheLoggedStateRead:
         # the default stays the one id of a root conversation
         seq = record_state(api.fsm_manager, log, cid, source="probe")
         assert next(e for e in log.read(cid) if e["seq"] == seq)["frame"] == 0
+
+
+async def _ascenario(api: API) -> str:
+    """The async twin of ``_scenario`` (same calls, the push and the turns awaited)."""
+    cid, _ = await api.astart_conversation()
+    assert await api.aconverse("Ann", cid) == "root reply"
+    await api.apush_fsm(cid, copy.deepcopy(_KID), context_to_pass={"topic": "x"})
+    assert await api.aconverse("hi", cid) == "kid bye"
+    api.update_context(cid, {"note": "n"})
+    api.pop_fsm(cid, context_to_return={"result": 1})
+    assert await api.aconverse("again", cid) == "root reply"
+    await api.apush_fsm(cid, copy.deepcopy(_KID))
+    return cid
+
+
+def _shape(log: EventLog, cid: str) -> list[tuple[Any, ...]]:
+    """What a log says without the bytes that differ between two runs (ids, timestamps)."""
+    return [
+        (e["type"], e["frame"], e.get("depth"), e.get("source")) for e in log.read(cid)
+    ]
+
+
+class TestAnAsyncPush:
+    """Plan 77e5fef9 step 6 (D-008): in async mode ``stack/push`` is one job queued behind the
+    tree's lane jobs and an inline write of the tree waits for it. After a drain the log holds
+    what the sync run holds, in the same order, and it folds to the stack the API had. Every row
+    asserts the log AFTER ``release``/``close`` (the drains) and the NEXT call of the caller."""
+
+    async def test_after_a_drain_the_async_run_logs_what_the_sync_run_logs(
+        self, tmp_path
+    ):
+        """Kills (M29, M30): a push written on the loop is in the log at once too, so the equality
+        is the order and the content; the fold is compared with what the live API shows."""
+        sync_log, async_log = EventLog(tmp_path / "s"), EventLog(tmp_path / "a")
+        sync_api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=sync_log)
+        sync_cid = _scenario(sync_api)
+        async_api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=async_log)
+        async_cid = await _ascenario(async_api)
+        live = _view(async_api, async_cid)
+        sync_log.release(sync_cid)
+        async_log.release(async_cid)
+        assert _shape(async_log, async_cid) == _shape(sync_log, sync_cid)
+        folded = fold_stack(async_log.read(async_cid), async_log.get_json)
+        assert folded is not None and _folded_view(folded) == live
+        want = fold_stack(sync_log.read(sync_cid), sync_log.get_json)
+        assert want is not None and _folded_view(folded) == _folded_view(want)
+        for log in (sync_log, async_log):
+            log.close()
+
+    async def test_a_pop_right_after_the_push_cannot_precede_it(self, log: EventLog):
+        """The sequence the guard exists for: no awaited lane write between the push and the pop.
+        Without the wait the pop is written FIRST and the fold reads a phantom child frame (3 of
+        3 on the probe). Kills (M31): an ``append`` that does not wait for the deferred push."""
+        for n in range(10):
+            api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+            cid, _ = await api.astart_conversation()
+            await api.aconverse("Ann", cid)
+            await api.apush_fsm(cid, copy.deepcopy(_KID))
+            api.pop_fsm(cid, context_to_return={"result": 1})
+            live = _view(api, cid)
+            log.release(cid)
+            kinds = [e["type"] for e in log.read(cid) if e["type"].startswith("stack/")]
+            assert kinds == ["stack/push", "stack/pop"], (n, kinds)
+            folded = fold_stack(log.read(cid), log.get_json)
+            assert folded is not None and folded.depth == 1
+            assert _folded_view(folded) == live, n
+
+    async def test_an_update_right_after_the_push_cannot_precede_it(
+        self, log: EventLog
+    ):
+        """``update_context`` writes at the CHILD frame, inline, and its write raises on failure
+        (it cannot be deferred): before the push the fold raised ``LogCorruptError`` (3 of 3 on
+        the probe). Kills (M31): an ``append`` that does not wait."""
+        for n in range(10):
+            api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+            cid, _ = await api.astart_conversation()
+            await api.apush_fsm(cid, copy.deepcopy(_KID))
+            api.update_context(cid, {"note": "n"})
+            live = _view(api, cid)
+            log.release(cid)
+            frames = [
+                (e["type"], e["frame"])
+                for e in log.read(cid)
+                if e["type"] in ("stack/push", "context/record") and e["frame"] >= 0
+            ]
+            assert frames[-2:] == [("stack/push", 0), ("context/record", 1)], (
+                n,
+                frames,
+            )
+            folded = fold_stack(log.read(cid), log.get_json)
+            assert folded is not None and _folded_view(folded) == live, n
+
+    async def test_the_childs_greeting_comes_before_the_push_as_before(
+        self, log: EventLog
+    ):
+        """The greeting of the child is an awaited lane job written before the push line; FIFO
+        keeps it there. Kills (M30 order): a push queued ahead of the greeting, or a push that
+        is written before the child exists."""
+        api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+        cid, _ = await api.astart_conversation()
+        await api.apush_fsm(cid, copy.deepcopy(_KID))
+        log.release(cid)
+        events = list(log.read(cid))
+        (push,) = [e for e in events if e["type"] == "stack/push"]
+        greeting = [e for e in events if e["frame"] == 1 and e["type"] == "llm/request"]
+        assert greeting and all(e["seq"] < push["seq"] for e in greeting)
+        assert [e["type"] for e in events if e["seq"] > push["seq"]] == []
+
+    async def test_the_blobs_are_read_on_the_loop_before_the_job_runs(
+        self, log: EventLog
+    ):
+        """The job is held back (captured, run after the caller changed the child and its
+        context): the push blobs are the state, the return context and the definition AT the
+        push. Kills (M30): bodies read inside the job (the state blob would hold ``note``)."""
+        api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+        cid, _ = await api.astart_conversation()
+        jobs: list[Any] = []
+        with patch.object(
+            Lanes, "after", lambda self, root_id, fn: jobs.append(fn) or None
+        ):
+            await api.apush_fsm(
+                cid,
+                copy.deepcopy(_KID),
+                return_context={"answer": 1},
+                inherit_context=False,
+            )
+            api.update_context(cid, {"note": "later"})
+            assert len(jobs) == 1  # the push job, queued and not yet run
+            jobs[0]()
+        log.release(cid)
+        (push,) = _of(log, cid, EventType.STACK_PUSH)
+        assert "note" not in log.get_json(push["state_ref"])["context_data"]
+        assert log.get_json(push["return_context_ref"]) == {"answer": 1}
+        assert log.get_json(push["definition_ref"])["name"] == "Kid"
+
+    async def test_a_sync_push_writes_inline_even_with_a_started_lane(
+        self, log: EventLog
+    ):
+        """``SYNC`` (a ``push_fsm`` from a worker thread) never queues: the lane is parked, so a
+        queued job could not have written the line. Kills (M29 sync): a deferral that ignores
+        ``SYNC``."""
+        api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+        cid, _ = await api.astart_conversation()  # a lane thread now serves the tree
+        entered, gate = threading.Event(), threading.Event()
+
+        def hold() -> None:
+            entered.set()
+            gate.wait(20.0)
+
+        parked = asyncio.ensure_future(log.lane_call(cid, hold))
+        try:
+            assert await asyncio.to_thread(entered.wait, 20.0), "the lane never parked"
+            await asyncio.to_thread(api.push_fsm, cid, copy.deepcopy(_KID))
+            assert len(_of(log, cid, EventType.STACK_PUSH)) == 1
+        finally:
+            gate.set()
+            await parked
+
+    @pytest.mark.parametrize("how", ["end_conversation", "log_close"])
+    async def test_the_next_call_sees_the_push_the_drain_wrote(self, tmp_path, how):
+        """Push, then end (or close), then resume in the same or a new process: the frame is
+        there, 30 times (a ``release`` that does not queue behind the job lost it 30 of 30 for
+        the stream reply). Kills (M28): ``release`` or ``close`` that does not wait for the job."""
+        for n in range(30):
+            log = EventLog(tmp_path / f"{how}{n}")
+            api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+            cid, _ = await api.astart_conversation()
+            await api.apush_fsm(cid, copy.deepcopy(_KID))
+            if how == "end_conversation":
+                api.end_conversation(cid)
+                again, again_api = log, api
+            else:
+                log.close()
+                again = EventLog(tmp_path / f"{how}{n}")
+                again_api = API(
+                    copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=again
+                )
+            again_api.resume(cid)
+            assert again_api.get_stack_depth(cid) == 2, n
+            assert again_api.get_current_state(cid) == "hello", n
+            again.close()

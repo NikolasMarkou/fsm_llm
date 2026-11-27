@@ -788,6 +788,50 @@ class TestFailClosedAtTheSites:
         assert api.get_stack_depth(cid) == 2
         assert warned.warning.called
 
+    async def test_a_failing_stack_event_of_an_async_push_is_a_warning_on_a_lane(
+        self, log: EventLog
+    ):
+        """Plan 77e5fef9 step 6 (D-008): the deferred write fails on a lane thread, after the
+        push returned: the same WARNING, the push stands, nothing is raised into the caller.
+        Kills (M32): a failed deferred write that is swallowed with no WARNING (or raised)."""
+        api = API(copy.deepcopy(_FSM), llm_interface=_script(), event_log=log)
+        cid, _ = await api.astart_conversation()
+        with (
+            patch.object(jsonl, "_write", side_effect=OSError("disk full")),
+            patch("fsm_llm.runtime.log.logger") as warned,
+        ):
+            await api.apush_fsm(cid, copy.deepcopy(_SILENT_CHILD))
+            log.release(cid)  # the drain: the job has run when it returns
+        assert api.get_stack_depth(cid) == 2
+        assert "stack/push not written" in warned.warning.call_args.args[0]
+        assert not _events(log, cid, "stack/push")
+
+    async def test_a_definition_blob_that_fails_in_the_job_is_marked_unrecorded(
+        self, log: EventLog
+    ):
+        """The definition is stored by the job: a failure there leaves the push standing with
+        ``definition_unrecorded`` (and the WARNING of the other fields), as the inline write did."""
+        api = API(copy.deepcopy(_FSM), llm_interface=_script(), event_log=log)
+        cid, _ = await api.astart_conversation()
+        real = log.put_json
+
+        def failing(body: Any, *, kind: Any = None, **kw: Any) -> str:
+            if getattr(kind, "value", kind) == "definition":
+                raise OSError("disk full")
+            return real(body, kind=kind, **kw)
+
+        with (
+            patch.object(log, "put_json", side_effect=failing),
+            patch("fsm_llm.engine.api.events.logger") as warned,
+        ):
+            await api.apush_fsm(cid, copy.deepcopy(_SILENT_CHILD))
+            log.release(cid)
+        (push,) = _events(log, cid, "stack/push")
+        assert push["definition_unrecorded"] is True and "definition_ref" not in push
+        assert "state_ref" in push and "return_context_ref" in push
+        message = warned.warning.call_args.args[0]
+        assert "definition" in message and "not recorded (OSError)" in message
+
     def test_a_failing_update_context_record_raises(self, log: EventLog):
         api = API(copy.deepcopy(_FSM), llm_interface=_script(), event_log=log)
         cid, _ = api.start_conversation()

@@ -13,6 +13,7 @@ log run unedited; this file pins the lane and the writer alone.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import gc
 import json
@@ -20,9 +21,11 @@ import threading
 from functools import partial
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
 
+import fsm_llm.runtime.log as log_module
 from fsm_llm.aio import run_sync
 from fsm_llm.core.definitions import ResponseGenerationRequest
 from fsm_llm.runtime import EventLog, LogWriteError, bind, llm_call
@@ -890,3 +893,153 @@ class TestADeferredStreamReply:
             "lane_call",
             "lane_after",
         }
+
+
+def _labels(log: EventLog) -> list[str]:
+    return [e["label"] for e in log.read(ROOT) if "label" in e]
+
+
+def _deferred_write(log: EventLog, label: str) -> Any:
+    """A deferred job: one ``context/record`` named *label*, appended on the lane thread."""
+    return lambda: log.append(ROOT, "context/record", label=label)
+
+
+class TestADeferredJobOrdersTheInlineWritesOfItsTree:
+    """Plan 77e5fef9 step 6 (D-008): an inline ``append`` of a tree waits for the tree's last
+    deferred job, so a ``stack/pop``, a ``run/end`` or an ``update_context`` record written right
+    after a deferred ``stack/push`` cannot land before it. Every row parks the lane on an
+    ``Event`` and spies on the wait itself (no clock decides)."""
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _spy():
+        """Set ``reached`` when an inline writer enters its wait (the ``settle`` of the log)."""
+        reached = threading.Event()
+        real = log_module.settle
+
+        def settle(jobs: Any) -> bool:
+            reached.set()
+            return real(jobs)
+
+        with mock.patch.object(log_module, "settle", settle):
+            yield reached
+
+    @pytest.mark.parametrize("how", ["append", "append_batch"])
+    async def test_an_inline_write_waits_for_the_deferred_job_and_lands_after_it(
+        self, log: EventLog, how: str
+    ) -> None:
+        """Kills (M31): an ``append`` or ``append_batch`` that does not wait (it returns while
+        the lane is parked and its line precedes the deferred one: the inverted push and pop)."""
+        await log.lane_call(ROOT, lambda: None)  # a lane thread serves the tree
+        parked, gate = await _park(log)
+        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        write = {
+            "append": lambda: log.append(ROOT, "context/record", label="inline"),
+            "append_batch": lambda: log.append_batch(
+                ROOT, [{"type": "context/record", "label": "inline"}]
+            ),
+        }[how]
+        with self._spy() as reached:
+            thread, out = _run_in_thread(write)
+            _until(reached.is_set, "the inline write to reach its wait")
+            assert thread.is_alive() and _labels(log) == []
+            gate.set()
+            await parked
+            _until(lambda: not thread.is_alive(), "the inline write to finish")
+        assert _labels(log) == ["deferred", "inline"] and len(out) == 1
+        assert not isinstance(out[0], BaseException)
+
+    async def test_the_last_of_several_deferred_jobs_is_what_it_waits_for(
+        self, log: EventLog
+    ) -> None:
+        """A lane is FIFO, so the last job ends last. Kills: a wait for the FIRST job only."""
+        await log.lane_call(ROOT, lambda: None)
+        parked, gate = await _park(log)
+        for label in ("one", "two", "three"):
+            log.lane_after(ROOT, _deferred_write(log, label))
+        with self._spy() as reached:
+            thread, _ = _run_in_thread(
+                lambda: log.append(ROOT, "context/record", label="inline")
+            )
+            _until(reached.is_set, "the inline write to reach its wait")
+            gate.set()
+            await parked
+            _until(lambda: not thread.is_alive(), "the inline write to finish")
+        assert _labels(log) == ["one", "two", "three", "inline"]
+
+    async def test_another_tree_never_waits(self, log: EventLog) -> None:
+        """The wait is per tree. Kills: a wait on any deferred job of the log."""
+        await log.lane_call(ROOT, lambda: None)
+        parked, gate = await _park(log)
+        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        try:
+            with self._spy() as reached:
+                thread, out = _run_in_thread(
+                    lambda: log.append("another-root", "context/record", label="other")
+                )
+                _until(
+                    lambda: not thread.is_alive(), "the other tree's write to return"
+                )
+            assert len(out) == 1 and not isinstance(out[0], BaseException)
+            assert not reached.is_set(), "the other tree's write waited"
+            assert _labels(log) == []  # the deferred job still waits behind the park
+        finally:
+            gate.set()
+            await parked
+            await log.lane_call(ROOT, lambda: None)
+
+    async def test_a_deferred_job_does_not_wait_for_itself(self, log: EventLog) -> None:
+        """The job's own append runs on a lane thread, where ``settle`` never waits. Kills: a
+        wait on a lane thread (it would wait for the job it runs in, until the bound: a WARNING)."""
+        await log.lane_call(ROOT, lambda: None)
+        with (
+            mock.patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.2),
+            mock.patch.object(lanes_module, "logger") as warned,
+        ):
+            log.lane_after(ROOT, _deferred_write(log, "deferred"))
+            await log.lane_call(ROOT, lambda: None)  # FIFO: the job has run
+        assert _labels(log) == ["deferred"]
+        assert not warned.warning.called, warned.warning.call_args_list
+
+    async def test_the_wait_is_bounded_and_the_write_goes_on_with_a_warning(
+        self, log: EventLog
+    ) -> None:
+        """A hung lane: past ``LANE_WAIT_SECONDS`` the inline write goes on with a WARNING and
+        may precede the job (the named limit of D-008 (d)). Kills: a wait with no bound."""
+        await log.lane_call(ROOT, lambda: None)
+        parked, gate = await _park(log)
+        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        try:
+            with (
+                mock.patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.05),
+                mock.patch.object(lanes_module, "logger") as warned,
+            ):
+                thread, out = _run_in_thread(
+                    lambda: log.append(ROOT, "context/record", label="inline")
+                )
+                _until(lambda: not thread.is_alive(), "the bounded wait to give up")
+            assert len(out) == 1 and not isinstance(out[0], BaseException)
+            assert _labels(log) == ["inline"]  # the job is still parked
+            assert "still running" in warned.warning.call_args.args[0]
+        finally:
+            gate.set()
+            await parked
+            await log.lane_call(ROOT, lambda: None)
+        assert _labels(log) == ["inline", "deferred"]
+
+    async def test_a_finished_job_leaves_nothing_behind(self, log: EventLog) -> None:
+        """Kills: a registry that keeps a finished job (a leak per conversation, a wait on a
+        done future). A job that ran inline (no lane thread ever served the tree) registers none."""
+        log.lane_after(
+            ROOT, _deferred_write(log, "inline")
+        )  # no lane thread yet: inline
+        assert log._deferred == {} and _pool_of(log, ROOT) is None
+        await log.lane_call(ROOT, lambda: None)
+        parked, gate = await _park(log)
+        log.lane_after(ROOT, _deferred_write(log, "queued"))
+        assert list(log._deferred) == [ROOT]
+        gate.set()
+        await parked
+        await log.lane_call(ROOT, lambda: None)
+        _until(lambda: log._deferred == {}, "the finished job to be forgotten")
+        assert _labels(log) == ["inline", "queued"]

@@ -93,18 +93,21 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import os
 import uuid
 from collections.abc import AsyncGenerator, Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, nullcontext, suppress
+from functools import partial
 from typing import Any, TypeVar, cast
 
-from fsm_llm.aio import asteps
+from fsm_llm.aio import SYNC, asteps
 from fsm_llm.core.definitions import FSMDefinition
 from fsm_llm.engine.events import (
     arecord_state,
     record_delta,
     record_state,
+    state_ref_later,
     state_ref_of,
 )
 from fsm_llm.logging import logger
@@ -234,6 +237,22 @@ def _optional_field(
         )
 
 
+def _later(log: EventLog, kind: RedactionKind, body: Any) -> Callable[[], str]:
+    """The call that stores *body*, read now, as a blob (it runs in the job)."""
+    return lambda: log.put_json(body, kind=kind)
+
+
+# DECISION plan-2026-11-26T213359-77e5fef9/D-008
+# [PARTLY SUPERSEDES clause 6 of D-017 of plan 3f4530d3: the push is no longer written on the
+# loop.] In async mode the three blobs and the `stack/push` line are ONE job queued behind the
+# tree's jobs (`lane_after`: after the child's greeting, before the caller's next write); every
+# body is read HERE, on the loop (a pop or an update right after changes them). An inline
+# `stack/pop`, `run/end` or `update_context` cannot land before the push: `EventLog.append`
+# waits for the tree's deferred job (else the fold reads a phantom frame, or raises
+# LogCorruptError for a child record no push covers). Do NOT await a lane call after the frame
+# append (a cancel point, D-020 of plan baa37f40), read state, context or definition inside the
+# job, queue the pop instead of waiting (`update_context` raises: it cannot be deferred), run
+# the job inline outside SYNC mode or add a public name. See decisions.md D-008.
 def record_push(
     api: _ApiSurface,
     conversation_id: str,
@@ -247,7 +266,7 @@ def record_push(
     preserve_history: bool,
     limits: Mapping[str, Any] | None = None,
 ) -> None:
-    """Append ``stack/push`` for a frame that was just added (a no-op with the log off)."""
+    """Append ``stack/push`` for a frame just added (a no-op with the log off; see the anchor)."""
     log = getattr(api, "_event_log", None)
     if log is None:
         return
@@ -258,25 +277,37 @@ def record_push(
         "preserve_history": bool(preserve_history),
         **logged_limits(limits),
     }
+    stores: dict[str, Any] = {}  # field name -> the call that stores its blob (the job)
     if log.stores_values:
         try:
-            fields["definition_ref"] = log.put_json(
-                definition.model_dump(mode="json"), kind=RedactionKind.DEFINITION
+            stores["definition_ref"] = _later(
+                log, RedactionKind.DEFINITION, definition.model_dump(mode="json")
             )
         except Exception as exc:
             logger.warning(f"event log: definition not recorded ({type(exc).__name__})")
             fields["definition_unrecorded"] = True
         _optional_field(
-            fields,
+            stores,
             "return_context_ref",
-            lambda: log.put_json(
-                filter_context(return_context), kind=RedactionKind.DELTA
-            ),
+            lambda: _later(log, RedactionKind.DELTA, filter_context(return_context)),
         )
         _optional_field(
-            fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, child_id)
+            stores,
+            "state_ref",
+            lambda: state_ref_later(api.fsm_manager, log, child_id),
         )
-    _record_stack_event(api, EventType.STACK_PUSH, conversation_id, depth, **fields)
+
+    def write() -> None:
+        for name, store in stores.items():
+            _optional_field(fields, name, store)
+        if "definition_ref" in stores and "definition_ref" not in fields:
+            fields["definition_unrecorded"] = True
+        _record_stack_event(api, EventType.STACK_PUSH, conversation_id, depth, **fields)
+
+    if SYNC.get():
+        write()
+    else:
+        log.lane_after(conversation_id, partial(contextvars.copy_context().run, write))
 
 
 def record_pop(

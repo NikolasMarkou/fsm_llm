@@ -1284,6 +1284,11 @@
       "delta": 1,
       "reason": "plan 77e5fef9 D-007: the anchor of the deferred stream_done write (runtime/calls.py)",
       "token": "plan-2026-11-26T213359-77e5fef9/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 77e5fef9 step 6 (D-008): engine/api/events.py gains the anchor of the deferred stack/push (record_push) and the order guard of EventLog.append",
+      "token": "plan-2026-11-26T213359-77e5fef9/D-008"
     }
   ]
 }

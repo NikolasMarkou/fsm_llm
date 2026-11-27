@@ -35,6 +35,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import Future
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
@@ -220,6 +221,8 @@ class EventLog(ToolEventsMixin):
         self._live: dict[str, tuple[int, int, int] | None] = {}
         self._closed = False
         self._lanes = Lanes()  # no thread starts until the first lane_call
+        # the last deferred job of a tree still queued or running (`lane_after`)
+        self._deferred: dict[str, Future[object]] = {}
 
     @property
     def privacy(self) -> PrivacyLevel:
@@ -331,10 +334,31 @@ class EventLog(ToolEventsMixin):
     def lane_after(self, conversation_id: str, fn: Callable[[], object]) -> None:
         """Run *fn* behind the jobs already queued for the tree *conversation_id*, never waiting.
 
-        What a cancel arm uses (``Lanes.after``): its ``provider/error`` runs after the request
-        job whose await was cancelled. Inline when no lane thread ever served the tree.
+        For a cancel arm and a deferred write (``stream_done``, ``stack/push``); every
+        ``append`` of the tree waits for the last such job first (``_await_deferred``). Inline
+        when no lane thread ever served the tree.
         """
-        self._lanes.after(conversation_id, fn)
+        job = self._lanes.after(conversation_id, fn)
+        if job is not None:
+            with self._guard:
+                self._deferred[conversation_id] = job  # FIFO: the last ends last
+            job.add_done_callback(partial(self._undefer, conversation_id))
+
+    def _undefer(self, conversation_id: str, job: Future[object]) -> None:
+        with self._guard:
+            if self._deferred.get(conversation_id) is job:
+                del self._deferred[conversation_id]
+
+    # An inline write that follows a deferred job of its tree (`stack/pop`, `run/end` or an
+    # `update_context` right after a deferred `stack/push`) must not land before it: the fold
+    # reads a pop with no push as a phantom frame and a child record with no push as
+    # `LogCorruptError`. One wait covers every inline writer (one dict read when nothing is
+    # in flight); `settle` never waits on a lane thread and gives up after `LANE_WAIT_SECONDS`
+    # with a WARNING. See decisions.md D-008.
+    def _await_deferred(self, conversation_id: str) -> None:
+        job = self._deferred.get(conversation_id)
+        if job is not None:
+            settle([job])
 
     def has_writer(self, conversation_id: str) -> bool:
         """True while *conversation_id* is live in this log: appended to or opened, not released.
@@ -417,6 +441,7 @@ class EventLog(ToolEventsMixin):
         **fields: Any,
     ) -> int:
         """Append one event and return its ``seq`` (see the class contract)."""
+        self._await_deferred(conversation_id)
         event = self._envelope(conversation_id, type, frame, fields)
         with self._lease(conversation_id) as writer:  # checks the id
             if checkpoint is None:
@@ -436,6 +461,7 @@ class EventLog(ToolEventsMixin):
         if not events:
             check_conversation_id(conversation_id)
             return []
+        self._await_deferred(conversation_id)
         envelopes = []
         for item in events:
             if "type" not in item:

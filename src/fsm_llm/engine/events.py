@@ -76,7 +76,7 @@ Imports ``core``, ``runtime`` and ``engine.fsm.snapshots`` only; never the pipel
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -395,11 +395,17 @@ def _read_state_blob(manager: FSMManager, conversation_id: str) -> dict[str, Any
     )
 
 
+def state_ref_later(
+    manager: FSMManager, log: EventLog, conversation_id: str
+) -> Callable[[], str]:
+    """Read the state of *conversation_id* now; the returned call stores its blob (a reference)."""
+    blob = _read_state_blob(manager, conversation_id)
+    return lambda: log.put_json(blob, kind=RedactionKind.STATE)
+
+
 def state_ref_of(manager: FSMManager, log: EventLog, conversation_id: str) -> str:
     """Store the current state of *conversation_id* as a blob and return its reference."""
-    return log.put_json(
-        _read_state_blob(manager, conversation_id), kind=RedactionKind.STATE
-    )
+    return state_ref_later(manager, log, conversation_id)()
 
 
 async def arecord_state(

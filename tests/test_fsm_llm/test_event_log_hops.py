@@ -16,6 +16,7 @@ Nothing reads a clock: a wait on a thread is an ``Event`` with a cap that only e
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import threading
 from collections.abc import Awaitable
@@ -60,7 +61,12 @@ from tests.test_fsm_llm.test_async_engine import (
     _collect,
     _stream_api,
 )
-from tests.test_fsm_llm.test_event_log_census import _chat, _llm
+from tests.test_fsm_llm.test_event_log_census import (
+    _TALKING_KID,
+    _chat,
+    _llm,
+    _push_api,
+)
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 from tests.test_fsm_llm.test_event_log_lanes import (
     _pool_of,
@@ -1059,3 +1065,69 @@ class TestTheNextCallSeesTheReply:
         finally:
             again.close()
         api.close()
+
+
+PUSH_HOPS = (
+    2  # the greeting of the pushed child: its request and its reply; the push adds none
+)
+
+
+async def _push_logged(root: Path) -> tuple[API, str]:
+    api = _push_api(root)
+    cid, _ = await api.astart_conversation()
+    return api, cid
+
+
+def _kinds(api: API, cid: str, prefix: str = "") -> list[str]:
+    return [e["type"] for e in _events(api, cid) if e["type"].startswith(prefix)]
+
+
+class TestTheHopsOfAnAsyncPush:
+    """Plan 77e5fef9 step 6 (S2b, D-008): ``stack/push`` is deferred, never awaited, so
+    ``apush_fsm`` has the hops it had (D-020 of plan baa37f40: no await after the frame append)."""
+
+    async def test_a_push_has_the_hops_it_had_before_the_deferral(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills (M26 for the push): an awaited ``lane_call`` after the frame append (a new
+        cancel point on a pushed frame)."""
+        hops = Hops()
+        with hops.installed():
+            api, cid = await _push_logged(tmp_path)
+            hops.arm(-1)
+            await api.apush_fsm(cid, copy.deepcopy(_TALKING_KID))
+            assert hops.count == PUSH_HOPS
+            api.close()
+
+    async def test_a_cancel_parked_at_every_hop_of_a_push(self, tmp_path: Path) -> None:
+        """A cancel in the greeting leaves no child, no frame, no in-flight id and NO push line,
+        the orphan job still ran, the gate is free, and the NEXT push of the caller works and
+        folds. Kills: a push line queued before the greeting settles (a push for a child that
+        does not exist), a frame left by the cancel."""
+        from fsm_llm.runtime.stores import fold_stack
+
+        hops = Hops()
+        for k in range(1, PUSH_HOPS + 1):
+            with hops.installed():
+                api, cid = await _push_logged(tmp_path / f"k{k}")
+                before = _seen(api, cid)
+                hops.arm(k)
+                task = await _cancel_at(
+                    hops, api.apush_fsm(cid, copy.deepcopy(_TALKING_KID))
+                )
+                await _barrier(api.event_log, cid)
+                assert hops.ran.is_set() and task.cancelled(), f"k={k}"
+                assert api.get_stack_depth(cid) == 1, f"k={k}"
+                assert not api._pending_push_ids, f"k={k}"
+                assert _gate_is_free(api, cid), f"k={k}"
+                assert _seen(api, cid) == before, f"k={k}"
+                assert _kinds(api, cid, "stack/") == [], f"k={k}"
+                _every_request_has_its_end(_kinds(api, cid))
+                hops.arm(-1)
+                await api.apush_fsm(cid, copy.deepcopy(_TALKING_KID))
+                api.event_log.release(cid)
+                assert _kinds(api, cid, "stack/") == ["stack/push"], f"k={k}"
+                log = api.event_log
+                folded = fold_stack(log.read(cid), log.get_json)
+                assert folded is not None and folded.depth == 2, f"k={k}"
+            api.close()
