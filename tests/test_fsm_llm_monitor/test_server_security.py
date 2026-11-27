@@ -681,7 +681,7 @@ class TestInstanceReadsNeedTheKey:
 
 class TestListLimitsAreBounded:
     """``limit`` of the three list routes is 1 to ``MAX_QUERY_LIMIT``; the event log
-    route keeps its own clamp (``limit=0`` is 200 there, ``test_event_log_browse.py``)."""
+    route keeps its own clamp (``limit=0`` is 200 with one event there, ``test_event_log_browse.py``)."""
 
     _ROUTES = ("/api/events", "/api/logs", "/api/instances/ag1/events")
 

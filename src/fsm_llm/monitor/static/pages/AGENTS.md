@@ -63,7 +63,7 @@ Exports called by `app.js` or `ws.js`, grouped by file:
 | POST `/api/fsm/launch`, POST `/api/fsm/{id}/start`, POST `/api/fsm/{id}/converse` `{conversation_id, message}`, POST `/api/fsm/{id}/end` `{conversation_id}`, GET `/api/fsm/{id}/conversations` | launch, builder, control, conversations |
 | GET `/api/conversations/{convId}` | conversations |
 | GET `/api/workflow/presets`, POST `/api/workflow/launch` (presets only), GET `/api/workflow/{id}/instances`, POST `/api/workflow/{id}/advance` `{workflow_instance_id, user_input: ''}`, POST `/api/workflow/{id}/cancel` `{workflow_instance_id, reason}`, POST `/api/workflow/{id}/event` `{event_type, payload, workflow_instance_id ("" = broadcast)}` -> `{affected}` | launch, control |
-| GET `/api/agent/types`, POST `/api/agent/launch`, GET `/api/agent/{id}/status`, GET `/api/agent/{id}/result`, POST `/api/agent/{id}/cancel` | launch, builder, control |
+| GET `/api/agent/types`, POST `/api/agent/launch`, GET `/api/agent/{id}/status`, POST `/api/agent/{id}/cancel` | launch, builder, control |
 | GET `/api/capabilities` | launch |
 | GET `/api/presets` | launch, visualizer |
 | GET `/api/preset/fsm/{id}` | visualizer |
