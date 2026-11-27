@@ -825,6 +825,159 @@ class TestBuilderStartInputAndStatusTiming:
         assert probe("stale_state")["builder_edit_workflow_graph"] == "none"
 
 
+class TestSmallUiFixes:
+    """Plan 1f0925d2 step 8 (F4, D-010): graph rows, empty graph, CRLF markdown, six metric columns."""
+
+    def test_a_row_starts_below_the_previous_rows_own_height(self, probe):
+        out = probe("stale_state")["graph_rows"]
+        assert out == {"overlaps": [], "row1_minus_row0": 860, "row2_minus_row1": 220}
+
+    def test_a_taller_second_row_does_not_move_the_row_above_it(self, probe):
+        out = probe("stale_state")["graph_rows_tall_second"]
+        assert out == {"overlaps": [], "row1_minus_row0": 220, "row2_minus_row1": 540}
+
+    def test_graphs_of_one_row_and_of_equal_rows_keep_every_byte(self, probe):
+        # The sha1 of the whole svg markup and the viewBox come from the BASE archive (7174a1fd).
+        assert probe("stale_state")["graph_unmoved"] == {
+            "one": ["f263de7bd06eb1280c2d5f36c1708c720105b48d", "0 0 900 400"],
+            "two": ["776132f4d6d901c5be55d72d187e5e1091a2511a", "0 0 1500 460"],
+        }
+
+    def test_an_empty_graph_clears_the_svg_and_never_writes_an_infinite_viewbox(
+        self, probe
+    ):
+        out = probe("stale_state")["graph_empty"]
+        assert out["html"] == "" and out["viewBox"] is None and out["bad"] is False
+        assert out["threw"] is None and out["no_nodes_key"] is None
+
+    def test_crlf_and_cr_text_render_as_lf_text(self, probe):
+        out = probe("stale_state")["markdown_crlf"]
+        assert out["fence"] and out["same_as_lf"] and out["cr_same_as_lf"]
+        assert out["stray_cr"] is False and out["lists"] == [True, True]
+        assert out["paragraphs"] is True
+
+    def test_the_escape_still_comes_first_in_a_crlf_fence(self, probe):
+        out = probe("stale_state")["markdown_crlf_hostile"]
+        assert out == {"raw": False, "fence": True, "img": True}
+
+    def test_the_markdown_normalisation_runs_after_the_escape(self):
+        text = (_STATIC / "utils" / "markdown.js").read_text(encoding="utf-8")
+        line = next(ln for ln in text.splitlines() if "let s = esc(text)" in ln)
+        assert line.index("esc(text)") < line.index(r"/\r\n?/g")
+
+    def test_the_first_metrics_row_has_a_column_for_every_card(self):
+        html = (_STATIC.parent / "templates" / "index.html").read_text(encoding="utf-8")
+        row = html.split('<div class="metrics-row">')[1].split(
+            '<div class="metrics-row"'
+        )[0]
+        cards = row.count('<div class="metric-card')
+        css = (_STATIC / "style.css").read_text(encoding="utf-8")
+        rule = re.search(r"\n\.metrics-row \{([^}]*)\}", css)[1]
+        template = re.search(r"grid-template-columns:\s*([^;]+);", rule)[1]
+
+        def tracks(text: str) -> int:
+            total = 0
+            for repeat, _token in re.findall(r"repeat\((\d+),\s*[^)]+\)|(\S+)", text):
+                total += int(repeat) if repeat else 1
+            return total
+
+        assert cards == 6 and tracks(template) == cards
+        # the two breakpoint rules are unchanged: 3 columns hold six cards in two rows, 2 columns the hero apart
+        assert (
+            "@media (max-width: 1200px) {\n    .metrics-row { grid-template-columns: repeat(3, 1fr); }"
+            in css
+        )
+        assert ".metrics-row { grid-template-columns: repeat(2, 1fr); }" in css
+
+
+class TestVisualizerEmptyOption:
+    """Plan 1f0925d2 step 8 (F4, D-010): the empty option clears the view and a late reply cannot undo it."""
+
+    def test_the_empty_workflow_option_clears_the_svg_info_and_table(self, probe):
+        out = probe("stale_state")["viz_empty_workflow"]
+        assert out["drawn"] is True and out["drew"] is True and out["cleared"] is None
+        assert out["svg"] == "" and out["rows"] == ""
+        assert out["info"] == (
+            '<span class="key">Select a workflow to visualize</span><span class="val"></span>'
+        )
+
+    def test_the_agent_twin_clears_too(self, probe):
+        out = probe("stale_state")["viz_empty_agent"]
+        assert out["drew"] is True and out["svg"] == "" and out["rows"] == ""
+        assert "Select an agent type to visualize" in out["info"]
+
+    def test_a_reply_that_lands_after_the_clear_paints_nothing(self, probe):
+        out = probe("stale_state")["viz_late_after_clear"]
+        assert out == {"svg": "", "rows": "", "info": False, "returned": None}
+
+    def test_a_reply_of_an_older_request_never_paints_over_a_newer_one(self, probe):
+        out = probe("stale_state")["viz_late_after_newer"]
+        assert out == {"info_is_b": True, "info_is_a": False}
+
+    def test_the_empty_info_texts_are_the_words_of_the_template(self):
+        html = (_STATIC.parent / "templates" / "index.html").read_text(encoding="utf-8")
+        text = (_STATIC / "pages" / "visualizer.js").read_text(encoding="utf-8")
+        for words in (
+            "Select an agent type to visualize",
+            "Select a workflow to visualize",
+        ):
+            assert words in html and words in text
+
+
+class TestLogsClearCursor:
+    """Plan 1f0925d2 step 8 (F4, D-010): Clear survives every rebuild of the stream; a later record shows."""
+
+    def test_cleared_records_stay_hidden_after_a_pill_a_search_and_a_page_show(
+        self, probe
+    ):
+        out = probe("stale_state")["logs_clear"]
+        assert out["refreshed"] == 3 and out["cleared"] == 0
+        for key in (
+            "refresh_after_clear",
+            "pill_off",
+            "pill_on",
+            "search",
+            "page_show",
+            "sync",
+        ):
+            assert out[key] == 0, key
+
+    def test_a_record_that_arrives_after_the_clear_shows_and_stays(self, probe):
+        out = probe("stale_state")["logs_clear"]
+        assert out["new_by_refresh"] == 1 and out["new_by_append"] == 2
+        assert out["new_after_toggles"] == 2 and out["pill_text"] == "Info (2)"
+
+    def test_a_second_clear_hides_those_too_and_a_later_record_shows(self, probe):
+        out = probe("stale_state")["logs_clear"]
+        assert out["second_clear"] == 0 and out["after_second_clear"] == 1
+
+
+class TestDrawerDirectOpen:
+    """Plan 1f0925d2 step 8 (F4, D-010): a conversation opened straight in the drawer fetches no hidden detail."""
+
+    def test_the_request_census_is_the_conversation_alone(self, probe):
+        out = probe("stale_state")["drawer_direct"]
+        assert out["census"] == ["/api/conversations/c"]
+        # the owning FSM is still the drawer selection and the 2 s poll still runs
+        assert out["chosen"] == {"id": "I", "type": "fsm", "conv": "c", "polling": True}
+
+    def test_back_asks_for_the_instance_detail(self, probe):
+        out = probe("stale_state")["drawer_back"]
+        assert out["census"] == [
+            "/api/fsm/I/conversations",
+            "/api/instances/I/events?limit=100",
+        ]
+        assert out["chosen"]["id"] == "I" and out["chosen"]["conv"] is None
+
+    def test_a_plain_open_and_an_already_selected_instance_are_as_before(self, probe):
+        out = probe("stale_state")
+        assert out["drawer_plain_open"] == [
+            "/api/fsm/I/conversations",
+            "/api/instances/I/events?limit=100",
+        ]
+        assert out["drawer_already_selected"] == ["/api/conversations/c"]
+
+
 class TestJsonColouring:
     """Plan 51fde95b step 14 (D-040): `utils/json_highlight.js` and every page that shows JSON."""
 

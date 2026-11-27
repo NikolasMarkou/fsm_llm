@@ -47,20 +47,23 @@ function layoutNodes(nodes, edges) {
     const layerKeys = Object.keys(layerGroups).map(Number).sort((a, b) => a - b);
     const wrapRow = layerKeys.length > MAX_COLS ? MAX_COLS : layerKeys.length;
 
+    // A row starts below the previous row's own height (its tallest layer), never the current row's.
+    const rowHeights = [];
+    layerKeys.forEach((k, li) => {
+        const r = Math.floor(li / wrapRow);
+        rowHeights[r] = Math.max(rowHeights[r] || 0, layerGroups[k].length);
+    });
+    const rowBase = [60];
+    for (let r = 1; r < rowHeights.length; r++) rowBase[r] = rowBase[r - 1] + rowHeights[r - 1] * (H + YPAD) + 60;
+
     for (let li = 0; li < layerKeys.length; li++) {
         const group = layerGroups[layerKeys[li]];
         const col = li % wrapRow;
         const row = Math.floor(li / wrapRow);
         const effectiveCol = (row % 2 === 0) ? col : (wrapRow - 1 - col);
 
-        let rowHeight = 0;
-        for (let ri = row * wrapRow; ri < Math.min((row + 1) * wrapRow, layerKeys.length); ri++) {
-            const g = layerGroups[layerKeys[ri]];
-            if (g.length > rowHeight) rowHeight = g.length;
-        }
-
         const x = 140 + effectiveCol * (W + XPAD);
-        const rowYBase = 60 + row * (rowHeight * (H + YPAD) + 60);
+        const rowYBase = rowBase[row];
         for (let ni = 0; ni < group.length; ni++) {
             group[ni].x = x;
             group[ni].y = rowYBase + ni * (H + YPAD);
@@ -83,6 +86,8 @@ export function renderGraph(svgId, data, opts = {}) {
     if (!svg) return;
 
     const { nodes, edges } = data;
+    // No nodes: bounds would be infinite, so clear and leave the viewBox as it was.
+    if (!nodes?.length) { svg.innerHTML = ''; return; }
     const colorVar = opts.colorVar || 'var(--primary-dim)';
     const arrowColor = opts.arrowColor || colorVar;
     const rx = opts.rx || 4;

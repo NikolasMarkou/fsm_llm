@@ -17,6 +17,8 @@ let _logPillCounts = {};
 const _SEEN_CAP = 10000;
 let _seenKeys = new Set();
 let _seenOrder = [];
+// Keys seen when Clear was pressed: a rebuild (pill, search, page show) drops them, a later record shows.
+let _clearedKeys = new Set();
 
 function _logKey(r) {
     return `${r.timestamp}|${r.level}|${r.module}:${r.line}|${r.message}`;
@@ -171,7 +173,8 @@ export function clearLogs() {
     _logPillCounts = {};
     _updateLogPillCounts([], true);
     // Cleared records stay marked as seen so the periodic sync does not
-    // bring them back; the error badge restarts from zero.
+    // bring them back, and refreshLogs drops them; the error badge restarts from zero.
+    _clearedKeys = new Set(_seenKeys);
     _logErrorCount = 0;
     _updateLogSidebarBadge();
 }
@@ -295,7 +298,8 @@ export async function refreshLogs() {
     const filter = $('log-filter')?.value.trim().toLowerCase();
 
     try {
-        let logs = await fetchJson(`/api/logs?limit=500&level=${encodeURIComponent(minLevel)}`);
+        let logs = (await fetchJson(`/api/logs?limit=500&level=${encodeURIComponent(minLevel)}`))
+            .filter(r => !_clearedKeys.has(_logKey(r)));
 
         // The rebuilt view reflects the server's latest state, so anything held
         // in the pause buffer is either shown now or already evicted server side.

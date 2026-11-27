@@ -66,7 +66,7 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 - `formatNumber(n)` - null/NaN -> `'0'`; `>=1e9` B, `>=1e6` M, `>=1e4` K (one decimal, trailing `.0` stripped), `>=1000` `en-US` commas, else `String(n)`.
 
 `markdown.js`
-- `renderMarkdown(text): string` - falsy -> `''`. Order: `esc` (and NULs dropped) -> fenced code to `pre.md-code-block` and inline code to `code.md-code-inline`, both stashed behind NUL placeholders so no later pass touches them -> `###`/`##`/`#` to `<strong class="md-h3|md-h2|md-h1">` -> `**`/`__` bold -> `*`/`_` italic -> `-`/`*` items wrapped in `<ul>` -> `1.` runs as `<ol>` (a distinct `<oli>` marker keeps them out of the `<ul>` pass) -> `---`/`***` to `<hr class="md-hr">` -> blank lines to `</p><p>`, newlines to `<br>` -> wrap in `<p>` -> restore the stashed code -> cleanup of empty `<p>` and `<p>`/`<br>` around `pre`, `ul`, `ol`, `hr`.
+- `renderMarkdown(text): string` - falsy -> `''`. Order: `esc` (NULs dropped, then `\r\n` and a lone `\r` become `\n`, after the escape) -> fenced code to `pre.md-code-block` and inline code to `code.md-code-inline`, both stashed behind NUL placeholders so no later pass touches them -> `###`/`##`/`#` to `<strong class="md-h3|md-h2|md-h1">` -> `**`/`__` bold -> `*`/`_` italic -> `-`/`*` items wrapped in `<ul>` -> `1.` runs as `<ol>` (a distinct `<oli>` marker keeps them out of the `<ul>` pass) -> `---`/`***` to `<hr class="md-hr">` -> blank lines to `</p><p>`, newlines to `<br>` -> wrap in `<p>` -> restore the stashed code -> cleanup of empty `<p>` and `<p>`/`<br>` around `pre`, `ul`, `ol`, `hr`.
 
 `json_highlight.js`
 - `tokenizeJson(text, lenient = false): {type, text}[] | null` - `type` is `key`, `string`, `number`, `bool`, `null` or `punct`; one linear scan, no recursion and no regex, so nesting depth costs no stack. Whitespace belongs to the neighbouring `punct` token and no character is dropped: the token texts joined equal `text`. `null` for a non-string, a text over `JSON_HIGHLIGHT_MAX_CHARS` (200000) or, unless `lenient`, a text `JSON.parse` refuses (`lenient` colours whatever the scan finds, for text that is invalid while it is typed). A string is a `key` when the next non-space character is `:`.
@@ -112,7 +112,7 @@ Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `t
 ## Invariants and constraints
 
 - XSS: every interpolated value must go through `esc()`, `safeClass()`, `levelClass()`, or another escaping helper. `renderMarkdown` depends on escaping first; do not add transforms that reintroduce raw input. `showStatus` `color` and `graph.js` `opts` values are not escaped, so pass only trusted constants.
-- `graph.js` layout: start is the first node with `is_initial`, else `nodes[0]`. Unreachable nodes go to layer `max+1`. Layers wrap into rows of at most `MAX_COLS = 5` columns in serpentine order (odd rows reversed). Constants `XPAD=120`, `YPAD=100`, outer `PAD=60`, plus 60 px top padding for self-loop arcs.
+- `graph.js` layout: start is the first node with `is_initial`, else `nodes[0]`. Unreachable nodes go to layer `max+1`. Layers wrap into rows of at most `MAX_COLS = 5` columns in serpentine order (odd rows reversed); a row starts below the previous row's own height (its tallest layer), so a one-row graph is laid out as before. Constants `XPAD=120`, `YPAD=100`, outer `PAD=60`, plus 60 px top padding for self-loop arcs.
 - Edges: self-loops are a cubic arc above the node; a node pair with more than one edge gets quadratic curves offset +12 then -12 px; other edges are straight lines. Arrow marker id is `arrow-<svgId>`, so several graphs can share a page.
 - The viewBox is the larger of content and container size; content is centered when the container is larger. `minWidth`/`minHeight` are set only when content exceeds the container.
 - `json_highlight.js` builds nodes with `textContent` only: never `innerHTML` for a token or for the fallback (a probe records every `innerHTML` write and every created tag), so a JSON string holding `<script>` or HTML stays text. The page text is the source of truth and the coloured nodes must hold exactly the same characters. Only object or array values are marked `json-view` (a plain string that happens to read as a number would be coloured as one). The colours are CSS variables in `:root` of `style.css` (the dashboard has one dark theme; a test checks the 4.5:1 contrast and that no second theme appeared).
@@ -131,7 +131,7 @@ Emitted SVG: `<defs><marker id="arrow-<svgId>">`, then `path|line.edge-line`, `t
 - `copyToClipboard` never rejects and always returns `true`, even if the fallback copy fails.
 - `formatTime` on an unparseable non-ISO string returns a substring that may be meaningless.
 - `relativeTime` on an unparseable date yields `NaN`, which falls through every comparison to `NaNd ago`.
-- `renderGraph` with an empty `nodes` array produces infinite/negative bounds; callers should not pass empty graphs. `layoutNodes` returns early on empty input.
+- `renderGraph` with an empty or missing `nodes` clears the svg and returns before it writes any attribute (the viewBox keeps its last value, never an infinite one). `layoutNodes` returns early on empty input.
 - `hashInstances` throws if `items` is not an array-like with `length`.
 
 ## Working here

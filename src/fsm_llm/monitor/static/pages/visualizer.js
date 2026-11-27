@@ -8,6 +8,9 @@ import { renderGraph } from '../utils/graph.js';
 
 let _vizStatusTimer = null;
 let _filledFrom = null;  // the state.agentTypes rows the select was filled from
+const _vizSeq = {};      // per type: the latest request, so a late reply cannot paint over a newer view or a clear
+// Info text of an empty view (the same words as templates/index.html).
+const EMPTY_INFO = { agent: 'Select an agent type to visualize', workflow: 'Select a workflow to visualize' };
 
 /**
  * Render a graph. Returns true on success, false on failure (a toast is
@@ -28,6 +31,7 @@ export async function visualizeGraph(type, typeValue) {
         workflow: { colorVar: 'var(--cyan)', arrowColor: 'var(--cyan)', rx: 12, nodeClass: 'wf' },
     };
 
+    const seq = _vizSeq[type] = (_vizSeq[type] || 0) + 1;
     try {
         let data;
         if (type === 'fsm') {
@@ -43,9 +47,17 @@ export async function visualizeGraph(type, typeValue) {
                 return null;
             }
         } else {
-            if (!typeValue) return null;
+            if (!typeValue) {  // the empty option: back to the empty view, not the previous graph
+                renderGraph(svgIds[type], { nodes: [], edges: [] });
+                const emptyInfo = $(infoIds[type]);
+                if (emptyInfo) emptyInfo.innerHTML = `<span class="key">${EMPTY_INFO[type]}</span><span class="val"></span>`;
+                const emptyRows = $(transIds[type]);
+                if (emptyRows) emptyRows.innerHTML = '';
+                return null;
+            }
             data = await fetchJson(`${endpoints[type].get}${encodeURIComponent(typeValue)}`);
         }
+        if (seq !== _vizSeq[type]) return null;
 
         renderGraph(svgIds[type], data, styles[type]);
 

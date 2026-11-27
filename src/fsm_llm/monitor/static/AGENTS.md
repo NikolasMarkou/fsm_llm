@@ -119,7 +119,7 @@ Server endpoints the frontend relies on (defined in `server/`): `GET /api/auth`,
 - 401: one shared key prompt, one retry. After the user cancels, non-forced 401s do not reopen the prompt until a key is saved. WebSocket close 4401 stops reconnecting and forces the key prompt; saving a key resumes reconnecting. Close 4403 (Host/Origin refused) stops reconnecting too and shows "Host or origin refused".
 - Unknown `data-action`: ignored silently. Invalid hash: `navigateFromHash` ignores hashes not in `VALID_PAGES`.
 - Bad WebSocket message: parse error caught and logged; the socket stays up.
-- `renderGraph` with an empty `nodes` array yields bad bounds; callers must not pass empty graphs.
+- `renderGraph` with an empty `nodes` array clears the svg and writes no viewBox.
 
 ## Working here
 

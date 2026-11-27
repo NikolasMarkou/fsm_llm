@@ -189,7 +189,7 @@ function _resetDetailRequests() {
     cancelRefresh('ctrl-detail', 'ctrl-detail-wf', 'conv-detail');
 }
 
-export function openDrawer(instanceId, type) {
+export function openDrawer(instanceId, type, { fetchDetail = true } = {}) {
     if (!instanceId) return;
     const switching = state.selectedDetailId !== instanceId || state.selectedDetailType !== type;
 
@@ -219,7 +219,7 @@ export function openDrawer(instanceId, type) {
     if (backdrop) backdrop.style.display = 'block';
     openDialog($('ctrl-drawer'), 'block');
 
-    refreshDetailPanel(instanceId, type);
+    if (fetchDetail) refreshDetailPanel(instanceId, type);
 
     if (state.detailPollTimer) clearInterval(state.detailPollTimer);
     state.detailPollTimer = setInterval(() => {

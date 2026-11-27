@@ -7,7 +7,8 @@ export function renderMarkdown(text) {
     if (!text) return '';
 
     // Escape first (XSS). Raw NULs are dropped so a placeholder below can only be ours.
-    let s = esc(text).replace(/\u0000/g, '');
+    // Line ends are normalised after the escape (it does not touch them): CRLF text renders as LF text.
+    let s = esc(text).replace(/\u0000/g, '').replace(/\r\n?/g, '\n');
 
     // Code is stashed behind NUL placeholders (already escaped) so the bold, italic,
     // list and line-break passes below never touch it; restored before the clean-up.

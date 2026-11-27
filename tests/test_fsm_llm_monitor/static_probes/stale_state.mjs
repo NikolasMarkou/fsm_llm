@@ -1,10 +1,15 @@
-import { el, serve, out } from './stub.mjs';
+import { createHash } from 'node:crypto';
+import { El, el, serve, out } from './stub.mjs';
 import { state } from '../static/services/state.js';
 import * as launch from '../static/pages/launch.js';
 import * as builder from '../static/pages/builder.js';
 import * as conv from '../static/pages/conversations.js';
 import * as eventlog from '../static/pages/eventlog.js';
 import * as control from '../static/pages/control.js';
+import * as visualizer from '../static/pages/visualizer.js';
+import * as logs from '../static/pages/logs.js';
+import { renderGraph } from '../static/utils/graph.js';
+import { renderMarkdown } from '../static/utils/markdown.js';
 
 // Plan 1f0925d2: a view or a timer must not act on a request, a modal or a state that is no longer the
 // current one. No sleep decides anything here: the timers are a fake scheduler, the replies are gates.
@@ -519,6 +524,210 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     builder.startBuilderSession(); await flush();
     await apply(JSON.stringify(FSM));
     result.builder_edit_workflow_graph = graph.style.display;
+}
+
+// --- F4 (D-010): graph rows as a running sum, the empty graph, CRLF markdown ---
+{
+    const W = 180, H = 60;
+    const overlapsOf = ns => {
+        const o = [];
+        for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++) {
+            if (Math.abs(ns[i].x - ns[j].x) < W && Math.abs(ns[i].y - ns[j].y) < H) o.push([ns[i].id, ns[j].id]);
+        }
+        return o;
+    };
+    const draw = (id, graph) => { el(id).parentElement = null; renderGraph(id, graph); return el(id); };
+    const hash = t => createHash('sha1').update(t).digest('hex');
+    // a start node, `wide` children in layer 1, then a chain: layer l holds the node n<l> (and `extra` more at `tallLayer`)
+    const chain = (wide, last, extra = 0, tallLayer = 0) => {
+        const nodes = [{ id: 'a', is_initial: true }], edges = [], layer = { a: 0 };
+        for (let i = 1; i <= wide; i++) { nodes.push({ id: 'b' + i }); edges.push({ from: 'a', to: 'b' + i }); layer['b' + i] = 1; }
+        let prev = 'b1';
+        for (let l = 2; l <= last; l++) {
+            nodes.push({ id: 'n' + l }); edges.push({ from: prev, to: 'n' + l }); layer['n' + l] = l; prev = 'n' + l;
+            if (l === tallLayer) for (let k = 0; k < extra; k++) { nodes.push({ id: `x${l}_${k}` }); edges.push({ from: 'n' + (l - 1), to: `x${l}_${k}` }); layer[`x${l}_${k}`] = l; }
+        }
+        return { nodes, edges, layer };
+    };
+    const rowTops = g => {
+        const tops = [];
+        for (const n of g.nodes) { const r = Math.floor(g.layer[n.id] / 5); tops[r] = Math.min(tops[r] ?? Infinity, n.y); }
+        return tops;
+    };
+    // row 0 holds a layer of 5 nodes: row 1 starts below THAT height (5 * 160 + 60), row 2 below row 1 (1 * 160 + 60)
+    const g1 = chain(5, 11);
+    draw('g-rows', g1);
+    const t1 = rowTops(g1);
+    result.graph_rows = { overlaps: overlapsOf(g1.nodes), row1_minus_row0: t1[1] - t1[0], row2_minus_row1: t1[2] - t1[1] };
+    // row 1 is the taller one (3 nodes in layer 6): row 1 still starts below row 0's own height (1 layer deep: 160 + 60)
+    const g2 = chain(1, 11, 2, 6);
+    draw('g-rows2', g2);
+    const t2 = rowTops(g2);
+    result.graph_rows_tall_second = { overlaps: overlapsOf(g2.nodes), row1_minus_row0: t2[1] - t2[0], row2_minus_row1: t2[2] - t2[1] };
+
+    // a graph of one row, and one of two rows of equal height, keep every byte (the hashes come from the BASE archive)
+    const one = () => ({
+        nodes: [{ id: 's', is_initial: true, label: 'S<b>' }, { id: 'x', description: 'a long description of the state' }, { id: 'y' }, { id: 'z', is_terminal: true }],
+        edges: [{ from: 's', to: 'x', label: 'go' }, { from: 's', to: 'y' }, { from: 'x', to: 'x', label: 'loop' }, { from: 'x', to: 'z' }, { from: 'z', to: 'x' }, { from: 'y', to: 'z' }],
+    });
+    const two = chain(1, 6);   // 7 layers in two rows, every layer one node tall
+    const sizedSvg = (id, g) => { const svg = el(id); svg.parentElement = { clientWidth: 800, clientHeight: 400 }; renderGraph(id, g); return svg; };
+    const sOne = sizedSvg('g-one', one()), sTwo = sizedSvg('g-two', two);
+    result.graph_unmoved = { one: [hash(sOne.innerHTML), sOne.attrs.viewBox], two: [hash(sTwo.innerHTML), sTwo.attrs.viewBox] };
+
+    // no nodes: the svg is cleared and the viewBox is never written from infinite bounds
+    const e1 = el('g-empty'); e1.innerHTML = '<g/>'; e1.parentElement = null;
+    renderGraph('g-empty', { nodes: [], edges: [] });
+    const e2 = el('g-empty2'); e2.parentElement = null;
+    let threw = null;
+    try { renderGraph('g-empty2', {}); } catch (e) { threw = String(e.message); }
+    result.graph_empty = { html: e1.innerHTML, viewBox: e1.attrs.viewBox ?? null, bad: /Infinity|NaN/.test(JSON.stringify([e1.attrs, e2.attrs, e1.style, e2.style])), threw, no_nodes_key: e2.attrs.viewBox ?? null };
+}
+{
+    const lf = 'Intro\n```js\nlet a = 1;\n```\nafter\n\n- a\n- b\n\n1. x\n2. y\n\none\n\ntwo';
+    const crlf = lf.replace(/\n/g, '\r\n'), cr = lf.replace(/\n/g, '\r');
+    const want = renderMarkdown(lf), got = renderMarkdown(crlf);
+    result.markdown_crlf = {
+        fence: got.includes('<pre class="md-code-block"><code>let a = 1;</code></pre>'),
+        same_as_lf: got === want, cr_same_as_lf: renderMarkdown(cr) === want, stray_cr: got.includes('\r'),
+        lists: [got.includes('<ul><li>a</li><li>b</li></ul>'), got.includes('<ol><li>x</li><li>y</li></ol>')],
+        paragraphs: got.includes('one</p><p>two'),
+    };
+    // the escape still comes first: hostile text inside and around a CRLF fence stays text
+    const bad = renderMarkdown('```\r\n<script>alert(1)</script>\r\n```\r\n<img src=x onerror=alert(1)>\r\n**<b>**');
+    result.markdown_crlf_hostile = {
+        raw: /<script|<img|<b>/.test(bad),
+        fence: bad.includes('<pre class="md-code-block"><code>&lt;script&gt;alert(1)&lt;/script&gt;</code></pre>'),
+        img: bad.includes('&lt;img src=x onerror=alert(1)&gt;'),
+    };
+}
+
+// --- F4 (D-010): the empty dropdown option clears the view, and a late reply cannot paint over the clear ---
+{
+    const view = (svgId, infoId, rowsId) => ({ svg: el(svgId).innerHTML, info: el(infoId).innerHTML, rows: el(rowsId).innerHTML });
+    const wfGates = {};
+    const graphFor = id => ({ nodes: [{ id: 'a', is_initial: true }, { id: 'b' }], edges: [{ from: 'a', to: 'b', label: 'go' }], info: { name: 'WF ' + id } });
+    reset();
+    route.custom = async url => {
+        const m = /workflow_id=(.+)$/.exec(url);
+        if (m) { await wfGates[m[1]]?.p; return graphFor(m[1]); }
+        if (url.startsWith('/api/agent/visualize')) return { ...graphFor('agent'), info: { name: 'AG<' } };
+        return undefined;
+    };
+    const wf = () => view('viz-wf-svg', 'viz-wf-info', 'viz-wf-trans-body');
+    const drawn = await visualizer.visualizeGraph('workflow', 'order_processing');
+    const afterDraw = wf();
+    const cleared = await visualizer.visualizeGraph('workflow', '');
+    const afterClear = wf();
+    result.viz_empty_workflow = {
+        drawn, cleared,
+        drew: afterDraw.svg.includes('<rect') && afterDraw.info.includes('WF order_processing') && afterDraw.rows.includes('<tr>'),
+        svg: afterClear.svg, rows: afterClear.rows,
+        info: afterClear.info,
+    };
+    const ag = () => view('viz-agent-svg', 'viz-agent-info', 'viz-agent-trans-body');
+    await visualizer.visualizeGraph('agent', 'react');
+    const agDrawn = ag().info.includes('AG&lt;');
+    await visualizer.visualizeGraph('agent', '');
+    result.viz_empty_agent = { drew: agDrawn, svg: ag().svg, rows: ag().rows, info: ag().info };
+
+    // a reply that lands after the empty option was chosen does not bring the old graph back
+    wfGates.slow = gate();
+    const late = visualizer.visualizeGraph('workflow', 'slow');
+    await visualizer.visualizeGraph('workflow', '');
+    wfGates.slow.open();
+    const lateRet = await late;
+    result.viz_late_after_clear = { svg: wf().svg, rows: wf().rows, info: wf().info.includes('WF slow'), returned: lateRet };
+    // A (slow) then B (fast): the final view is B
+    wfGates.A = gate();
+    const slowA = visualizer.visualizeGraph('workflow', 'A');
+    await visualizer.visualizeGraph('workflow', 'B');
+    wfGates.A.open(); await slowA;
+    result.viz_late_after_newer = { info_is_b: wf().info.includes('WF B'), info_is_a: wf().info.includes('WF A') };
+}
+// --- F4 (D-010): Clear survives a pill toggle, a search and a page show; a record that arrives later shows ---
+{
+    const pill = lvl => { const p = new El('pill-' + lvl); p.attrs['data-level'] = lvl; p.classList.add('active'); return p; };
+    const pills = [pill('INFO'), pill('ERROR')];
+    const realAll = document.querySelectorAll;
+    document.querySelectorAll = sel => (sel === '#log-pills .log-pill.active' ? pills.filter(p => p.classList.contains('active')) : sel === '#log-pills .log-pill' ? pills : []);
+    const stream = el('log-stream');
+    let markup = '';
+    Object.defineProperty(stream, 'innerHTML', { get: () => markup, set: v => { markup = v; stream.html = []; } });
+    stream.children = [];
+    const visible = () => (markup + stream.html.join('')).split('class="entry').length - 1;
+    const rec = (i, level = 'INFO') => ({ timestamp: `2026-11-27T10:00:0${i}Z`, level, module: 'm', line: i, message: 'rec' + i });
+    let server = [rec(1), rec(2), rec(3, 'ERROR')];
+    reset();
+    route.custom = url => (url.startsWith('/api/logs') ? [...server] : undefined);
+    state.currentPage = 'logs';
+    const seen = {};
+    await logs.refreshLogs();
+    seen.refreshed = visible();
+    logs.clearLogs();
+    seen.cleared = visible();
+    await logs.refreshLogs();
+    seen.refresh_after_clear = visible();
+    logs.toggleLogPill(pills[0]); await flush();               // INFO off
+    seen.pill_off = visible();
+    logs.toggleLogPill(pills[0]); await flush();               // INFO on again: the cleared records stay hidden
+    seen.pill_on = visible();
+    el('log-filter').value = 'rec';
+    await logs.refreshLogs();
+    seen.search = visible();
+    el('log-filter').value = '';
+    logs.onShowLogs(); await flush();
+    seen.page_show = visible();
+    await logs.syncLogs();
+    seen.sync = visible();
+    // a record that arrives after the Clear shows, by refresh and by append, and survives later rebuilds
+    server = [...server, rec(4)];
+    await logs.refreshLogs();
+    seen.new_by_refresh = visible();
+    logs.appendLogs([rec(5)]);
+    seen.new_by_append = visible();
+    server = [...server, rec(5)];
+    logs.toggleLogPill(pills[0]); await flush(); logs.toggleLogPill(pills[0]); await flush();
+    seen.new_after_toggles = visible();
+    seen.pill_text = pills[0].textContent;
+    // a second Clear hides these too, and a later record shows again
+    logs.clearLogs();
+    await logs.refreshLogs();
+    seen.second_clear = visible();
+    server = [...server, rec(6)];
+    await logs.refreshLogs();
+    seen.after_second_clear = visible();
+    result.logs_clear = seen;
+    document.querySelectorAll = realAll;
+}
+// --- F4 (D-010): opening a conversation straight in the drawer makes no request for the hidden detail panel ---
+{
+    const urls = [];
+    const convOk = { conversation_id: 'c', instance_id: 'I', current_state: 's', is_terminal: false, message_history: [], context_data: {} };
+    const run = async (before, act) => {
+        reset();
+        urls.length = 0;
+        route.custom = url => { urls.push(url); return url.startsWith('/api/conversations/') ? convOk : []; };
+        state.instances = [{ instance_id: 'I', instance_type: 'fsm', label: 'L', status: 'running' }];
+        state.currentPage = 'control';
+        state.selectedConvId = null;
+        Object.assign(state, before);
+        await act();
+        await flush();
+        const census = [...urls];
+        const chosen = { id: state.selectedDetailId, type: state.selectedDetailType, conv: state.selectedConvId, polling: !!state.detailPollTimer };
+        clearInterval(state.detailPollTimer); state.detailPollTimer = null;
+        return { census, chosen };
+    };
+    conv.setDeps({ showPage() {}, openDrawer: control.openDrawer, refreshDetailPanel: control.refreshDetailPanel });
+    const direct = await run({ selectedDetailId: null, selectedDetailType: null }, () => conv.showConversationInDrawer('I', 'c'));
+    result.drawer_direct = direct;
+    // Back shows the instance: it asks for the detail then
+    const back = await run({ selectedDetailId: null, selectedDetailType: null }, async () => { conv.showConversationInDrawer('I', 'c'); await flush(); urls.length = 0; conv.drawerBack(); });
+    result.drawer_back = { census: back.census, chosen: back.chosen };
+    // the plain open (a row click) still fetches, and so does an instance already selected for another conversation
+    result.drawer_plain_open = (await run({ selectedDetailId: null, selectedDetailType: null }, () => control.openDrawer('I', 'fsm'))).census;
+    result.drawer_already_selected = (await run({ selectedDetailId: 'I', selectedDetailType: 'fsm' }, () => conv.showConversationInDrawer('I', 'c'))).census;
 }
 out(result);
 process.exit(0);

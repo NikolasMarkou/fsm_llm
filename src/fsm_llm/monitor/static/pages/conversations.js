@@ -30,7 +30,7 @@ export function showConversationInDrawer(instanceId, convId) {
     // after a launch, which opens the conversation without openDrawer) so
     // Back shows that instance instead of an empty panel.
     if (state.selectedDetailId !== instanceId || state.selectedDetailType !== 'fsm') {
-        _openDrawer?.(instanceId, 'fsm');
+        _openDrawer?.(instanceId, 'fsm', { fetchDetail: false });  // the conversation view hides that panel; Back refreshes it
     }
     state.selectedConvInstanceId = instanceId;
     state.selectedConvId = convId;
