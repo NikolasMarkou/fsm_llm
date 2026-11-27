@@ -22,9 +22,9 @@ The leaf lock ``_guard`` protects the table of writers. It is never held across 
 a call into another component, so the log adds no edge to the lock order of ``FSMManager``;
 it IS held while a new writer is built (taking the file lock, opening the file and scanning
 it for a torn tail) and while an idle one is closed, so the first append of a large log makes
-the first append of another conversation on the same ``EventLog`` wait for that scan. Imports ``core``, the kernel and
-``runtime`` modules only. Windows behavior is that of ``stores.jsonl`` and ``blobs``
-(unverified until the Windows run).
+the first append of another conversation on the same ``EventLog`` wait for that scan. Imports
+``core``, the kernel and ``runtime`` modules only. Windows behavior is that of ``stores.jsonl``
+and ``blobs`` (unverified until the Windows run).
 """
 
 from __future__ import annotations

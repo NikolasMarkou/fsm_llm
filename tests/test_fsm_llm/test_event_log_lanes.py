@@ -27,7 +27,6 @@ import pytest
 
 import fsm_llm.runtime.log as log_module
 from fsm_llm.aio import run_sync
-from fsm_llm.core.definitions import ResponseGenerationRequest
 from fsm_llm.runtime import EventLog, LogWriteError, bind, llm_call
 from fsm_llm.runtime import lanes as lanes_module
 from fsm_llm.runtime.calls import LlmCall, allm_call
@@ -36,6 +35,7 @@ from fsm_llm.runtime.stores import jsonl, read_events
 from fsm_llm.runtime.stores.jsonl import JsonlWriter
 from fsm_llm.testing import ScriptedLLM
 from tests.conftest import current_timing_factor
+from tests.test_fsm_llm.event_log_support import greeting_request
 
 CAP_SECONDS = 20.0  # only caps a hang; no assertion reads a duration
 LANE_PREFIX = "fsm-llm-log-lane"
@@ -627,10 +627,6 @@ class TestShutdownRunsTheFinalJobBehindTheQueue:
 ROOT = "stream-root"
 
 
-def _asked() -> ResponseGenerationRequest:
-    return ResponseGenerationRequest(system_prompt="Greet.", user_message="hi")
-
-
 def _responses(log: EventLog) -> list[dict[str, Any]]:
     return [e for e in log.read(ROOT) if e["type"] == "llm/response"]
 
@@ -668,7 +664,9 @@ class TestADeferredStreamReply:
 
         llm = ScriptedLLM()
         with bind(log, ROOT):
-            async with allm_call(llm, "response_stream", _asked(), stream=True) as call:
+            async with allm_call(
+                llm, "response_stream", greeting_request(), stream=True
+            ) as call:
                 parked, gate = await _park(log)
                 pool = _pool_of(log, ROOT)
                 log.append = recording  # type: ignore[method-assign]
@@ -695,7 +693,9 @@ class TestADeferredStreamReply:
         llm = LiteLLMInterface(model="gpt-4o", api_key="sk-unused")
         await log.lane_call(ROOT, lambda: None)  # a lane thread has served the tree
         with bind(log, ROOT) as scope:
-            with llm_call(llm, "response_stream", _asked(), stream=True) as call:
+            with llm_call(
+                llm, "response_stream", greeting_request(), stream=True
+            ) as call:
                 scope.observer.last_request_seq = 7
                 parked, gate = await _park(log)
                 call.stream_done("ab")  # abandoned None: read from the chunk state NOW
@@ -723,7 +723,7 @@ class TestADeferredStreamReply:
             tenant.set("acme")
             with bind(redacting, ROOT):
                 async with allm_call(
-                    ScriptedLLM(), "response_stream", _asked(), stream=True
+                    ScriptedLLM(), "response_stream", greeting_request(), stream=True
                 ) as call:
                     call.stream_done("abc", abandoned=False)
                     await redacting.lane_call(ROOT, lambda: None)
@@ -740,7 +740,7 @@ class TestADeferredStreamReply:
         event_log = EventLog(tmp_path)
         with bind(event_log, ROOT):
             async with allm_call(
-                ScriptedLLM(), "response_stream", _asked(), stream=True
+                ScriptedLLM(), "response_stream", greeting_request(), stream=True
             ) as call:
                 parked, gate = await _park(event_log)
                 pool = _pool_of(event_log, ROOT)
@@ -781,7 +781,7 @@ class TestADeferredStreamReply:
         event_log = EventLog(tmp_path)
         with bind(event_log, ROOT):
             async with allm_call(
-                ScriptedLLM(), "response_stream", _asked(), stream=True
+                ScriptedLLM(), "response_stream", greeting_request(), stream=True
             ) as call:
                 parked, gate = await _park(event_log)
                 call.stream_done("abc", abandoned=True)
@@ -809,7 +809,7 @@ class TestADeferredStreamReply:
         event_log = EventLog(tmp_path)
         with bind(event_log, ROOT):
             async with allm_call(
-                ScriptedLLM(), "response_stream", _asked(), stream=True
+                ScriptedLLM(), "response_stream", greeting_request(), stream=True
             ) as call:
                 event_log.close()
                 with patch("fsm_llm.runtime.log.logger") as warned:
@@ -827,7 +827,7 @@ class TestADeferredStreamReply:
 
         with bind(log, ROOT):
             async with allm_call(
-                ScriptedLLM(), "response_stream", _asked(), stream=True
+                ScriptedLLM(), "response_stream", greeting_request(), stream=True
             ) as call:
                 with (
                     patch.object(log, "put_json", side_effect=OSError("disk full")),
@@ -854,7 +854,9 @@ class TestADeferredStreamReply:
 
         log.append = recording  # type: ignore[method-assign]
         with bind(log, ROOT):
-            with llm_call(ScriptedLLM(), "response_stream", _asked(), stream=True) as c:
+            with llm_call(
+                ScriptedLLM(), "response_stream", greeting_request(), stream=True
+            ) as c:
                 c.stream_done("abc", abandoned=False)
         assert [e["type"] for e in log.read(ROOT)] == ["llm/request", "llm/response"]
         assert set(threads) == {threading.current_thread().name}
@@ -872,7 +874,10 @@ class TestADeferredStreamReply:
             async def body() -> None:
                 with bind(log, ROOT):
                     with llm_call(
-                        ScriptedLLM(), "response_stream", _asked(), stream=True
+                        ScriptedLLM(),
+                        "response_stream",
+                        greeting_request(),
+                        stream=True,
                     ) as call:
                         call.stream_done("abc", abandoned=False)
 

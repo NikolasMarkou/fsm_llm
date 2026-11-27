@@ -1,37 +1,39 @@
-"""Row 1.18 tail: open writer handles of an ``EventLog`` (plan 77e5fef9, steps 1, 3a and 3b).
+"""Open writer handles of an ``EventLog`` (row 1.18; D-004 and D-005 of plan 77e5fef9).
 
 One ``JsonlWriter`` (the log descriptor and its lock descriptor) is opened on the first append of
-a conversation tree. Before step 3a it stayed in ``EventLog._writers`` until ``release`` or
-``close`` and nothing bounded the table; now ``EventLog(max_open_writers=N)`` closes the least
-recently used idle writer (default 64, ``None`` is the unbounded table of before, ``0`` closes a
-writer the moment its append ends). This file is the one new test file of the plan (every other
-row goes into an existing suite).
+a conversation tree. ``EventLog(max_open_writers=N)`` closes the least recently used idle writer
+(``DEFAULT_MAX_OPEN_WRITERS`` by default, ``None`` is the unbounded table, ``0`` closes a writer
+the moment its append ends). This is the one test file of the bound; the rows that prove the
+bound does not move a byte of the log (parity, kill sweeps, census, hops) live in the suites of
+those subjects and run at ``None`` and ``0`` through ``event_log_support.writer_bound``.
 
-Step 1 baselines, kept as the explicit ``max_open_writers=None`` rows (non-vacuity of the rest):
+The ``max_open_writers=None`` rows are the baselines (non-vacuity of the rest):
 
-- ``TestDescriptorBaseline``: 1,000 idle conversations (a start and one turn each, one shared
-  ``EventLog``, doubles only) hold 2,000 descriptors, 2.00 each, sync and async; ending 500 frees
-  1,000; closing the log frees the rest. Counted through ``/proc/self/fd`` (Linux), so the count
-  rows skip elsewhere; the writer-table rows are cross-platform.
-- ``TestExhaustionBaseline``: a child process under ``RLIMIT_NOFILE`` 256 fails with
-  ``LogWriteError`` (cause ``EMFILE``) near conversation 126 on the unbounded log.
+- ``TestDescriptorBaseline``: ``IDLE_CONVERSATIONS`` idle conversations (a start and one turn
+  each, one shared ``EventLog``, doubles only) hold ``DESCRIPTORS_PER_IDLE_CONVERSATION``
+  descriptors each, sync and async; ending a conversation frees its two; closing the log frees
+  the rest. Counted through ``/proc/self/fd`` (Linux), so the count rows skip elsewhere; the
+  writer-table rows are cross-platform.
+- ``TestExhaustionBaseline``: a child process under a low ``RLIMIT_NOFILE`` fails with
+  ``LogWriteError`` (cause ``EMFILE``) inside ``EXHAUSTION_WINDOW`` conversations on the
+  unbounded log.
 
-Step 3a rows (the bound, the pins, the lease set; plan D-004):
+The bound (D-004):
 
-- ``TestBoundedDescriptors``: with ``max_open_writers=16`` the same 1,000 conversations hold at
-  most ``2 * 16`` descriptors above the baseline, every log is complete and paired, a fresh log
-  resumes the first one; the exhaustion child passes 1,000 where the unbounded one failed.
+- ``TestBoundedDescriptors``: under ``BOUND`` the same conversations hold at most two
+  descriptors per open writer above the baseline, every log is complete and paired, a fresh log
+  resumes the first one; the exhaustion child passes where the unbounded one failed.
 - ``TestTheBoundIsValidated``, ``TestEviction`` (LRU order, pins, poison, the lock fd closed,
   bound 0), ``TestTheLeaseSet`` (``open_existing``, ``has_writer``, ``prune``, ``release``,
   ``close``), ``TestReopen`` (same file, ``seq`` continues, fail closed on a link, a vanished
   file or a held lock), ``TestRaces`` (pin against evict on threads, recorded; an eviction from a
   lane thread; queued lane jobs of an evicted id).
 
-Step 3b rows (the tail-read re-open, D-005): ``TestReopenFailsClosed`` (a log appended to, cut
-or replaced while idle is refused and never forked, the model call is not made, a big log is
-re-opened by reading the window only) and ``TestAKilledChurningChild`` (a kill in the write of
-a re-opened writer, then a lock holder that continues). The equivalence of the tail read and
-the full scan (G2) is in ``test_event_log_jsonl.py`` (``TestTailReopen``).
+The re-open (D-005): ``TestReopenFailsClosed`` (a log appended to, cut or replaced while idle is
+refused and never forked, the model call is not made, a big log is re-opened by reading the
+window only) and ``TestAKilledChurningChild`` (a kill in the write of a re-opened writer, then a
+lock holder that continues). The equivalence of the tail read and the full scan is in
+``test_event_log_jsonl.py`` (``TestTailReopen``).
 
 Interface contract of the shared helper ``open_log(root, bound)``: *bound* is None for the
 unbounded log or a non-negative int for ``max_open_writers``; returns an ``EventLog`` on *root*.
@@ -46,6 +48,7 @@ import os
 import subprocess
 import sys
 import threading
+from concurrent.futures import Future
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +60,12 @@ from fsm_llm.runtime.events import LogCorruptError, LogLockedError, LogWriteErro
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.runtime.stores.jsonl import JsonlWriter, exclusive_lock, read_events
 from tests.conftest import current_timing_factor, posix_only, symlink_or_skip
-from tests.test_fsm_llm.event_log_support import REPO, child_env, reopen_after_kill
+from tests.test_fsm_llm.event_log_support import (
+    REPO,
+    child_env,
+    count_reads,
+    reopen_after_kill,
+)
 from tests.test_fsm_llm.test_event_log_census import _chat, _llm
 from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 
@@ -372,6 +380,26 @@ def closes(monkeypatch: pytest.MonkeyPatch) -> Closes:
 
 def _put(log: EventLog, cid: str, *, checkpoint: bool = False) -> int:
     return log.append(cid, "turn/end" if checkpoint else "turn/start")
+
+
+async def _park_lane(
+    log: EventLog, root_id: str
+) -> tuple[Future[object], threading.Event]:
+    """Hold the lane of *root_id* with a job that waits on the returned gate; the job and the gate.
+
+    Returns once the job runs (no clock); set the gate to release it.
+    """
+    parked, gate = threading.Event(), threading.Event()
+
+    def park() -> None:
+        parked.set()
+        gate.wait(JOIN_CAP_SECONDS)
+
+    job = log._lanes.after(root_id, park)
+    assert job is not None
+    while not parked.is_set():
+        await asyncio.sleep(0)
+    return job, gate
 
 
 def _ids_on_two_lanes(log: EventLog) -> tuple[str, str]:
@@ -882,21 +910,7 @@ class TestReopenFailsClosed:
         with open_log(tmp_path, 1) as log:
             assert _put(log, "a") == 101  # the first open scans the log, once
             _put(log, "b")  # evicts "a"
-            me = threading.get_ident()
-            read: list[int] = []
-
-            def counting(real: Any) -> Any:
-                def spy(*args: Any) -> bytes:
-                    data = real(*args)
-                    if threading.get_ident() == me:
-                        read.append(len(data))
-                    return data
-
-                return spy
-
-            monkeypatch.setattr(os, "read", counting(os.read))
-            if hasattr(os, "pread"):
-                monkeypatch.setattr(os, "pread", counting(os.pread))
+            read = count_reads(monkeypatch)
             assert _put(log, "a") == 102
             monkeypatch.undo()
             assert 0 < sum(read) <= 2 * jsonl.MAX_EVENT_BYTES + 1, sum(read)
@@ -1024,16 +1038,7 @@ class TestRaces:
             first, second = _ids_on_two_lanes(log)
             await log.lane_call(first, _put, log, first)
             victim = log._writers[first]
-            parked, gate = threading.Event(), threading.Event()
-
-            def park() -> None:
-                parked.set()
-                gate.wait(JOIN_CAP_SECONDS)
-
-            job = log._lanes.after(first, park)  # the victim's lane is busy
-            assert job is not None
-            while not parked.is_set():
-                await asyncio.sleep(0)
+            job, gate = await _park_lane(log, first)  # the victim's lane is busy
             try:
                 await log.lane_call(second, _put, log, second)
                 assert victim._fd < 0 and victim._lock_fd < 0
@@ -1051,17 +1056,9 @@ class TestRaces:
         log = open_log(tmp_path, 1)
         first = "lane-a"
         await log.lane_call(first, _put, log, first)
-        parked, gate = threading.Event(), threading.Event()
-
-        def park() -> None:
-            parked.set()
-            gate.wait(JOIN_CAP_SECONDS)
-
-        busy = log._lanes.after(first, park)
+        _, gate = await _park_lane(log, first)
         queued = log._lanes.after(first, lambda: _put(log, first, checkpoint=True))
-        assert busy is not None and queued is not None
-        while not parked.is_set():
-            await asyncio.sleep(0)
+        assert queued is not None
         _put(log, "other")  # evicts the writer of `first`, no job holds it
         assert "lane-a" not in log._writers and log.has_writer(first)
         gate.set()

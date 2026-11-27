@@ -861,8 +861,8 @@ class TestACloseWithJobsStillQueued:
 # ----------------------------------------------------------------------------------------------
 
 #: the lane hops of one streamed turn of the chat FSM (the greeting excluded): turn/start, the
-#: extraction record, the stream request, turn/end and one more. Measured on the parent of
-#: step 5 (HEAD e3cf7db6), where the reply write is inline and has no hop of its own.
+#: extraction record, the stream request, turn/end and one more. The reply write is a deferred job
+#: and has no hop of its own.
 STREAM_TURN_HOPS = 5
 
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -196,6 +197,30 @@ def wait_ready(proc: subprocess.Popen[bytes], ready: Path, err: Path) -> None:
             )
         time.sleep(POLL_SECONDS)
     pytest.fail("the child never reached its announced point")
+
+
+def count_reads(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Record the size of every ``os.read`` and ``os.pread`` result of the CALLING thread.
+
+    Interface contract: patches both through *monkeypatch* (``monkeypatch.undo()`` ends the
+    recording); the returned list grows by one length per read; other threads are not counted.
+    """
+    me = threading.get_ident()
+    read: list[int] = []
+
+    def counting(real: Callable[..., bytes]) -> Callable[..., bytes]:
+        def spy(*args: Any) -> bytes:
+            data = real(*args)
+            if threading.get_ident() == me:
+                read.append(len(data))
+            return data
+
+        return spy
+
+    monkeypatch.setattr(os, "read", counting(os.read))
+    if hasattr(os, "pread"):
+        monkeypatch.setattr(os, "pread", counting(os.pread))
+    return read
 
 
 @pytest.fixture(

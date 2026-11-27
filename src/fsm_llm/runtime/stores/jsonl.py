@@ -458,9 +458,8 @@ class JsonlWriter:
             good = 0
             size = scanned.st_size
             tail = _tail(read_fd, size) if expect else None
-            if (
-                tail is not None
-            ):  # a re-open: the tail only, the middle is trusted (D-005)
+            # a re-open: the tail only, the middle is trusted (D-005)
+            if tail is not None:
                 good, self._seq = tail
             else:
                 for event, end in _scan(read_fd):

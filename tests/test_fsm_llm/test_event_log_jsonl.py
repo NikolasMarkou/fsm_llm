@@ -48,7 +48,11 @@ from fsm_llm.runtime.stores.jsonl import (
     read_events,
 )
 from tests.conftest import current_timing_factor, symlink_or_skip
-from tests.test_fsm_llm.event_log_support import child_env, reopen_after_kill
+from tests.test_fsm_llm.event_log_support import (
+    child_env,
+    count_reads,
+    reopen_after_kill,
+)
 
 JSONL_SOURCE = (
     Path(__file__).resolve().parents[2]
@@ -1155,21 +1159,7 @@ class TestTailReopen:
         point = _point(path, 100)
         with path.open("ab") as fh:
             fh.write(torn)
-        me = threading.get_ident()
-        read: list[int] = []
-
-        def counting(real: Any) -> Any:
-            def spy(*args: Any) -> bytes:
-                data = real(*args)
-                if threading.get_ident() == me:
-                    read.append(len(data))
-                return data
-
-            return spy
-
-        monkeypatch.setattr(os, "read", counting(os.read))
-        if hasattr(os, "pread"):
-            monkeypatch.setattr(os, "pread", counting(os.pread))
+        read = count_reads(monkeypatch)
         writer = JsonlWriter(path, create=False, expect=point)
         monkeypatch.undo()
         try:

@@ -44,6 +44,15 @@ PARK_CAP_SECONDS = 10.0  # caps a hang only; no assertion reads a duration
 TICKS = 5
 
 
+async def _ticker(entered: threading.Event, released: threading.Event) -> None:
+    """A LOOP task: once a write is parked (*entered*), tick ``TICKS`` times, then release it."""
+    while not entered.is_set():
+        await asyncio.sleep(0)
+    for _ in range(TICKS):
+        await asyncio.sleep(0)
+    released.set()
+
+
 def _chat(*, silent: bool) -> dict[str, Any]:
     """chat (extracts a name, speaks unless *silent*) -> bye."""
     first: dict[str, Any] = {
@@ -210,19 +219,12 @@ class TestTheLoopStaysFree:
                     starved.append(threading.get_ident() == loop_ident)
             real(fd)
 
-        async def ticker() -> None:
-            while not entered.is_set():
-                await asyncio.sleep(0)
-            for _ in range(TICKS):
-                await asyncio.sleep(0)
-            released.set()
-
         api = _api(tmp_path)
         with (
             mock.patch.object(os, "fsync", parked),
             mock.patch.object(jsonl, "_fsync", parked),
         ):
-            task = asyncio.create_task(ticker())
+            task = asyncio.create_task(_ticker(entered, released))
             cid, _ = await api.astart_conversation()
             await api.aconverse("my name is Ada", cid)
             await task
@@ -252,20 +254,13 @@ class TestTheLoopStaysFree:
                     starved.append(threading.get_ident() == loop_ident)
             real(fd)
 
-        async def ticker() -> None:
-            while not entered.is_set():
-                await asyncio.sleep(0)
-            for _ in range(TICKS):
-                await asyncio.sleep(0)
-            released.set()
-
         api = _api(tmp_path)
         with (
             mock.patch.object(Lanes, "lane_call", inline),
             mock.patch.object(os, "fsync", parked),
             mock.patch.object(jsonl, "_fsync", parked),
         ):
-            task = asyncio.create_task(ticker())
+            task = asyncio.create_task(_ticker(entered, released))
             await api.astart_conversation()
             await task
         assert starved == [True]
@@ -549,7 +544,7 @@ class TestAReopenUnderChurn:
     The first write of a turn is a lane job, so a re-open normally runs on a lane thread. The
     named limit: when more turns are in flight than ``max_open_writers``, an INLINE line append
     of an evicted id (the plain line writes that stay on the loop) re-opens on the loop and
-    adds an ``os.open``, a lock and a full scan to the loop census. The bound must be at least
+    adds an ``os.open``, a lock and a tail read to the loop census. The bound must be at least
     the number of conversations in flight; below it the loop pays a re-open."""
 
     @staticmethod
@@ -665,8 +660,7 @@ class TestAStreamedTurn:
         self, tmp_path: Path
     ) -> None:
         """Kills: the reply blob and the ``llm/response`` line written on the loop in the
-        ``finally`` of the stream (the parent counted mkdir, open, dirsync, temp file, fsync
-        and replace there)."""
+        ``finally`` of the stream."""
         census = Census()
         api = _stream_api(tmp_path)
         assert await _async_stream(api, census) == ["B", "ye"]
@@ -725,19 +719,12 @@ class TestAStreamedTurn:
                     starved.append(threading.get_ident() == loop_ident)
             real(fd)
 
-        async def ticker() -> None:
-            while not entered.is_set():
-                await asyncio.sleep(0)
-            for _ in range(TICKS):
-                await asyncio.sleep(0)
-            released.set()
-
         api = _stream_api(tmp_path)
         with (
             mock.patch.object(os, "fsync", parked),
             mock.patch.object(jsonl, "_fsync", parked),
         ):
-            task = asyncio.create_task(ticker())
+            task = asyncio.create_task(_ticker(entered, released))
             cid, _ = await api.astart_conversation()
             async for _chunk_text in api.aconverse_stream("my name is Ada", cid):
                 chunked.set()
@@ -836,8 +823,7 @@ class TestAnAsyncPush:
     async def test_an_awaited_push_blocks_the_loop_on_no_log_io(
         self, tmp_path: Path
     ) -> None:
-        """Kills (M29): the push written on the loop (the parent counted mkdir 3, open 9,
-        dirsync 6, tempfile 3, fsync 3, replace 3 there)."""
+        """Kills (M29): the push written on the loop."""
         census = Census()
         api = _push_api(tmp_path)
         await _async_push(api, census)
@@ -894,20 +880,13 @@ class TestAnAsyncPush:
                     starved.append(threading.get_ident() == loop_ident)
             real(fd)
 
-        async def ticker() -> None:
-            while not entered.is_set():
-                await asyncio.sleep(0)
-            for _ in range(TICKS):
-                await asyncio.sleep(0)
-            released.set()
-
         api = _push_api(tmp_path)
         cid, _ = await api.astart_conversation()
         with (
             mock.patch.object(os, "fsync", parked),
             mock.patch.object(jsonl, "_fsync", parked),
         ):
-            task = asyncio.create_task(ticker())
+            task = asyncio.create_task(_ticker(entered, released))
             armed.set()
             await api.apush_fsm(cid, copy.deepcopy(_SILENT_KID))
             await task
