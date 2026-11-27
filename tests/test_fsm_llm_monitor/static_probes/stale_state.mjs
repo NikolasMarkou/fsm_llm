@@ -659,7 +659,13 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     const rec = (i, level = 'INFO') => ({ timestamp: `2026-11-27T10:00:0${i}Z`, level, module: 'm', line: i, message: 'rec' + i });
     let server = [rec(1), rec(2), rec(3, 'ERROR')];
     reset();
-    route.custom = url => (url.startsWith('/api/logs') ? [...server] : undefined);
+    // the server answers like the route: the records at or above `level`, the newest `limit` of them (oldest first here)
+    const RANK = { TRACE: 5, DEBUG: 10, INFO: 20, ERROR: 40 };
+    route.custom = url => {
+        if (!url.startsWith('/api/logs')) return undefined;
+        const q = new URL('http://x' + url).searchParams;
+        return server.filter(r => RANK[r.level] >= RANK[q.get('level')]).slice(-Number(q.get('limit')));
+    };
     state.currentPage = 'logs';
     const seen = {};
     await logs.refreshLogs();
@@ -698,6 +704,66 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     await logs.refreshLogs();
     seen.after_second_clear = visible();
     result.logs_clear = seen;
+    // Clear holds across a pill that LOWERS the minimum level: the records below the level shown at Clear were never fetched
+    const lr = (m, n, level) => ({ timestamp: `2026-11-27T10:0${m}:0${n}Z`, level, module: 'm', line: 10 * m + n, message: `lr${m}${n}` });
+    const debugPill = pill('DEBUG');
+    debugPill.classList.remove('active');
+    pills.push(debugPill);                                      // DEBUG off, INFO and ERROR on
+    const lv = {};
+    server = [lr(1, 1, 'INFO'), lr(1, 2, 'ERROR'), lr(1, 3, 'DEBUG')];  // the newest record is a DEBUG one
+    await logs.refreshLogs();
+    lv.shown_before = visible();                                // the INFO and the ERROR
+    const cursorCalls = () => calls.filter(c => c === 'GET /api/logs?limit=1&level=TRACE').length;
+    const cursorBefore = cursorCalls();
+    logs.clearLogs(); await flush();                            // the one request that learns the newest record of any level
+    lv.cursor_request = cursorCalls() - cursorBefore;
+    await logs.refreshLogs();
+    lv.after_clear = visible();
+    logs.toggleLogPill(debugPill); await flush();               // Debug on: the old DEBUG record stays hidden
+    lv.debug_on = visible();
+    server = [...server, lr(1, 4, 'DEBUG')];
+    await logs.refreshLogs();
+    lv.new_debug = visible();                                   // a record after the Clear shows at any level
+    server = [...server, lr(1, 5, 'INFO')];
+    await logs.refreshLogs();
+    lv.new_info = visible();
+    logs.toggleLogPill(debugPill); await flush();               // Debug off again
+    // INFO off at Clear time (the newest record is an INFO one), then on again
+    server = [lr(2, 1, 'ERROR'), lr(2, 2, 'INFO')];
+    logs.toggleLogPill(pills[0]); await flush();                // INFO off (ERROR left)
+    lv.info_off_shown = visible();
+    logs.clearLogs(); await flush();
+    logs.toggleLogPill(pills[0]); await flush();                // INFO on: the old INFO record stays hidden
+    lv.info_on = visible();
+    server = [...server, lr(2, 3, 'INFO')];
+    await logs.refreshLogs();
+    lv.info_new = visible();
+    // the reply of an earlier Clear arrives after a later one: the cursor never moves back
+    const real = route.custom;
+    let release;
+    const held = new Promise(r => { release = r; });
+    let asked = 0;
+    route.custom = async url => {
+        if (!url.includes('limit=1&')) return real(url);
+        const answer = real(url);                                // the snapshot of the moment of the request
+        if (asked++ === 0) await held;
+        return answer;
+    };
+    logs.clearLogs();                                           // its reply is held
+    server = [...server, lr(3, 1, 'INFO'), lr(3, 2, 'INFO')];
+    logs.clearLogs(); await flush();                            // answers at once with the newer record
+    release(); await flush();
+    await logs.refreshLogs();
+    lv.late_reply = visible();
+    // the cursor request fails: the keys of the records seen still hold
+    route.custom = url => (url.includes('limit=1&') ? { fail: 'down' } : real(url));
+    server = [...server, lr(4, 1, 'INFO')];
+    await logs.refreshLogs();                                   // seen now
+    logs.clearLogs(); await flush();
+    await logs.refreshLogs();
+    lv.cursor_failed = visible();
+    route.custom = real;
+    result.logs_clear_levels = lv;
     document.querySelectorAll = realAll;
 }
 // --- opening a conversation straight in the drawer makes no request for the hidden detail panel ---

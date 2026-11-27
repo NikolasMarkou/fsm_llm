@@ -19,6 +19,9 @@ let _seenKeys = new Set();
 let _seenOrder = [];
 // Keys seen when Clear was pressed: a rebuild (pill, search, page show) drops them, a later record shows.
 let _clearedKeys = new Set();
+// Timestamp of the newest record of ANY level at Clear (server time, UTC isoformat): a rebuild drops older
+// records too, which the keys miss when a pill lowers the minimum level (those were never fetched).
+let _clearedBefore = '';
 
 function _logKey(r) {
     return `${r.timestamp}|${r.level}|${r.module}:${r.line}|${r.message}`;
@@ -175,8 +178,19 @@ export function clearLogs() {
     // Cleared records stay marked as seen so the periodic sync does not
     // bring them back, and refreshLogs drops them; the error badge restarts from zero.
     _clearedKeys = new Set(_seenKeys);
+    _learnClearCursor();
     _logErrorCount = 0;
     _updateLogSidebarBadge();
+}
+
+/** One unfiltered request for the newest record; the cursor only moves forward. A failure leaves the keys as the guard. */
+async function _learnClearCursor() {
+    try {
+        const [newest] = await fetchJson('/api/logs?limit=1&level=TRACE');
+        if (newest && newest.timestamp > _clearedBefore) _clearedBefore = newest.timestamp;
+    } catch (e) {
+        console.error('clearLogs:', e);
+    }
 }
 
 // --- Incremental Append (from WebSocket / periodic sync) ---
@@ -299,7 +313,7 @@ export async function refreshLogs() {
 
     try {
         let logs = (await fetchJson(`/api/logs?limit=500&level=${encodeURIComponent(minLevel)}`))
-            .filter(r => !_clearedKeys.has(_logKey(r)));
+            .filter(r => !_clearedKeys.has(_logKey(r)) && !(r.timestamp <= _clearedBefore));
 
         // The rebuilt view reflects the server's latest state, so anything held
         // in the pause buffer is either shown now or already evicted server side.

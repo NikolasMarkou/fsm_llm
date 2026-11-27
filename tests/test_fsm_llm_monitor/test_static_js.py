@@ -952,6 +952,33 @@ class TestLogsClearCursor:
         assert out["second_clear"] == 0 and out["after_second_clear"] == 1
 
 
+class TestLogsClearAcrossLevels:
+    """Clear holds across a pill that lowers the minimum level (the server filters by level)."""
+
+    def test_a_debug_record_from_before_the_clear_stays_hidden(self, probe):
+        out = probe("stale_state")["logs_clear_levels"]
+        assert out["shown_before"] == 2 and out["after_clear"] == 0
+        assert (
+            out["cursor_request"] == 1
+        )  # one unfiltered request for the newest record
+        assert out["debug_on"] == 0
+
+    def test_an_info_record_from_before_the_clear_stays_hidden(self, probe):
+        out = probe("stale_state")["logs_clear_levels"]
+        assert out["info_off_shown"] == 1 and out["info_on"] == 0
+
+    def test_a_record_after_the_clear_shows_at_any_level(self, probe):
+        out = probe("stale_state")["logs_clear_levels"]
+        assert out["new_debug"] == 1 and out["new_info"] == 2
+        assert out["info_new"] == 1
+
+    def test_a_late_reply_of_an_earlier_clear_never_moves_the_cursor_back(self, probe):
+        assert probe("stale_state")["logs_clear_levels"]["late_reply"] == 0
+
+    def test_a_failed_cursor_request_leaves_the_keys_as_the_guard(self, probe):
+        assert probe("stale_state")["logs_clear_levels"]["cursor_failed"] == 0
+
+
 class TestDrawerDirectOpen:
     """A conversation opened straight in the drawer fetches no hidden detail."""
 
