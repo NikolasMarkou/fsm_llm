@@ -45,7 +45,7 @@ from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.instance_manager import agent as agent_mod
 from fsm_llm.monitor.instance_manager import lifecycle as lifecycle_mod
 from fsm_llm.monitor.instance_manager.managed import ManagedAgent, ManagedFSM
-from fsm_llm.monitor.server import app, configure, routes_builder
+from fsm_llm.monitor.server import app, configure, routes_builder, support
 from tests.test_fsm_llm_monitor.support import _manager
 
 _BOUND_SECONDS = 20.0  # a hard bound on every wait, never the thing that decides
@@ -419,7 +419,66 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
         monkeypatch.setattr(meta_builder, "MetaBuilderAgent", Broken)
 
         async def main():
-            with pytest.raises(RuntimeError, match="cannot build"):
+            assert (
+                await _status_of(
+                    routes_builder.api_builder_start(BuilderStartRequest())
+                )
+                == 500
+            )
+            assert not _pending()
+
+        _run(rig, main)
+
+    def test_a_construction_failure_is_a_json_500_and_one_log_record(
+        self, rig, monkeypatch
+    ):
+        class Broken:
+            def __init__(self, config=None):
+                raise RuntimeError("cannot build the agent")
+
+        monkeypatch.setattr(meta_builder, "MetaBuilderAgent", Broken)
+
+        async def main():
+            async with _client() as client:
+                return await _start(client)
+
+        with mock.patch.object(support, "logger") as log:
+            response = _run(rig, main)
+
+        assert response.status_code == 500
+        assert response.headers["content-type"] == "application/json"
+        assert _detail(response) == "Internal server error"
+        assert "cannot build" not in response.text
+        log.error.assert_called_once()
+        assert "start builder" in log.error.call_args.args[0]
+        assert not _pending()
+
+    def test_a_value_error_in_construction_is_the_mapped_400(self, rig, monkeypatch):
+        class Refusing:
+            def __init__(self, config=None):
+                raise ValueError("temperature out of range")
+
+        monkeypatch.setattr(meta_builder, "MetaBuilderAgent", Refusing)
+
+        async def main():
+            async with _client() as client:
+                return await _start(client)
+
+        response = _run(rig, main)
+        assert response.status_code == 400
+        assert _detail(response) == "temperature out of range"
+        assert not _pending()
+
+    def test_a_cancel_during_construction_still_discards_the_slot(
+        self, rig, monkeypatch
+    ):
+        def cancelled(_req):
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(routes_builder, "_build_start_agent", cancelled)
+
+        async def main():
+            with pytest.raises(asyncio.CancelledError):
                 await routes_builder.api_builder_start(BuilderStartRequest())
             assert not _pending()
 

@@ -116,27 +116,34 @@ def snapshot_from_api(
 class SnapshotsMixin(_InstanceSurface):
     """Conversation snapshots, the ended-conversation cache and the activity list."""
 
-    def get_active_conversations(self) -> list[str]:
-        result: list[str] = []
-        # From the attached API (snapshot the reference under lock; D-003)
+    def _active_owners(self) -> list[tuple[str, API, str]]:
+        """``(instance_id, api, conversation_id)`` of every active conversation: the
+        attached API first (instance id ``""``), then the running FSMs in dict order.
+        The references are copied under ``_lock`` (D-003) and each API is asked once
+        outside it."""
         with self._lock:
-            attached_api = self._attached_api
-        if attached_api is not None:
+            attached = self._attached_api
+            apis = [("", attached)] if attached is not None else []
+            apis += [
+                (inst_id, inst.api)
+                for inst_id, inst in self._instances.items()
+                if isinstance(inst, ManagedFSM) and inst.status == "running"
+            ]
+        owners: list[tuple[str, API, str]] = []
+        for inst_id, api in apis:
             try:
-                result.extend(attached_api.list_active_conversations())
+                owners += [(inst_id, api, c) for c in api.list_active_conversations()]
             except Exception as e:
-                logger.debug(f"Failed to list attached API conversations: {e}")
-        # From managed FSMs
-        with self._lock:
-            for inst in self._instances.values():
-                if isinstance(inst, ManagedFSM) and inst.status == "running":
-                    try:
-                        result.extend(inst.api.list_active_conversations())
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to list conversations for instance {inst.instance_id}: {e}"
-                        )
-        return result
+                what = (
+                    f"conversations for instance {inst_id}"
+                    if inst_id
+                    else "attached API conversations"
+                )
+                logger.debug(f"Failed to list {what}: {e}")
+        return owners
+
+    def get_active_conversations(self) -> list[str]:
+        return [conv_id for _, _, conv_id in self._active_owners()]
 
     def get_conversation_snapshot(
         self, conversation_id: str
@@ -168,35 +175,46 @@ class SnapshotsMixin(_InstanceSurface):
         with self._lock:
             return self._ended_conversations.get(conversation_id)
 
+    def _owner_snapshot(
+        self, inst_id: str, api: API, conversation_id: str
+    ) -> ConversationSnapshot | None:
+        """The live snapshot from the owner's API (read once), else the ended cache."""
+        snap = self._snapshot_from_api(api, conversation_id)
+        if snap is None:
+            return self._ended_snapshot(conversation_id)
+        snap.instance_id = inst_id
+        return snap
+
     def get_all_conversation_snapshots(
         self, include_ended: bool = True
     ) -> list[ConversationSnapshot]:
+        """One pass: each conversation is read once, from the API that owns it."""
         seen: set[str] = set()
         snapshots: list[ConversationSnapshot] = []
 
-        # Active conversations from all FSM APIs
-        for conv_id in self.get_active_conversations():
-            snap = self.get_conversation_snapshot(conv_id)
+        # Active conversations of the attached API and the running FSMs
+        for inst_id, api, conv_id in self._active_owners():
+            snap = self._owner_snapshot(inst_id, api, conv_id)
             if snap is not None and conv_id not in seen:
                 snapshots.append(snap)
                 seen.add(conv_id)
 
         # All known conversation IDs from managed instances
         with self._lock:
-            all_inst_conv_ids = [
-                (inst.instance_id, conv_id)
+            owned = [
+                (inst.instance_id, inst.api, list(inst.conversation_ids))
                 for inst in self._instances.values()
                 if isinstance(inst, ManagedFSM)
-                for conv_id in inst.conversation_ids
             ]
-        for inst_id, conv_id in all_inst_conv_ids:
-            if conv_id in seen:
-                continue
-            snap = self.get_conversation_snapshot(conv_id)
-            if snap is not None:
-                snap.instance_id = inst_id
-                snapshots.append(snap)
-                seen.add(conv_id)
+        for inst_id, api, conv_ids in owned:
+            for conv_id in conv_ids:
+                if conv_id in seen:
+                    continue
+                snap = self._owner_snapshot(inst_id, api, conv_id)
+                if snap is not None:
+                    snap.instance_id = inst_id
+                    snapshots.append(snap)
+                    seen.add(conv_id)
 
         # Ended conversations from cache
         if include_ended:

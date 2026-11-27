@@ -17,7 +17,7 @@ from fsm_llm.logging import logger
 from ..constants import MAX_ABANDONED_BUILDERS, MAX_BUILDER_SESSIONS
 from ..definitions import BuilderSendRequest, BuilderStartRequest
 from .application import app
-from .support import _GATED, _LLM_OPERATION_TIMEOUT
+from .support import _GATED, _LLM_OPERATION_TIMEOUT, _raise_http
 
 # Builder builds run a multi-step LLM loop — needs more time
 _BUILDER_OPERATION_TIMEOUT = 300.0
@@ -173,8 +173,10 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
 
     try:
         agent = _build_start_agent(req)
-    except BaseException:
-        _builder_starting.discard(token)
+    except BaseException as e:
+        _builder_starting.discard(token)  # no await in this arm: a cancel is raised
+        if isinstance(e, Exception):
+            _raise_http(e, "start builder")  # logged, and a JSON detail
         raise
 
     work = asyncio.ensure_future(

@@ -386,6 +386,37 @@ class TestPresetJsonIsReadAsUtf8:
         assert "OK" in proc.stdout
 
 
+class TestPresetListOrder:
+    """O4 of plan 9283c1fd: the files of one example directory are listed in
+    name order, whatever order the filesystem returns them in."""
+
+    def test_the_files_of_a_directory_are_listed_by_name(self, tmp_path):
+        from pathlib import Path
+
+        from fsm_llm.monitor.server import routes_visualize
+
+        for name in ("b.json", "a.json", "c.json"):
+            folder = tmp_path / "basic" / "demo"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_text('{"description": "d"}', encoding="utf-8")
+        real_glob = Path.glob
+
+        def reverse_glob(self, pattern):
+            return iter(sorted(real_glob(self, pattern), reverse=True))
+
+        with (
+            mock.patch.object(routes_visualize, "find_examples_dir", lambda: tmp_path),
+            mock.patch.object(Path, "glob", reverse_glob),
+        ):
+            listed = routes_visualize._scan_fsm_presets()["fsm"]
+
+        assert [p["id"] for p in listed] == [
+            "basic/demo/a.json",
+            "basic/demo/b.json",
+            "basic/demo/c.json",
+        ]
+
+
 class TestRouteLaunchedWorkflowIsStopped:
     """REVIEW-C1: ``POST /api/workflow/launch`` runs ``launch_workflow`` in a
     worker thread, where no loop is running; the engine still lives on the

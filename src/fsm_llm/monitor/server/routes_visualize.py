@@ -212,8 +212,7 @@ def _scan_fsm_presets() -> dict[str, list[dict[str, str]]]:
         for example_dir in sorted(cat_dir.iterdir()):
             if not example_dir.is_dir():
                 continue
-            fsm_files = list(example_dir.glob("*.json"))
-            for f in fsm_files:
+            for f in sorted(example_dir.glob("*.json")):
                 name = example_dir.name.replace("_", " ").title()
                 preset_id = f"{category}/{example_dir.name}/{f.name}"
                 parse_error = ""
