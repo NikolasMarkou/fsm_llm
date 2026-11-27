@@ -89,12 +89,14 @@ reset();
 const status = id => el(id).innerHTML;
 reset(); pages.length = 0; drawer.length = 0;
 route.fail['/api/fsm/i1/start'] = 'LLM operation timed out';
+const startFailedToasts = () => toasts().filter(t => t.includes('starting the first conversation failed')).length;
 {
     const btn = { disabled: false, textContent: 'Launch FSM' };
+    const toastsBefore = startFailedToasts();
     await launch.doLaunchFSM(btn);
     const after = { status: status('launch-fsm-status'), disabled: btn.disabled, pages: [...pages] };
     const ran = fire();
-    result.fsm_partial = { after, ran, pages: [...pages], drawer: drawer.length, disabled: btn.disabled, launches: count('/api/fsm/launch'), modal: el('launch-modal').style.display };
+    result.fsm_partial = { after, ran, pages: [...pages], drawer: drawer.length, disabled: btn.disabled, launches: count('/api/fsm/launch'), modal: el('launch-modal').style.display, toast: startFailedToasts() - toastsBefore };
 }
 reset(); pages.length = 0; drawer.length = 0;
 route.fail['/api/fsm/launch'] = 'bad preset';
@@ -137,6 +139,25 @@ route.gates['/api/fsm/i1/start'] = gate();
     result.fsm_closed_during_start = { pages: [...pages], drawer: drawer.length, disabled: btn.disabled };
 }
 
+// --- a newer launch owns the button: the 500 ms window of an earlier one never frees it ---
+reset(); pages.length = 0; drawer.length = 0;
+el('launch-modal').style.display = 'flex';
+{
+    const btn = { disabled: false, textContent: 'Launch Workflow' };
+    await launch.doLaunchWorkflow(btn);                    // A lands, its window is pending
+    launch.closeLaunchModal();
+    launch.showLaunchModal(); await flush();
+    route.gates['/api/workflow/launch'] = gate();
+    const second = launch.doLaunchWorkflow(btn);           // B is in flight on the same button
+    await flush();
+    const before = btn.disabled;
+    fire();                                                // A's window ends
+    const afterA = { disabled: btn.disabled, text: btn.textContent };
+    route.gates['/api/workflow/launch'].open(); await second;
+    fire();                                                // B's own window frees the button
+    result.launch_newer_owns_button = { before, afterA, afterB: { disabled: btn.disabled, text: btn.textContent }, posts: count('/api/workflow/launch') };
+}
+
 // --- the builder FSM launch ---
 async function builderReady() {
     builder.startBuilderSession();
@@ -147,9 +168,10 @@ reset(); pages.length = 0;
 await builderReady();
 reset();
 route.fail['/api/fsm/i1/start'] = 'LLM operation timed out';
+const builderToastsBefore = startFailedToasts();
 builder.launchBuilderResult();
 await flush();
-result.builder_partial = { status: status('builder-status'), disabled: bbtn.disabled, pages_before: [...pages] };
+result.builder_partial = { status: status('builder-status'), disabled: bbtn.disabled, pages_before: [...pages], toast: startFailedToasts() - builderToastsBefore };
 fire();
 result.builder_partial.pages = [...pages];
 result.builder_partial.disabled_after = bbtn.disabled;
@@ -644,6 +666,21 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     await visualizer.visualizeGraph('workflow', 'B');
     wfGates.A.open(); await slowA;
     result.viz_late_after_newer = { info_is_b: wf().info.includes('WF B'), info_is_a: wf().info.includes('WF A') };
+    // a superseded request that FAILS shows no toast (the view is another one now); the current one still does
+    const graphRoute = route.custom;
+    wfGates.bad = gate();
+    route.custom = async url => {
+        if (url.endsWith('workflow_id=bad')) { await wfGates.bad.p; return { fail: 'late failure' }; }
+        if (url.endsWith('workflow_id=now')) return { fail: 'current failure' };
+        return graphRoute(url);
+    };
+    const failToasts = text => toasts().filter(t => t.includes(text)).length;
+    const slowBad = visualizer.visualizeGraph('workflow', 'bad');
+    await visualizer.visualizeGraph('workflow', '');
+    wfGates.bad.open();
+    const lateFailed = await slowBad;
+    const current = await visualizer.visualizeGraph('workflow', 'now');
+    result.viz_late_failure = { returned: lateFailed, late_toasts: failToasts('late failure'), current_returned: current, current_toasts: failToasts('current failure') };
 }
 // --- Clear survives a pill toggle, a search and a page show; a record that arrives later shows ---
 {

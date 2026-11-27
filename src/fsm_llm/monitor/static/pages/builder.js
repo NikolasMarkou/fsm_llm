@@ -574,6 +574,7 @@ async function _launchBuilderFSM() {
         startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, {});
     } catch (e) {
         showError('builder-status', launchedNotStartedText(data, e));
+        showToast(launchedNotStartedText(data, e), 'error');  // the view moves to Control in 500 ms
     }
     setTimeout(() => {
         release();

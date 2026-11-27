@@ -48,7 +48,11 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
     file_path = base / preset_id
     # a directory, the empty id (the base itself) and a non-JSON file are no preset
     # (`_scan_fsm_presets` lists `*/*/*.json`): a 404, not a failed read
-    if file_path.suffix != ".json" or not file_path.is_file():
+    try:
+        is_json_file = file_path.suffix == ".json" and file_path.is_file()
+    except OSError:  # a name longer than the filesystem allows: no such file, not a 500
+        is_json_file = False
+    if not is_json_file:
         raise FileNotFoundError(f"Preset not found: {preset_id}")
     return file_path
 

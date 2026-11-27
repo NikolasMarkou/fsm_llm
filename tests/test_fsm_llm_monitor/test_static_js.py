@@ -952,6 +952,26 @@ class TestLogsClearCursor:
         assert out["second_clear"] == 0 and out["after_second_clear"] == 1
 
 
+class TestLaunchAndVisualizerNotes:
+    def test_the_first_start_failure_is_also_a_toast(self, probe):
+        out = probe("stale_state")
+        assert out["fsm_partial"]["toast"] == 1
+        assert out["builder_partial"]["toast"] == 1
+
+    def test_the_window_of_an_earlier_launch_never_frees_the_button_of_a_newer_one(
+        self, probe
+    ):
+        out = probe("stale_state")["launch_newer_owns_button"]
+        assert out["posts"] == 2 and out["before"] is True
+        assert out["afterA"] == {"disabled": True, "text": "Launching..."}
+        assert out["afterB"] == {"disabled": False, "text": "Launch Workflow"}
+
+    def test_a_superseded_visualizer_failure_shows_no_toast(self, probe):
+        out = probe("stale_state")["viz_late_failure"]
+        assert out["returned"] is None and out["late_toasts"] == 0
+        assert out["current_returned"] is False and out["current_toasts"] == 1
+
+
 class TestLogsClearAcrossLevels:
     """Clear holds across a pill that lowers the minimum level (the server filters by level)."""
 

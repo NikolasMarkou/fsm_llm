@@ -173,7 +173,8 @@ export function selectPreset(card) {
 
 /** A function that re-enables a launch button with its idle *label*. */
 function _resetter(btn, label) {
-    return () => { if (btn) { btn.disabled = false; btn.textContent = label; } };
+    const mine = btn ? (btn._launch = (btn._launch || 0) + 1) : 0;  // a newer launch owns the button: an older one never frees it
+    return () => { if (btn && btn._launch === mine) { btn.disabled = false; btn.textContent = label; } };
 }
 
 /** The 500 ms window after a launch (the button stays disabled in it): close the modal and show Control only if
@@ -219,6 +220,7 @@ export async function doLaunchFSM(btn) {
         startData = await postJson(`/api/fsm/${encodeURIComponent(data.instance_id)}/start`, { initial_context: {} });
     } catch (e) {
         showError('launch-fsm-status', launchedNotStartedText(data, e));
+        showToast(launchedNotStartedText(data, e), 'error');  // the modal closes in 500 ms
     }
     // The button stays disabled until the window ends (no second POST inside it).
     _afterLaunch(epoch, _resetBtn, () => {

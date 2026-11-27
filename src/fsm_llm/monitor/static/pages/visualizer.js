@@ -99,6 +99,7 @@ export async function visualizeGraph(type, typeValue) {
         }
         return true;
     } catch (e) {
+        if (seq !== _vizSeq[type]) return null;  // a newer request owns the view
         console.error(`visualizeGraph ${type}:`, e);
         showToast(`Visualization failed: ${e.message || e}`, 'error');
         return false;

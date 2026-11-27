@@ -661,7 +661,14 @@ class TestAPresetIsAJsonFile:
     JSON are no preset: ``FileNotFoundError`` and so 404 on every route, never the 500
     of reading a directory."""
 
-    _NOT_PRESETS = ("basic", "basic/", "", "basic/event_registration/run.py")
+    # the last one is longer than a file name may be (the filesystem answers ENAMETOOLONG)
+    _NOT_PRESETS = (
+        "basic",
+        "basic/",
+        "",
+        "basic/event_registration/run.py",
+        "a" * 300 + ".json",
+    )
 
     def test_unit_rows_on_a_tmp_directory(self, tmp_path):
         (tmp_path / "ok.json").write_text("{}", encoding="utf-8")
@@ -669,7 +676,7 @@ class TestAPresetIsAJsonFile:
         (tmp_path / "dir.json").mkdir()
         (tmp_path / "sub").mkdir()
         assert validate_preset_id("ok.json", tmp_path) == tmp_path / "ok.json"
-        for bad in ("sub", "sub/", "", "note.txt", "dir.json"):
+        for bad in ("sub", "sub/", "", "note.txt", "dir.json", "a" * 300 + ".json"):
             with pytest.raises(FileNotFoundError):
                 validate_preset_id(bad, tmp_path)
         for escaping in ("../x.json", "/etc/passwd", "a/../b.json"):
