@@ -9,8 +9,10 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 import subprocess
 import sys
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -18,10 +20,18 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from fsm_llm.core.definitions import ConversationBusyError
-from fsm_llm.monitor.definitions import MonitorConfig
+from fsm_llm.monitor.collector import EventCollector
+from fsm_llm.monitor.constants import MAX_QUERY_LIMIT
+from fsm_llm.monitor.definitions import MonitorConfig, MonitorEvent
 from fsm_llm.monitor.exceptions import MonitorCapacityError
 from fsm_llm.monitor.instance_manager import InstanceManager, validate_preset_id
-from fsm_llm.monitor.server import app, configure, routes_builder
+from fsm_llm.monitor.instance_manager.managed import ManagedAgent
+from fsm_llm.monitor.server import (
+    app,
+    configure,
+    routes_builder,
+    routes_monitoring,
+)
 
 
 def _client(api_key: str | None = None) -> TestClient:
@@ -92,6 +102,8 @@ class TestApiKeyGating:
             "/api/agent/x/result",
             "/api/builder/result/x",
             "/api/fsm/x/conversations",
+            "/api/instances",
+            "/api/instances/x",
         ],
     )
     def test_sensitive_reads_need_the_key(self, path):
@@ -539,3 +551,213 @@ class TestPresetValidation:
 
         assert response.status_code == 400
         assert response.json()["detail"] == "invalid preset ID"
+
+
+_TASK = "MY PRIVATE TASK: wire 5000 to account 12345"
+
+
+def _agent_manager() -> InstanceManager:
+    """A manager that holds one agent (with its collector) whose task and label are private."""
+    mgr = InstanceManager(config=MonitorConfig(refresh_interval=0.5))
+    agent = ManagedAgent(
+        instance_id="ag1", agent_type="react", task=_TASK, label="private label"
+    )
+    with mgr._lock:
+        mgr._instances["ag1"] = agent
+        mgr._collectors["ag1"] = EventCollector()
+    return mgr
+
+
+def _client_with_agent(api_key: str | None = None) -> TestClient:
+    configure(manager=_agent_manager(), api_key=api_key)
+    return TestClient(app)
+
+
+class TestInstanceReadsNeedTheKey:
+    """Plan 1f0925d2 step 2 (D-003): the instance list and detail show an agent's
+    ``task`` and ``label``, so they take the key like every other read that shows
+    user text; a server with no key configured is unchanged."""
+
+    _PATHS = ("/api/instances", "/api/instances/ag1")
+
+    @pytest.mark.parametrize("path", _PATHS)
+    @pytest.mark.parametrize(
+        "headers", [{}, {"X-API-Key": "wrong"}, {"Authorization": "Bearer wrong"}]
+    )
+    def test_no_key_or_a_wrong_key_is_401_and_leaks_nothing(self, path, headers):
+        resp = _client_with_agent("s3cr3t").get(path, headers=headers)
+        assert resp.status_code == 401
+        assert _TASK not in resp.text and "private label" not in resp.text
+
+    @pytest.mark.parametrize("path", _PATHS)
+    @pytest.mark.parametrize(
+        "headers", [{"X-API-Key": "s3cr3t"}, {"Authorization": "Bearer s3cr3t"}]
+    )
+    def test_the_key_in_either_header_reads(self, path, headers):
+        resp = _client_with_agent("s3cr3t").get(path, headers=headers)
+        assert resp.status_code == 200
+        assert _TASK in resp.text
+
+    @pytest.mark.parametrize("path", _PATHS)
+    def test_a_server_with_no_key_is_open_as_before(self, path):
+        resp = _client_with_agent().get(path)
+        assert resp.status_code == 200
+
+    def test_health_and_config_stay_open_with_a_key_set(self):
+        client = _client_with_agent("s3cr3t")
+        assert client.get("/health").status_code == 200
+        assert client.get("/api/config").status_code == 200
+
+
+class TestListLimitsAreBounded:
+    """``limit`` of the three list routes is 1 to ``MAX_QUERY_LIMIT``; the event log
+    route keeps its own clamp (``limit=0`` is 200 there, ``test_event_log_browse.py``)."""
+
+    _ROUTES = ("/api/events", "/api/logs", "/api/instances/ag1/events")
+
+    def test_the_cap_is_one_named_constant_of_a_thousand(self):
+        assert MAX_QUERY_LIMIT == 1000
+
+    @pytest.mark.parametrize("route", _ROUTES)
+    @pytest.mark.parametrize("limit", ["0", "-1", "1001", "1000000000", "abc"])
+    def test_out_of_range_is_422(self, route, limit):
+        resp = _client_with_agent().get(route, params={"limit": limit})
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize("route", _ROUTES)
+    @pytest.mark.parametrize("limit", ["1", "50", str(MAX_QUERY_LIMIT)])
+    def test_in_range_is_200(self, route, limit):
+        resp = _client_with_agent().get(route, params={"limit": limit})
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("route", _ROUTES)
+    def test_the_default_is_unchanged(self, route):
+        assert _client_with_agent().get(route).status_code == 200
+
+    def test_a_limit_returns_at_most_that_many_rows(self):
+        mgr = _agent_manager()
+        configure(manager=mgr)
+        client = TestClient(app)
+        for i in range(60):
+            mgr.global_collector.record_event(
+                MonitorEvent(event_type="x", message=str(i))
+            )
+        assert len(client.get("/api/events", params={"limit": 7}).json()) == 7
+        assert len(client.get("/api/events", params={"limit": 1000}).json()) == 60
+
+    def test_the_three_routes_read_the_one_constant(self):
+        """The bound is imported, never repeated: a literal beside the constant drifts."""
+        src = Path(routes_monitoring.__file__).read_text(encoding="utf-8")
+        assert src.count("le=MAX_QUERY_LIMIT") == 3
+        assert not re.search(r"\ble=\d", src)
+
+    def test_the_422_body_echoes_nothing_but_the_number(self):
+        body = _client_with_agent().get("/api/events", params={"limit": "1001"}).text
+        assert "1001" in body and "Traceback" not in body
+
+
+class TestAPresetIsAJsonFile:
+    """Plan 1f0925d2 step 2 (D-003): a directory, an empty id and a file that is not
+    JSON are no preset: ``FileNotFoundError`` and so 404 on every route, never the 500
+    of reading a directory."""
+
+    _NOT_PRESETS = ("basic", "basic/", "", "basic/event_registration/run.py")
+
+    def test_unit_rows_on_a_tmp_directory(self, tmp_path):
+        (tmp_path / "ok.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "note.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "dir.json").mkdir()
+        (tmp_path / "sub").mkdir()
+        assert validate_preset_id("ok.json", tmp_path) == tmp_path / "ok.json"
+        for bad in ("sub", "sub/", "", "note.txt", "dir.json"):
+            with pytest.raises(FileNotFoundError):
+                validate_preset_id(bad, tmp_path)
+        for escaping in ("../x.json", "/etc/passwd", "a/../b.json"):
+            with pytest.raises(ValueError):
+                validate_preset_id(escaping, tmp_path)
+
+    @pytest.mark.parametrize("preset_id", _NOT_PRESETS)
+    def test_the_read_route_is_404(self, preset_id):
+        resp = _client().get(f"/api/preset/fsm/{preset_id}")
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "preset not found"}
+
+    @pytest.mark.parametrize("preset_id", [i for i in _NOT_PRESETS if i])
+    def test_the_visualize_route_is_404_and_names_no_path(self, preset_id):
+        resp = _client().get(f"/api/fsm/visualize/preset/{preset_id}")
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "preset not found"}
+
+    @pytest.mark.parametrize("preset_id", _NOT_PRESETS)
+    def test_the_launch_route_is_404(self, preset_id):
+        resp = _client().post("/api/fsm/launch", json={"preset_id": preset_id})
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "not found"}
+
+    def test_a_real_preset_still_launches_reads_and_draws(self):
+        client = _client()
+        assert (
+            client.get("/api/preset/fsm/basic/form_filling/fsm.json").status_code == 200
+        )
+        assert (
+            client.get(
+                "/api/fsm/visualize/preset/basic/form_filling/fsm.json"
+            ).status_code
+            == 200
+        )
+        listed = client.get("/api/presets").json()["fsm"]
+        assert listed and all(
+            client.get(f"/api/preset/fsm/{p['id']}").status_code == 200
+            for p in listed[:5]
+        )
+
+
+class TestUnknownIdsEchoNothing:
+    def test_the_unknown_workflow_text_has_no_id(self):
+        resp = _client().get(
+            "/api/workflow/visualize", params={"workflow_id": "<b>probe</b>"}
+        )
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "unknown workflow"}
+        assert "probe" not in resp.text
+
+
+class TestActivitySurvivesADestroyedAgent:
+    """AM-C: an agent ``end_instance`` removed while the list was built is skipped."""
+
+    def _manager_with_two_agents(self) -> InstanceManager:
+        mgr = InstanceManager(config=MonitorConfig(refresh_interval=0.5))
+        with mgr._lock:
+            for name in ("gone", "kept"):
+                mgr._instances[name] = ManagedAgent(
+                    instance_id=name, agent_type="react", task="t", label=name
+                )
+        return mgr
+
+    def test_the_manager_skips_the_destroyed_agent(self):
+        mgr = self._manager_with_two_agents()
+        real = mgr.get_agent_status
+
+        def status(instance_id):
+            if instance_id == "gone":
+                raise KeyError(instance_id)
+            return real(instance_id)
+
+        with mock.patch.object(mgr, "get_agent_status", side_effect=status):
+            items = mgr.get_all_activity_snapshots()
+        assert [i.item_id for i in items if i.item_type == "agent_task"] == ["kept"]
+
+    def test_the_route_answers_200_without_that_item(self):
+        mgr = self._manager_with_two_agents()
+        configure(manager=mgr)
+        real = mgr.get_agent_status
+
+        def status(instance_id):
+            if instance_id == "gone":
+                raise KeyError(instance_id)
+            return real(instance_id)
+
+        with mock.patch.object(mgr, "get_agent_status", side_effect=status):
+            resp = TestClient(app).get("/api/activity")
+        assert resp.status_code == 200
+        assert [i["item_id"] for i in resp.json()] == ["kept"]

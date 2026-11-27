@@ -30,7 +30,7 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
     """Validate a preset ID against path traversal and resolve to a file path.
 
     Raises ``ValueError`` if the ID is invalid or escapes the base directory.
-    Raises ``FileNotFoundError`` if the resolved file does not exist.
+    Raises ``FileNotFoundError`` if the resolved path is not an existing ``.json`` file.
     """
     if ".." in preset_id or preset_id.startswith("/"):
         raise ValueError("Invalid preset ID")
@@ -46,7 +46,9 @@ def validate_preset_id(preset_id: str, base: Path) -> Path:
     if confined is None:
         raise ValueError("Invalid preset ID")
     file_path = base / preset_id
-    if not file_path.exists():
+    # a directory, the empty id (the base itself) and a non-JSON file are no preset
+    # (`_scan_fsm_presets` lists `*/*/*.json`): a 404, not a failed read
+    if file_path.suffix != ".json" or not file_path.is_file():
         raise FileNotFoundError(f"Preset not found: {preset_id}")
     return file_path
 

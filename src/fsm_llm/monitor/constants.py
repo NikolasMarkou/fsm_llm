@@ -54,6 +54,8 @@ MAX_EVENTLOG_USAGE_CACHE = (
     32  # event log usage folds kept by (path, mtime, size), D-056
 )
 MAX_WORKFLOW_RUNS_LISTED = 200  # the newest runs the instances route lists
+# `limit` of the events, logs and instance events routes is 1..this (422 outside); the UI asks for at most 500
+MAX_QUERY_LIMIT = 1000
 
 # Host header values the server answers to by default (DNS-rebinding defence);
 # these are also the loopback names the CLI recognises.

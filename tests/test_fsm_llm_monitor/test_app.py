@@ -9,7 +9,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from fsm_llm.monitor.constants import LOG_LEVELS, MAX_AGENT_ITERATIONS
+from fsm_llm.monitor.constants import (
+    LOG_LEVELS,
+    MAX_AGENT_ITERATIONS,
+    MAX_QUERY_LIMIT,
+)
 from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.server import app, configure
 from fsm_llm.monitor.server.routes_visualize import _fsm_dict_to_snapshot
@@ -384,6 +388,30 @@ class TestUiMatchesServerLimits:
         max_attr = re.search(r'\bmax="(\d+)"', match.group(0))
         assert max_attr is not None
         assert int(max_attr.group(1)) == MAX_AGENT_ITERATIONS
+
+    def test_every_limit_the_ui_asks_for_is_within_the_server_bound(self):
+        """A ``limit=<n>`` of the static JS is 422 on the server outside 1 to
+        ``MAX_QUERY_LIMIT``: the UI's own values (100, 500) must sit inside."""
+        found = []
+        for js in (self._MONITOR_DIR / "static").rglob("*.js"):
+            text = js.read_text(encoding="utf-8")
+            found += [int(n) for n in re.findall(r"limit=(\d+)", text)]
+        assert found, "the UI no longer sends a limit: the row guards nothing"
+        assert all(1 <= n <= MAX_QUERY_LIMIT for n in found), found
+
+    def test_every_instances_fetch_goes_through_the_key_sending_client(self):
+        """``GET /api/instances`` takes the key: a bare ``fetch`` of it would send
+        none. ``fetchJson`` adds ``X-API-Key`` and prompts once on a 401."""
+        static = self._MONITOR_DIR / "static"
+        seen = 0
+        for js in static.rglob("*.js"):
+            for line in js.read_text(encoding="utf-8").splitlines():
+                if "/api/instances" in line and "fetch" in line:
+                    seen += 1
+                    assert "fetchJson(" in line, f"{js.name}: {line.strip()}"
+        assert seen >= 2
+        api = (static / "services" / "api.js").read_text(encoding="utf-8")
+        assert "headers.set('X-API-Key', key)" in api
 
     def test_log_pills_cover_every_server_level_in_order(self):
         match = re.search(
@@ -1269,13 +1297,22 @@ class TestApiKeyGate:
             resp = client.request(method, path, json=body)
             assert resp.status_code == 401, f"{method.upper()} {path} was not gated"
 
-    def test_read_only_route_stays_ungated(self):
-        """GETs and /health remain reachable without a key even when one is configured."""
+    def test_open_reads_stay_open_and_instance_reads_take_the_key(self):
+        """``/health`` and ``/api/config`` show no user text and stay reachable with a
+        key configured; the two instance reads show an agent's task and label, so
+        they answer 401 without the key (plan 1f0925d2 step 2, D-003)."""
         configure(manager=InstanceManager(), api_key="s3cr3t")
         client = TestClient(app)
         assert client.get("/health").status_code == 200
         assert client.get("/api/config").status_code == 200
-        assert client.get("/api/instances").status_code == 200
+        for path in ("/api/instances", "/api/instances/nope"):
+            assert client.get(path).status_code == 401
+            assert client.get(path, headers={"X-API-Key": "bad"}).status_code == 401
+        assert (
+            client.get("/api/instances", headers={"X-API-Key": "s3cr3t"}).json() == []
+        )
+        bearer = {"Authorization": "Bearer s3cr3t"}
+        assert client.get("/api/instances/nope", headers=bearer).status_code == 404
 
     def test_configure_reread_after_first_request_takes_effect(self):
         """Unlike CORS, api_key changes after the first request DO take effect

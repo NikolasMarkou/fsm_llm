@@ -282,7 +282,7 @@ async def api_workflow_visualize(
     """Return visualization data for a workflow pattern."""
     flow = get_flows().get("workflows", {}).get(workflow_id)
     if flow is None:
-        raise HTTPException(status_code=404, detail=f"unknown workflow: {workflow_id}")
+        raise HTTPException(status_code=404, detail="unknown workflow")
     return {
         "info": {
             "name": flow["name"],

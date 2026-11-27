@@ -239,7 +239,10 @@ class SnapshotsMixin(_InstanceSurface):
                 if isinstance(inst, ManagedAgent)
             ]
         for inst_id, inst in agents:
-            status_data = self.get_agent_status(inst_id)
+            try:
+                status_data = self.get_agent_status(inst_id)
+            except KeyError:  # `end_instance` removed it while the list was built
+                continue
             iteration_count = status_data.get("iteration_count", 0)
             total_iterations = status_data.get("total_iterations", 0)
             iters = total_iterations if total_iterations else iteration_count

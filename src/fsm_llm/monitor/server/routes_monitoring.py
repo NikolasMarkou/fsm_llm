@@ -4,9 +4,9 @@ configuration, the instance list and the instance detail, events and destroy."""
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Query
 from pydantic import ValidationError
 
 from fsm_llm import __version__ as core_version
@@ -14,6 +14,7 @@ from fsm_llm.logging import logger
 
 from .. import eventlog
 from ..__version__ import __version__
+from ..constants import MAX_QUERY_LIMIT
 from ..definitions import DashboardAlert, DashboardConfig, DashboardPanel, MonitorConfig
 from ..exceptions import MonitorError
 from .application import app, get_manager
@@ -77,7 +78,9 @@ async def api_activity(
 
 
 @app.get("/api/events", dependencies=_GATED)
-async def api_events(limit: int = 50) -> list[dict[str, Any]]:
+async def api_events(
+    limit: Annotated[int, Query(ge=1, le=MAX_QUERY_LIMIT)] = 50,
+) -> list[dict[str, Any]]:
     mgr = get_manager()
     try:
         events = mgr.get_events(limit=limit)
@@ -87,7 +90,9 @@ async def api_events(limit: int = 50) -> list[dict[str, Any]]:
 
 
 @app.get("/api/logs", dependencies=_GATED)
-async def api_logs(limit: int = 100, level: str = "INFO") -> list[dict[str, Any]]:
+async def api_logs(
+    limit: Annotated[int, Query(ge=1, le=MAX_QUERY_LIMIT)] = 100, level: str = "INFO"
+) -> list[dict[str, Any]]:
     mgr = get_manager()
     try:
         logs = mgr.global_collector.get_logs(limit=limit, level=level)
@@ -216,7 +221,7 @@ async def api_capabilities() -> dict[str, Any]:
 # --- REST API: Instance Management ---
 
 
-@app.get("/api/instances")
+@app.get("/api/instances", dependencies=_GATED)
 async def api_instances(type: str | None = None) -> list[dict[str, Any]]:
     """List all managed instances."""
     mgr = get_manager()
@@ -224,7 +229,7 @@ async def api_instances(type: str | None = None) -> list[dict[str, Any]]:
     return [i.model_dump() for i in instances]
 
 
-@app.get("/api/instances/{instance_id}")
+@app.get("/api/instances/{instance_id}", dependencies=_GATED)
 async def api_instance_detail(instance_id: str) -> dict[str, Any]:
     """Get detailed info for a managed instance."""
     mgr = get_manager()
@@ -236,7 +241,7 @@ async def api_instance_detail(instance_id: str) -> dict[str, Any]:
 
 @app.get("/api/instances/{instance_id}/events", dependencies=_GATED)
 async def api_instance_events(
-    instance_id: str, limit: int = 50
+    instance_id: str, limit: Annotated[int, Query(ge=1, le=MAX_QUERY_LIMIT)] = 50
 ) -> list[dict[str, Any]]:
     """Get events for a specific managed instance."""
     mgr = get_manager()
