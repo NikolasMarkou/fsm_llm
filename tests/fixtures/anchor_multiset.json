@@ -1289,6 +1289,11 @@
       "delta": 1,
       "reason": "plan 77e5fef9 step 6 (D-008): engine/api/events.py gains the anchor of the deferred stack/push (record_push) and the order guard of EventLog.append",
       "token": "plan-2026-11-26T213359-77e5fef9/D-008"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 1f0925d2 step 3 D-004: new anchor beside the builder start slot table (routes_builder.py); the D-054 anchor is unchanged",
+      "token": "plan-2026-11-27T102400-1f0925d2/D-004"
     }
   ]
 }

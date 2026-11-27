@@ -33,17 +33,41 @@ _BUILDER_SESSION_TTL = 3600.0  # 1 hour since last use
 _builder_busy: set[str] = set()
 # Strong references to fire-and-forget tasks (the loop keeps only weak ones).
 _background_tasks: set[asyncio.Future[Any]] = set()
+# DECISION plan-2026-11-27T102400-1f0925d2/D-004
+# Extends the D-054 anchor in api_builder_start to a start in flight. Reserved
+# starts, token -> detached (the request gave up: a 504 or a cancel). A start
+# reserves its token in the SAME lock block as the cap check, before agent.start,
+# so a burst cannot pass the cap. A token counts against the session cap, a
+# detached one also against MAX_ABANDONED_BUILDERS, until its thread ends. Do NOT
+# release at the 504 (the thread still runs, D-054), do NOT check and reserve in
+# two lock blocks, and do NOT await in the arm that detaches (a cancel is raised).
+_builder_starting: dict[str, bool] = {}
+
+
+class _LoopLock(asyncio.Lock):
+    """An asyncio.Lock that remembers its loop (None: made with no loop running)."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        super().__init__()
+        self.owner = loop
+
+
 # Lock protecting _builder_sessions. Initialized lazily (not at module import
 # time) to avoid creating an asyncio.Lock before an event loop exists (Python
-# deprecated that pattern in 3.10; the floor is 3.11).
-_builder_sessions_lock: asyncio.Lock | None = None
+# deprecated that pattern in 3.10; the floor is 3.11). One per running loop: a
+# contended Lock binds to one loop and raises on another.
+_builder_sessions_lock: _LoopLock | None = None
 
 
 def _get_builder_lock() -> asyncio.Lock:
-    """Return the asyncio.Lock for _builder_sessions, creating it lazily."""
+    """Return the lock for _builder_sessions, made anew for another running loop."""
     global _builder_sessions_lock
-    if _builder_sessions_lock is None:
-        _builder_sessions_lock = asyncio.Lock()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _builder_sessions_lock is None or _builder_sessions_lock.owner is not loop:
+        _builder_sessions_lock = _LoopLock(loop)
     return _builder_sessions_lock
 
 
@@ -72,31 +96,8 @@ async def _cleanup_stale_builder_sessions() -> None:
             logger.debug(f"Cleaned up stale builder session: {sid}")
 
 
-@app.post("/api/builder/start", dependencies=_GATED)
-async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
-    """Start a new builder session using the meta-agent."""
-    await _cleanup_stale_builder_sessions()
-    async with _get_builder_lock():
-        # DECISION plan-2026-11-19T025425-51fde95b/D-054
-        # A force-deleted build whose worker still runs stays COUNTED until the
-        # thread ends (an id in _builder_busy with no live session), against the
-        # session cap and MAX_ABANDONED_BUILDERS. Do NOT stop counting it on the
-        # delete (hidden model loops starve the shared thread pool), and do NOT add
-        # an executor or a thread cancel for it (a model call cannot be stopped).
-        abandoned = len(_builder_busy - _builder_sessions.keys())
-        if len(_builder_sessions) + abandoned >= MAX_BUILDER_SESSIONS:
-            raise HTTPException(
-                status_code=429,
-                detail=f"too many builder sessions (max {MAX_BUILDER_SESSIONS})",
-            )
-        if abandoned >= MAX_ABANDONED_BUILDERS:
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"{abandoned} cancelled builds are still running "
-                    f"(max {MAX_ABANDONED_BUILDERS}); try again when one ends"
-                ),
-            )
+def _build_start_agent(req: BuilderStartRequest) -> Any:
+    """The meta-agent a start runs: HTTP 501 without the extension, 400 with no model."""
     try:
         from fsm_llm.agents.meta_builder import (
             MetaBuilderAgent as MetaAgent,
@@ -122,23 +123,83 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
     }
 
     config = MetaAgentConfig(**config_kwargs)
-    agent = MetaAgent(config=config)
+    return MetaAgent(config=config)
+
+
+def _detach_start(token: str, work: asyncio.Future[Any]) -> None:
+    """The request gave up on a start whose thread runs on: its slot is held (and
+    counted as abandoned) until the thread ends. No await: callable from an except arm."""
+    _builder_starting[token] = True
+
+    def _ended(fut: asyncio.Future[Any]) -> None:
+        if not fut.cancelled():
+            fut.exception()  # retrieved: a late failure is not logged by the loop
+        _builder_starting.pop(token, None)
+
+    work.add_done_callback(_ended)  # a future already done runs it on the next tick
+
+
+@app.post("/api/builder/start", dependencies=_GATED)
+async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
+    """Start a new builder session using the meta-agent."""
+    await _cleanup_stale_builder_sessions()
+    token = uuid.uuid4().hex
+    async with _get_builder_lock():
+        # DECISION plan-2026-11-19T025425-51fde95b/D-054
+        # A force-deleted build whose worker still runs stays COUNTED until the
+        # thread ends (an id in _builder_busy with no live session), against the
+        # session cap and MAX_ABANDONED_BUILDERS. Do NOT stop counting it on the
+        # delete (hidden model loops starve the shared thread pool), and do NOT add
+        # an executor or a thread cancel for it (a model call cannot be stopped).
+        orphans = len(_builder_busy - _builder_sessions.keys())
+        abandoned = orphans + sum(_builder_starting.values())
+        if len(_builder_sessions) + orphans + len(_builder_starting) >= (
+            MAX_BUILDER_SESSIONS
+        ):
+            raise HTTPException(
+                status_code=429,
+                detail=f"too many builder sessions (max {MAX_BUILDER_SESSIONS})",
+            )
+        if abandoned >= MAX_ABANDONED_BUILDERS:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"{abandoned} cancelled builds are still running "
+                    f"(max {MAX_ABANDONED_BUILDERS}); try again when one ends"
+                ),
+            )
+        _builder_starting[token] = False  # reserved before the model call
 
     try:
-        initial_message = req.artifact_type or ""
+        agent = _build_start_agent(req)
+    except BaseException:
+        _builder_starting.pop(token, None)
+        raise
+
+    work = asyncio.ensure_future(
+        asyncio.to_thread(agent.start, req.artifact_type or "")
+    )
+    try:
         response = await asyncio.wait_for(
-            asyncio.to_thread(agent.start, initial_message),
-            timeout=_LLM_OPERATION_TIMEOUT,
+            asyncio.shield(work), timeout=_LLM_OPERATION_TIMEOUT
         )
     except TimeoutError:
+        _detach_start(token, work)
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
+        _builder_starting.pop(token, None)  # the worker is over
         logger.error(f"Builder start failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
+    except BaseException:  # cancelled: the thread runs on
+        _detach_start(token, work)
+        raise
 
     session_id = f"builder-{uuid.uuid4().hex[:8]}"
-    async with _get_builder_lock():
-        _builder_sessions[session_id] = (agent, time.time())
+    try:
+        async with _get_builder_lock():
+            _builder_sessions[session_id] = (agent, time.time())
+    finally:
+        _builder_starting.pop(token, None)
 
     result: dict[str, Any] = {
         "session_id": session_id,
@@ -183,7 +244,9 @@ async def api_builder_send(req: BuilderSendRequest) -> dict[str, Any]:
             if req.session_id in _builder_sessions:
                 _builder_sessions[req.session_id] = (agent, time.time())
 
-    def _release_when_done(_fut: asyncio.Future[Any]) -> None:
+    def _release_when_done(fut: asyncio.Future[Any]) -> None:
+        if not fut.cancelled():
+            fut.exception()  # retrieved: a late failure is not logged by the loop
         task = asyncio.ensure_future(_release())
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
