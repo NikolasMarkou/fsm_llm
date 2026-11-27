@@ -1128,7 +1128,7 @@ class TestTailReopen:
         left the fd at the end of the window, so the scan after an undecided window saw an empty
         file (``('empty', 65536)``). The matrix at the window and cap edges with the fallback
         forced. Kills: a ``_read_at`` fallback that does not put the position back."""
-        monkeypatch.delattr(os, "pread")
+        monkeypatch.delattr(os, "pread", raising=False)
         lengths = [0, 1, 300, MAX_EVENT_BYTES - 1, MAX_EVENT_BYTES, MAX_EVENT_BYTES + 1]
         for name, lines in _tail_shapes().items():
             for k in lengths:
@@ -1145,7 +1145,7 @@ class TestTailReopen:
         of ``os.pread``). Kills: a fallback that leaves the position at the end of the read, or
         puts it back at 0 instead of where it stood."""
         if not pread:
-            monkeypatch.delattr(os, "pread")
+            monkeypatch.delattr(os, "pread", raising=False)
         path = tmp_path / "f.bin"
         path.write_bytes(bytes(range(200)))
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
@@ -1365,7 +1365,7 @@ class TestTailReopen:
         path.write_bytes(b"".join(lines))
         point = _point(path, 30)
         if not pread:
-            monkeypatch.delattr(os, "pread")
+            monkeypatch.delattr(os, "pread", raising=False)
         real = jsonl._read_at
         monkeypatch.setattr(jsonl, "_read_at", lambda fd, n, at: real(fd, n, at)[:-5])
         writer = JsonlWriter(path, create=False, expect=point)  # short read: the scan
@@ -1375,7 +1375,7 @@ class TestTailReopen:
         if (
             not pread
         ):  # the Windows case (D-011): no os.pread, the seek and read fallback
-            monkeypatch.delattr(os, "pread")
+            monkeypatch.delattr(os, "pread", raising=False)
         path.write_bytes(b"".join(lines[:-1]) + b"z" * (2 * WINDOW_BYTES))
         with pytest.raises(LogCorruptError, match="no newline within"):
             JsonlWriter(path, create=False, expect=(29, 0, 0))
