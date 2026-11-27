@@ -220,7 +220,7 @@ def _scan(fd: int) -> Iterator[tuple[dict[str, Any], int]]:
             seq = event["seq"]
             if type(seq) is not int or seq != index:
                 raise LogCorruptError(
-                    f"log line {index} has seq {seq!r}, expected {index}"
+                    f"log line {index} has seq {seq!r:.40}, expected {index}"
                 )
             offset += len(line)
             yield event, offset
@@ -252,7 +252,8 @@ def _read_at(fd: int, size: int, offset: int) -> bytes:
 # another process may have appended, cut or replaced the log, and the next line would fork it),
 # do NOT guess when the window cannot decide (None: the caller scans), do NOT skip a last line
 # that fails `decode_event`, and do NOT use this for a first open or `resume` (full scan, which
-# also finds a gapped middle). See decisions.md D-005.
+# also finds a gapped middle). The identity check (inode, device, last `seq`) is not a proof:
+# a copy written over a deleted log can reuse both. See decisions.md D-005.
 def _tail(fd: int, size: int) -> tuple[int, int] | None:
     """``(end offset of the last committed line, its seq)`` from the last ``_TAIL_BYTES`` of *fd*.
 
@@ -273,7 +274,7 @@ def _tail(fd: int, size: int) -> tuple[int, int] | None:
         return None
     seq = decode_event(buf[before + 1 : end + 1])["seq"]
     if type(seq) is not int:
-        raise LogCorruptError(f"the last log line has seq {seq!r}")
+        raise LogCorruptError(f"the last log line has seq {seq!r:.40}")
     return start + end + 1, seq
 
 

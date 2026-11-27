@@ -1299,6 +1299,23 @@ class TestTailReopen:
             JsonlWriter(path, create=False, expect=point)
         assert path.read_bytes() == bad  # nothing was cut
 
+    def test_a_huge_seq_is_capped_in_both_error_texts(self, tmp_path: Path) -> None:
+        """D-005 (c): the texts name no log content. A string ``seq`` of 60,000 characters in the
+        last line lands in the tail read's error and in the scan's error, capped. Kills: an
+        uncapped ``{seq!r}`` in either text."""
+        big = "A" * 60_000
+        path = tmp_path / "logs" / "c1.jsonl"
+        path.parent.mkdir()
+        path.write_bytes(_line(1) + encode_event({"v": 1, "seq": big, **_event(2)}))
+        stat = os.stat(path)
+        with pytest.raises(LogCorruptError, match="seq") as tail:
+            JsonlWriter(path, create=False, expect=(2, stat.st_dev, stat.st_ino))
+        with pytest.raises(LogCorruptError, match="seq") as scan:
+            JsonlWriter(path)
+        for caught in (tail, scan):
+            assert "AAAA" in str(caught.value) and big not in str(caught.value)
+            assert len(str(caught.value)) < 200
+
     def test_a_window_that_cannot_decide_falls_back_to_the_scan(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
