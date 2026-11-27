@@ -237,11 +237,19 @@ _TAIL_BYTES = 2 * MAX_EVENT_BYTES + 1
 
 
 def _read_at(fd: int, size: int, offset: int) -> bytes:
-    """Up to *size* bytes of *fd* at *offset* (``os.pread``; a seek and read where it is absent)."""
+    """Up to *size* bytes of *fd* at *offset*; the position of *fd* is left as it was.
+
+    ``os.pread``; where it is absent (Windows) a seek and read, the position put back (the scan
+    that follows an undecided ``_tail`` reads the same fd from where it stood).
+    """
     if hasattr(os, "pread"):
         return os.pread(fd, size, offset)
-    os.lseek(fd, offset, os.SEEK_SET)
-    return os.read(fd, size)
+    where = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(fd, offset, os.SEEK_SET)
+        return os.read(fd, size)
+    finally:
+        os.lseek(fd, where, os.SEEK_SET)
 
 
 # DECISION plan-2026-11-26T213359-77e5fef9/D-005

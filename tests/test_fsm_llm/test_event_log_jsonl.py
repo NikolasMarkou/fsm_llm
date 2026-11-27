@@ -1121,6 +1121,42 @@ class TestTailReopen:
                 cases += 1
         assert cases > 1_000  # every shape against every length
 
+    def test_without_pread_the_tail_read_equals_the_full_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CI fix 1 (D-011): Windows has no ``os.pread``, the seek and read fallback ran there and
+        left the fd at the end of the window, so the scan after an undecided window saw an empty
+        file (``('empty', 65536)``). The matrix at the window and cap edges with the fallback
+        forced. Kills: a ``_read_at`` fallback that does not put the position back."""
+        monkeypatch.delattr(os, "pread")
+        lengths = [0, 1, 300, MAX_EVENT_BYTES - 1, MAX_EVENT_BYTES, MAX_EVENT_BYTES + 1]
+        for name, lines in _tail_shapes().items():
+            for k in lengths:
+                torn = _torn_bytes(len(lines) + 1, k)
+                scan = _reopen(tmp_path, f"{name}-{k}", lines, torn, tail=False)
+                tail = _reopen(tmp_path, f"{name}-{k}", lines, torn, tail=True)
+                assert tail == scan, (name, k)
+
+    @pytest.mark.parametrize("pread", [True, False])
+    def test_read_at_leaves_the_position_of_the_fd_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pread: bool
+    ) -> None:
+        """Both branches of ``_read_at`` read at the offset and keep the fd position (the contract
+        of ``os.pread``). Kills: a fallback that leaves the position at the end of the read, or
+        puts it back at 0 instead of where it stood."""
+        if not pread:
+            monkeypatch.delattr(os, "pread")
+        path = tmp_path / "f.bin"
+        path.write_bytes(bytes(range(200)))
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+        try:
+            assert os.read(fd, 7) == bytes(range(7))
+            assert jsonl._read_at(fd, 10, 50) == bytes(range(50, 60))
+            assert os.lseek(fd, 0, os.SEEK_CUR) == 7
+            assert os.read(fd, 3) == bytes(range(7, 10))
+        finally:
+            os.close(fd)
+
     def test_the_comparer_can_fail(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1316,8 +1352,9 @@ class TestTailReopen:
             assert "AAAA" in str(caught.value) and big not in str(caught.value)
             assert len(str(caught.value)) < 200
 
+    @pytest.mark.parametrize("pread", [True, False])
     def test_a_window_that_cannot_decide_falls_back_to_the_scan(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pread: bool
     ) -> None:
         """A short read, or a tail with no newline in a window that does not start at 0, is not
         guessed at: the scan decides (and raises for a shape no valid log has). Kills: a window
@@ -1327,12 +1364,18 @@ class TestTailReopen:
         path.parent.mkdir()
         path.write_bytes(b"".join(lines))
         point = _point(path, 30)
+        if not pread:
+            monkeypatch.delattr(os, "pread")
         real = jsonl._read_at
         monkeypatch.setattr(jsonl, "_read_at", lambda fd, n, at: real(fd, n, at)[:-5])
         writer = JsonlWriter(path, create=False, expect=point)  # short read: the scan
         assert writer.last_seq == 30
         writer.close()
         monkeypatch.undo()
+        if (
+            not pread
+        ):  # the Windows case (D-011): no os.pread, the seek and read fallback
+            monkeypatch.delattr(os, "pread")
         path.write_bytes(b"".join(lines[:-1]) + b"z" * (2 * WINDOW_BYTES))
         with pytest.raises(LogCorruptError, match="no newline within"):
             JsonlWriter(path, create=False, expect=(29, 0, 0))

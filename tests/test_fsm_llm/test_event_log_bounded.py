@@ -706,6 +706,10 @@ class TestReopen:
     ) -> None:
         """Kills: ``O_NOFOLLOW`` dropped on the re-open (M15): the lock would be taken on the
         link's target and the append would go on."""
+        if not hasattr(os, "O_NOFOLLOW"):
+            pytest.skip(
+                "no O_NOFOLLOW here (Windows): only the Windows legs can show it"
+            )
         target = tmp_path / "elsewhere.lock"
         target.write_bytes(b"")
         with open_log(tmp_path / "root", 1) as log:
