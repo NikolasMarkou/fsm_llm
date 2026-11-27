@@ -142,12 +142,12 @@ export function connectWS() {
     ws.onclose = (ev) => {
         if (state.ws !== ws) return;
         if (ev?.code === WS_AUTH_FAILED) {
-            // Wrong or missing key: stop the reconnect loop and ask for a key.
+            // Wrong or missing key: stop the reconnect loop and ask for a key, unless the user already
+            // dismissed the prompt (not forced: a late close never re-opens it; Settings saves a key).
             // The onApiKeyChange listener reconnects once a key is saved.
             _authFailed = true;
             _setStatus('API key required', 'ws-label', false);
             requestApiKey({
-                force: true,
                 message: 'The live connection was refused: missing or invalid API key.',
             });
             return;

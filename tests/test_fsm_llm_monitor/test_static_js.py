@@ -246,14 +246,43 @@ class TestBuilderAgentLaunch:
             "posts": 1,
         }
 
-    def test_an_accepted_launch_closes_the_form(self, probe):
-        retried = probe("builder_launch")["retried"]
-        assert retried == {
+    def test_an_accepted_launch_closes_the_form_and_holds_the_button(self, probe):
+        # Plan 9283c1fd step 8: the button stays disabled until the redirect (it was freed at once).
+        out = probe("builder_launch")
+        assert out["retried"] == {
             "form": "none",
             "label": "Launch AGENT",
-            "disabled": False,
+            "disabled": True,
             "posts": 2,
         }
+        assert out["g3a"]["window_over"] == {"disabled": False, "pages": ["control"]}
+
+    def test_four_clicks_inside_the_window_make_one_post(self, probe):
+        g3a = probe("builder_launch")["g3a"]
+        assert g3a["four_clicks"] == {"posts": 1, "disabled": True, "form": "none"}
+        assert g3a["after_window"] == {"disabled": False, "pages": ["control"]}
+
+    def test_a_refused_launch_frees_the_button_and_the_guard_at_once(self, probe):
+        g3a = probe("builder_launch")["g3a"]
+        assert g3a["refused"]["disabled"] is False
+        assert g3a["refused"]["form"] == "block"
+        assert g3a["retry_posts"] == 1  # the guard is released, a retry posts
+
+    def test_the_redirect_follows_only_the_session_and_page_it_came_from(self, probe):
+        g3a = probe("builder_launch")["g3a"]
+        for kind in ("agent", "fsm"):
+            assert g3a[f"{kind}_stays"]["pages"] == ["control"]
+            for left in ("reset", "navigated"):
+                moved = g3a[f"{kind}_{left}"]
+                assert (
+                    moved["pages"] == []
+                )  # no redirect after a Reset or a page change
+                assert moved["disabled"] is False  # and the button is free again
+        assert (
+            g3a["fsm_stays"]["conv"] == "c1"
+        )  # the conversation opens only with the redirect
+        assert g3a["fsm_reset"]["conv"] is None
+        assert g3a["fsm_navigated"]["conv"] is None
 
 
 class TestBuilderAgentLaunchFields:
@@ -342,6 +371,53 @@ class TestBuilderAgentLaunchGate:
         out = probe("builder_agent_gate")
         assert out["noList"]["disabled"] is False
         assert out["capsDown"]["disabled"] is False
+
+
+class TestBuilderRefusalNamesEditJson:
+    """Plan 9283c1fd step 8 (G3b): the refusal of a tool-less artifact names the control that adds a tool."""
+
+    def test_the_refusal_names_edit_json_and_posts_nothing(self, probe):
+        out = probe("builder_agent_gate")["needsTools"]
+        assert out["posts"] == 0
+        assert "requires at least one tool" in out["status"]
+        assert "Edit JSON" in out["status"]
+
+    def test_the_name_is_the_label_of_the_button_in_the_template(self):
+        html = (_STATIC.parent / "templates" / "index.html").read_text(encoding="utf-8")
+        label = re.search(r'id="builder-edit-btn"[^>]*>([^<]*)<', html).group(1)
+        assert label == "Edit JSON"  # the refusal text quotes it as written
+
+
+class TestKeyPromptLateClose:
+    """Plan 9283c1fd step 8 (G7): a 4401 close after the user dismissed the prompt does not open it again."""
+
+    def test_a_4401_after_cancel_keeps_the_modal_closed(self, probe):
+        late = probe("dialog_focus")["late"]
+        assert late == {"open": False, "opens": 1, "status": "API key required"}
+
+    def test_a_4401_before_the_boot_prompt_is_one_modal(self, probe):
+        early = probe("dialog_focus")["early"]
+        assert early == {
+            "open_after_4401": True,
+            "opens": 1,
+            "status": "API key required",
+            "open_after_cancel": False,
+        }
+
+    def test_saving_a_key_after_the_dismissal_reconnects(self, probe):
+        assert probe("dialog_focus")["save"] == {"reconnects": 1, "open": False}
+
+    def test_a_4401_with_no_dismissal_still_prompts(self, probe):
+        undismissed = probe("dialog_focus")["undismissed"]
+        assert undismissed == {
+            "open": True,
+            "opens": 1,
+            "status": "API key required",
+        }
+
+    def test_the_settings_page_keeps_its_own_key_field(self):
+        html = (_STATIC.parent / "templates" / "index.html").read_text(encoding="utf-8")
+        assert 'id="set-api-key"' in html  # the way back in after a dismissal
 
 
 _HOSTILE = "<img src=x onerror=alert(1)>"

@@ -5,6 +5,7 @@ import { $, esc, intVal, jsonViewHtml, numVal, showError, showStatus, showToast,
 import { highlightJsonIn, renderJson } from '../utils/json_highlight.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { renderGraph } from '../utils/graph.js';
+import { state } from '../services/state.js';
 import { addTypingIndicator, removeTypingIndicator, showConversationInDrawer } from './conversations.js';
 
 // Forward references
@@ -542,20 +543,32 @@ export function launchBuilderResult() {
     showError('builder-status', `Unknown artifact type: ${_artifactType}`);
 }
 
-// One FSM launch at a time: the flag is the guard, the disabled button its sign
+// One launch at a time, FSM or agent: the flag is the guard, the disabled button its sign
 // (an Apply of Edit JSON re-syncs the button, so the button alone is not a guard).
-let _fsmLaunching = false;
+let _launching = false;
+
+/** The 500 ms window after a launch, then Control. `release` runs at its end in every case; the move (and `then`)
+ *  only while the session and the page are those the launch came from: a Reset, a new start or another page cancels it. */
+function _afterLaunch(release, then) {
+    const token = _sessionToken, page = state.currentPage;
+    setTimeout(() => {
+        release();
+        if (token !== _sessionToken || state.currentPage !== page) return;
+        _showPage?.('control');
+        then?.();
+    }, 500);
+}
 
 async function _launchBuilderFSM() {
-    if (_fsmLaunching) return;
+    if (_launching) return;
     let parsed;
     try { parsed = JSON.parse(_artifact); } catch { showError('builder-status', 'Invalid JSON'); return; }
 
     const launchBtn = $('builder-launch-btn');
     const model = $('builder-model').value.trim() || undefined;
     const temp = numVal('builder-temp', 0.5);
-    const release = () => { _fsmLaunching = false; if (launchBtn) launchBtn.disabled = false; };
-    _fsmLaunching = true;
+    const release = () => { _launching = false; if (launchBtn) launchBtn.disabled = false; };
+    _launching = true;
     if (launchBtn) launchBtn.disabled = true;
 
     let data;
@@ -576,12 +589,10 @@ async function _launchBuilderFSM() {
         showError('builder-status', launchedNotStartedText(data, e));
         showToast(launchedNotStartedText(data, e), 'error');  // the view moves to Control in 500 ms
     }
-    setTimeout(() => {
-        release();
-        _showPage?.('control');
+    _afterLaunch(release, () => {
         // Open the new conversation, as the Launch modal does.
         if (startData?.conversation_id) showConversationInDrawer(data.instance_id, startData.conversation_id);
-    }, 500);
+    });
 }
 
 function _launchBuilderWorkflow() {
@@ -591,6 +602,7 @@ function _launchBuilderWorkflow() {
 }
 
 function _launchBuilderAgent() {
+    if (_launching) return;
     const form = $('builder-agent-launch-form');
     const launchBtn = $('builder-launch-btn');
 
@@ -619,7 +631,7 @@ function _launchBuilderAgent() {
     const tools = _collectAgentToolStubs(parsed);
 
     if (toolsRequired(agentType) && tools.length === 0) {
-        showError('builder-status', 'This agent type requires at least one tool');
+        showError('builder-status', 'This agent type requires at least one tool: use Edit JSON to add one to "tools" (a name and a description), then Apply and Launch again');
         return;
     }
 
@@ -634,8 +646,10 @@ function _launchBuilderAgent() {
         label: $('builder-agent-label').value.trim() || parsed.name || 'Built Agent',
     };
 
+    _launching = true;
     launchBtn.disabled = true;
     launchBtn.textContent = 'Launching...';
+    const release = () => { _launching = false; launchBtn.disabled = false; };
 
     postJson('/api/agent/launch', body)
         .then(() => {
@@ -643,14 +657,14 @@ function _launchBuilderAgent() {
             launchBtn.textContent = 'Launch AGENT';
             showStatus('builder-status', 'Launched! Switching to Control Center...', 'success');
             _refreshInstances?.();
-            setTimeout(() => _showPage?.('control'), 500);
+            _afterLaunch(release);
         })
         .catch(e => {
             // Keep the form (task, stub responses) open so the user can retry.
             launchBtn.textContent = 'Confirm Launch';
             showError('builder-status', `Launch failed: ${e.message}`);
-        })
-        .finally(() => { launchBtn.disabled = false; });
+            release();
+        });
 }
 
 /** A positive finite number from the artifact config, else the fallback (the server bounds the value). */

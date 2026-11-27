@@ -27,7 +27,7 @@ sequenceDiagram
         WS->>S: scheduleRefresh(key, fn, ms)
     end
     alt close code 4401
-        WS->>A: requestApiKey({force: true})
+        WS->>A: requestApiKey({message}) (not forced)
         A-->>WS: onApiKeyChange -> connectWS()
     else other close
         WS-->>WS: setTimeout(connectWS, delay + jitter)
@@ -101,7 +101,7 @@ Dispatch handler names: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `
 - Only one live socket: `connectWS` nulls `onopen/onmessage/onclose/onerror` on the previous `state.ws` before replacing it, and `onclose` ignores sockets that are no longer `state.ws`.
 - Backoff: `setTimeout(connectWS, wsRetryDelay + Math.random() * 1000)`, then `wsRetryDelay = min(2x, WS_MAX_DELAY)`. `onopen` resets it to 3000. `onerror` calls `close()`, which triggers `onclose`.
 - Close code 4403 (`WS_FORBIDDEN`, the server's `_WS_CLOSE_FORBIDDEN`: Host or Origin refused): no reconnect; status shows "Host or origin refused".
-- Close code 4401 (`WS_AUTH_FAILED`, matching the server's `_WS_CLOSE_UNAUTHORIZED`): no reconnect; status shows "API key required" and `requestApiKey({force: true})` opens the modal. A module-level `onApiKeyChange` listener reconnects once a key is saved.
+- Close code 4401 (`WS_AUTH_FAILED`, matching the server's `_WS_CLOSE_UNAUTHORIZED`): no reconnect; status shows "API key required" and `requestApiKey({message})` (not forced) opens the modal, unless the user already dismissed the prompt: a close that arrives after a Cancel never re-opens it (plan 9283c1fd G7; only the boot prompt is forced). A module-level `onApiKeyChange` listener reconnects once a key is saved.
 - The auth message must be the first frame the client sends; the server expects it before anything else.
 - Scheduled refresh callbacks read `state.selectedDetailId/Type` and `state.selectedConvId` when they fire, never values captured at schedule time.
 - `onopen`/`onclose` update `#ws-status` text and class, `#conn-status` text, and toggle `connected` on `#ws-dot`, each guarded for a missing element.
@@ -118,7 +118,7 @@ Dispatch handler names: `updateMetrics`, `updateEvents`, `renderInstanceGrid`, `
 ## Failure modes
 
 - Server error: `fetchJson` throws `Error(detail)` with `.status`; callers show a toast or inline error.
-- 401 with the modal cancelled: the request throws with the server detail (`missing or invalid API key`); later non-forced 401s do not reopen the modal until a key is saved (Settings or a forced prompt).
+- 401 with the modal cancelled: the request throws with the server detail (`missing or invalid API key`); later non-forced 401s do not reopen the modal until a key is saved (Settings or the forced boot prompt); the Settings API key field is the way back after a dismissal.
 - Non-JSON 2xx body: `resp.json()` rejects with a `SyntaxError`.
 - `/api/auth` unreachable: `checkAuthRequired` returns `null`.
 - Server down: the socket keeps reconnecting, at most about every 31 s, indefinitely.

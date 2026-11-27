@@ -25,6 +25,7 @@ async function run(builderModel, edit) {
     el('builder-agent-task').value = 'task';
     edit?.();
     builder.launchBuilderResult(); await sleep(30);     // second click sends
+    await sleep(520);                                   // the button and the guard hold for the 500 ms redirect window
     return { prefilled, sent: launchBody };
 }
 const fromBuilderField = await run('ollama_chat/my-local-model');

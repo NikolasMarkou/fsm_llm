@@ -1,11 +1,13 @@
 import { el, serve, sleep, out } from './stub.mjs';
 import * as builder from '../static/pages/builder.js';
 // 13.2: Launch is disabled, with a note, for an agent type /api/capabilities does not list.
+let toolList = [{ name: 't', description: 'd' }];
 let agentType = 'react', capsDelay = 0, capsCalls = 0, slowFirst = false, caps = { fsm: true, agent_types: ['react', 'debate'] }, posts = 0;
 serve(async url => {
     if (url === '/api/capabilities') { const n = ++capsCalls; await sleep(slowFirst && n === 1 ? 60 : capsDelay); return caps.fail ? { fail: 'down' } : caps; }
     if (url === '/api/agent/launch') { posts++; return {}; }
-    const a = { name: 'A', agent_type: agentType, tools: [{ name: 't', description: 'd' }], config: {} };
+    if (url === '/api/agent/types') return { agent_types: [{ id: 'react', launchable: true, needs_tools: true, takes_tools: true, tool_names: [] }] };
+    const a = { name: 'A', agent_type: agentType, tools: toolList, config: {} };
     return { session_id: 's', response: 'done', internal_state: {}, is_complete: true, artifact: a, artifact_json: JSON.stringify(a), artifact_type: 'agent', is_valid: true };
 });
 builder.setDeps({ showPage() {}, refreshInstances() {} });
@@ -40,4 +42,12 @@ area.value = JSON.stringify({ name: 'A', agent_type: 'react', tools: [{ name: 't
 builder.editBuilderResult(); await sleep(120);
 slowFirst = false;
 const staleAfterEdit = { disabled: btn.disabled, note: note.textContent };
-out({ inherited, protoKey, staleAfterEdit, staleAfterReset, listed, unlisted, unlistedPromptChain, backToListed, noList, capsDown });
+// G3b (plan 9283c1fd step 8): a type that needs a tool, an artifact with none: the refusal names the control that adds one.
+toolList = []; agentType = 'react'; caps = { fsm: true, agent_types: ['react'] };
+const postsBefore = posts;
+builder.startBuilderSession(); await sleep(40);
+builder.launchBuilderResult(); await sleep(20);              // the first click opens the form and loads the types
+el('builder-agent-task').value = 'a task';
+builder.launchBuilderResult(); await sleep(20);              // the second click is refused
+const needsTools = { status: el('builder-status').innerHTML, posts: posts - postsBefore };
+out({ needsTools, inherited, protoKey, staleAfterEdit, staleAfterReset, listed, unlisted, unlistedPromptChain, backToListed, noList, capsDown });
