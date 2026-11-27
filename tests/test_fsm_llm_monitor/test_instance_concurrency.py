@@ -21,13 +21,14 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
+from unittest import mock
 
 import httpx
 import pytest
 from fastapi import HTTPException
 
 import fsm_llm.agents.meta_builder as meta_builder
-from fsm_llm.core.definitions import ModelNotConfiguredError
+from fsm_llm.core.definitions import ConversationBusyError, ModelNotConfiguredError
 from fsm_llm.engine.executables import ExecutableRegistry
 from fsm_llm.monitor.constants import MAX_ROOM_ATTEMPTS
 from fsm_llm.monitor.definitions import (
@@ -36,7 +37,10 @@ from fsm_llm.monitor.definitions import (
     MonitorConfig,
     StubToolConfig,
 )
-from fsm_llm.monitor.exceptions import MonitorCapacityError
+from fsm_llm.monitor.exceptions import (
+    MonitorCapacityError,
+    MonitorInitializationError,
+)
 from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.instance_manager import agent as agent_mod
 from fsm_llm.monitor.instance_manager import lifecycle as lifecycle_mod
@@ -1066,9 +1070,9 @@ class TestTheConfigSetterIsOneScope:
         ):
             real = getattr(owner, name)
 
-            def wrapped(real=real, name=name):
+            def wrapped(*args, real=real, name=name):
                 owned[name] = mgr._lock._is_owned()
-                real()
+                return real(*args)
 
             setattr(owner, name, wrapped)
 
@@ -1078,8 +1082,8 @@ class TestTheConfigSetterIsOneScope:
         assert mgr.config.log_level == "DEBUG"
 
     def test_two_setters_leave_exactly_one_sink(self, mgr):
-        """A pauses between removing the old sink and adding its own; B runs its whole setter
-        meanwhile (without the lock B finishes first and its sink is orphaned; with it B waits)."""
+        """A pauses before it registers its sink; B runs its whole setter meanwhile
+        (without the lock B finishes first and a sink is orphaned; with it B waits)."""
         spy = _SpyLock(threading.RLock())
         mgr._lock = spy
         paused, b_done, real = (
@@ -1089,7 +1093,7 @@ class TestTheConfigSetterIsOneScope:
         )
         calls: list[int] = []
 
-        def setup():
+        def setup(*args):
             calls.append(1)
             if len(calls) == 1:
                 paused.set()
@@ -1099,7 +1103,7 @@ class TestTheConfigSetterIsOneScope:
                 ):  # a counter, not a clock
                     assert time.monotonic() < deadline, "B never ran or blocked"
                     time.sleep(0.001)
-            real()
+            return real(*args)
 
         mgr._setup_loguru_sink = setup  # type: ignore[method-assign]
 
@@ -1203,3 +1207,291 @@ class TestTheUsageOfAnEndedInstanceIsVisibleAtEveryMoment:
         with pytest.raises(KeyError):
             mgr.end_instance("nobody")
         assert self._calls(mgr) == 3
+
+
+def _fsm_with_api(mgr: InstanceManager, api, conversation_id: str = "c1") -> ManagedFSM:
+    inst = ManagedFSM("f1", api)
+    inst.conversation_ids.append(conversation_id)
+    mgr._instances["f1"] = inst
+    return inst
+
+
+class _EndRig:
+    """An API double whose ``end_conversation`` parks on ``release`` (a hard bound).
+
+    ``entered`` is set when a caller is inside the API end; ``held`` records, per call, whether
+    the calling thread held the manager lock at that moment (it must never).
+    """
+
+    def __init__(self, mgr: InstanceManager) -> None:
+        from unittest.mock import MagicMock
+
+        self.mgr = mgr
+        self.entered, self.release = threading.Event(), threading.Event()
+        self.held: list[bool] = []
+        self.api = MagicMock()
+        self.api.has_conversation_ended.return_value = True
+        self.api.end_conversation.side_effect = self._end
+
+    def _end(self, conversation_id: str) -> None:
+        self.held.append(self.mgr._lock._is_owned())
+        self.entered.set()
+        assert self.release.wait(_BOUND_SECONDS), "the end was never released"
+
+
+class TestASecondConcurrentEndOfOneConversationIsRefused:
+    """D-005 of plan 9283c1fd: the check and the claim are one scope; the loser is a 409."""
+
+    @pytest.fixture
+    def rig(self):
+        mgr = _manager()
+        rig = _EndRig(mgr)
+        rig.inst = _fsm_with_api(mgr, rig.api)
+        yield rig
+        rig.release.set()
+
+    @staticmethod
+    def _start(call) -> tuple[threading.Thread, list]:
+        outcome: list = []
+
+        def work():
+            try:
+                outcome.append(call())
+            except BaseException as e:
+                outcome.append(e)
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        return t, outcome
+
+    @staticmethod
+    def _finish(rig: _EndRig, t: threading.Thread) -> None:
+        rig.release.set()
+        t.join(_BOUND_SECONDS)
+        assert not t.is_alive()
+
+    def test_the_second_end_raises_busy_and_the_conversation_ends_once(self, rig):
+        t, outcome = self._start(lambda: rig.mgr.end_conversation("f1", "c1"))
+        assert rig.entered.wait(_BOUND_SECONDS)
+
+        with pytest.raises(ConversationBusyError):
+            rig.mgr.end_conversation("f1", "c1")
+        self._finish(rig, t)
+
+        assert outcome == [None]
+        rig.api.end_conversation.assert_called_once_with("c1")
+        assert rig.held == [False]  # never under the manager lock
+        assert rig.inst.ended_conversation_ids == {"c1"}
+        assert rig.inst.ending_conversation_ids == set()
+
+    def test_a_repeat_after_the_end_finished_is_a_quiet_no_op(self, rig):
+        rig.release.set()
+        rig.mgr.end_conversation("f1", "c1")
+        rig.mgr.end_conversation("f1", "c1")
+        rig.api.end_conversation.assert_called_once_with("c1")
+
+    def test_a_refused_end_releases_the_claim_so_a_retry_works(self, rig):
+        rig.api.end_conversation.side_effect = [ConversationBusyError("turn"), None]
+
+        with pytest.raises(ConversationBusyError):
+            rig.mgr.end_conversation("f1", "c1")
+        assert rig.inst.ending_conversation_ids == set()
+        assert rig.inst.ended_conversation_ids == set()
+        rig.mgr.end_conversation("f1", "c1")
+
+        assert rig.inst.ended_conversation_ids == {"c1"}
+        assert rig.api.end_conversation.call_count == 2
+
+    def test_a_failing_end_releases_the_claim_too(self, rig):
+        rig.api.end_conversation.side_effect = [RuntimeError("boom"), None]
+        with pytest.raises(RuntimeError):
+            rig.mgr.end_conversation("f1", "c1")
+        assert rig.inst.ending_conversation_ids == set()
+        rig.mgr.end_conversation("f1", "c1")
+        assert rig.inst.ended_conversation_ids == {"c1"}
+
+    @pytest.mark.parametrize("first", ["explicit_end", "terminal_send"])
+    def test_a_terminal_send_and_an_explicit_end_end_it_once(self, rig, first):
+        """Whichever starts first holds the claim; the other is refused (the terminal path of
+        ``send_message`` logs it and still returns its reply) and the API ends it once."""
+        rig.api.converse.return_value = "bye"
+        rig.api.get_current_state.return_value = "end"
+        end = lambda: rig.mgr.end_conversation("f1", "c1")  # noqa: E731
+        send = lambda: rig.mgr.send_message("f1", "c1", "hi")  # noqa: E731
+        holder, other = (end, send) if first == "explicit_end" else (send, end)
+
+        t, outcome = self._start(holder)
+        assert rig.entered.wait(_BOUND_SECONDS)
+        if first == "explicit_end":
+            reply = other()
+            assert reply["is_terminal"] is True and reply["response"] == "bye"
+        else:
+            with pytest.raises(ConversationBusyError):
+                other()
+        self._finish(rig, t)
+
+        assert len(outcome) == 1 and not isinstance(outcome[0], BaseException)
+        rig.api.end_conversation.assert_called_once_with("c1")
+        assert rig.inst.ended_conversation_ids == {"c1"}
+        assert rig.inst.status == "completed"
+
+    def test_the_check_and_the_claim_share_one_lock_hold(self, rig):
+        spy = _SpyLock(threading.RLock())
+        rig.mgr._lock = spy
+        tape: list[tuple[str, int | None]] = []
+
+        class _Set(set):
+            def __init__(self, name):
+                super().__init__()
+                self._name = name
+
+            def __contains__(self, item):
+                tape.append((f"in:{self._name}", spy.hold))
+                return super().__contains__(item)
+
+            def add(self, item):
+                tape.append((f"add:{self._name}", spy.hold))
+                super().add(item)
+
+        rig.inst.ended_conversation_ids = _Set("ended")
+        rig.inst.ending_conversation_ids = _Set("ending")
+        rig.release.set()
+
+        rig.mgr.end_conversation("f1", "c1")
+
+        steps = ("in:ended", "in:ending", "add:ending")
+        claim = [hold for name, hold in tape if name in steps]
+        assert [n for n, _ in tape if n in steps] == list(steps)
+        assert claim[0] is not None and len(set(claim)) == 1  # one outermost hold
+
+
+class TestTheEndRouteAnswers409ForTheLoser:
+    def test_two_concurrent_requests_one_ok_one_409_json(self, rig):
+        mgr = _manager()
+        end = _EndRig(mgr)
+        _fsm_with_api(mgr, end.api)
+        configure(manager=mgr)
+        body = {"conversation_id": "c1"}
+
+        async def main():
+            async with _client() as client:
+                first = asyncio.create_task(client.post("/api/fsm/f1/end", json=body))
+                await _until(end.entered.is_set, "the first end reached the API")
+                second = await client.post("/api/fsm/f1/end", json=body)
+                end.release.set()
+                return await first, second
+
+        try:
+            first, second = _run(rig, main)
+        finally:
+            end.release.set()
+
+        assert first.status_code == 200 and first.json() == {"status": "ok"}
+        assert second.status_code == 409
+        assert second.headers["content-type"].startswith("application/json")
+        assert second.json() == {"detail": "conversation is busy with another turn"}
+        end.api.end_conversation.assert_called_once_with("c1")
+
+
+class TestTheConfigSinkSwapNeverLeavesAGap:
+    """D-006 of plan 9283c1fd: the new sink is registered before the old one goes, and the
+    config is assigned last."""
+
+    @pytest.fixture
+    def mgr(self):
+        mgr = InstanceManager(config=MonitorConfig(log_level="ERROR"))
+        yield mgr
+        mgr.close()
+
+    @staticmethod
+    def _emit(method: str, marker: str) -> None:
+        """Log ``marker`` from another thread (a bounded join)."""
+        from loguru import logger
+
+        t = threading.Thread(
+            target=getattr(logger, method), args=(marker,), daemon=True
+        )
+        t.start()
+        t.join(_BOUND_SECONDS)
+        assert not t.is_alive()
+
+    @staticmethod
+    def _count(mgr: InstanceManager, marker: str) -> int:
+        return sum(1 for r in mgr.global_collector.get_logs() if r.message == marker)
+
+    def test_a_record_is_delivered_in_both_windows_of_the_swap(self, mgr):
+        """Window A: just before the new sink is registered (the old one must still be there).
+        Window B: just after the old one is removed (the new one must already be there)."""
+        collector, real_setup, real_cleanup = (
+            mgr.global_collector,
+            mgr._setup_loguru_sink,
+            mgr.global_collector.cleanup,
+        )
+
+        def setup(*args):
+            self._emit("error", "window-a")  # the old sink is at ERROR
+            return real_setup(*args)
+
+        def cleanup():
+            real_cleanup()
+            self._emit(
+                "warning", "window-b"
+            )  # only the new sink (DEBUG) takes a warning
+
+        mgr._setup_loguru_sink = setup  # type: ignore[method-assign]
+        collector.cleanup = cleanup  # type: ignore[method-assign]
+
+        mgr.config = MonitorConfig(log_level="DEBUG")
+
+        assert self._count(mgr, "window-a") == 1
+        assert self._count(mgr, "window-b") == 1
+        assert collector._log_sink_id is not None
+
+    def test_a_failing_registration_leaves_config_sizes_and_the_old_sink(self, mgr):
+        before = mgr.config
+        sink = mgr.global_collector._log_sink_id
+        sizes = (mgr.global_collector._max_events, mgr.global_collector._max_log_lines)
+
+        def refuse(*args):
+            raise MonitorInitializationError("no sink")
+
+        mgr._setup_loguru_sink = refuse  # type: ignore[method-assign]
+        with pytest.raises(MonitorInitializationError):
+            mgr.config = MonitorConfig(
+                log_level="DEBUG", max_events=77, max_log_lines=88
+            )
+
+        assert mgr.config is before
+        assert mgr.global_collector._log_sink_id == sink
+        assert (
+            mgr.global_collector._max_events,
+            mgr.global_collector._max_log_lines,
+        ) == sizes
+        from loguru import logger
+
+        logger.error("old-sink-marker")
+        assert self._count(mgr, "old-sink-marker") == 1
+
+    def test_the_route_answers_500_and_keeps_the_old_config(self, mgr):
+        from fastapi.testclient import TestClient
+
+        configure(manager=mgr)
+        mgr._setup_loguru_sink = mock.Mock(  # type: ignore[method-assign]
+            side_effect=MonitorInitializationError("no sink")
+        )
+        resp = TestClient(app, raise_server_exceptions=False).post(
+            "/api/config", json={"log_level": "DEBUG", "max_events": 77}
+        )
+
+        assert resp.status_code == 500
+        assert mgr.config.log_level == "ERROR" and mgr.config.max_events != 77
+
+    def test_sequential_changes_leave_one_delivering_sink(self, mgr):
+        mgr.config = MonitorConfig(log_level="DEBUG")
+        mgr.config = MonitorConfig(log_level="WARNING")
+
+        self._emit("warning", "after-two-changes")
+        self._emit("debug", "below-the-level")
+
+        assert self._count(mgr, "after-two-changes") == 1  # no orphan, so no duplicate
+        assert self._count(mgr, "below-the-level") == 0

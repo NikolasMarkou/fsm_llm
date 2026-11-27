@@ -25,7 +25,7 @@ from fsm_llm.monitor.constants import MAX_QUERY_LIMIT
 from fsm_llm.monitor.definitions import MonitorConfig, MonitorEvent
 from fsm_llm.monitor.exceptions import MonitorCapacityError
 from fsm_llm.monitor.instance_manager import InstanceManager, validate_preset_id
-from fsm_llm.monitor.instance_manager.managed import ManagedAgent
+from fsm_llm.monitor.instance_manager.managed import ManagedAgent, ManagedFSM
 from fsm_llm.monitor.server import (
     app,
     configure,
@@ -181,6 +181,21 @@ class TestErrorMapping:
                 "/api/fsm/x/converse", json={"message": "hi", "conversation_id": "c"}
             )
         assert resp.status_code == 409
+
+    def test_an_end_that_loses_the_claim_is_a_json_409(self):
+        # D-005 of plan 9283c1fd: the loser of two concurrent ends is a 409, not a 500
+        mgr = InstanceManager(config=MonitorConfig(refresh_interval=0.5))
+        inst = ManagedFSM("f1", mock.MagicMock())
+        inst.conversation_ids.append("c1")
+        inst.ending_conversation_ids.add("c1")  # another request holds the claim
+        mgr._instances["f1"] = inst
+        configure(manager=mgr)
+
+        resp = TestClient(app).post("/api/fsm/f1/end", json={"conversation_id": "c1"})
+
+        assert resp.status_code == 409
+        assert resp.json() == {"detail": "conversation is busy with another turn"}
+        inst.api.end_conversation.assert_not_called()
 
     def test_capacity_is_429(self):
         client = _client()

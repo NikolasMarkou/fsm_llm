@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm import API
+from fsm_llm import API, ConversationBusyError
 from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
@@ -20,6 +20,7 @@ from ..constants import (
 from ..definitions import (
     ConversationSnapshot,
 )
+from ..exceptions import MonitorCapacityError
 from .examples import load_preset_json
 from .handlers import register_monitor_handlers
 from .managed import ManagedFSM, _new_instance_id
@@ -57,7 +58,11 @@ class FsmMixin(_InstanceSurface):
             label=label or fsm_data.get("name", f"FSM-{instance_id[:6]}"),
             source=preset_id or "custom",
         )
-        self._register_instance(managed, collector, "FSM")
+        try:
+            self._register_instance(managed, collector, "FSM")
+        except MonitorCapacityError:
+            api.close()  # refused: nothing was registered, the API holds nothing else
+            raise
         return managed
 
     def start_conversation(
@@ -112,19 +117,39 @@ class FsmMixin(_InstanceSurface):
             inst = self._get_fsm(instance_id)
             if conversation_id not in inst.conversation_ids:
                 raise KeyError(f"Conversation not found: {conversation_id}")
-            already_ended = conversation_id in inst.ended_conversation_ids
-        if not already_ended:
-            self._finish_conversation(inst, conversation_id)
+        self._finish_conversation(inst, conversation_id)
 
     def _finish_conversation(self, inst: ManagedFSM, conversation_id: str) -> None:
         """Cache the snapshot, end the conversation in the core (it fires
         END_CONVERSATION, closing the monitor/OTEL span, and frees it), and only
         then record it as ended: a refusal (``ConversationBusyError``)
         propagates and leaves it unmarked. The id stays in ``conversation_ids``
-        so the conversation remains visible in the UI."""
-        self._cache_ended_conversation(inst.api, conversation_id, inst.instance_id)
-        inst.api.end_conversation(conversation_id)
-        self._mark_conversation_ended(inst, conversation_id)
+        so the conversation remains visible in the UI. An id already ended is a
+        no-op; one being ended by another caller is refused (409).
+
+        # DECISION plan-2026-11-27T201735-9283c1fd/D-005
+        # The check (ended? being ended?) and the claim are ONE ``_lock`` scope: in two
+        # scopes both callers pass the check and the loser fails inside the core with
+        # a plain ``FSMError`` (a 500). The end itself runs OUTSIDE ``_lock`` (it fires
+        # END handlers) and the claim is dropped in a ``finally`` (a refused end must
+        # stay retryable). Do NOT hold ``_lock`` across ``api.end_conversation``, go
+        # back to check-then-act, or answer the loser with a silent success.
+        """
+        with self._lock:
+            if conversation_id in inst.ended_conversation_ids:
+                return
+            if conversation_id in inst.ending_conversation_ids:
+                raise ConversationBusyError(
+                    "conversation is already being ended", conversation_id
+                )
+            inst.ending_conversation_ids.add(conversation_id)
+        try:
+            self._cache_ended_conversation(inst.api, conversation_id, inst.instance_id)
+            inst.api.end_conversation(conversation_id)
+            self._mark_conversation_ended(inst, conversation_id)
+        finally:
+            with self._lock:
+                inst.ending_conversation_ids.discard(conversation_id)
 
     def _mark_conversation_ended(self, inst: ManagedFSM, conversation_id: str) -> None:
         """Record an ended conversation; complete the instance when every

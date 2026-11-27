@@ -69,7 +69,7 @@ class InstanceManager(
         self._closed = False
 
         # Register loguru sink so log records flow into the collector
-        self._setup_loguru_sink()
+        self._global_collector._log_sink_id = self._setup_loguru_sink()
 
         # Cache for ended conversations (no longer queryable from API)
         # Bounded to prevent unbounded memory growth in long-running monitors
@@ -114,15 +114,14 @@ class InstanceManager(
         with self._lock:
             return self._dashboard_config_version
 
-    def _setup_loguru_sink(self) -> None:
-        """Register a loguru sink that feeds log records into the global collector."""
+    def _setup_loguru_sink(self, level: str | None = None) -> int:
+        """Register a loguru sink that feeds the global collector at ``level``
+        (default: the config's) and return its id; the caller keeps the id."""
         try:
             from loguru import logger as _loguru_logger
 
             sink = self._global_collector.create_loguru_sink()
-            self._global_collector._log_sink_id = _loguru_logger.add(
-                sink, level=self._config.log_level
-            )
+            return _loguru_logger.add(sink, level=level or self._config.log_level)
         except Exception as e:
             raise MonitorInitializationError(
                 f"Failed to register loguru sink: {e}"
@@ -140,12 +139,20 @@ class InstanceManager(
         # One scope (the lock ``close`` takes too), so two setters cannot orphan a sink
         # and a closed manager gets none: ``close`` removed the sink and nobody would.
         with self._lock:
-            old = self._config
+            collector = self._global_collector
+            if value.log_level != self._config.log_level and not self._closed:
+                # DECISION plan-2026-11-27T201735-9283c1fd/D-006
+                # Register the new sink BEFORE the old one goes, and assign the config
+                # LAST: records between a remove and an add are lost (a record inside the
+                # overlap may arrive twice, accepted), and a registration that raises must
+                # leave the old config, buffer sizes and sink as they were (the route
+                # answers 500). Do NOT remove the old sink first, assign ``_config`` or
+                # resize before the swap succeeded, or restore the old sink on failure.
+                new_sink = self._setup_loguru_sink(value.log_level)
+                collector.cleanup()  # removes the old sink
+                collector._log_sink_id = new_sink
+            collector.resize(value.max_events, value.max_log_lines)
             self._config = value
-            self._global_collector.resize(value.max_events, value.max_log_lines)
-            if value.log_level != old.log_level and not self._closed:
-                self._global_collector.cleanup()
-                self._setup_loguru_sink()
 
     @property
     def closed(self) -> bool:

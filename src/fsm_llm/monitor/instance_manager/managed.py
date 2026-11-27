@@ -64,6 +64,7 @@ class ManagedFSM(_ManagedBase):
         self.source = source
         self.conversation_ids: list[str] = []
         self.ended_conversation_ids: set[str] = set()
+        self.ending_conversation_ids: set[str] = set()  # claimed by an end in flight
 
     def to_info(self) -> InstanceInfo:
         return self._info(

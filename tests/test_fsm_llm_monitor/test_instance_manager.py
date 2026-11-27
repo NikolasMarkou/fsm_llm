@@ -2424,3 +2424,44 @@ class TestAttachApiForgetsThePreviousApisConversations:
         collector.forget_conversations(["a", "unknown"])
 
         assert collector.get_metrics().active_conversations == 1
+
+
+class TestARefusedFsmLaunchClosesItsApi:
+    """D-005 of plan 1f0925d2 keeps ``_register_instance`` as it is: the launch closes
+    the API it built when the registration is refused."""
+
+    def test_the_api_is_closed_once_and_the_refusal_is_unchanged(self, monkeypatch):
+        from fsm_llm import API
+        from fsm_llm.monitor.instance_manager import fsm as fsm_mod
+        from fsm_llm.testing import MockLLM2Interface
+
+        built: list[API] = []
+        real_from_definition = API.from_definition
+
+        def _from_definition(definition, **kwargs):
+            api = real_from_definition(definition, llm_interface=MockLLM2Interface())
+            built.append(api)
+            return api
+
+        monkeypatch.setattr(fsm_mod.API, "from_definition", _from_definition)
+        mgr = _manager(max_instances=1)
+        mgr.launch_fsm(fsm_json=_CHAT_FSM)
+        closed: list[API] = []
+        real_close = API.close
+
+        def _close(self):
+            closed.append(self)
+            return real_close(self)
+
+        monkeypatch.setattr(API, "close", _close)
+
+        with pytest.raises(MonitorCapacityError) as refused:
+            mgr.launch_fsm(fsm_json=_CHAT_FSM)
+
+        assert closed == [built[1]]  # the refused one, once, and not the first
+        assert str(refused.value) == (
+            "1 instances are active (max_instances=1); destroy one first"
+        )
+        assert [i.instance_id for i in mgr.list_instances()] == [
+            next(iter(mgr._instances))
+        ]
