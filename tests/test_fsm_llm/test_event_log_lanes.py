@@ -673,6 +673,7 @@ class TestADeferredStreamReply:
                 call.stream_done("abc", abandoned=False)
                 assert _responses(log) == [], "the reply was written on the loop"
                 assert _queued(pool) == 1
+                assert list(log._deferred) == [ROOT]  # an ordered job (D-009)
                 gate.set()
                 await parked
                 await log.lane_call(ROOT, lambda: None)  # FIFO: the job has run
@@ -937,7 +938,7 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
         the lane is parked and its line precedes the deferred one: the inverted push and pop)."""
         await log.lane_call(ROOT, lambda: None)  # a lane thread serves the tree
         parked, gate = await _park(log)
-        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        log.lane_after(ROOT, _deferred_write(log, "deferred"), ordered=True)
         write = {
             "append": lambda: log.append(ROOT, "context/record", label="inline"),
             "append_batch": lambda: log.append_batch(
@@ -961,7 +962,7 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
         await log.lane_call(ROOT, lambda: None)
         parked, gate = await _park(log)
         for label in ("one", "two", "three"):
-            log.lane_after(ROOT, _deferred_write(log, label))
+            log.lane_after(ROOT, _deferred_write(log, label), ordered=True)
         with self._spy() as reached:
             thread, _ = _run_in_thread(
                 lambda: log.append(ROOT, "context/record", label="inline")
@@ -976,7 +977,7 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
         """The wait is per tree. Kills: a wait on any deferred job of the log."""
         await log.lane_call(ROOT, lambda: None)
         parked, gate = await _park(log)
-        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        log.lane_after(ROOT, _deferred_write(log, "deferred"), ordered=True)
         try:
             with self._spy() as reached:
                 thread, out = _run_in_thread(
@@ -1001,7 +1002,7 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
             mock.patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.2),
             mock.patch.object(lanes_module, "logger") as warned,
         ):
-            log.lane_after(ROOT, _deferred_write(log, "deferred"))
+            log.lane_after(ROOT, _deferred_write(log, "deferred"), ordered=True)
             await log.lane_call(ROOT, lambda: None)  # FIFO: the job has run
         assert _labels(log) == ["deferred"]
         assert not warned.warning.called, warned.warning.call_args_list
@@ -1013,7 +1014,7 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
         may precede the job (the named limit of D-008 (d)). Kills: a wait with no bound."""
         await log.lane_call(ROOT, lambda: None)
         parked, gate = await _park(log)
-        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        log.lane_after(ROOT, _deferred_write(log, "deferred"), ordered=True)
         try:
             with (
                 mock.patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.05),
@@ -1032,16 +1033,74 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
             await log.lane_call(ROOT, lambda: None)
         assert _labels(log) == ["inline", "deferred"]
 
+    async def test_a_job_that_is_not_ordered_orders_nothing(
+        self, log: EventLog
+    ) -> None:
+        """The cancel arms (``provider/error`` of a cancelled call) keep their pre-plan behaviour:
+        an inline append right after one never waits for the lane (D-009, probe p11: 1.45 s on
+        the loop at the parent). Kills: a registry that keeps every ``lane_after`` job."""
+        await log.lane_call(ROOT, lambda: None)
+        parked, gate = await _park(log)
+        log.lane_after(ROOT, _deferred_write(log, "deferred"))
+        try:
+            assert log._deferred == {}
+            with (
+                self._spy() as reached,
+                mock.patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.2),
+            ):
+                thread, out = _run_in_thread(
+                    lambda: log.append(ROOT, "context/record", label="inline")
+                )
+                _until(lambda: not thread.is_alive(), "the inline write to return")
+            assert len(out) == 1 and not isinstance(out[0], BaseException), out
+            assert not reached.is_set(), "an unordered job made an inline write wait"
+            assert _labels(log) == ["inline"]
+        finally:
+            gate.set()
+            await parked
+            await log.lane_call(ROOT, lambda: None)
+
+    def test_only_the_two_deferrals_of_the_plan_are_ordered(self) -> None:
+        """A source scan (D-009): ``lane_after`` is called with ``ordered=True`` by
+        ``LlmCall.stream_done`` and ``record_push`` and by nothing else; the cancel arms
+        (``alog_request``, ``_recorded``) keep their pre-plan behaviour. Kills: a cancel arm that
+        registers (an inline append after a cancelled call blocks the loop behind the stuck
+        request job), a deferral that stops registering (a pop could precede its push)."""
+        import ast
+
+        import fsm_llm
+
+        found: dict[tuple[str, str], bool] = {}
+        for path in sorted(Path(fsm_llm.__file__).parent.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for fn in ast.walk(tree):
+                if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                for call in ast.walk(fn):
+                    if (
+                        isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "lane_after"
+                    ):
+                        flag = {k.arg: k.value for k in call.keywords}.get("ordered")
+                        found[(path.name, fn.name)] = (
+                            isinstance(flag, ast.Constant) and flag.value is True
+                        )
+        ordered = {key for key, flag in found.items() if flag}
+        assert ordered == {("calls.py", "stream_done"), ("events.py", "record_push")}
+        assert found[("scope.py", "alog_request")] is False
+        assert found[("calls.py", "_recorded")] is False
+
     async def test_a_finished_job_leaves_nothing_behind(self, log: EventLog) -> None:
         """Kills: a registry that keeps a finished job (a leak per conversation, a wait on a
         done future). A job that ran inline (no lane thread ever served the tree) registers none."""
         log.lane_after(
-            ROOT, _deferred_write(log, "inline")
+            ROOT, _deferred_write(log, "inline"), ordered=True
         )  # no lane thread yet: inline
         assert log._deferred == {} and _pool_of(log, ROOT) is None
         await log.lane_call(ROOT, lambda: None)
         parked, gate = await _park(log)
-        log.lane_after(ROOT, _deferred_write(log, "queued"))
+        log.lane_after(ROOT, _deferred_write(log, "queued"), ordered=True)
         assert list(log._deferred) == [ROOT]
         gate.set()
         await parked

@@ -181,10 +181,11 @@ class EventLog(ToolEventsMixin):
           ``prune``. A host that starts many conversations must still end them
           (``API.end_conversation``) or close the API or the log. A writer or log that is
           dropped without either is closed by the finalizer of ``JsonlWriter``.
-        - ``lane_after(conversation_id, fn)``: the deferral of the joined reply of a streamed
-          call and of ``stack/push`` in async mode (one whole job behind the tree's lane jobs,
-          never awaited); every ``append`` and ``append_batch`` of the tree waits for the last
-          such job (bounded by ``LANE_WAIT_SECONDS``, never on a lane thread), so an inline
+        - ``lane_after(conversation_id, fn, *, ordered=False)``: the deferral of the joined reply
+          of a streamed call and of ``stack/push`` in async mode (one whole job behind the tree's
+          lane jobs, never awaited, ``ordered=True``); every ``append`` and ``append_batch`` of
+          the tree waits for the last ordered job (bounded by ``LANE_WAIT_SECONDS``, never on a
+          lane thread), so an inline
           write cannot land before it. A reader that reads the log between the deferral and
           the next drain (``release``, ``close``, the next awaited write of the tree) may not
           see the event yet.
@@ -341,16 +342,18 @@ class EventLog(ToolEventsMixin):
         """
         return await self._lanes.lane_call(conversation_id, fn, *args)
 
-    def lane_after(self, conversation_id: str, fn: Callable[[], object]) -> None:
+    def lane_after(
+        self, conversation_id: str, fn: Callable[[], object], *, ordered: bool = False
+    ) -> None:
         """Run *fn* behind the jobs already queued for the tree *conversation_id*, never waiting.
 
-        For a cancel arm and a deferred write (``stream_done``, ``stack/push``); every
-        ``append`` of the tree waits for the last such job first (``_await_deferred``). Inline
-        when the lane of the tree never started (no boundary write was ever queued on it) and
-        after ``close``.
+        A cancel arm uses it as is. A deferred write (``stream_done``, ``stack/push``) passes
+        ``ordered=True``: every ``append`` of the tree then waits for the last such job first
+        (``_await_deferred``). Inline when the lane of the tree never started (no boundary
+        write was ever queued on it) and after ``close``.
         """
         job = self._lanes.after(conversation_id, fn)
-        if job is not None:
+        if job is not None and ordered:
             with self._guard:
                 self._deferred[conversation_id] = job  # FIFO: the last ends last
             job.add_done_callback(partial(self._undefer, conversation_id))

@@ -311,7 +311,11 @@ def record_push(
     if SYNC.get():
         write()
     else:
-        log.lane_after(conversation_id, partial(contextvars.copy_context().run, write))
+        log.lane_after(
+            conversation_id,
+            partial(contextvars.copy_context().run, write),
+            ordered=True,
+        )
 
 
 def record_pop(

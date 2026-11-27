@@ -245,7 +245,9 @@ class LlmCall:
             write()
         else:
             scope.log.lane_after(
-                scope.root_id, partial(contextvars.copy_context().run, write)
+                scope.root_id,
+                partial(contextvars.copy_context().run, write),
+                ordered=True,
             )
 
     def _failed(self, error: BaseException) -> None:
