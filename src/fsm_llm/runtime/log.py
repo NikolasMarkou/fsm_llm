@@ -2,10 +2,11 @@
 
 ``EventLog(root)`` owns the layout ``<root>/logs/<root conversation id>.jsonl`` and
 ``<root>/blobs/``. It keeps one ``JsonlWriter`` per conversation id (opened on first use, so
-nothing is created until something is written) and adds what the writer does not know: the
-envelope (``ts``, ``conversation_id``, ``frame``, ``type``), the checkpoint rule, the
-write-time secret filter, reads and queries, blobs, and the checkpoint API of a side-effecting
-tool call (``tool_call``).
+nothing is created until something is written; at most ``max_open_writers`` idle ones stay
+open, the least recently used is closed and a later append re-opens it) and adds what the
+writer does not know: the envelope (``ts``, ``conversation_id``, ``frame``, ``type``), the
+checkpoint rule, the write-time secret filter, reads and queries, blobs, and the checkpoint
+API of a side-effecting tool call (``tool_call``).
 
 Privacy (D-003 of plan 21e6f00d): structured state and context payloads go through
 ``fsm_llm.runtime.filtering.filter_context`` (``core.redaction.redact_context``, then
@@ -163,13 +164,15 @@ class EventLog(ToolEventsMixin):
           the unresolved ones.
         - ``conversation_ids() -> list[str]``, ``release(conversation_id)``.
         - ``EventLog(root, *, max_open_writers=DEFAULT_MAX_OPEN_WRITERS)``: at most that many
-          idle writers stay open (two file descriptors and the advisory lock each); the least
-          recently used idle, unpoisoned one is closed when another is needed and a later
-          append of its id re-opens the same file (it reads the tail of the log, never the
-          whole file, and refuses a file another process changed or replaced meanwhile), so a
-          host holds about ``2 * max_open_writers`` descriptors however many conversations idle.
-          ``None`` is unbounded (the lock is held for the conversation's life), ``0`` closes a writer the
-          moment its append ends (every append re-opens); a bool, a negative or a non-int is a
+          idle writers stay open (two file descriptors and the advisory lock each, plus the
+          writers with an append in flight, which are never closed); the least recently used
+          idle, unpoisoned one is closed when another is needed and a later append of its id
+          re-opens the same file (it reads the tail of the log, never the whole file, and
+          refuses a file another process changed or replaced meanwhile), so a host holds about
+          ``2 * max_open_writers`` descriptors however many conversations idle.
+          ``open_writer_count()`` is the number of writers open now. ``None`` is unbounded (the
+          lock is held for the conversation's life), ``0`` closes a writer the moment its
+          append ends (every append re-opens); a bool, a negative or a non-int is a
           ``ValueError``. A closed idle writer holds no lock, so another process can write,
           resume or prune that conversation (a re-open meeting its lock is ``LogLockedError``,
           a vanished file ``LogCorruptError``, nothing is recreated); in this log the id stays
@@ -178,6 +181,13 @@ class EventLog(ToolEventsMixin):
           ``prune``. A host that starts many conversations must still end them
           (``API.end_conversation``) or close the API or the log. A writer or log that is
           dropped without either is closed by the finalizer of ``JsonlWriter``.
+        - ``lane_after(conversation_id, fn)``: the deferral of the joined reply of a streamed
+          call and of ``stack/push`` in async mode (one whole job behind the tree's lane jobs,
+          never awaited); every ``append`` and ``append_batch`` of the tree waits for the last
+          such job (bounded by ``LANE_WAIT_SECONDS``, never on a lane thread), so an inline
+          write cannot land before it. A reader that reads the log between the deferral and
+          the next drain (``release``, ``close``, the next awaited write of the tree) may not
+          see the event yet.
         - Recovery: a failed write POISONS the writer of that id, and every later append of
           that tree raises ``LogWriteError`` until ``release(conversation_id)`` (the next
           append reopens the file, repairs a torn tail and continues the ``seq``) or
@@ -336,7 +346,8 @@ class EventLog(ToolEventsMixin):
 
         For a cancel arm and a deferred write (``stream_done``, ``stack/push``); every
         ``append`` of the tree waits for the last such job first (``_await_deferred``). Inline
-        when no lane thread ever served the tree.
+        when the lane of the tree never started (no boundary write was ever queued on it) and
+        after ``close``.
         """
         job = self._lanes.after(conversation_id, fn)
         if job is not None:

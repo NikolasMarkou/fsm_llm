@@ -133,7 +133,7 @@ api = API.from_file("greeter.json", event_log="logs")
 conv_id, state = api.resume(conv_id)              # same id; an in-flight tool is reported, never re-run
 ```
 
-`fork` and `resume` rebuild the whole stack of pushed FSMs from the log. Privacy is a setting: `EventLog(root, privacy="values")` is the default, `"shape"` keeps ids, names and outcomes with no text (and then the log cannot be forked), and a `redact` hook handles free text. `EventLog.prune` is explicit retention and deletes nothing by default. Usage totals can be folded back out of the log with `fsm_llm.runtime.usage`.
+`fork` and `resume` rebuild the whole stack of pushed FSMs from the log. Privacy is a setting: `EventLog(root, privacy="values")` is the default, `"shape"` keeps ids, names and outcomes with no text (and then the log cannot be forked), and a `redact` hook handles free text. `EventLog.prune` is explicit retention and deletes nothing by default. An `EventLog` keeps at most `max_open_writers` (default 64) idle writers open, two file descriptors each; a conversation whose writer was closed holds no lock across processes, so a host that needs the lock for every live conversation passes `max_open_writers=None` (see the Event Log section of the API reference). Usage totals can be folded back out of the log with `fsm_llm.runtime.usage`.
 
 ### Check a definition before it runs
 

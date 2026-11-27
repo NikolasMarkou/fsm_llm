@@ -266,7 +266,11 @@ def record_push(
     preserve_history: bool,
     limits: Mapping[str, Any] | None = None,
 ) -> None:
-    """Append ``stack/push`` for a frame just added (a no-op with the log off; see the anchor)."""
+    """Append ``stack/push`` for a frame just added (a no-op with the log off; see the anchor).
+
+    In async mode the write is one lane job (inline when no job ever started the lane of the
+    tree, and in sync mode).
+    """
     log = getattr(api, "_event_log", None)
     if log is None:
         return

@@ -218,7 +218,8 @@ class LlmCall:
         *abandoned* ``None`` (the default) is read from ``stream``: abandoned unless the
         chunks ran out. A stream that raised writes no ``llm/response`` here: its
         ``provider/error`` is the outcome (``llm_call`` writes it when the error escapes).
-        The write runs inline in sync mode and as one queued lane job otherwise.
+        The write runs inline in sync mode (and when no job ever started the lane of the tree)
+        and as one queued lane job otherwise.
         """
         scope = self._scope
         if scope is None or self._done or self._errored:
