@@ -548,7 +548,7 @@ class TestEventLogView:
 
 
 class TestLaunchFlows:
-    """Plan 1f0925d2 step 5 (F1, D-006): a created instance is never a failed launch; no stale timer."""
+    """A created instance is never a failed launch; no stale timer."""
 
     def test_a_failed_first_start_says_the_instance_was_launched(self, probe):
         out = probe("stale_state")["fsm_partial"]
@@ -636,7 +636,7 @@ class TestLaunchFlows:
 
 
 class TestConversationDetailRaces:
-    """Plan 1f0925d2 step 6 (F2, D-007): a superseded failure paints nothing, a failure says why, focus follows the view."""
+    """A superseded failure paints nothing, a failure says why, focus follows the view."""
 
     def test_a_superseded_failure_does_not_replace_the_newer_view(self, probe):
         out = probe("stale_state")["detail_superseded"]
@@ -664,7 +664,7 @@ class TestConversationDetailRaces:
 
 
 class TestEventLogLoadMore:
-    """Plan 1f0925d2 step 6 (F2, D-007): Load more by `since_seq`, a request token, errors keep the earlier pages."""
+    """Load more by `since_seq`, a request token, errors keep the earlier pages."""
 
     def test_load_more_appends_the_next_pages_and_ends_with_a_marker(self, probe):
         out = probe("stale_state")["eventlog_more"]
@@ -760,11 +760,11 @@ class TestEventLogLoadMore:
 
 
 class TestControlDrawerStepDataAndDetails:
-    """Plan 1f0925d2 step 7 (F3, D-009): step data whole or a labelled raw cut, the details state across a repaint."""
+    """Step data whole or a labelled raw cut, the details state across a repaint."""
 
     def test_a_small_step_data_is_shown_whole_and_parses(self, probe):
         out = probe("stale_state")["step_data_small"]
-        assert out["length"] > 300  # the old cut was 300 characters
+        assert out["length"] > 300  # no 300 character cut
         assert out["whole"] is True and out["parses"] is True and out["note"] is False
 
     def test_the_cap_is_inclusive_and_one_more_character_is_the_labelled_cut(
@@ -791,7 +791,7 @@ class TestControlDrawerStepDataAndDetails:
 
 
 class TestBuilderStartInputAndStatusTiming:
-    """Plan 1f0925d2 step 7 (F3, D-009): the input waits for the start reply, an edit with no states hides the graph."""
+    """The input waits for the start reply, an edit with no states hides the graph."""
 
     def test_the_input_area_is_shown_only_after_the_start_reply(self, probe):
         out = probe("stale_state")["builder_input_start"]
@@ -826,7 +826,7 @@ class TestBuilderStartInputAndStatusTiming:
 
 
 class TestSmallUiFixes:
-    """Plan 1f0925d2 step 8 (F4, D-010): graph rows, empty graph, CRLF markdown, six metric columns."""
+    """Graph rows, empty graph, CRLF markdown, six metric columns."""
 
     def test_a_row_starts_below_the_previous_rows_own_height(self, probe):
         out = probe("stale_state")["graph_rows"]
@@ -837,7 +837,7 @@ class TestSmallUiFixes:
         assert out == {"overlaps": [], "row1_minus_row0": 220, "row2_minus_row1": 540}
 
     def test_graphs_of_one_row_and_of_equal_rows_keep_every_byte(self, probe):
-        # The sha1 of the whole svg markup and the viewBox come from the BASE archive (7174a1fd).
+        # The sha1 of the whole svg markup and the viewBox were computed once for the layout of a one-row graph.
         assert probe("stale_state")["graph_unmoved"] == {
             "one": ["f263de7bd06eb1280c2d5f36c1708c720105b48d", "0 0 900 400"],
             "two": ["776132f4d6d901c5be55d72d187e5e1091a2511a", "0 0 1500 460"],
@@ -891,7 +891,7 @@ class TestSmallUiFixes:
 
 
 class TestVisualizerEmptyOption:
-    """Plan 1f0925d2 step 8 (F4, D-010): the empty option clears the view and a late reply cannot undo it."""
+    """The empty option clears the view and a late reply cannot undo it."""
 
     def test_the_empty_workflow_option_clears_the_svg_info_and_table(self, probe):
         out = probe("stale_state")["viz_empty_workflow"]
@@ -925,7 +925,7 @@ class TestVisualizerEmptyOption:
 
 
 class TestLogsClearCursor:
-    """Plan 1f0925d2 step 8 (F4, D-010): Clear survives every rebuild of the stream; a later record shows."""
+    """Clear survives every rebuild of the stream; a later record shows."""
 
     def test_cleared_records_stay_hidden_after_a_pill_a_search_and_a_page_show(
         self, probe
@@ -953,7 +953,7 @@ class TestLogsClearCursor:
 
 
 class TestDrawerDirectOpen:
-    """Plan 1f0925d2 step 8 (F4, D-010): a conversation opened straight in the drawer fetches no hidden detail."""
+    """A conversation opened straight in the drawer fetches no hidden detail."""
 
     def test_the_request_census_is_the_conversation_alone(self, probe):
         out = probe("stale_state")["drawer_direct"]

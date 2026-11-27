@@ -1300,7 +1300,7 @@ class TestApiKeyGate:
     def test_open_reads_stay_open_and_instance_reads_take_the_key(self):
         """``/health`` and ``/api/config`` show no user text and stay reachable with a
         key configured; the two instance reads show an agent's task and label, so
-        they answer 401 without the key (plan 1f0925d2 step 2, D-003)."""
+        they answer 401 without the key."""
         configure(manager=InstanceManager(), api_key="s3cr3t")
         client = TestClient(app)
         assert client.get("/health").status_code == 200

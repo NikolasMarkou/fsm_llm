@@ -155,7 +155,7 @@ class AgentsMixin(_InstanceSurface):
     # leaf `_catalog_lock` that is never held with `_lock`; a load that raises assigns nothing, so
     # the next call retries. Do NOT load in `__init__`, on the loop thread or under `_lock`.
     # The rows and the registry they came from are returned from ONE scope, so a caller that needs
-    # both (a preview, a launch) never pairs the rows of one registry with another (plan 1f0925d2).
+    # both (a preview, a launch) never pairs the rows of one registry with another.
     def _agent_catalog(self) -> tuple[list[dict[str, Any]], ExecutableRegistry]:
         """The rows (a copy) and the registry they were built from, read in one scope."""
         with self._catalog_lock:

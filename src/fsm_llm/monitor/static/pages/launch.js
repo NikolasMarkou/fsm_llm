@@ -24,7 +24,7 @@ export function showLaunchModal() {
 }
 
 // Bumped by every close: a launch captures it at its click and its 500 ms window acts only on the same
-// open modal (D-006 of plan 1f0925d2). A plain counter, so a close and a reopen cancel it too.
+// open modal. A plain counter, so a close and a reopen cancel it too.
 let _modalEpoch = 0;
 
 export function closeLaunchModal() {

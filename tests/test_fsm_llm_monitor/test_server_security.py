@@ -574,7 +574,7 @@ def _client_with_agent(api_key: str | None = None) -> TestClient:
 
 
 class TestInstanceReadsNeedTheKey:
-    """Plan 1f0925d2 step 2 (D-003): the instance list and detail show an agent's
+    """The instance list and detail show an agent's
     ``task`` and ``label``, so they take the key like every other read that shows
     user text; a server with no key configured is unchanged."""
 
@@ -657,7 +657,7 @@ class TestListLimitsAreBounded:
 
 
 class TestAPresetIsAJsonFile:
-    """Plan 1f0925d2 step 2 (D-003): a directory, an empty id and a file that is not
+    """A directory, an empty id and a file that is not
     JSON are no preset: ``FileNotFoundError`` and so 404 on every route, never the 500
     of reading a directory."""
 
@@ -723,7 +723,7 @@ class TestUnknownIdsEchoNothing:
 
 
 class TestActivitySurvivesADestroyedAgent:
-    """AM-C: an agent ``end_instance`` removed while the list was built is skipped."""
+    """An agent ``end_instance`` removed while the list was built is skipped."""
 
     def _manager_with_two_agents(self) -> InstanceManager:
         mgr = InstanceManager(config=MonitorConfig(refresh_interval=0.5))

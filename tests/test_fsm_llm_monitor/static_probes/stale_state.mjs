@@ -11,7 +11,7 @@ import * as logs from '../static/pages/logs.js';
 import { renderGraph } from '../static/utils/graph.js';
 import { renderMarkdown } from '../static/utils/markdown.js';
 
-// Plan 1f0925d2: a view or a timer must not act on a request, a modal or a state that is no longer the
+// A view or a timer must not act on a request, a modal or a state that is no longer the
 // current one. No sleep decides anything here: the timers are a fake scheduler, the replies are gates.
 const timers = [];
 globalThis.setTimeout = (fn, ms) => { timers.push({ fn, ms, live: true }); return timers.length; };
@@ -55,7 +55,7 @@ launch.setDeps({ showPage: p => pages.push(p), refreshInstances() {}, showConver
 builder.setDeps({ showPage: p => pages.push(p), refreshInstances() {} });
 const result = {};
 
-// --- F1: the capabilities fetch fails (the server decides; the failure is shown once) ---
+// --- the capabilities fetch fails (the server decides; the failure is shown once) ---
 route.fail['/api/capabilities'] = 'boom';
 launch.showLaunchModal();
 await flush();
@@ -85,7 +85,7 @@ reset();
     fire();
 }
 
-// --- F1: the launch created the instance, then the first start failed ---
+// --- the launch created the instance, then the first start failed ---
 const status = id => el(id).innerHTML;
 reset(); pages.length = 0; drawer.length = 0;
 route.fail['/api/fsm/i1/start'] = 'LLM operation timed out';
@@ -104,7 +104,7 @@ route.fail['/api/fsm/launch'] = 'bad preset';
     result.fsm_first_failed = { status: status('launch-fsm-status'), disabled: btn.disabled, timers: timers.filter(t => t.live).length, pages: [...pages], posts: calls.filter(c => c.startsWith('POST')).length };
 }
 
-// --- F1: the modal closed inside the window (or while the start was in flight): no navigation ---
+// --- the modal closed inside the window (or while the start was in flight): no navigation ---
 const launchers = {
     fsm: [launch.doLaunchFSM, 'Launch FSM'],
     workflow: [launch.doLaunchWorkflow, 'Launch Workflow'],
@@ -137,7 +137,7 @@ route.gates['/api/fsm/i1/start'] = gate();
     result.fsm_closed_during_start = { pages: [...pages], drawer: drawer.length, disabled: btn.disabled };
 }
 
-// --- F1: the builder FSM launch ---
+// --- the builder FSM launch ---
 async function builderReady() {
     builder.startBuilderSession();
     await flush();
@@ -183,7 +183,7 @@ builder.launchBuilderResult();                   // a retry after the failure is
 await flush();
 result.builder_first_failed.retry_launches = count('/api/fsm/launch');
 
-// --- F2: a failing conversation detail load that was superseded does not touch the view ---
+// --- a failing conversation detail load that was superseded does not touch the view ---
 conv.setDeps({});
 state.instances = [{ instance_id: 'I', instance_type: 'fsm', label: 'L' }];
 state.currentPage = 'control';
@@ -224,7 +224,7 @@ const shown = () => {
     await a;
     result.detail_after_back = shown();
 }
-// --- F2: the input is focused only while the same conversation is still shown and the input is visible ---
+// --- the input is focused only while the same conversation is still shown and the input is visible ---
 async function focusScenario(mode) {
     reset();
     const gate2 = gate();
@@ -248,7 +248,7 @@ async function focusScenario(mode) {
 }
 result.focus = { stays: await focusScenario('stays'), switched: await focusScenario('switched'), terminal: await focusScenario('terminal') };
 
-// --- F2: the event log: Load more by since_seq, a request token, an error keeps the earlier pages ---
+// --- the event log: Load more by since_seq, a request token, an error keeps the earlier pages ---
 const seqs = html => [...html.matchAll(/<tr><td>(\d+)<\/td>/g)].map(m => Number(m[1]));
 const logView = () => el('eventlog-view').innerHTML;
 const usage = { calls: 1, total_tokens: 2, errors: 0 };
@@ -393,7 +393,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     result.eventlog_failed_open = { error: failedView.includes('no such log'), more: failedView.includes('eventlog-more'), asked_more: asks().length - before };
 }
 
-// --- F3 (D-009): the workflow step data in the control drawer, and the <details> open state across the 2 s repaint ---
+// --- the workflow step data in the control drawer, and the <details> open state across the 2 s repaint ---
 {
     // The stub has no DOM: the drawer content gets the two behaviours the paint relies on. Assigning innerHTML re-creates
     // every <details> CLOSED (as a real DOM does) and querySelectorAll('details') returns the current ones.
@@ -455,7 +455,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     result.details_state = { count: details.length, closed_before: closedBefore, closed_after: closedAfter, opened_after: openedAfter, repainted: h2 !== '', unchanged: details.map(d => d.open), same: h2 === h3 };
 }
 
-// --- F3 (D-009): the builder input area waits for the start reply; an edit with no states hides the old graph; the first status paint ---
+// --- the builder input area waits for the start reply; an edit with no states hides the old graph; the first status paint ---
 {
     const input = () => el('builder-input-area').style.display;
     const status = () => el('builder-status').innerHTML;
@@ -526,7 +526,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     result.builder_edit_workflow_graph = graph.style.display;
 }
 
-// --- F4 (D-010): graph rows as a running sum, the empty graph, CRLF markdown ---
+// --- graph rows as a running sum, the empty graph, CRLF markdown ---
 {
     const W = 180, H = 60;
     const overlapsOf = ns => {
@@ -565,7 +565,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     const t2 = rowTops(g2);
     result.graph_rows_tall_second = { overlaps: overlapsOf(g2.nodes), row1_minus_row0: t2[1] - t2[0], row2_minus_row1: t2[2] - t2[1] };
 
-    // a graph of one row, and one of two rows of equal height, keep every byte (the hashes come from the BASE archive)
+    // a graph of one row, and one of two rows of equal height, keep every byte (the hashes were computed once for the layout of a one-row graph)
     const one = () => ({
         nodes: [{ id: 's', is_initial: true, label: 'S<b>' }, { id: 'x', description: 'a long description of the state' }, { id: 'y' }, { id: 'z', is_terminal: true }],
         edges: [{ from: 's', to: 'x', label: 'go' }, { from: 's', to: 'y' }, { from: 'x', to: 'x', label: 'loop' }, { from: 'x', to: 'z' }, { from: 'z', to: 'x' }, { from: 'y', to: 'z' }],
@@ -602,7 +602,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     };
 }
 
-// --- F4 (D-010): the empty dropdown option clears the view, and a late reply cannot paint over the clear ---
+// --- the empty dropdown option clears the view, and a late reply cannot paint over the clear ---
 {
     const view = (svgId, infoId, rowsId) => ({ svg: el(svgId).innerHTML, info: el(infoId).innerHTML, rows: el(rowsId).innerHTML });
     const wfGates = {};
@@ -645,7 +645,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     wfGates.A.open(); await slowA;
     result.viz_late_after_newer = { info_is_b: wf().info.includes('WF B'), info_is_a: wf().info.includes('WF A') };
 }
-// --- F4 (D-010): Clear survives a pill toggle, a search and a page show; a record that arrives later shows ---
+// --- Clear survives a pill toggle, a search and a page show; a record that arrives later shows ---
 {
     const pill = lvl => { const p = new El('pill-' + lvl); p.attrs['data-level'] = lvl; p.classList.add('active'); return p; };
     const pills = [pill('INFO'), pill('ERROR')];
@@ -700,7 +700,7 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     result.logs_clear = seen;
     document.querySelectorAll = realAll;
 }
-// --- F4 (D-010): opening a conversation straight in the drawer makes no request for the hidden detail panel ---
+// --- opening a conversation straight in the drawer makes no request for the hidden detail panel ---
 {
     const urls = [];
     const convOk = { conversation_id: 'c', instance_id: 'I', current_state: 's', is_terminal: false, message_history: [], context_data: {} };

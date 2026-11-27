@@ -542,7 +542,7 @@ export function launchBuilderResult() {
     showError('builder-status', `Unknown artifact type: ${_artifactType}`);
 }
 
-// One FSM launch at a time (D-006 of plan 1f0925d2): the flag is the guard, the disabled button its sign
+// One FSM launch at a time: the flag is the guard, the disabled button its sign
 // (an Apply of Edit JSON re-syncs the button, so the button alone is not a guard).
 let _fsmLaunching = false;
 

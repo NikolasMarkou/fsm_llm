@@ -339,7 +339,7 @@ function _restoreFormState(root, st) {
     }
 }
 
-/** Step data above this many characters is shown as a labelled raw cut, never as a half JSON (D-009 of plan 1f0925d2). */
+/** Step data above this many characters is shown as a labelled raw cut, never as a half JSON. */
 const STEP_DATA_MAX_CHARS = 20000;
 
 function _stepDataHtml(dataStr) {

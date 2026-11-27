@@ -1,4 +1,4 @@
-"""Plan 1f0925d2 steps 3 and 4 (S2, S3): the builder start reserves its slot before the model
+"""The builder start reserves its slot before the model
 call, holds it until the worker thread really ends, and releases it on every exit path;
 a launch checks capacity and registers in ONE ``_lock`` hold, the config setter, the
 registry snapshot and the usage fold are single scopes (the classes from
@@ -90,14 +90,14 @@ class _Rig:
 
 
 def _pending() -> dict:
-    """The table of reserved starts (empty on a tree that has none)."""
-    return dict(getattr(routes_builder, "_builder_starting", {}))
+    """The table of reserved starts."""
+    return dict(routes_builder._builder_starting)
 
 
 def _reset() -> None:
     routes_builder._builder_sessions.clear()
     routes_builder._builder_busy.clear()
-    getattr(routes_builder, "_builder_starting", {}).clear()
+    routes_builder._builder_starting.clear()
     routes_builder._builder_sessions_lock = None
 
 
@@ -441,7 +441,7 @@ class TestTheLockBelongsToTheRunningLoop:
 
     def test_a_second_loop_after_a_contended_first_loop(self, rig):
         first = asyncio.run(self._contended())
-        second = asyncio.run(self._contended())  # BASE: RuntimeError, another loop
+        second = asyncio.run(self._contended())  # a lock per loop
         assert first is not second
 
     def test_the_getter_outside_a_loop_still_keeps_one_lock(self, rig):
@@ -536,7 +536,7 @@ class TestNoPathLeaksASlot:
         _run(rig, main)
 
 
-# --- S3: one lock scope for launch capacity, the setter, the registry snapshot, the usage fold ---
+# --- one lock scope for launch capacity, the setter, the registry snapshot, the usage fold ---
 
 _STUB = StubToolConfig(name="lookup", description="A stub.", stub_response="R")
 _DONE = SimpleNamespace(success=True, answer="done", trace=None, final_context={})
@@ -702,7 +702,7 @@ def _after_check(mgr: InstanceManager, hook: str, states: list) -> None:
 
 
 class TestALaunchChecksCapacityAndRegistersInOneHold:
-    """AM-A: two launches that both pass the early check cannot both register."""
+    """Two launches that both pass the early check cannot both register."""
 
     def test_two_agent_launches_at_one_running_agent_admit_one(self, launcher):
         gate, _ = launcher
@@ -852,7 +852,7 @@ class TestTheRegistryOfALaunchIsOneSnapshot:
         assert before is not None
         self._swap_after_the_next_catalog_scope(mgr)
 
-        assert mgr.agent_preview("react") == before  # BASE: ExecutableNotFoundError
+        assert mgr.agent_preview("react") == before  # no ExecutableNotFoundError
 
     def test_the_visualize_route_is_not_a_500_after_a_swap(self):
         from fastapi.testclient import TestClient
@@ -927,7 +927,7 @@ class TestTheConfigSetterIsOneScope:
 
     def test_two_setters_leave_exactly_one_sink(self, mgr):
         """A pauses between removing the old sink and adding its own; B runs its whole setter
-        meanwhile (BASE: B finishes first and its sink is orphaned; with the lock B waits)."""
+        meanwhile (without the lock B finishes first and its sink is orphaned; with it B waits)."""
         spy = _SpyLock(threading.RLock())
         mgr._lock = spy
         paused, b_done, real = (
@@ -1023,7 +1023,7 @@ class TestTheUsageOfAnEndedInstanceIsVisibleAtEveryMoment:
 
         mgr.end_instance("gone")
 
-        assert seen == [3]  # BASE: 1 (the ended instance was neither listed nor folded)
+        assert seen == [3]  # 3, not 1: the ended instance is listed and folded
         assert self._calls(mgr) == 3
 
     def test_two_ends_of_one_instance_fold_it_once(self, monkeypatch):
