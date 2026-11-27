@@ -62,7 +62,7 @@ from fsm_llm.runtime.events import (
     check_depth,
     to_jsonable,
 )
-from fsm_llm.runtime.lanes import Lanes, settle
+from fsm_llm.runtime.lanes import Lanes, on_lane_thread, settle
 from fsm_llm.runtime.privacy import (
     PrivacyLevel,
     RedactionHook,
@@ -185,7 +185,7 @@ class EventLog(ToolEventsMixin):
           of a streamed call and of ``stack/push`` in async mode (one whole job behind the tree's
           lane jobs, never awaited, ``ordered=True``); every ``append`` and ``append_batch`` of
           the tree waits for the last ordered job (bounded by ``LANE_WAIT_SECONDS``, never on a
-          lane thread), so an inline
+          lane thread; past the bound the write is refused with ``LogWriteError``), so an inline
           write cannot land before it. A reader that reads the log between the deferral and
           the next drain (``release``, ``close``, the next awaited write of the tree) may not
           see the event yet.
@@ -349,8 +349,9 @@ class EventLog(ToolEventsMixin):
 
         A cancel arm uses it as is. A deferred write (``stream_done``, ``stack/push``) passes
         ``ordered=True``: every ``append`` of the tree then waits for the last such job first
-        (``_await_deferred``). Inline when the lane of the tree never started (no boundary
-        write was ever queued on it) and after ``close``.
+        (``_await_deferred``), and is refused when the bounded wait runs out. Inline when the
+        lane of the tree never started (no boundary write was ever queued on it) and after
+        ``close``.
         """
         job = self._lanes.after(conversation_id, fn)
         if job is not None and ordered:
@@ -367,12 +368,15 @@ class EventLog(ToolEventsMixin):
     # `update_context` right after a deferred `stack/push`) must not land before it: the fold
     # reads a pop with no push as a phantom frame and a child record with no push as
     # `LogCorruptError`. One wait covers every inline writer (one dict read when nothing is
-    # in flight); `settle` never waits on a lane thread and gives up after `LANE_WAIT_SECONDS`
-    # with a WARNING. See decisions.md D-008.
+    # in flight); a lane thread never waits (its jobs are the ordered ones). Past
+    # `LANE_WAIT_SECONDS` the write is REFUSED, never made out of order. See decisions.md
+    # D-008 and D-009.
     def _await_deferred(self, conversation_id: str) -> None:
         job = self._deferred.get(conversation_id)
-        if job is not None:
-            settle([job])
+        if job is not None and not on_lane_thread() and not settle([job]):
+            raise LogWriteError(
+                "an earlier deferred write of this tree is still running"
+            )
 
     def has_writer(self, conversation_id: str) -> bool:
         """True while *conversation_id* is live in this log: appended to or opened, not released.

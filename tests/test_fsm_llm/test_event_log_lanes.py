@@ -1007,31 +1007,42 @@ class TestADeferredJobOrdersTheInlineWritesOfItsTree:
         assert _labels(log) == ["deferred"]
         assert not warned.warning.called, warned.warning.call_args_list
 
-    async def test_the_wait_is_bounded_and_the_write_goes_on_with_a_warning(
-        self, log: EventLog
+    @pytest.mark.parametrize("how", ["append", "append_batch"])
+    async def test_the_wait_is_bounded_and_the_write_is_refused_never_made_out_of_order(
+        self, log: EventLog, how: str
     ) -> None:
-        """A hung lane: past ``LANE_WAIT_SECONDS`` the inline write goes on with a WARNING and
-        may precede the job (the named limit of D-008 (d)). Kills: a wait with no bound."""
+        """A hung lane: past ``LANE_WAIT_SECONDS`` the inline write is REFUSED with a
+        ``LogWriteError`` (no log content in the text) and writes nothing: a write that went on
+        landed before the push and the log stopped folding (D-009). Once the lane drains the tree
+        is usable again. Kills: a wait with no bound; a guard that goes on after the bound."""
         await log.lane_call(ROOT, lambda: None)
         parked, gate = await _park(log)
         log.lane_after(ROOT, _deferred_write(log, "deferred"), ordered=True)
+        write = {
+            "append": lambda: log.append(ROOT, "context/record", label="inline"),
+            "append_batch": lambda: log.append_batch(
+                ROOT, [{"type": "context/record", "label": "inline"}]
+            ),
+        }[how]
         try:
             with (
                 mock.patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.05),
                 mock.patch.object(lanes_module, "logger") as warned,
             ):
-                thread, out = _run_in_thread(
-                    lambda: log.append(ROOT, "context/record", label="inline")
-                )
+                thread, out = _run_in_thread(write)
                 _until(lambda: not thread.is_alive(), "the bounded wait to give up")
-            assert len(out) == 1 and not isinstance(out[0], BaseException)
-            assert _labels(log) == ["inline"]  # the job is still parked
+            assert len(out) == 1 and isinstance(out[0], LogWriteError), out
+            assert "still running" in str(out[0]) and ROOT not in str(out[0])
+            assert (
+                _labels(log) == []
+            )  # nothing was written, and the job is still parked
             assert "still running" in warned.warning.call_args.args[0]
         finally:
             gate.set()
             await parked
             await log.lane_call(ROOT, lambda: None)
-        assert _labels(log) == ["inline", "deferred"]
+        log.append(ROOT, "context/record", label="after")
+        assert _labels(log) == ["deferred", "after"]
 
     async def test_a_job_that_is_not_ordered_orders_nothing(
         self, log: EventLog

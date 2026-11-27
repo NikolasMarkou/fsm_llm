@@ -74,7 +74,8 @@ LANE_COUNT = 4
 
 #: The longest ``EventLog.release`` and ``close`` wait for the lane job that closes a writer (the
 #: wait keeps a finished conversation from holding a writer, file or lock after the call returns;
-#: the bound only caps a hung disk, after which the caller goes on with a WARNING).
+#: the bound only caps a hung disk, after which they go on with a WARNING, and an inline append
+#: that waits for a deferred job is refused with ``LogWriteError``).
 LANE_WAIT_SECONDS = 5.0
 
 #: The open writers (two descriptors each) an ``EventLog`` keeps by default: the least recently

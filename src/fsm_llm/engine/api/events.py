@@ -248,11 +248,12 @@ def _later(log: EventLog, kind: RedactionKind, body: Any) -> Callable[[], str]:
 # tree's jobs (`lane_after`: after the child's greeting, before the caller's next write); every
 # body is read HERE, on the loop (a pop or an update right after changes them). An inline
 # `stack/pop`, `run/end` or `update_context` cannot land before the push: `EventLog.append`
-# waits for the tree's deferred job (else the fold reads a phantom frame, or raises
-# LogCorruptError for a child record no push covers). Do NOT await a lane call after the frame
-# append (a cancel point, D-020 of plan baa37f40), read state, context or definition inside the
-# job, queue the pop instead of waiting (`update_context` raises: it cannot be deferred), run
-# the job inline outside SYNC mode or add a public name. See decisions.md D-008.
+# waits for the tree's deferred job and REFUSES the write past its bound (D-009; else the fold
+# reads a phantom frame, or raises LogCorruptError for a child record no push covers). Do NOT
+# await a lane call after the frame append (a cancel point, D-020 of plan baa37f40), read
+# state, context or definition inside the job, queue the pop instead of waiting
+# (`update_context` raises: it cannot be deferred), run the job inline outside SYNC mode or
+# add a public name. See decisions.md D-008.
 def record_push(
     api: _ApiSurface,
     conversation_id: str,

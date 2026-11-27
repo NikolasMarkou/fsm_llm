@@ -63,7 +63,7 @@ def on_lane_thread() -> bool:
 def settle(jobs: Iterable[Future[Any] | None]) -> bool:
     """Wait for the futures ``Lanes.after`` returned; True when every one has finished.
 
-    Bounded by ``LANE_WAIT_SECONDS`` (a WARNING when one is still running: the caller goes on and
+    Bounded by ``LANE_WAIT_SECONDS`` (a WARNING when one is still running: the caller decides, and
     the job still runs). Never waits on a lane thread: the job would wait for its own queue, or
     two lanes for each other, so the answer there is ``False`` at once.
     """
@@ -74,9 +74,7 @@ def settle(jobs: Iterable[Future[Any] | None]) -> bool:
         return False
     _, running = wait_futures(queued, timeout=LANE_WAIT_SECONDS)
     if running:
-        logger.warning(
-            "event log lane job still running after the wait bound; going on"
-        )
+        logger.warning("event log lane job still running after the wait bound")
     return not running
 
 

@@ -23,7 +23,8 @@ import pytest
 
 from fsm_llm import API
 from fsm_llm.engine.events import record_state
-from fsm_llm.runtime import EventLog, EventType, LogCorruptError
+from fsm_llm.runtime import EventLog, EventType, LogCorruptError, LogWriteError
+from fsm_llm.runtime import lanes as lanes_module
 from fsm_llm.runtime.lanes import Lanes
 from fsm_llm.runtime.stores import (
     StackProjection,
@@ -899,3 +900,57 @@ class TestAnAsyncPush:
             assert again_api.get_stack_depth(cid) == 2, n
             assert again_api.get_current_state(cid) == "hello", n
             again.close()
+
+    @pytest.mark.parametrize("after", ["pop", "update"])
+    async def test_past_the_bound_the_inline_write_is_refused_and_the_log_still_folds(
+        self, log: EventLog, after: str
+    ):
+        """D-009 (review probes p7_giveup, p13_lostpop): the lane is parked just ahead of the
+        deferred push and the wait bound is tiny. A write that went on past the bound landed
+        BEFORE the push: a ``stack/pop`` made a phantom child frame, an ``update_context`` record
+        made the fold raise ``LogCorruptError`` for good. Now the write is refused: the pop is
+        dropped (its WARNING), ``update_context`` raises ``LogWriteError``, the log folds, and
+        once the lane drains the conversation is usable (a parent turn heals the dropped pop).
+        Kills: a guard that goes on after the bound."""
+        api = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+        cid, _ = await api.astart_conversation()
+        gate = threading.Event()
+        real_after = log.lane_after
+
+        def parked_after(root: str, fn: Any, **kw: Any) -> None:
+            log._lanes._submit(
+                root, True, gate.wait, 20.0
+            )  # parked just ahead of the job
+            real_after(root, fn, **kw)
+
+        try:
+            with patch.object(log, "lane_after", parked_after):
+                await api.apush_fsm(cid, copy.deepcopy(_KID))
+            with patch.object(lanes_module, "LANE_WAIT_SECONDS", 0.2):
+                if after == "pop":
+                    api.pop_fsm(cid, context_to_return={"result": 1})
+                else:
+                    with pytest.raises(LogWriteError):
+                        api.update_context(cid, {"note": "n"})
+            live = _view(api, cid)
+            assert not [e for e in log.read(cid) if e["type"] == "stack/push"]
+            kinds = [(e["type"], e["frame"]) for e in log.read(cid)]
+            assert ("stack/pop", 0) not in kinds and ("context/record", 1) not in kinds
+        finally:
+            gate.set()
+        if after == "pop":
+            await api.aconverse(
+                "again", cid
+            )  # the next parent turn heals the dropped pop
+        log.release(cid)  # the drain: the push job runs behind the park
+        folded = fold_stack(log.read(cid), log.get_json)  # never LogCorruptError
+        assert folded is not None and folded.depth == live[0]
+        api2 = API(copy.deepcopy(_ROOT), llm_interface=_llm(), event_log=log)
+        cid2, _ = await api2.astart_conversation()
+        await api2.apush_fsm(cid2, copy.deepcopy(_KID))
+        api2.update_context(cid2, {"note": "n"})  # the tree is usable again
+        api2.pop_fsm(cid2, context_to_return={"result": 1})
+        log.release(cid2)
+        again = fold_stack(log.read(cid2), log.get_json)
+        assert again is not None and again.depth == 1
+        assert live[0] == (2 if after == "update" else 1)
