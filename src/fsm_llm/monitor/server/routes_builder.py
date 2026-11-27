@@ -149,7 +149,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         # DECISION plan-2026-11-19T025425-51fde95b/D-054
         # A force-deleted build whose worker still runs stays COUNTED until the
         # thread ends (an id in _builder_busy with no live session), against the
-        # session cap and MAX_ABANDONED_BUILDERS, as every start in flight does. Do NOT stop counting it on the
+        # session cap and MAX_ABANDONED_BUILDERS. Do NOT stop counting it on the
         # delete (hidden model loops starve the shared thread pool), and do NOT add
         # an executor or a thread cancel for it (a model call cannot be stopped).
         orphans = len(_builder_busy - _builder_sessions.keys())
