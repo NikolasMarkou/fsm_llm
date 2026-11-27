@@ -35,13 +35,15 @@ _builder_busy: set[str] = set()
 _background_tasks: set[asyncio.Future[Any]] = set()
 # DECISION plan-2026-11-27T102400-1f0925d2/D-004
 # Extends the D-054 anchor in api_builder_start to a start in flight. Reserved
-# starts, token -> detached (the request gave up: a 504 or a cancel). A start
-# reserves its token in the SAME lock block as the cap check, before agent.start,
-# so a burst cannot pass the cap. A token counts against the session cap, a
-# detached one also against MAX_ABANDONED_BUILDERS, until its thread ends. Do NOT
-# release at the 504 (the thread still runs, D-054), do NOT check and reserve in
-# two lock blocks, and do NOT await in the arm that detaches (a cancel is raised).
-_builder_starting: dict[str, bool] = {}
+# starts (one token each). A start reserves its token in the SAME lock block as the
+# cap check, before agent.start, so a burst cannot pass the cap. A token counts
+# against the session cap AND MAX_ABANDONED_BUILDERS from the reservation to the end
+# of its thread: a start that times out (504) or is cancelled keeps its thread, so
+# counting only the ones already given up lets a burst of starts leave every one of
+# them running. Do NOT release at the 504 (the thread still runs, D-054), do NOT
+# count only the detached ones, do NOT check and reserve in two lock blocks, and do
+# NOT await in the arm that detaches (a cancel is raised).
+_builder_starting: set[str] = set()
 
 
 class _LoopLock(asyncio.Lock):
@@ -127,14 +129,13 @@ def _build_start_agent(req: BuilderStartRequest) -> Any:
 
 
 def _detach_start(token: str, work: asyncio.Future[Any]) -> None:
-    """The request gave up on a start whose thread runs on: its slot is held (and
-    counted as abandoned) until the thread ends. No await: callable from an except arm."""
-    _builder_starting[token] = True
+    """The request gave up on a start whose thread runs on: its slot is held until the
+    thread ends. No await: callable from an except arm."""
 
     def _ended(fut: asyncio.Future[Any]) -> None:
         if not fut.cancelled():
             fut.exception()  # retrieved: a late failure is not logged by the loop
-        _builder_starting.pop(token, None)
+        _builder_starting.discard(token)
 
     work.add_done_callback(_ended)  # a future already done runs it on the next tick
 
@@ -148,11 +149,11 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         # DECISION plan-2026-11-19T025425-51fde95b/D-054
         # A force-deleted build whose worker still runs stays COUNTED until the
         # thread ends (an id in _builder_busy with no live session), against the
-        # session cap and MAX_ABANDONED_BUILDERS. Do NOT stop counting it on the
+        # session cap and MAX_ABANDONED_BUILDERS, as every start in flight does. Do NOT stop counting it on the
         # delete (hidden model loops starve the shared thread pool), and do NOT add
         # an executor or a thread cancel for it (a model call cannot be stopped).
         orphans = len(_builder_busy - _builder_sessions.keys())
-        abandoned = orphans + sum(_builder_starting.values())
+        running = orphans + len(_builder_starting)
         if len(_builder_sessions) + orphans + len(_builder_starting) >= (
             MAX_BUILDER_SESSIONS
         ):
@@ -160,20 +161,20 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
                 status_code=429,
                 detail=f"too many builder sessions (max {MAX_BUILDER_SESSIONS})",
             )
-        if abandoned >= MAX_ABANDONED_BUILDERS:
+        if running >= MAX_ABANDONED_BUILDERS:
             raise HTTPException(
                 status_code=429,
                 detail=(
-                    f"{abandoned} cancelled builds are still running "
+                    f"{running} builds are still running "
                     f"(max {MAX_ABANDONED_BUILDERS}); try again when one ends"
                 ),
             )
-        _builder_starting[token] = False  # reserved before the model call
+        _builder_starting.add(token)  # reserved before the model call
 
     try:
         agent = _build_start_agent(req)
     except BaseException:
-        _builder_starting.pop(token, None)
+        _builder_starting.discard(token)
         raise
 
     work = asyncio.ensure_future(
@@ -187,7 +188,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         _detach_start(token, work)
         raise HTTPException(status_code=504, detail="LLM operation timed out") from None
     except Exception as e:
-        _builder_starting.pop(token, None)  # the worker is over
+        _builder_starting.discard(token)  # the worker is over
         logger.error(f"Builder start failed: {e}")
         raise HTTPException(status_code=500, detail="Internal server error") from e
     except BaseException:  # cancelled: the thread runs on
@@ -199,7 +200,7 @@ async def api_builder_start(req: BuilderStartRequest) -> dict[str, Any]:
         async with _get_builder_lock():
             _builder_sessions[session_id] = (agent, time.time())
     finally:
-        _builder_starting.pop(token, None)
+        _builder_starting.discard(token)
 
     result: dict[str, Any] = {
         "session_id": session_id,

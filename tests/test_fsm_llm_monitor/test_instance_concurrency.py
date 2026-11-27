@@ -90,9 +90,9 @@ class _Rig:
         return _Agent
 
 
-def _pending() -> dict:
-    """The table of reserved starts."""
-    return dict(routes_builder._builder_starting)
+def _pending() -> set:
+    """The reserved starts."""
+    return set(routes_builder._builder_starting)
 
 
 def _reset() -> None:
@@ -184,13 +184,12 @@ class TestAStartReservesItsSlotBeforeTheModelCall:
                     "too many builder sessions (max 3)"
                 }
                 assert len(_pending()) == 3
-                assert not any(_pending().values())  # reserved, none detached
                 rig.gate.set()
                 rest = [t for t in tasks if not t.done()]
                 codes = [r.status_code for r in await asyncio.gather(*rest)]
                 assert codes == [200] * 3
             assert len(routes_builder._builder_sessions) == 3
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -210,7 +209,7 @@ class TestAStartReservesItsSlotBeforeTheModelCall:
             }
             assert body["response"] == "hello"
             assert body["session_id"] in routes_builder._builder_sessions
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -222,7 +221,7 @@ class TestAStartReservesItsSlotBeforeTheModelCall:
             with pytest.raises(HTTPException) as refused:
                 await routes_builder.api_builder_start(BuilderStartRequest())
             assert refused.value.status_code == 429
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -239,7 +238,7 @@ class TestATimedOutOrCancelledStartKeepsItsSlotUntilTheWorkerEnds:
                 assert first.status_code == 504
                 assert _detail(first) == "LLM operation timed out"
                 assert rig.entered == 1 and not rig.gate.is_set()
-                assert list(_pending().values()) == [True]  # held, detached
+                assert len(_pending()) == 1  # held until the worker ends
                 with monkeypatch.context() as cap:  # the session cap counts it
                     cap.setattr(routes_builder, "MAX_BUILDER_SESSIONS", 1)
                     second = await _start(client)
@@ -250,12 +249,11 @@ class TestATimedOutOrCancelledStartKeepsItsSlotUntilTheWorkerEnds:
                     third = await _start(client)
                 assert third.status_code == 429
                 assert _detail(third) == (
-                    "1 cancelled builds are still running (max 1); "
-                    "try again when one ends"
+                    "1 builds are still running (max 1); try again when one ends"
                 )
                 assert rig.entered == 1  # neither refused start reached a worker
                 rig.gate.set()  # the worker ends: the slot is released
-                await _until(lambda: _pending() == {}, "the slot released")
+                await _until(lambda: not _pending(), "the slot released")
                 monkeypatch.setattr(routes_builder, "_LLM_OPERATION_TIMEOUT", 30.0)
                 fourth = await _start(client)
                 assert fourth.status_code == 200
@@ -274,11 +272,63 @@ class TestATimedOutOrCancelledStartKeepsItsSlotUntilTheWorkerEnds:
                 await task
             assert task.cancelled()  # raised, never absorbed
             assert asyncio.current_task().cancelling() == 0
-            # no await ran in the arm: the slot is already marked detached
-            assert list(_pending().values()) == [True]
+            assert len(_pending()) == 1  # the thread runs on: the slot is held
             rig.gate.set()
-            await _until(lambda: _pending() == {}, "the slot released")
+            await _until(lambda: not _pending(), "the slot released")
             assert routes_builder._builder_sessions == {}
+
+        _run(rig, main)
+
+
+class TestABurstOfStartsHoldsAtMostTheAbandonedBound:
+    """A start in flight counts against ``MAX_ABANDONED_BUILDERS`` too: a burst whose
+    requests all time out cannot leave more than that many model threads running."""
+
+    def test_ten_concurrent_starts_admit_the_bound_and_refuse_the_rest(self, rig):
+        bound = routes_builder.MAX_ABANDONED_BUILDERS
+
+        async def main():
+            async with _client() as client:
+                tasks = [asyncio.ensure_future(_start(client)) for _ in range(10)]
+                await _until(
+                    lambda: rig.entered + sum(t.done() for t in tasks) >= 10,
+                    "ten requests placed",
+                )
+                answered = [t.result() for t in tasks if t.done()]
+                assert rig.entered == bound
+                assert [r.status_code for r in answered] == [429] * (10 - bound)
+                assert {_detail(r) for r in answered} == {
+                    f"{bound} builds are still running (max {bound}); "
+                    "try again when one ends"
+                }
+                rig.gate.set()
+                rest = [t for t in tasks if not t.done()]
+                assert [r.status_code for r in await asyncio.gather(*rest)] == [
+                    200
+                ] * bound
+
+        _run(rig, main)
+
+    def test_a_burst_that_all_times_out_leaves_the_bound_of_live_workers(
+        self, rig, monkeypatch
+    ):
+        monkeypatch.setattr(routes_builder, "_LLM_OPERATION_TIMEOUT", 0.05)
+        bound = routes_builder.MAX_ABANDONED_BUILDERS
+
+        async def main():
+            async with _client() as client:
+                burst = await asyncio.gather(*[_start(client) for _ in range(10)])
+                assert (
+                    sorted(r.status_code for r in burst)
+                    == [429] * (10 - bound) + [504] * bound
+                )
+                assert rig.entered == bound and len(_pending()) == bound
+                again = await _start(client)  # the held workers still count
+                assert again.status_code == 429 and rig.entered == bound
+                rig.gate.set()
+                await _until(lambda: not _pending(), "the workers ended")
+                monkeypatch.setattr(routes_builder, "_LLM_OPERATION_TIMEOUT", 30.0)
+                assert (await _start(client)).status_code == 200
 
         _run(rig, main)
 
@@ -290,7 +340,7 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
                 response = await _start(client, "boom")
             assert response.status_code == 500
             assert _detail(response) == "Internal server error"
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -311,7 +361,7 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
                 rig.gate.set()
                 codes = [r.status_code for r in await asyncio.gather(*blocked, third)]
                 assert codes == [200] * 3
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -327,7 +377,7 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
                 rig.gate.set()
                 assert (await blocked).status_code == 200
             assert len(routes_builder._builder_sessions) == 2
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -338,7 +388,7 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
             with pytest.raises(HTTPException) as refused:
                 await routes_builder.api_builder_start(BuilderStartRequest())
             assert refused.value.status_code == 501
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -353,7 +403,7 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
                 await routes_builder.api_builder_start(BuilderStartRequest())
             assert refused.value.status_code == 400
             assert refused.value.detail == "no model is set"
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -367,7 +417,7 @@ class TestEveryOtherExitReleasesTheSlotAtOnce:
         async def main():
             with pytest.raises(RuntimeError, match="cannot build"):
                 await routes_builder.api_builder_start(BuilderStartRequest())
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
@@ -398,7 +448,7 @@ class TestAFailureAfterTheRequestGaveUpIsRetrieved:
                 )
             )
             assert status == 504
-            records = await self._after_the_worker_failed(rig, lambda: _pending() == {})
+            records = await self._after_the_worker_failed(rig, lambda: not _pending())
             assert [r for r in records if "never retrieved" in r] == []
             assert routes_builder._builder_sessions == {}
 
@@ -527,12 +577,12 @@ class TestNoPathLeaksASlot:
                     # the thread still runs: its slot is held, the cap says refuse
                     await self._check(client, 1, refused=True)
                     rig.gate.set()
-                    await _until(lambda: _pending() == {}, "the worker ended")
+                    await _until(lambda: not _pending(), "the worker ended")
                 if path == "success":
                     await self._check(client, 1, refused=True)
                 else:
                     await self._check(client, 0, refused=False)
-            assert _pending() == {}
+            assert not _pending()
 
         _run(rig, main)
 
