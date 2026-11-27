@@ -175,7 +175,9 @@ export async function showConversationDetail(convId) {
             titleEl.textContent = `${instLabel ? `${instLabel} \u2192 ` : ''}${data.current_state}`;
         }
     } catch (e) {
-        detail.innerHTML = '<span class="error-message">Failed to load conversation</span>';
+        // A newer request, or another conversation, owns the view: a late failure paints nothing.
+        if (thisRequest !== _detailRequestId || state.selectedConvId !== convId) return;
+        detail.innerHTML = `<span class="error-message">Failed to load conversation: ${esc(e?.message || 'request failed')}</span>`;
         if (chatInput) chatInput.style.display = 'none';
         console.error('showConversationDetail:', e);
     }
@@ -276,7 +278,8 @@ export async function sendChatMessage() {
     }
     _sendingConvId = null;
     input.disabled = false;
-    input.focus();
+    // The input is shared: take focus only for the conversation still shown, and only while it is visible.
+    if (state.selectedConvId === convId && $('conv-chat-input')?.style.display !== 'none') input.focus();
     // Catch up on any refresh deferred during the send.
     if (_rerenderAfterSend && state.selectedConvId === convId) {
         _rerenderAfterSend = false;

@@ -197,6 +197,7 @@ const ACTIONS = {
     'refresh-logs':      () => logs.refreshLogs(),
     'refresh-eventlog':  () => eventlog.loadEventLogs(),
     'open-eventlog':     (el) => eventlog.openEventLog(el.dataset.convId),
+    'eventlog-more':     () => eventlog.loadMoreEventLog(),
     'toggle-log-pause':  () => logs.toggleLogPause(),
     'clear-logs':        () => logs.clearLogs(),
     'log-jump-latest':   () => logs.logJumpToLatest(),

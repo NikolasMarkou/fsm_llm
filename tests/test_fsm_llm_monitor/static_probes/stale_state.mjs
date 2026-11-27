@@ -2,6 +2,8 @@ import { el, serve, out } from './stub.mjs';
 import { state } from '../static/services/state.js';
 import * as launch from '../static/pages/launch.js';
 import * as builder from '../static/pages/builder.js';
+import * as conv from '../static/pages/conversations.js';
+import * as eventlog from '../static/pages/eventlog.js';
 
 // Plan 1f0925d2: a view or a timer must not act on a request, a modal or a state that is no longer the
 // current one. No sleep decides anything here: the timers are a fake scheduler, the replies are gates.
@@ -21,9 +23,10 @@ const toasts = () => (document.body.children || []).map(c => c.textContent);
 
 const defaultCaps = { ...state.capabilities };   // read before anything sets it
 const calls = [];
-const route = { fail: {}, gates: {} };           // route[url] -> fail text, or a gate the reply waits on
+const route = { fail: {}, gates: {}, custom: null };  // route[url] -> fail text, or a gate the reply waits on; custom(url, opts) answers first
 serve(async (url, opts) => {
     calls.push(`${opts?.method || 'GET'} ${url}`);
+    if (route.custom) { const r = await route.custom(url, opts); if (r !== undefined) return r; }
     if (route.gates[url]) await route.gates[url].p;
     if (route.fail[url] !== undefined) return { fail: route.fail[url] };
     if (url === '/api/agent/types') return { agent_types: [{ id: 'debate', name: 'debate', launchable: true, needs_tools: false, takes_tools: false, tool_names: [], drawable: true }] };
@@ -38,7 +41,7 @@ serve(async (url, opts) => {
 });
 const FSM = { name: 'F', initial_state: 'a', states: { a: { id: 'a', description: 'd', purpose: 'p' } } };
 const count = url => calls.filter(c => c === `POST ${url}`).length;
-const reset = () => { calls.length = 0; route.fail = {}; route.gates = {}; timers.length = 0; };
+const reset = () => { calls.length = 0; route.fail = {}; route.gates = {}; route.custom = null; timers.length = 0; };
 
 const pages = [];
 const drawer = [];
@@ -174,5 +177,214 @@ builder.launchBuilderResult();                   // a retry after the failure is
 await flush();
 result.builder_first_failed.retry_launches = count('/api/fsm/launch');
 
+// --- F2: a failing conversation detail load that was superseded does not touch the view ---
+conv.setDeps({});
+state.instances = [{ instance_id: 'I', instance_type: 'fsm', label: 'L' }];
+state.currentPage = 'control';
+const convBody = (id, st) => ({ conversation_id: id, instance_id: 'I', current_state: st, is_terminal: false, message_history: [], context_data: {} });
+const shown = () => {
+    const html = el('conv-detail').innerHTML;
+    return { live: html.includes('liveB'), prior: html === 'PRIOR', error: (html.match(/<span class="error-message">(.*?)<\/span>/) || [])[1] ?? null, input: el('conv-chat-input').style.display };
+};
+{
+    reset();
+    const gA = gate();
+    route.custom = async url => {
+        if (url.endsWith('/A')) { await gA.p; return { fail: 'ended A' }; }
+        return convBody('B', 'liveB');
+    };
+    const a = conv.showConversationDetail('A');
+    await conv.showConversationDetail('B');
+    const beforeA = shown();
+    gA.open();
+    await a;
+    result.detail_superseded = { before: beforeA, after: shown(), selected: state.selectedConvId };
+}
+{
+    reset();
+    route.custom = url => (url.endsWith('/A') ? { fail: 'ended <b>A</b>' } : undefined);
+    await conv.showConversationDetail('A');
+    result.detail_current_fails = shown();
+}
+{
+    reset();
+    const gA = gate();
+    route.custom = async () => { await gA.p; return { fail: 'late' }; };
+    el('conv-detail').innerHTML = 'PRIOR';
+    el('conv-chat-input').style.display = 'block';
+    const a = conv.showConversationDetail('A');
+    state.selectedConvId = null;               // the drawer went back: no conversation is shown
+    gA.open();
+    await a;
+    result.detail_after_back = shown();
+}
+// --- F2: the input is focused only while the same conversation is still shown and the input is visible ---
+async function focusScenario(mode) {
+    reset();
+    const gate2 = gate();
+    route.custom = async (url, opts) => {
+        if (opts?.method === 'POST') { await gate2.p; return { response: 'R', current_state: mode === 'terminal' ? 'END' : 'live', is_terminal: mode === 'terminal' }; }
+        return convBody(url.endsWith('/B') ? 'B' : 'A', 'live');
+    };
+    const input = el('conv-message-input');
+    let focused = 0;
+    input.focus = () => { focused++; };
+    el('conv-chat-input').style.display = '';
+    conv.showConversationInDrawer('I', 'A');
+    await flush();
+    input.value = 'hello';
+    const sent = conv.sendChatMessage();
+    await flush();
+    if (mode === 'switched') { conv.drawerBack(); conv.showConversationInDrawer('I', 'B'); await flush(); }
+    gate2.open();
+    await sent;
+    return { focused, disabled: input.disabled };
+}
+result.focus = { stays: await focusScenario('stays'), switched: await focusScenario('switched'), terminal: await focusScenario('terminal') };
+
+// --- F2: the event log: Load more by since_seq, a request token, an error keeps the earlier pages ---
+const seqs = html => [...html.matchAll(/<tr><td>(\d+)<\/td>/g)].map(m => Number(m[1]));
+const logView = () => el('eventlog-view').innerHTML;
+const usage = { calls: 1, total_tokens: 2, errors: 0 };
+/** A log of `total` events served 200 at a time after `since_seq`, as the route does (next_seq only on a full page). */
+const pageOf = (id, url, total, mark) => {
+    const since = Number(new URL(url, 'http://x').searchParams.get('since_seq') || 0);
+    const last = Math.min(since + 200, total);
+    const events = [];
+    for (let s = since + 1; s <= last; s++) events.push({ seq: s, ts: `t${s}`, type: 'turn/start', frame: 0, ...(s === 201 ? { state: '<script>x</script>' } : {}), ...(mark ? { log: id } : {}) });
+    return { conversation_id: id, events, usage, skipped: 0, corrupt_after_seq: null, next_seq: events.length === 200 ? last : null };
+};
+const more = eventlog.loadMoreEventLog ?? (async () => {});   // absent before the fix: the rows then fail on values
+const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
+{
+    reset();
+    route.custom = url => (url.startsWith('/api/eventlog/abc') ? pageOf('abc', url, 450) : undefined);
+    await eventlog.openEventLog('abc');
+    const first = logView();
+    await more();
+    const second = logView();
+    await more();
+    const third = logView();
+    const askedBefore = asks().length;
+    await more();           // nothing is left: no request
+    result.eventlog_more = {
+        first: { seqs: seqs(first).length, more: first.includes('data-action="eventlog-more"'), notice: first.includes('the first events only'), end: first.includes('No more events to show') },
+        second: { seqs: seqs(second).length, more: second.includes('data-action="eventlog-more"'), notice: second.includes('the first events only'), headers: second.split('<thead>').length - 1, escaped: second.includes('&lt;script&gt;'), raw: second.includes('<script>') },
+        third: { rows: seqs(third).length, unique: new Set(seqs(third)).size, last: seqs(third).at(-1), more: third.includes('data-action="eventlog-more"'), notice: third.includes('the first events only'), end: third.includes('No more events to show'), headers: third.split('<thead>').length - 1 },
+        asked: asks(),
+        asked_after_end: asks().length - askedBefore,
+    };
+}
+{
+    reset();
+    const g = gate();
+    route.custom = async url => { if (url.includes('since_seq=200')) await g.p; return url.startsWith('/api/eventlog/abc') ? pageOf('abc', url, 450) : undefined; };
+    await eventlog.openEventLog('abc');
+    const one = more();
+    const two = more();     // a second click while the first is in flight
+    g.open();
+    await Promise.all([one, two]);
+    result.eventlog_double_click = { asked: asks(), rows: seqs(logView()).length };
+}
+{
+    reset();
+    let broken = true;
+    route.custom = url => {
+        if (url.startsWith('/api/eventlog/abc')) return broken && url.includes('since_seq') ? { fail: 'boom <i>x</i>' } : pageOf('abc', url, 450);
+        return undefined;
+    };
+    await eventlog.openEventLog('abc');
+    await more();
+    const failed = logView();
+    broken = false;
+    await more();
+    const retried = logView();
+    result.eventlog_error = { rows: seqs(failed).length, error: failed.includes('boom &lt;i&gt;x&lt;/i&gt;'), raw: failed.includes('<i>x'), more: failed.includes('data-action="eventlog-more"'), rows_after: seqs(retried).length, error_after: retried.includes('boom') };
+}
+{
+    reset();
+    const gA = gate();
+    route.custom = async url => {
+        if (url.startsWith('/api/eventlog/A')) { await gA.p; return pageOf('A', url, 450, true); }
+        if (url.startsWith('/api/eventlog/B')) return pageOf('B', url, 450, true);
+        return undefined;
+    };
+    // log A (slow) opened, then log B (fast)
+    const openA = eventlog.openEventLog('A');
+    await eventlog.openEventLog('B');
+    const afterB = logView();
+    gA.open();
+    await openA;
+    result.eventlog_open_race = { b_shown: afterB.includes('B:'), final_b: logView().includes('B:') && !logView().includes('A:'), final_rows: seqs(logView()).length };
+    // A Load more of log A lands after log B was opened: dropped, and B continues from its own next_seq
+    reset();
+    const gA2 = gate();
+    route.custom = async url => {
+        if (url.startsWith('/api/eventlog/A')) { if (url.includes('since_seq')) await gA2.p; return pageOf('A', url, 450, true); }
+        if (url.startsWith('/api/eventlog/B')) return pageOf('B', url, 450, true);
+        return undefined;
+    };
+    await eventlog.openEventLog('A');
+    const moreA = more();
+    await eventlog.openEventLog('B');
+    gA2.open();
+    await moreA;
+    const mixed = logView();
+    await more();
+    const next = logView();
+    result.eventlog_more_race = { rows: seqs(mixed).length, b_only: mixed.includes('B:') && !mixed.includes('A:'), next_rows: seqs(next).length, next_b_only: !next.includes('A:'), asked: asks().filter(a => a.includes('since_seq')) };
+}
+{
+    // A Load more clicked while another log is still opening must not supersede that open
+    reset();
+    const gB = gate();
+    route.custom = async url => {
+        if (url.startsWith('/api/eventlog/B')) await gB.p;
+        return url.startsWith('/api/eventlog/') ? pageOf(url.split('/')[3].split('?')[0], url, 450, true) : undefined;
+    };
+    await eventlog.openEventLog('A');
+    const openB = eventlog.openEventLog('B');
+    await more();                                // the stale button of log A, clicked while B loads
+    gB.open();
+    await openB;
+    result.eventlog_more_during_open = { b_only: logView().includes('B:') && !logView().includes('A:'), asked: asks() };
+}
+{
+    // A stale open that FAILS must not paint over the newer log either; hostile fields of every column are escaped
+    reset();
+    const gA = gate();
+    route.custom = async url => {
+        if (url.startsWith('/api/eventlog/A')) { await gA.p; return { fail: 'late failure of A' }; }
+        if (url.startsWith('/api/eventlog/B')) return pageOf('B', url, 10, true);
+        return undefined;
+    };
+    const openA = eventlog.openEventLog('A');
+    await eventlog.openEventLog('B');
+    gA.open();
+    await openA;
+    result.eventlog_stale_failure = { b_only: logView().includes('B:') && !logView().includes('late failure') };
+    reset();
+    route.custom = () => ({ conversation_id: 'h<u>x', usage, next_seq: null, events: [{ seq: 1, ts: '<i>ts</i>', frame: '<s>f</s>', type: '<b>t</b>', note: '<em>n</em>' }] });
+    await eventlog.openEventLog('h');
+    const hostile = logView();
+    result.eventlog_hostile = { raw: ['<u>', '<i>', '<s>', '<b>', '<em>'].filter(t => hostile.includes(t)), escaped: ['h&lt;u&gt;x', '&lt;i&gt;ts', '&lt;s&gt;f', '&lt;b&gt;t', '&lt;em&gt;n'].filter(t => hostile.includes(t)).length };
+}
+{
+    reset();
+    route.custom = url => (url.startsWith('/api/eventlog/big') ? pageOf('big', url, 2600) : undefined);
+    await eventlog.openEventLog('big');
+    for (let i = 0; i < 12; i++) await more();
+    const capped = logView();
+    result.eventlog_cap = { rows: seqs(capped).length, more: capped.includes('eventlog-more'), line: (capped.match(/Showing the first[^<]*/) || [null])[0], asked: asks().length };
+}
+{
+    reset();
+    route.custom = url => (url.startsWith('/api/eventlog/zzz') ? { fail: 'no such log' } : undefined);
+    await eventlog.openEventLog('zzz');
+    const failedView = logView();
+    const before = asks().length;
+    await more();
+    result.eventlog_failed_open = { error: failedView.includes('no such log'), more: failedView.includes('eventlog-more'), asked_more: asks().length - before };
+}
 out(result);
 process.exit(0);

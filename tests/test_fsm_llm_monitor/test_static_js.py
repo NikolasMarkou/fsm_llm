@@ -635,6 +635,130 @@ class TestLaunchFlows:
         assert "innerHTML +=" not in text
 
 
+class TestConversationDetailRaces:
+    """Plan 1f0925d2 step 6 (F2, D-007): a superseded failure paints nothing, a failure says why, focus follows the view."""
+
+    def test_a_superseded_failure_does_not_replace_the_newer_view(self, probe):
+        out = probe("stale_state")["detail_superseded"]
+        assert out["before"]["live"] is True and out["before"]["input"] == "block"
+        assert out["after"] == out["before"]
+        assert out["selected"] == "B"
+
+    def test_the_current_failure_shows_the_server_reason_escaped_and_hides_the_input(
+        self, probe
+    ):
+        out = probe("stale_state")["detail_current_fails"]
+        assert out["error"] == "Failed to load conversation: ended &lt;b&gt;A&lt;/b&gt;"
+        assert out["input"] == "none"
+
+    def test_a_failure_after_the_drawer_went_back_paints_nothing(self, probe):
+        out = probe("stale_state")["detail_after_back"]
+        assert out["prior"] is True and out["error"] is None and out["input"] == "block"
+
+    def test_focus_moves_only_while_the_same_visible_conversation_is_shown(self, probe):
+        out = probe("stale_state")["focus"]
+        assert out["stays"] == {"focused": 1, "disabled": False}
+        # the shared input is released in every case, focused only when it is this reply's to take
+        assert out["switched"] == {"focused": 0, "disabled": False}
+        assert out["terminal"] == {"focused": 0, "disabled": False}
+
+
+class TestEventLogLoadMore:
+    """Plan 1f0925d2 step 6 (F2, D-007): Load more by `since_seq`, a request token, errors keep the earlier pages."""
+
+    def test_load_more_appends_the_next_pages_and_ends_with_a_marker(self, probe):
+        out = probe("stale_state")["eventlog_more"]
+        # the first page is not asked again; each later page starts after the last seq shown
+        assert out["asked"] == [
+            "GET /api/eventlog/abc",
+            "GET /api/eventlog/abc?since_seq=200",
+            "GET /api/eventlog/abc?since_seq=400",
+        ]
+        assert out["first"] == {
+            "seqs": 200,
+            "more": True,
+            "notice": True,
+            "end": False,
+        }
+        assert out["second"]["seqs"] == 400 and out["second"]["more"] is True
+        assert out["second"]["notice"] is True and out["second"]["headers"] == 1
+        third = out["third"]
+        assert (third["rows"], third["unique"], third["last"]) == (450, 450, 450)
+        assert third["more"] is False and third["notice"] is False
+        assert third["end"] is True and third["headers"] == 1
+        assert out["asked_after_end"] == 0
+
+    def test_hostile_text_in_a_later_page_is_escaped(self, probe):
+        second = probe("stale_state")["eventlog_more"]["second"]
+        assert second["escaped"] is True and second["raw"] is False
+
+    def test_a_second_click_while_a_page_is_in_flight_asks_once(self, probe):
+        out = probe("stale_state")["eventlog_double_click"]
+        assert out["asked"] == [
+            "GET /api/eventlog/abc",
+            "GET /api/eventlog/abc?since_seq=200",
+        ]
+        assert out["rows"] == 400
+
+    def test_a_failed_page_keeps_the_earlier_pages_and_can_be_retried(self, probe):
+        out = probe("stale_state")["eventlog_error"]
+        assert out["rows"] == 200 and out["error"] is True and out["raw"] is False
+        assert out["more"] is True
+        assert out["rows_after"] == 400 and out["error_after"] is False
+
+    def test_a_slow_log_never_paints_over_a_newer_one(self, probe):
+        out = probe("stale_state")["eventlog_open_race"]
+        assert out["b_shown"] is True and out["final_b"] is True
+        assert out["final_rows"] == 200
+
+    def test_a_late_page_of_a_replaced_log_is_dropped_and_logs_are_never_mixed(
+        self, probe
+    ):
+        out = probe("stale_state")["eventlog_more_race"]
+        assert out["rows"] == 200 and out["b_only"] is True
+        assert out["next_rows"] == 400 and out["next_b_only"] is True
+        assert out["asked"] == [
+            "GET /api/eventlog/A?since_seq=200",
+            "GET /api/eventlog/B?since_seq=200",
+        ]
+
+    def test_a_stale_failed_open_paints_nothing(self, probe):
+        assert probe("stale_state")["eventlog_stale_failure"] == {"b_only": True}
+
+    def test_every_column_of_a_row_and_the_head_are_escaped(self, probe):
+        out = probe("stale_state")["eventlog_hostile"]
+        assert out == {"raw": [], "escaped": 5}
+
+    def test_a_load_more_click_while_another_log_opens_does_not_supersede_that_open(
+        self, probe
+    ):
+        out = probe("stale_state")["eventlog_more_during_open"]
+        assert out["b_only"] is True
+        assert out["asked"] == ["GET /api/eventlog/A", "GET /api/eventlog/B"]
+
+    def test_the_rendered_rows_are_bounded_and_the_view_says_where_the_log_continues(
+        self, probe
+    ):
+        out = probe("stale_state")["eventlog_cap"]
+        assert out["rows"] == 2000 and out["more"] is False
+        assert (
+            out["line"]
+            == "Showing the first 2000 events; the log continues after seq 2000"
+        )
+        assert out["asked"] == 10  # the open and nine pages: no request past the cap
+
+    def test_a_failed_open_leaves_no_load_more_to_click(self, probe):
+        out = probe("stale_state")["eventlog_failed_open"]
+        assert out == {"error": True, "more": False, "asked_more": 0}
+
+    def test_the_action_is_wired_and_the_row_cap_is_one_named_constant(self):
+        app = (_STATIC / "app.js").read_text(encoding="utf-8")
+        assert "'eventlog-more':" in app and "eventlog.loadMoreEventLog()" in app
+        text = (_STATIC / "pages" / "eventlog.js").read_text(encoding="utf-8")
+        assert text.count("EVENTLOG_MAX_ROWS") >= 2
+        assert "innerHTML +=" not in text
+
+
 class TestJsonColouring:
     """Plan 51fde95b step 14 (D-040): `utils/json_highlight.js` and every page that shows JSON."""
 
