@@ -42,6 +42,7 @@ Callers build HTML as template strings and assign `innerHTML`; these helpers mak
 `dom.js`
 - `esc(s): string` - escapes `& < > " '` to entities; `null`/`undefined` -> `''`.
 - `$(id): HTMLElement | null` - `document.getElementById`.
+- `launchedNotStartedText(data, e)` - the status text of a launch that created the instance (`data.label` or `data.instance_id`) and then failed to start its first conversation (`e.message`); used by `launch.js` and `builder.js`, never reads the DOM, and the caller passes the result through `showError`, which escapes it.
 - `showError(elementId, msg)` - sets innerHTML to `<span class="error-message">` with escaped msg; no-op if element missing.
 - `showStatus(elementId, msg, color)` - `<span class="status-msg status-<color>">`; empty `msg` clears. `color` is interpolated unescaped into the class.
 - `showToast(msg, type)` - removes any existing `.toast`, appends a new `div.toast.toast-success|toast-error` (success only when `type === 'success'`), adds `toast-visible` next frame, removes it after 4000 ms, then the node 300 ms later. Uses `textContent`. Also clears `#toast-live` and sets its text after 50 ms (polite live region in `templates/index.html`).
