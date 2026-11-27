@@ -188,7 +188,14 @@ function _resetDetailRequests() {
 }
 
 export function openDrawer(instanceId, type, { fetchDetail = true } = {}) {
-    if (!instanceId) return;
+    state.selectedConvReadOnly = false;
+    if (!instanceId) {
+        // An attached-API conversation has no instance: nothing stale may stay selected or shown behind it.
+        state.selectedDetailId = null;
+        state.selectedDetailType = null;
+        for (const id of ['ctrl-drawer-content', 'ctrl-drawer-events']) { const e = $(id); if (e) e.innerHTML = ''; }
+        return;
+    }
     const switching = state.selectedDetailId !== instanceId || state.selectedDetailType !== type;
 
     document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));

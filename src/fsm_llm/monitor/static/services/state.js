@@ -15,6 +15,7 @@ export const state = {
     instances: [],
     selectedConvId: null,
     selectedConvInstanceId: null,
+    selectedConvReadOnly: false,   // an open conversation with no owner instance (attached API): no chat, no End
     selectedDetailId: null,
     selectedDetailType: null,
     detailPollTimer: null,

@@ -396,7 +396,7 @@ function _renderActivityTable() {
         const itemId = String(a.item_id || '');
 
         let action = '';
-        if (a.instance_id) {
+        if (a.instance_id || a.item_type === 'fsm_conversation') {
             action = ` role="button" tabindex="0" aria-label="Open ${esc(a.label || itemId)}" data-action="activity-row-click" data-item-type="${esc(a.item_type)}" data-instance-id="${esc(a.instance_id)}" data-item-id="${esc(itemId)}"`;
         }
 

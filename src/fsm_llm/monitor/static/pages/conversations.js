@@ -33,6 +33,7 @@ export function showConversationInDrawer(instanceId, convId) {
         _openDrawer?.(instanceId, 'fsm', { fetchDetail: false });  // the conversation view hides that panel; Back refreshes it
     }
     state.selectedConvInstanceId = instanceId;
+    state.selectedConvReadOnly = !instanceId;
     state.selectedConvId = convId;
 
     const drawer = $('ctrl-drawer');
@@ -61,6 +62,7 @@ export function drawerBack() {
     showDrawerDetailView();
 
     state.selectedConvId = null;
+    state.selectedConvReadOnly = false;
 
     if (state.selectedDetailId && state.selectedDetailType) {
         _refreshDetailPanel?.(state.selectedDetailId, state.selectedDetailType);
@@ -81,12 +83,10 @@ export async function showConversationDetail(convId) {
         // A send may have started while this request was in flight.
         if (_sendingConvId === convId) { _rerenderAfterSend = true; return; }
 
-        if (data.instance_id) {
-            state.selectedConvInstanceId = data.instance_id;
-        } else if (!state.selectedConvInstanceId) {
-            const fsm = state.instances.find(i => i.instance_type === 'fsm');
-            if (fsm) state.selectedConvInstanceId = fsm.instance_id;
-        }
+        // The owner is the explicit id of the entry, else the snapshot's; with neither the view is read-only
+        // (D-010): never a guessed FSM, a message or End could reach another one.
+        if (data.instance_id) state.selectedConvInstanceId = data.instance_id;
+        state.selectedConvReadOnly = !state.selectedConvInstanceId;
 
         let html = '<div class="kv">';
         html += `<span class="key">ID:</span><span class="val mono-id">${esc(data.conversation_id)}</span>`;
@@ -97,7 +97,7 @@ export async function showConversationDetail(convId) {
         html += '</div>';
 
         const ownerId = data.instance_id || state.selectedConvInstanceId;
-        if (!data.is_terminal && ownerId) {
+        if (!data.is_terminal && !state.selectedConvReadOnly) {
             html += `<div class="btn-row"><button class="btn btn-sm btn-warning" data-action="end-conversation" data-instance-id="${esc(ownerId)}" data-conv-id="${esc(data.conversation_id || convId)}">End conversation</button></div>`;
         }
 
@@ -162,7 +162,7 @@ export async function showConversationDetail(convId) {
         if (chatLogEl) chatLogEl.scrollTop = chatLogEl.scrollHeight;
 
         if (chatInput) {
-            chatInput.style.display = (!data.is_terminal && state.selectedConvInstanceId) ? 'block' : 'none';
+            chatInput.style.display = (!data.is_terminal && !state.selectedConvReadOnly) ? 'block' : 'none';
         }
         // Only the conversation being answered has a disabled input (the early returns above skip this line).
         const msgInput = $('conv-message-input');
@@ -217,7 +217,7 @@ function _removeTypingIndicator() {
 export { _addTypingIndicator as addTypingIndicator, _removeTypingIndicator as removeTypingIndicator };
 
 export async function sendChatMessage() {
-    if (!state.selectedConvId || !state.selectedConvInstanceId) return;
+    if (!state.selectedConvId || !state.selectedConvInstanceId || state.selectedConvReadOnly) return;
     if (_sendingConvId) { showToast('Another message is still being answered', 'error'); return; }
     const input = $('conv-message-input');
     const message = input.value.trim();
@@ -268,11 +268,16 @@ export async function sendChatMessage() {
         if (state.currentPage === 'dashboard') _refreshActivityTable?.();
     } catch (e) {
         _removeTypingIndicator();
-        if (chatLog) {
-            chatLog.insertAdjacentHTML('beforeend',
-                `<div class="chat-bubble error"><div class="chat-role-tag">error</div>${esc(e.message || 'Request failed')}</div>`
-            );
-            _smoothScrollToBottom(chatLog);
+        // A toast always; the bubble and the typed text only where the user still is (the input is shared).
+        showToast(`Message not sent: ${e.message || 'Request failed'}`, 'error');
+        if (state.selectedConvId === convId) {
+            if (chatLog) {
+                chatLog.insertAdjacentHTML('beforeend',
+                    `<div class="chat-bubble error"><div class="chat-role-tag">error</div>${esc(e.message || 'Request failed')}</div>`
+                );
+                _smoothScrollToBottom(chatLog);
+            }
+            if (!input.value) input.value = message;
         }
         console.error('sendChatMessage:', e);
     }
@@ -290,7 +295,7 @@ export async function sendChatMessage() {
 
 /** POST /api/fsm/{id}/end for a conversation of a managed FSM, then refresh. */
 export async function endConversation(instanceId, convId) {
-    if (!instanceId || !convId) return;
+    if (!instanceId || !convId || state.selectedConvReadOnly) return;
     if (!confirm('End this conversation?')) return;
     try {
         await postJson(`/api/fsm/${encodeURIComponent(instanceId)}/end`, { conversation_id: convId });

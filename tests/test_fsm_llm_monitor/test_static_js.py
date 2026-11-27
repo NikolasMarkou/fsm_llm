@@ -109,6 +109,84 @@ class TestChatAndTargets:
             "bubbles": 0,
         }
 
+    def test_an_attached_api_conversation_opens_read_only_and_binds_to_no_fsm(
+        self, probe
+    ):
+        """Plan 9283c1fd step 6 (O3, D-010): no instance id means no chat input, no End and no
+        POST, with a managed FSM listed (the first-FSM fallback bound it to that FSM)."""
+        out = probe("chat_switch")["attached"]
+        assert out["chat_input"] == "none" and out["end_button"] is False
+        assert out["conv_inst"] == "" and out["read_only"] is True
+        assert out["posts"] == []
+        assert out["detail_id"] is None  # no stale instance stays selected
+
+    def test_the_read_only_flag_is_up_before_the_snapshot_is_back_and_stops_both_senders(
+        self, probe
+    ):
+        out = probe("chat_switch")
+        assert out["during_load"] is True
+        assert out["read_only_guards"] == []  # no POST of a message, no POST of an end
+
+    def test_back_from_an_attached_conversation_shows_no_stale_panel(self, probe):
+        out = probe("chat_switch")["attached"]
+        assert out["after_back"] == {
+            "read_only": False,
+            "detail_id": None,
+            "panel": "",
+            "events": "",
+            "gets": [],
+        }
+        assert out["after_open_drawer"] is False
+
+    def test_a_managed_conversation_keeps_chat_and_end_on_its_own_instance(self, probe):
+        out = probe("chat_switch")["managed"]
+        assert out == {
+            "chat_input": "block",
+            "end_button": True,
+            "end_target": "managedFSM",
+            "conv_inst": "managedFSM",
+            "read_only": False,
+            "detail_id": "managedFSM",
+            "posts": ["/api/fsm/managedFSM/converse", "/api/fsm/managedFSM/end"],
+        }
+
+    def test_without_an_explicit_id_the_owner_is_the_snapshots_instance(self, probe):
+        out = probe("chat_switch")["snapshot_owner"]
+        assert out["chat_input"] == "block" and out["read_only"] is False
+        assert out["end_target"] == "OWN" and out["conv_inst"] == "OWN"
+        assert out["posts"] == ["/api/fsm/OWN/converse", "/api/fsm/OWN/end"]
+        assert out["detail_id"] is None
+
+    def test_a_failed_send_is_a_toast_and_the_text_returns_only_where_the_user_is(
+        self, probe
+    ):
+        """B4: the toast is unconditional; the error bubble and the restored text need the
+        conversation to be the one shown, and typed text is never overwritten."""
+        send = probe("chat_switch")["send"]
+        for name in ("stay", "stay_typed", "away", "away_typed"):
+            assert len(send[name]["toasts"]) == 1, name
+            assert "LLM down" in send[name]["toasts"][0], name
+            assert send[name]["disabled"] is False, name
+        assert (send["stay"]["error_bubbles"], send["stay"]["input"]) == (1, "hello")
+        assert (send["stay_typed"]["error_bubbles"], send["stay_typed"]["input"]) == (
+            1,
+            "draft",
+        )
+        assert (send["away"]["error_bubbles"], send["away"]["input"]) == (0, "")
+        assert (send["away_typed"]["error_bubbles"], send["away_typed"]["input"]) == (
+            0,
+            "draft B",
+        )
+
+    def test_a_successful_send_is_unchanged(self, probe):
+        assert probe("chat_switch")["send"]["ok"] == {
+            "error_bubbles": 0,
+            "reply_bubbles": 1,
+            "toasts": [],
+            "input": "",
+            "disabled": False,
+        }
+
     def test_send_event_targets_are_the_runs_that_can_take_one(self, probe):
         options = probe("send_targets")["options"]
         assert options == [["", False], ["live-1", True], ["wait-1", False]]
@@ -1077,6 +1155,20 @@ class TestInstanceList:
             "grid": ["3 conversations", "2 active"],
             "table": ["3 convs", "2 active"],
         }
+
+    def test_an_attached_api_conversation_row_has_an_action_and_others_keep_theirs(
+        self, probe
+    ):
+        """O3: a row of `fsm_conversation` with no instance id is clickable (read-only view); an
+        agent or workflow row with none stays inert; the item id is escaped."""
+        rows = probe("instance_list")["activity_rows"]
+        assert [(r["action"], r["instance"], r["item"]) for r in rows] == [
+            (True, "", "att1"),
+            (True, "F1", "c1"),
+            (True, "", "&lt;b&gt;x&lt;/b&gt;"),
+            (False, None, None),
+        ]
+        assert not any(r["raw_tag"] for r in rows)
 
     def test_the_websocket_gate_passes_a_count_change(self, probe):
         out = probe("instance_list")["ws_gate"]

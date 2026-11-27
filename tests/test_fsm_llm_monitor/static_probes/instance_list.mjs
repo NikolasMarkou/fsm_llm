@@ -158,4 +158,20 @@ r.agent_drawer = {
     result_fetches: resultFetches,
     trace_block: /Execution Trace|toggle-trace-step|expand-all-trace/.test(withSteps),
 };
+
+// 7. the activity row of a conversation of the attached API (no instance id) opens it too (plan 9283c1fd step 6, O3)
+const act = (id, type, instance, extra = {}) => ({ item_id: id, item_type: type, instance_id: instance, label: id, status: 'active', is_terminal: false, current_step: 's', detail: 'd', ...extra });
+serve(async url => (url === '/api/activity' ? [
+    act('att1', 'fsm_conversation', ''),
+    act('c1', 'fsm_conversation', 'F1'),
+    act('<b>x</b>', 'fsm_conversation', ''),
+    act('w9', 'workflow_instance', ''),
+] : []));
+await dash.refreshActivityTable();
+r.activity_rows = el('activity-table-body').innerHTML.split('<tr').slice(1).map(h => ({
+    action: h.includes('data-action="activity-row-click"'),
+    instance: (h.match(/data-instance-id="([^"]*)"/) || [])[1] ?? null,
+    item: (h.match(/data-item-id="([^"]*)"/) || [])[1] ?? null,
+    raw_tag: h.includes('<b>x'),
+}));
 out(r);
