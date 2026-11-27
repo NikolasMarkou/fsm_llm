@@ -46,8 +46,11 @@ MAX_AGENT_TIMEOUT_SECONDS = 3600.0
 MAX_STUB_TOOLS = 50
 MAX_REQUEST_BODY_BYTES = 1_048_576  # 1 MiB
 MAX_BUILDER_SESSIONS = 50
-# force-deleted Builder builds whose worker thread still runs (D-054)
+# Builder builds whose worker thread still runs: force-deleted (D-054), timed out, or a
+# start in flight
 MAX_ABANDONED_BUILDERS = 3
+# tries of a launch to make room (evict, then insert) when concurrent launches take it
+MAX_ROOM_ATTEMPTS = 3
 MAX_EVENTLOG_CONVERSATIONS = 200  # logs the event log list shows
 MAX_EVENTLOG_EVENTS = 500  # events one event log timeline answer carries
 MAX_EVENTLOG_USAGE_CACHE = (

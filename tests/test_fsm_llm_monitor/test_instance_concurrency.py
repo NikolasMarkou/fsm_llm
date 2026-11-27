@@ -29,6 +29,7 @@ from fastapi import HTTPException
 import fsm_llm.agents.meta_builder as meta_builder
 from fsm_llm.core.definitions import ModelNotConfiguredError
 from fsm_llm.engine.executables import ExecutableRegistry
+from fsm_llm.monitor.constants import MAX_ROOM_ATTEMPTS
 from fsm_llm.monitor.definitions import (
     BuilderSendRequest,
     BuilderStartRequest,
@@ -777,6 +778,107 @@ class TestALaunchChecksCapacityAndRegistersInOneHold:
         }
         assert tape[cut][1] is not None
         assert holds == {"len": tape[cut][1], "values": tape[cut][1]}
+
+
+class _Api:
+    """The engine surface ``end_instance`` closes."""
+
+    def list_active_conversations(self):
+        return []
+
+    def close(self):
+        pass
+
+
+def _fsm(instance_id: str, status: str) -> ManagedFSM:
+    managed = ManagedFSM(instance_id=instance_id, api=_Api())
+    managed.status = status
+    return managed
+
+
+def _fill(mgr: InstanceManager, *statuses: str) -> None:
+    for index, status in enumerate(statuses):
+        mgr._register_instance(_fsm(f"old{index}", status), mgr._new_collector(), "FSM")
+
+
+class TestARefusalNeedsNothingFinishedToEvict:
+    """Two launches that evicted the same victim: the one that finds the room taken
+    evicts again while a finished instance is listed, and is refused only when none is."""
+
+    def _race(self, mgr: InstanceManager):
+        """Both threads leave their first ``_make_room`` before either registers; every
+        call of ``_make_room`` is noted (whether the instance lock was held)."""
+        states: list[bool] = []
+        _after_check(mgr, "_make_room", states)
+        held: list[bool] = []
+        inner = mgr._make_room
+
+        def noted():
+            held.append(mgr._lock._is_owned())
+            inner()
+
+        mgr._make_room = noted  # type: ignore[method-assign]
+        ids = iter(("n1", "n2"))
+
+        def register():
+            mgr._register_instance(
+                _fsm(next(ids), "running"), mgr._new_collector(), "FSM"
+            )
+
+        return _two_threads(register), held
+
+    def test_two_launches_that_picked_one_victim_both_register(self):
+        mgr = _manager(max_instances=2)
+        _fill(mgr, "completed", "completed")
+
+        outcomes, held = self._race(mgr)
+
+        assert outcomes == ["ok", "ok"]
+        assert sorted(mgr._instances) == ["n1", "n2"]  # one victim each, no 429
+        assert sorted(mgr._collectors) == ["n1", "n2"]
+        assert held and not any(held)  # every eviction, the retry too, outside `_lock`
+
+    def test_a_full_manager_with_nothing_finished_is_still_refused_at_once(self):
+        mgr = _manager(max_instances=2)
+        _fill(mgr, "running", "running")
+        calls: list[int] = []
+        inner = mgr._make_room
+        mgr._make_room = lambda: (calls.append(1), inner())  # type: ignore[method-assign]
+
+        with pytest.raises(MonitorCapacityError, match="2 instances are active"):
+            mgr._register_instance(_fsm("n1", "running"), mgr._new_collector(), "FSM")
+
+        assert len(calls) == 1 and sorted(mgr._instances) == ["old0", "old1"]
+
+    def test_an_uncontended_registration_makes_room_once(self):
+        mgr = _manager(max_instances=2)
+        _fill(mgr, "completed", "running")
+        calls: list[int] = []
+        inner = mgr._make_room
+        mgr._make_room = lambda: (calls.append(1), inner())  # type: ignore[method-assign]
+
+        mgr._register_instance(_fsm("n1", "running"), mgr._new_collector(), "FSM")
+
+        assert len(calls) == 1 and sorted(mgr._instances) == ["n1", "old1"]
+
+    def test_a_room_that_never_comes_is_tried_a_bounded_number_of_times(self):
+        """Eviction frees nothing (a double): the refusal comes after exactly
+        ``MAX_ROOM_ATTEMPTS`` tries, never an endless loop."""
+        mgr = _manager(max_instances=2)
+        _fill(mgr, "completed", "completed")
+        calls: list[int] = []
+
+        def never_frees():
+            calls.append(1)
+            assert len(calls) < 50, "unbounded retry"
+
+        mgr._make_room = never_frees  # type: ignore[method-assign]
+
+        with pytest.raises(MonitorCapacityError):
+            mgr._register_instance(_fsm("n1", "running"), mgr._new_collector(), "FSM")
+
+        assert len(calls) == MAX_ROOM_ATTEMPTS
+        assert sorted(mgr._instances) == ["old0", "old1"]
 
 
 class TestNothingBlocksOrNestsUnderTheLock:

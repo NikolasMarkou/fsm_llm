@@ -18,6 +18,7 @@ from ..constants import (
     ACTIVE_AGENT_STATUSES,
     EVENT_INSTANCE_DESTROYED,
     EVENT_INSTANCE_LAUNCHED,
+    MAX_ROOM_ATTEMPTS,
     TERMINAL_STATUSES,
 )
 from ..exceptions import (
@@ -88,16 +89,27 @@ class LifecycleMixin(_InstanceSurface):
         # worker threads, so a check in an earlier scope lets two launches pass and
         # both register. Eviction stays OUTSIDE (``_make_room``: a join and an API
         # close never run under ``_lock``). Do NOT split the scope, take
-        # ``_catalog_lock`` or log here.
+        # ``_catalog_lock`` or log here. Two launches can pick the SAME victim: the one
+        # that finds the room taken leaves the scope and makes room again (at most
+        # ``MAX_ROOM_ATTEMPTS`` tries; ``_make_room`` refuses when nothing finished is
+        # left), so a 429 never hides an evictable instance. Do NOT retry inside the
+        # scope or without bound.
         """
-        self._make_room()
         instance_id = managed.instance_id
-        with self._lock:
-            self._check_instance_room()
-            if isinstance(managed, ManagedAgent):
-                self._check_agent_capacity()
-            self._instances[instance_id] = managed
-            self._collectors[instance_id] = collector
+        for attempt in range(1, MAX_ROOM_ATTEMPTS + 1):
+            self._make_room()
+            with self._lock:
+                if (
+                    attempt < MAX_ROOM_ATTEMPTS
+                    and len(self._instances) >= self._config.max_instances
+                ):
+                    continue  # another launch took the room: make it again, outside the lock
+                self._check_instance_room()
+                if isinstance(managed, ManagedAgent):
+                    self._check_agent_capacity()
+                self._instances[instance_id] = managed
+                self._collectors[instance_id] = collector
+            break
         self._emit_event(
             EVENT_INSTANCE_LAUNCHED,
             message=f"{noun} launched: {managed.label}",
