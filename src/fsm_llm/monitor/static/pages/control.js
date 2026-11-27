@@ -339,6 +339,17 @@ function _restoreFormState(root, st) {
     }
 }
 
+/** Step data above this many characters is shown as a labelled raw cut, never as a half JSON (D-009 of plan 1f0925d2). */
+const STEP_DATA_MAX_CHARS = 20000;
+
+function _stepDataHtml(dataStr) {
+    if (dataStr.length <= 2) return '';
+    if (dataStr.length <= STEP_DATA_MAX_CHARS) return `<div class="step-data text-dim">${jsonViewHtml(dataStr)}</div>`;
+    return '<div class="step-data text-dim"><div class="step-data-note">Truncated raw text, not valid JSON</div>'
+        + `<pre class="step-data-raw">${esc(dataStr.slice(0, STEP_DATA_MAX_CHARS))}</pre>`
+        + `<div class="step-data-note">${dataStr.length - STEP_DATA_MAX_CHARS} more characters not shown</div></div>`;
+}
+
 function _paintDetail(contentEl, html) {
     if (!contentEl || html === _lastDetailHtml) return;
     _lastDetailHtml = html;
@@ -349,6 +360,7 @@ function _paintDetail(contentEl, html) {
         .map(el => ({ top: el.scrollTop, atBottom: _atBottom(el) }));
     const expanded = _captureTraceState(contentEl);
     const form = _captureFormState(contentEl);
+    const opened = [...contentEl.querySelectorAll('details')].map(d => d.open);
 
     contentEl.innerHTML = html;
     highlightJsonIn(contentEl);
@@ -359,6 +371,7 @@ function _paintDetail(contentEl, html) {
         el.scrollTop = (!prev || prev.atBottom) ? el.scrollHeight : prev.top;
     });
     _restoreTraceState(contentEl, expanded);
+    contentEl.querySelectorAll('details').forEach((d, i) => { if (opened[i]) d.open = true; });
     _restoreFormState(contentEl, form);
     if (drawer && drawerScroll) {
         drawer.scrollTop = (drawerScroll.atBottom && drawerScroll.top > 0)
@@ -567,12 +580,7 @@ async function _buildWorkflowDetail(instanceId, inst) {
                         html += `<div class="chat-bubble assistant" style="background:var(--surface-alt,#1a1c24);border-left:3px solid ${borderColor};">`;
                         html += `<div class="chat-role-tag" style="color:${borderColor};">${esc(step.step_id || 'step')}</div>`;
                         if (step.message) html += `<div>${esc(step.message)}</div>`;
-                        if (step.data && typeof step.data === 'object') {
-                            const dataStr = JSON.stringify(step.data, null, 1);
-                            if (dataStr.length > 2) {
-                                html += `<div style="margin-top:0.25rem;font-size:0.8rem;" class="text-dim">${jsonViewHtml(dataStr.substring(0, 300))}</div>`;
-                            }
-                        }
+                        if (step.data && typeof step.data === 'object') html += _stepDataHtml(JSON.stringify(step.data, null, 1));
                         if (hasError) html += `<div class="error-message" style="margin-top:0.25rem;">${esc(step.error)}</div>`;
                         if (step.timestamp) html += `<div class="text-dim" style="font-size:0.7rem;margin-top:0.25rem;">${esc(formatTime(step.timestamp))}</div>`;
                         html += '</div>';

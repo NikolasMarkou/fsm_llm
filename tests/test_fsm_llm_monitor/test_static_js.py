@@ -759,6 +759,72 @@ class TestEventLogLoadMore:
         assert "innerHTML +=" not in text
 
 
+class TestControlDrawerStepDataAndDetails:
+    """Plan 1f0925d2 step 7 (F3, D-009): step data whole or a labelled raw cut, the details state across a repaint."""
+
+    def test_a_small_step_data_is_shown_whole_and_parses(self, probe):
+        out = probe("stale_state")["step_data_small"]
+        assert out["length"] > 300  # the old cut was 300 characters
+        assert out["whole"] is True and out["parses"] is True and out["note"] is False
+
+    def test_the_cap_is_inclusive_and_one_more_character_is_the_labelled_cut(
+        self, probe
+    ):
+        out = probe("stale_state")["step_data_edge"]
+        assert out["edge"] == 20000
+        assert out["at_cap_whole"] is True and out["over_cut"] is True
+
+    def test_a_huge_step_data_is_a_labelled_escaped_raw_cut_never_json(self, probe):
+        out = probe("stale_state")["step_data_huge"]
+        assert out["label"] is True and out["count"] is True and out["shown"] is True
+        assert out["in_json_view"] is False  # the cut text is never presented as JSON
+        assert out["raw_tags"] is False and out["escaped"] is True
+
+    def test_an_opened_details_survives_a_repaint_and_a_closed_one_stays_closed(
+        self, probe
+    ):
+        out = probe("stale_state")["details_state"]
+        assert out["count"] == 1 and out["repainted"] is True
+        assert out["closed_before"] == [False] and out["closed_after"] == [False]
+        assert out["opened_after"] == [True] and out["unchanged"] == [True]
+        assert out["same"] is True
+
+
+class TestBuilderStartInputAndStatusTiming:
+    """Plan 1f0925d2 step 7 (F3, D-009): the input waits for the start reply, an edit with no states hides the graph."""
+
+    def test_the_input_area_is_shown_only_after_the_start_reply(self, probe):
+        out = probe("stale_state")["builder_input_start"]
+        assert out == {"pending": "none", "after": "flex"}
+
+    def test_a_failed_start_leaves_the_input_hidden_and_shows_the_error(self, probe):
+        out = probe("stale_state")["builder_input_failed"]
+        assert out == {"input": "none", "error": True}
+
+    def test_a_superseded_start_reply_never_shows_the_input(self, probe):
+        out = probe("stale_state")["builder_input_superseded"]
+        assert out == {"after_stale": "none", "after_current": "flex"}
+
+    def test_a_finished_build_still_hides_the_input(self, probe):
+        assert probe("stale_state")["builder_input_complete"] == "none"
+
+    def test_the_build_status_paints_at_once_and_the_reply_replaces_it(self, probe):
+        out = probe("stale_state")["builder_status_first"]
+        assert re.search(r"Building artifact\.\.\. 0 s", out["first"])
+        assert "Session active" in out["after"]
+
+    def test_an_edit_with_no_states_hides_the_old_result_graph(self, probe):
+        out = probe("stale_state")["builder_edit_graph"]
+        assert out == {
+            "before": "block",
+            "with_states": "block",
+            "no_states": "none",
+            "again": "block",
+            "empty_states": "none",
+        }
+        assert probe("stale_state")["builder_edit_workflow_graph"] == "none"
+
+
 class TestJsonColouring:
     """Plan 51fde95b step 14 (D-040): `utils/json_highlight.js` and every page that shows JSON."""
 

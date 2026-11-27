@@ -796,6 +796,11 @@ button.btn:disabled {
     font-weight: 500;
 }
 
+/* Workflow step data in the drawer: a bounded box; a payload over the cap is a labelled raw cut (control.js). */
+.step-data { margin-top: var(--space-1); font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow: auto; }
+.step-data-raw { margin: 0; font-family: var(--font-mono); }
+.step-data-note { font-style: italic; }
+
 .kv .val {
     color: var(--text);
     word-break: break-word;

@@ -134,7 +134,7 @@ export function startBuilderSession() {
     _resetInputControls();
     $('builder-chat').innerHTML = '';
     $('builder-result-panel').style.display = 'none';
-    $('builder-input-area').style.display = 'flex';
+    $('builder-input-area').style.display = 'none';
     showStatus('builder-status', 'Starting session...', 'info');
 
     postJson('/api/builder/start', { model: model || undefined, temperature: temp, max_tokens: maxTokens })
@@ -145,6 +145,7 @@ export function startBuilderSession() {
                 return;
             }
             _sessionId = data.session_id;
+            $('builder-input-area').style.display = 'flex';
             _appendBubble('assistant', data.response);
             _renderInternalState(data.internal_state);
             showStatus('builder-status', 'Session active', 'success');
@@ -178,9 +179,9 @@ export function sendBuilderMessage() {
     // Elapsed time of the build call, and a Cancel button while it runs.
     const began = Date.now();
     _abort = new AbortController();
-    _elapsedTimer = setInterval(() => {
-        showStatus('builder-status', `Building artifact... ${Math.round((Date.now() - began) / 1000)} s`, 'info');
-    }, 1000);
+    const paintElapsed = () => showStatus('builder-status', `Building artifact... ${Math.round((Date.now() - began) / 1000)} s`, 'info');
+    paintElapsed();
+    _elapsedTimer = setInterval(paintElapsed, 1000);
     const cancel = $('builder-cancel-btn');
     if (cancel) cancel.style.display = '';
 
@@ -505,7 +506,9 @@ export function editBuilderResult() {
     _syncLaunch(edited, _artifactType);
     const agentForm = $('builder-agent-launch-form');
     if (agentForm) agentForm.style.display = 'none';
-    if (_artifactType === 'fsm' && edited.states && Object.keys(edited.states).length > 0) _renderBuilderGraph(edited);
+    const hasStates = _artifactType === 'fsm' && edited.states && Object.keys(edited.states).length > 0;
+    $('builder-result-graph').style.display = hasStates ? 'block' : 'none';
+    if (hasStates) _renderBuilderGraph(edited);
     showStatus('builder-status', 'Edited JSON applied; Launch checks it', 'success');
 }
 

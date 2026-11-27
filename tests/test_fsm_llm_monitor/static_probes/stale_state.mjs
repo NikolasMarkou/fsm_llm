@@ -4,6 +4,7 @@ import * as launch from '../static/pages/launch.js';
 import * as builder from '../static/pages/builder.js';
 import * as conv from '../static/pages/conversations.js';
 import * as eventlog from '../static/pages/eventlog.js';
+import * as control from '../static/pages/control.js';
 
 // Plan 1f0925d2: a view or a timer must not act on a request, a modal or a state that is no longer the
 // current one. No sleep decides anything here: the timers are a fake scheduler, the replies are gates.
@@ -385,6 +386,139 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     const before = asks().length;
     await more();
     result.eventlog_failed_open = { error: failedView.includes('no such log'), more: failedView.includes('eventlog-more'), asked_more: asks().length - before };
+}
+
+// --- F3 (D-009): the workflow step data in the control drawer, and the <details> open state across the 2 s repaint ---
+{
+    // The stub has no DOM: the drawer content gets the two behaviours the paint relies on. Assigning innerHTML re-creates
+    // every <details> CLOSED (as a real DOM does) and querySelectorAll('details') returns the current ones.
+    const box = el('ctrl-drawer-content');
+    let markup = '';
+    let details = [];
+    Object.defineProperty(box, 'innerHTML', { get: () => markup, set: v => { markup = v; details = [...v.matchAll(/<details/g)].map(() => ({ open: false })); } });
+    box.querySelectorAll = sel => (sel === 'details' ? details : []);
+    state.instances = [{ instance_id: 'W', instance_type: 'workflow', label: 'W', status: 'running' }];
+    state.selectedDetailId = 'W'; state.selectedDetailType = 'workflow';
+    state.selectedConvId = null;
+    let wf = {};
+    route.custom = url => (url === '/api/workflow/W/instances' ? [wf] : url.includes('/events') ? [] : undefined);
+    const paint = async w => { wf = w; await control.refreshDetailPanel('W', 'workflow'); await flush(); return markup; };
+    const decode = t => t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+    const viewTexts = h => [...h.matchAll(/<span class="json-view">([\s\S]*?)<\/span>/g)].map(m => decode(m[1]));
+    const stepWith = data => ({ workflow_instance_id: 'w1', status: 'running', history: [{ step_id: 's', data }] });
+    const parses = t => { try { JSON.parse(t); return true; } catch { return false; } };
+
+    // a small payload (822 characters) is shown whole: it parses and equals the pretty text
+    const small = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`key${i}`, `value${i}`]));
+    const smallText = JSON.stringify(small, null, 1);
+    const hs = await paint(stepWith(small));
+    const shown = viewTexts(hs);
+    result.step_data_small = { length: smallText.length, whole: shown.length === 1 && shown[0] === smallText, parses: parses(shown[0] ?? ''), note: /Truncated|more characters/.test(hs) };
+
+    // exactly the cap is whole, one more character is the labelled cut
+    const padTo = n => { const base = JSON.stringify({ k: '' }, null, 1).length; return { k: 'x'.repeat(n - base) }; };
+    const edge = JSON.stringify(padTo(20000), null, 1).length;
+    const hEdge = await paint(stepWith(padTo(20000)));
+    const hOver = await paint(stepWith(padTo(20001)));
+    result.step_data_edge = { edge, at_cap_whole: viewTexts(hEdge).length === 1 && !/Truncated/.test(hEdge), over_cut: /Truncated/.test(hOver) && /1 more characters not shown/.test(hOver) };
+
+    // a 50000 character payload with hostile text: labelled raw cut, outside any json-view, escaped, the count right
+    const huge = { a: '<i>x</i>', blob: 'y'.repeat(50000) };
+    const hugeText = JSON.stringify(huge, null, 1);
+    const hh = await paint(stepWith(huge));
+    const rawM = hh.match(/<pre class="step-data-raw">([\s\S]*?)<\/pre>/);
+    const rawText = rawM ? decode(rawM[1]) : null;
+    result.step_data_huge = {
+        label: hh.includes('Truncated raw text, not valid JSON'),
+        count: hh.includes(`${hugeText.length - 20000} more characters not shown`),
+        shown: rawText === hugeText.slice(0, 20000),
+        in_json_view: viewTexts(hh).some(t => t.includes('blob')),
+        raw_tags: hh.includes('<i>x'),
+        escaped: hh.includes('&lt;i&gt;x'),
+    };
+
+    // the open state of the Context Data <details> survives a repaint that changes the markup; a closed one stays closed
+    const withCtx = (stamp) => ({ workflow_instance_id: 'w1', status: 'running', updated_at: stamp, context: { a: 1 } });
+    await paint(withCtx('2026-01-01T00:00:00Z'));
+    const closedBefore = details.map(d => d.open);
+    await paint(withCtx('2026-01-01T00:00:02Z'));
+    const closedAfter = details.map(d => d.open);
+    details[0].open = true;                                  // the user opens it
+    const h2 = await paint(withCtx('2026-01-01T00:00:04Z'));
+    const openedAfter = details.map(d => d.open);
+    const h3 = await paint(withCtx('2026-01-01T00:00:04Z'));  // identical markup: no repaint, no change
+    result.details_state = { count: details.length, closed_before: closedBefore, closed_after: closedAfter, opened_after: openedAfter, repainted: h2 !== '', unchanged: details.map(d => d.open), same: h2 === h3 };
+}
+
+// --- F3 (D-009): the builder input area waits for the start reply; an edit with no states hides the old graph; the first status paint ---
+{
+    const input = () => el('builder-input-area').style.display;
+    const status = () => el('builder-status').innerHTML;
+    const notDone = { session_id: 's', response: 'hi', internal_state: {}, is_complete: false };
+    reset();
+    const g = gate();
+    route.custom = url => (url === '/api/builder/start' ? g.p.then(() => notDone) : undefined);
+    builder.startBuilderSession();
+    await flush();
+    const pending = input();
+    g.open(); await flush();
+    result.builder_input_start = { pending, after: input() };
+    // a failed start leaves it hidden and shows the error
+    reset();
+    route.fail['/api/builder/start'] = 'no model';
+    builder.startBuilderSession(); await flush();
+    result.builder_input_failed = { input: input(), error: status().includes('Failed to start: no model') };
+    // a start that is superseded before its reply: the dropped reply must not show the input
+    reset();
+    const gA = gate(), gB = gate();
+    let starts = 0;
+    route.custom = url => { if (url !== '/api/builder/start') return undefined; return (++starts === 1 ? gA : gB).p.then(() => notDone); };
+    builder.startBuilderSession();
+    builder.startBuilderSession();
+    await flush();
+    gA.open(); await flush();
+    const afterStale = input();
+    gB.open(); await flush();
+    result.builder_input_superseded = { after_stale: afterStale, after_current: input() };
+    // an already finished build hides it again (the reply completes the session)
+    reset();
+    route.custom = undefined;
+    builder.startBuilderSession(); await flush();
+    result.builder_input_complete = input();
+
+    // the first status paint of a send is at once, not after the first 1000 ms tick
+    reset();
+    route.custom = url => (url === '/api/builder/start' ? notDone : undefined);
+    builder.startBuilderSession(); await flush();
+    const gS = gate();
+    route.custom = url => (url === '/api/builder/send' ? gS.p.then(() => notDone) : undefined);
+    el('builder-message-input').value = 'build it';
+    builder.sendBuilderMessage();
+    const first = status();
+    gS.open(); await flush();
+    result.builder_status_first = { first, after: status() };
+
+    // an edit of the built FSM: with states the graph stays, with no states it is hidden, a non-object is refused
+    reset();
+    route.custom = undefined;
+    builder.startBuilderSession(); await flush();
+    const graph = el('builder-result-graph');
+    const apply = async text => { builder.editBuilderResult(); el('builder-result-edit').value = text; builder.editBuilderResult(); await flush(); };
+    const before = graph.style.display;
+    await apply(JSON.stringify({ ...FSM, name: 'E' }));
+    const withStates = graph.style.display;
+    await apply(JSON.stringify({ name: 'NoStates', initial_state: 'a' }));
+    const noStates = graph.style.display;
+    await apply(JSON.stringify({ ...FSM, name: 'Again' }));      // states again: the hidden graph must come back
+    const again = graph.style.display;
+    await apply(JSON.stringify({ name: 'EmptyStates', initial_state: 'a', states: {} }));
+    result.builder_edit_graph = { before, with_states: withStates, no_states: noStates, again, empty_states: graph.style.display };
+    // a workflow artifact has no graph: an edit that happens to hold `states` does not show one
+    reset();
+    route.custom = url => (url === '/api/builder/start' ? { session_id: 's', response: 'r', internal_state: {}, is_complete: true, artifact: { name: 'W' }, artifact_json: '{"name":"W"}', artifact_type: 'workflow', is_valid: true } : undefined);
+    builder.startBuilderSession(); await flush();
+    await apply(JSON.stringify(FSM));
+    result.builder_edit_workflow_graph = graph.style.display;
 }
 out(result);
 process.exit(0);
