@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from fsm_llm import LLMUsage
 
@@ -193,8 +193,11 @@ class MonitorConfig(BaseModel):
     change) and the buffers of instances launched afterwards.
     ``max_instances`` caps managed instances (the oldest finished ones are
     evicted first) and ``max_running_agents`` caps concurrent agent threads.
-    ``auto_scroll_logs`` is a dashboard display preference.
+    ``auto_scroll_logs`` is a dashboard display preference. An unknown key is
+    refused (a typo is never a silent no-op).
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     refresh_interval: float = Field(
         default=DEFAULT_REFRESH_INTERVAL,

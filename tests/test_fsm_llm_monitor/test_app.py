@@ -14,6 +14,7 @@ from fsm_llm.monitor.constants import (
     MAX_AGENT_ITERATIONS,
     MAX_QUERY_LIMIT,
 )
+from fsm_llm.monitor.definitions import LogRecord, MonitorConfig
 from fsm_llm.monitor.instance_manager import InstanceManager
 from fsm_llm.monitor.server import app, configure
 from fsm_llm.monitor.server.routes_visualize import _fsm_dict_to_snapshot
@@ -427,6 +428,28 @@ class TestUiMatchesServerLimits:
         order = re.search(r"const order = \[([^\]]*)\]", logs_js)
         assert order is not None
         assert re.findall(r"'(\w+)'", order.group(1)) == list(LOG_LEVELS)
+
+    def test_settings_body_keys_are_model_fields(self):
+        """``saveSettings`` posts the keys of ``MonitorConfig`` and no other: the
+        model refuses an unknown key (422), so a key the form invents breaks Save."""
+        text = (self._MONITOR_DIR / "static" / "pages" / "settings.js").read_text(
+            encoding="utf-8"
+        )
+        save = text[text.index("export async function saveSettings") :]
+        keys = set(re.findall(r"\['set-[\w-]+',\s*'(\w+)'\]", save))
+        keys |= set(re.findall(r"\bbody\.(\w+)\s*=", save))
+        assert keys, "the form posts nothing: the row guards nothing"
+        assert keys <= set(MonitorConfig.model_fields), keys
+
+    def test_every_level_the_ui_asks_for_is_a_server_level(self):
+        """A ``level=<NAME>`` of the static JS is 422 on the server outside
+        ``LOG_LEVELS`` (the Clear cursor asks for TRACE)."""
+        found = []
+        for js in (self._MONITOR_DIR / "static").rglob("*.js"):
+            text = js.read_text(encoding="utf-8")
+            found += re.findall(r"level=([A-Za-z]+)", text)
+        assert "TRACE" in found, "the Clear cursor no longer asks for TRACE"
+        assert set(found) <= set(LOG_LEVELS), found
 
     def test_css_colours_every_active_log_pill(self):
         css = (self._MONITOR_DIR / "static" / "style.css").read_text(encoding="utf-8")
@@ -895,6 +918,143 @@ class TestServerConfigEndpoints:
         data = resp.json()
         assert "monitor_version" in data
         assert "fsm_llm_version" in data
+
+
+_UI_SETTINGS = {
+    "refresh_interval": 2.0,
+    "max_events": 2000,
+    "max_log_lines": 10000,
+    "log_level": "DEBUG",
+    "show_internal_keys": True,
+    "auto_scroll_logs": False,
+}
+
+
+class TestConfigPostMerges:
+    """``POST /api/config`` applies the fields the body sends over the live
+    config and refuses an unknown key (plan 9283c1fd step 1, B2)."""
+
+    def _client(self, **config):
+        configure(manager=InstanceManager(config=MonitorConfig(**config)))
+        return TestClient(app)
+
+    def teardown_method(self):
+        configure(manager=InstanceManager())
+
+    def test_a_settings_save_keeps_the_two_capacity_caps(self):
+        client = self._client(max_instances=5, max_running_agents=2)
+
+        assert client.post("/api/config", json=_UI_SETTINGS).status_code == 200
+
+        got = client.get("/api/config").json()
+        assert got["max_instances"] == 5 and got["max_running_agents"] == 2
+        assert got["refresh_interval"] == 2.0 and got["log_level"] == "DEBUG"
+
+    def test_an_omitted_field_keeps_its_value(self):
+        client = self._client(refresh_interval=3.0, max_events=300)
+
+        assert (
+            client.post("/api/config", json={"log_level": "ERROR"}).status_code == 200
+        )
+
+        got = client.get("/api/config").json()
+        assert got["refresh_interval"] == 3.0 and got["max_events"] == 300
+        assert got["log_level"] == "ERROR"
+
+    @pytest.mark.parametrize("key", ["bogus", "max_instance", "Max_Events"])
+    def test_an_unknown_key_is_422_and_nothing_applies(self, key):
+        client = self._client(max_instances=5)
+        before = client.get("/api/config").json()
+
+        resp = client.post("/api/config", json={"log_level": "DEBUG", key: 1})
+
+        assert resp.status_code == 422
+        assert client.get("/api/config").json() == before
+
+    def test_an_empty_body_changes_nothing(self):
+        client = self._client(max_instances=5, max_running_agents=2)
+        before = client.get("/api/config").json()
+
+        assert client.post("/api/config", json={}).status_code == 200
+
+        assert client.get("/api/config").json() == before
+
+    def test_out_of_range_is_422_and_the_config_is_unchanged(self):
+        client = self._client(max_instances=5)
+        before = client.get("/api/config").json()
+
+        resp = client.post(
+            "/api/config", json={"max_instances": 0, "log_level": "DEBUG"}
+        )
+
+        assert resp.status_code == 422
+        assert client.get("/api/config").json() == before
+
+    def test_the_whole_get_answer_posts_back_unchanged(self):
+        client = self._client(max_instances=5, max_running_agents=2, max_events=300)
+        before = client.get("/api/config").json()
+
+        assert client.post("/api/config", json=before).status_code == 200
+
+        assert client.get("/api/config").json() == before
+
+
+class TestLogsLevelIsValidated:
+    """``GET /api/logs?level=`` takes a name of ``LOG_LEVELS`` (any case, blanks
+    around it stripped); anything else is 422 with no echo (step 1, G8)."""
+
+    def _client(self):
+        mgr = InstanceManager()
+        configure(manager=mgr)
+        for level in ("TRACE", "DEBUG", "INFO", "WARNING", "ERROR"):
+            mgr.global_collector.record_log(LogRecord(level=level, message=level))
+        return TestClient(app)
+
+    def teardown_method(self):
+        configure(manager=InstanceManager())
+
+    @pytest.mark.parametrize("level", ["warn", "INVALID", "", " ", "   ", "INFO,ERROR"])
+    def test_an_unknown_empty_or_blank_level_is_422(self, level):
+        client = self._client()
+
+        resp = client.get("/api/logs", params={"level": level})
+
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert all(name in detail for name in LOG_LEVELS)
+
+    @pytest.mark.parametrize(
+        ("level", "shown"),
+        [
+            ("info", {"INFO", "WARNING", "ERROR"}),
+            ("Info ", {"INFO", "WARNING", "ERROR"}),
+            (" WARNING", {"WARNING", "ERROR"}),
+            ("trace", {"TRACE", "DEBUG", "INFO", "WARNING", "ERROR"}),
+        ],
+    )
+    def test_case_and_surrounding_blanks_are_accepted(self, level, shown):
+        client = self._client()
+
+        resp = client.get("/api/logs", params={"level": level})
+
+        assert resp.status_code == 200
+        assert {r["level"] for r in resp.json()} == shown
+
+    def test_the_refusal_does_not_echo_the_value(self):
+        client = self._client()
+
+        resp = client.get("/api/logs", params={"level": "zz_secret_level_9"})
+
+        assert resp.status_code == 422
+        assert "zz_secret_level_9" not in resp.text.lower()
+
+    def test_the_default_level_is_unchanged(self):
+        client = self._client()
+
+        resp = client.get("/api/logs")
+
+        assert resp.status_code == 200
+        assert {r["level"] for r in resp.json()} == {"INFO", "WARNING", "ERROR"}
 
 
 class TestDashboardConfigEndpoints:

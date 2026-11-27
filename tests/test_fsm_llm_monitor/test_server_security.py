@@ -435,6 +435,61 @@ class TestDashboardConfigRefusesWhatItWouldDrop:
         assert cfg["name"] == "Two" and [p["panel_id"] for p in cfg["panels"]] == ["p9"]
 
 
+class TestDashboardConfigFalsyNonObjects:
+    """Step 1, G1: ``panels``, ``alerts`` and ``config`` default only when the
+    key is absent or null; ``[]``, ``""``, ``false`` and ``0`` are 400 and the
+    applied dashboard (and its version) stay."""
+
+    def _applied(self, client):
+        assert (
+            client.post("/api/dashboard/config", json=_GOOD_DASHBOARD).status_code
+            == 200
+        )
+        return client.get("/api/dashboard/config").json()
+
+    @pytest.mark.parametrize("key", ["panels", "alerts", "config"])
+    @pytest.mark.parametrize(
+        "value", [[], "", False, 0], ids=["list", "str", "false", "zero"]
+    )
+    def test_a_falsy_non_object_is_400_and_the_config_stays(self, key, value):
+        client = _client()
+        before = self._applied(client)
+        version = routes_monitoring.get_manager().dashboard_config_version
+
+        resp = client.post("/api/dashboard/config", json={key: value})
+
+        assert resp.status_code == 400
+        assert client.get("/api/dashboard/config").json() == before
+        assert routes_monitoring.get_manager().dashboard_config_version == version
+
+    @pytest.mark.parametrize(
+        "body",
+        [{}, {"panels": None}, {"alerts": None, "config": None}, {"name": "N"}],
+    )
+    def test_null_and_absent_keys_default(self, body):
+        client = _client()
+        self._applied(client)
+
+        assert client.post("/api/dashboard/config", json=body).status_code == 200
+
+        cfg = client.get("/api/dashboard/config").json()["config"]
+        assert cfg["panels"] == [] and cfg["alerts"] == []
+        assert cfg["refresh_interval_seconds"] == 30 and cfg["retention_hours"] == 24
+
+    def test_the_get_answer_of_a_dashboard_with_no_panels_posts_back_as_400(self):
+        client = _client()
+        assert (
+            client.post("/api/dashboard/config", json={"name": "Empty"}).status_code
+            == 200
+        )
+        before = client.get("/api/dashboard/config").json()
+        assert before["config"]["panels"] == []
+
+        for body in (before, before["config"], {"config": before["config"]}):
+            assert client.post("/api/dashboard/config", json=body).status_code == 400
+        assert client.get("/api/dashboard/config").json() == before
+
+
 class _GatedAgent:
     """A builder agent whose ``send`` blocks on a gate (a slow worker thread)."""
 

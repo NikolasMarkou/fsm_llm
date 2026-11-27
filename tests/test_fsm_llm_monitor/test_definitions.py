@@ -549,6 +549,14 @@ class TestConfig:
     def test_log_level_normalised(self):
         assert MonitorConfig(log_level="debug").log_level == "DEBUG"
 
+    @pytest.mark.parametrize("kwarg", ["max_instance", "bogus", "Max_Events"])
+    def test_an_unknown_keyword_raises(self, kwarg):
+        """A typo of a field is refused, never a silent no-op (step 1, B2)."""
+        with pytest.raises(ValueError):
+            MonitorConfig(**{kwarg: 1})
+        with pytest.raises(ValueError):
+            MonitorConfig.model_validate({kwarg: 1})
+
     def test_setting_config_resizes_global_buffers(self):
         mgr = _manager()
         for _ in range(50):

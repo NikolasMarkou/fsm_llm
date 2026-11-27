@@ -376,6 +376,16 @@ class TestLogLevelFiltering:
         # Unknown level not in level_order dict, so filter is skipped
         assert len(logs) == 2
 
+    def test_no_level_means_all_like_an_unknown_one(self):
+        """The in-process reader keeps ``level=None`` as all; only the REST route
+        refuses an unknown level (step 1, G8)."""
+        collector = EventCollector()
+        collector.record_log(LogRecord(level="TRACE", message="t"))
+        collector.record_log(LogRecord(level="ERROR", message="e"))
+        assert len(collector.get_logs(level=None)) == 2
+        assert len(collector.get_logs()) == 2
+        assert len(collector.get_logs(level="INVALID")) == 2
+
     def test_log_limit(self):
         collector = EventCollector()
         for i in range(10):

@@ -14,7 +14,7 @@ from fsm_llm.logging import logger
 
 from .. import eventlog
 from ..__version__ import __version__
-from ..constants import MAX_QUERY_LIMIT
+from ..constants import LOG_LEVELS, MAX_QUERY_LIMIT
 from ..definitions import DashboardAlert, DashboardConfig, DashboardPanel, MonitorConfig
 from ..exceptions import MonitorError
 from .application import app, get_manager
@@ -94,8 +94,14 @@ async def api_logs(
     limit: Annotated[int, Query(ge=1, le=MAX_QUERY_LIMIT)] = 100, level: str = "INFO"
 ) -> list[dict[str, Any]]:
     mgr = get_manager()
+    name = level.strip().upper()
+    if name not in LOG_LEVELS:
+        # The value is not echoed back.
+        raise HTTPException(
+            status_code=422, detail=f"level must be one of {', '.join(LOG_LEVELS)}"
+        )
     try:
-        logs = mgr.global_collector.get_logs(limit=limit, level=level)
+        logs = mgr.global_collector.get_logs(limit=limit, level=name)
     except MonitorError as e:
         _raise_http(e, "list logs")
     return [r.model_dump() for r in logs]
@@ -110,7 +116,12 @@ async def api_config_get() -> dict[str, Any]:
 @app.post("/api/config", dependencies=_GATED)
 async def api_config_set(config: MonitorConfig) -> dict[str, str]:
     mgr = get_manager()
-    mgr.config = config
+    # The fields the body sent go over the live config (the two capacity caps
+    # survive a Settings Save). No `await` between the read and the write, so
+    # two posts cannot interleave on the loop.
+    mgr.config = MonitorConfig.model_validate(
+        {**mgr.config.model_dump(), **config.model_dump(exclude_unset=True)}
+    )
     return {"status": "ok"}
 
 
@@ -144,9 +155,11 @@ def _parse_dashboard_config(req: dict[str, Any]) -> Any:
     if not isinstance(raw, dict):
         raise ValueError("dashboard config must be an object")
 
-    panels_raw = raw.get("panels") or {}
-    alerts_raw = raw.get("alerts") or {}
-    settings = raw.get("config") or {}
+    # Only an absent key or null defaults; `[]`, "", false and 0 are refused below.
+    panels_raw, alerts_raw, settings = (
+        {} if raw.get(key) is None else raw[key]
+        for key in ("panels", "alerts", "config")
+    )
     if not isinstance(panels_raw, dict) or not isinstance(alerts_raw, dict):
         raise ValueError("'panels' and 'alerts' must be objects keyed by id")
     if not isinstance(settings, dict) or {"panels", "alerts"} & settings.keys():
