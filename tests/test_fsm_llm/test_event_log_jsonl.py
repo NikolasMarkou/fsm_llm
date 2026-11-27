@@ -1008,6 +1008,366 @@ def _stderr(proc: subprocess.Popen[bytes]) -> str:
     return proc.stderr.read().decode("utf-8", "replace")[-2000:]
 
 
+# ---------------------------------------------------------------------------------------------
+# Plan 77e5fef9 step 3b (D-005): the re-open of an evicted writer reads the tail, not the log.
+# ---------------------------------------------------------------------------------------------
+
+WINDOW_BYTES = (
+    2 * MAX_EVENT_BYTES + 1
+)  # the literal of the rule; the module constant may not move it
+
+
+def _exact_line(seq: int, size: int) -> bytes:
+    """A valid log line of exactly *size* bytes, newline included (``size`` up to the cap)."""
+    line = _line(seq, pad="x" * (size - len(_line(seq, pad=""))))
+    assert len(line) == size
+    return line
+
+
+def _small_lines(count: int) -> list[bytes]:
+    return [_line(i + 1) for i in range(count)]
+
+
+def _tail_shapes() -> dict[str, list[bytes]]:
+    """Committed contents, by name: empty, one line, a few, over the window, a last line at the
+    cap, three lines at the cap, a blob-bearing last line."""
+    return {
+        "empty": [],
+        "one": _small_lines(1),
+        "few": _small_lines(3),
+        "over-window": [_exact_line(i + 1, 8_000) for i in range(20)],
+        "edge-last": [*_small_lines(3), _exact_line(4, MAX_EVENT_BYTES)],
+        "huge-lines": [_exact_line(i + 1, MAX_EVENT_BYTES) for i in range(3)],
+        "blob-last": [
+            *_small_lines(2),
+            _line(3, response_ref="sha256:" + "a" * 64, finish_reason="stop"),
+        ],
+    }
+
+
+def _torn_lengths() -> list[int]:
+    """0 to 300, the edges of the cap, and a stride up to the cap."""
+    edges = {MAX_EVENT_BYTES - 2, MAX_EVENT_BYTES - 1, MAX_EVENT_BYTES}
+    edges |= {MAX_EVENT_BYTES + 1, MAX_EVENT_BYTES + 5}
+    return sorted(set(range(301)) | edges | set(range(301, MAX_EVENT_BYTES, 4_099)))
+
+
+def _torn_bytes(seq: int, length: int) -> bytes:
+    """The first *length* bytes of the next line (never its newline); over the cap, filler."""
+    if length >= MAX_EVENT_BYTES:
+        return b"y" * length
+    return _exact_line(seq, MAX_EVENT_BYTES)[:length]
+
+
+def _point(path: Path, seq: int) -> tuple[int, int, int]:
+    held = os.stat(path)
+    return (seq, held.st_dev, held.st_ino)
+
+
+def _reopen(
+    base: Path, name: str, lines: list[bytes], torn: bytes, *, tail: bool
+) -> tuple[str, int, bytes, bytes]:
+    """Open the same bytes by full scan (``tail`` False) or by tail read; return the outcome.
+
+    ``(outcome, last_seq, file bytes after the open, file bytes after one more append)``; the
+    outcome is ``"ok"`` or the error type name.
+    """
+    path = base / ("tail" if tail else "scan") / f"{name}.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"".join(lines))
+    expect = _point(path, len(lines)) if tail else None
+    with path.open("ab") as fh:
+        fh.write(torn)
+    try:
+        writer = JsonlWriter(path, create=False, expect=expect)
+    except LogCorruptError as exc:
+        return type(exc).__name__, -1, path.read_bytes(), b""
+    try:
+        opened = path.read_bytes()
+        writer.append(_event(99))
+        return "ok", writer.last_seq, opened, path.read_bytes()
+    finally:
+        writer.close()
+
+
+class TestTailReopen:
+    """G2: a tail-read re-open gives what the full-scan open gives, for every shape of log and
+    every torn tail, at a cost the size of the log does not move."""
+
+    def test_the_tail_read_equals_the_full_scan_for_every_shape_and_torn_tail(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: the tail ``seq`` off by one (M17), a torn tail not cut (M18), a window too small
+        with no fallback (M19), a torn last line read as committed."""
+        cases = 0
+        for name, lines in _tail_shapes().items():
+            for k in _torn_lengths():
+                torn = _torn_bytes(len(lines) + 1, k)
+                scan = _reopen(tmp_path, f"{name}-{k}", lines, torn, tail=False)
+                tail = _reopen(tmp_path, f"{name}-{k}", lines, torn, tail=True)
+                assert tail == scan, (name, k)
+                if k < MAX_EVENT_BYTES:
+                    assert scan[0] == "ok" and scan[1] == len(lines) + 1, (name, k)
+                    assert scan[2] == b"".join(lines), (
+                        name,
+                        k,
+                    )  # the torn tail was cut
+                else:
+                    assert scan[0] == "LogCorruptError", (name, k)
+                cases += 1
+        assert cases > 1_000  # every shape against every length
+
+    def test_the_comparer_can_fail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The differential above is not vacuous: a tail read that cuts one byte early or reports
+        another ``seq`` makes the two outcomes differ."""
+        lines = _tail_shapes()["few"]
+        real = jsonl._tail
+
+        def early(fd: int, size: int) -> tuple[int, int] | None:
+            found = real(fd, size)
+            return None if found is None else (found[0] - 1, found[1])
+
+        monkeypatch.setattr(jsonl, "_tail", early)
+        with pytest.raises(AssertionError):
+            torn = _torn_bytes(4, 7)
+            scan = _reopen(tmp_path, "cmp", lines, torn, tail=False)
+            tail = _reopen(tmp_path, "cmp", lines, torn, tail=True)
+            assert tail == scan
+
+    @pytest.mark.parametrize("shape", ["clean", "worst"])
+    def test_a_reopen_of_a_big_log_reads_at_most_the_window(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str
+    ) -> None:
+        """Counts, never a clock: the bytes a re-open reads on this thread stay under the window
+        of ``2 * MAX_EVENT_BYTES + 1`` however large the log. Kills: a full scan (the equal
+        result, the cost of the log), a window that falls back to the scan on the worst shape (a
+        torn tail of the cap minus one after a last line of the cap)."""
+        lines = [_exact_line(i + 1, 30_000) for i in range(100)]
+        torn = b""
+        if shape == "worst":
+            lines[-1] = _exact_line(100, MAX_EVENT_BYTES)
+            torn = _exact_line(101, MAX_EVENT_BYTES)[: MAX_EVENT_BYTES - 1]
+        path = tmp_path / "big.jsonl"
+        path.write_bytes(b"".join(lines))
+        assert path.stat().st_size > 20 * WINDOW_BYTES
+        point = _point(path, 100)
+        with path.open("ab") as fh:
+            fh.write(torn)
+        me = threading.get_ident()
+        read: list[int] = []
+
+        def counting(real: Any) -> Any:
+            def spy(*args: Any) -> bytes:
+                data = real(*args)
+                if threading.get_ident() == me:
+                    read.append(len(data))
+                return data
+
+            return spy
+
+        monkeypatch.setattr(os, "read", counting(os.read))
+        if hasattr(os, "pread"):
+            monkeypatch.setattr(os, "pread", counting(os.pread))
+        writer = JsonlWriter(path, create=False, expect=point)
+        monkeypatch.undo()
+        try:
+            assert writer.last_seq == 100
+            assert path.read_bytes() == b"".join(lines)  # a torn tail was cut
+        finally:
+            writer.close()
+        assert 0 < sum(read) <= WINDOW_BYTES, sum(read)
+
+    def test_a_first_open_and_open_existing_keep_the_full_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A first open and ``resume`` never read the tail: only a re-open with a resume point
+        does (D-005 e). Kills: the tail read used for a first open (a gapped middle would pass)."""
+        calls: list[int] = []
+        real = jsonl._tail
+        monkeypatch.setattr(
+            jsonl, "_tail", lambda fd, size: calls.append(size) or real(fd, size)
+        )
+        path = tmp_path / "logs" / "c1.jsonl"
+        path.parent.mkdir()
+        gapped = [_line(1), _line(5), _line(3)]  # a bad middle, a good last seq
+        path.write_bytes(b"".join(gapped))
+        with pytest.raises(LogCorruptError, match="line 2"):
+            JsonlWriter(path)
+        with pytest.raises(LogCorruptError, match="line 2"):
+            JsonlWriter(path, create=False)
+        with EventLog(tmp_path) as log, pytest.raises(LogCorruptError):
+            log.open_existing("c1")
+        assert calls == []
+        path.write_bytes(b"".join(_small_lines(3)))
+        JsonlWriter(path).close()
+        assert calls == []
+
+    def test_the_middle_of_the_log_is_trusted_after_a_reopen(
+        self, tmp_path: Path
+    ) -> None:
+        """The documented limit (D-005 f): a re-open checks the tail only, so a gapped middle is
+        found by the next full scan and not by this one. Kills: a re-open that scans."""
+        path = tmp_path / "logs" / "c1.jsonl"
+        path.parent.mkdir()
+        path.write_bytes(b"".join(_small_lines(3)))
+        point = _point(path, 3)
+        path.write_bytes(
+            b"".join([_line(1), _line(5), _line(3)])
+        )  # same inode, bad middle
+        writer = JsonlWriter(path, create=False, expect=point)
+        try:
+            assert writer.append(_event(0)) == 4
+        finally:
+            writer.close()
+        with pytest.raises(LogCorruptError, match="line 2"):
+            JsonlWriter(path)
+
+    def test_a_reopen_refuses_a_log_another_writer_appended_to_while_idle(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: the recorded ``seq`` trusted without looking at the file (a fork of the log)
+        and a changed ``seq`` accepted (M21)."""
+        path = tmp_path / "logs" / "c1.jsonl"
+        first = JsonlWriter(path)
+        first.append(_event(1))
+        first.append(_event(2))
+        point = first.resume_point
+        first.close()
+        other = JsonlWriter(path)  # the lock is free: another process could do this
+        other.append(_event(3))
+        other.close()
+        before = path.read_bytes()
+        with pytest.raises(LogCorruptError, match="changed while idle"):
+            JsonlWriter(path, create=False, expect=point)
+        assert path.read_bytes() == before  # the refusal wrote and cut nothing
+        JsonlWriter(path).close()  # and it released the lock again
+
+    def test_a_reopen_refuses_a_log_cut_back_while_idle(self, tmp_path: Path) -> None:
+        path = tmp_path / "logs" / "c1.jsonl"
+        first = JsonlWriter(path)
+        for n in range(3):
+            first.append(_event(n))
+        point = first.resume_point
+        first.close()
+        data = path.read_bytes()
+        cut = data[: data.rfind(b"\n", 0, len(data) - 1) + 1]
+        path.write_bytes(cut)  # the same file, one line fewer
+        with pytest.raises(LogCorruptError, match="changed while idle"):
+            JsonlWriter(path, create=False, expect=point)
+        assert path.read_bytes() == cut
+        path.write_bytes(b"")  # and a file emptied
+        with pytest.raises(LogCorruptError, match="changed while idle"):
+            JsonlWriter(path, create=False, expect=point)
+
+    def test_a_reopen_refuses_a_different_file_with_the_same_last_seq(
+        self, tmp_path: Path
+    ) -> None:
+        """A swapped file: a copy of the log put over it has the same bytes and the same last
+        ``seq`` and not the same inode. Kills: a swapped file accepted (M16)."""
+        path = tmp_path / "logs" / "c1.jsonl"
+        first = JsonlWriter(path)
+        first.append(_event(1))
+        point = first.resume_point
+        first.close()
+        if point[2] == 0:
+            pytest.skip("this file system gives no inode: nothing to compare")
+        copy = path.with_name("copy.tmp")
+        copy.write_bytes(path.read_bytes())
+        os.replace(copy, path)
+        assert _point(path, 1)[1:] != point[1:]
+        with pytest.raises(LogCorruptError, match="replaced while idle"):
+            JsonlWriter(path, create=False, expect=point)
+        assert [e["seq"] for e in read_events(path)] == [1]
+
+    def test_a_reopen_of_a_vanished_log_creates_nothing(self, tmp_path: Path) -> None:
+        path = tmp_path / "logs" / "c1.jsonl"
+        first = JsonlWriter(path)
+        first.append(_event(1))
+        point = first.resume_point
+        first.close()
+        path.unlink()
+        with pytest.raises(FileNotFoundError):
+            JsonlWriter(path, create=False, expect=point)
+        assert not path.exists()
+
+    def test_a_reopen_refuses_a_last_line_that_does_not_decode(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: an unparsable last line skipped or read as a torn tail."""
+        path = tmp_path / "logs" / "c1.jsonl"
+        first = JsonlWriter(path)
+        first.append(_event(1))
+        first.append(_event(2))
+        point = first.resume_point
+        first.close()
+        data = path.read_bytes()
+        bad = data[: data.rfind(b"\n", 0, len(data) - 1) + 1] + b"not json at all\n"
+        path.write_bytes(bad)
+        with pytest.raises(LogCorruptError, match="not valid JSON"):
+            JsonlWriter(path, create=False, expect=point)
+        assert path.read_bytes() == bad  # nothing was cut
+
+    def test_a_window_that_cannot_decide_falls_back_to_the_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A short read, or a tail with no newline in a window that does not start at 0, is not
+        guessed at: the scan decides (and raises for a shape no valid log has). Kills: a window
+        with no fallback (M19) and a guess from a short buffer."""
+        lines = [_exact_line(i + 1, 8_000) for i in range(30)]
+        path = tmp_path / "logs" / "c1.jsonl"
+        path.parent.mkdir()
+        path.write_bytes(b"".join(lines))
+        point = _point(path, 30)
+        real = jsonl._read_at
+        monkeypatch.setattr(jsonl, "_read_at", lambda fd, n, at: real(fd, n, at)[:-5])
+        writer = JsonlWriter(path, create=False, expect=point)  # short read: the scan
+        assert writer.last_seq == 30
+        writer.close()
+        monkeypatch.undo()
+        path.write_bytes(b"".join(lines[:-1]) + b"z" * (2 * WINDOW_BYTES))
+        with pytest.raises(LogCorruptError, match="no newline within"):
+            JsonlWriter(path, create=False, expect=(29, 0, 0))
+        # one newline in a window that does not start at 0: a last line over the cap, which the
+        # scan refuses by its own rule (a decision from the window would be "line is N bytes")
+        huge = b"z" * (WINDOW_BYTES + 5_000) + b"\n"
+        path.write_bytes(b"".join(lines[:-1]) + huge)
+        with pytest.raises(LogCorruptError, match="no newline within"):
+            JsonlWriter(path, create=False, expect=(29, 0, 0))
+
+    def test_a_reopen_keeps_the_open_flags_and_creates_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Kills: the re-open creating (``mkdir`` or a directory fsync, M22) and dropping
+        ``O_NOFOLLOW`` (M15): every ``os.open`` of the re-open carries the no-follow flag, none
+        creates the log, and no directory is made or synced."""
+        path = tmp_path / "logs" / "c1.jsonl"
+        first = JsonlWriter(path)
+        first.append(_event(1))
+        point = first.resume_point
+        first.close()
+        opened: list[tuple[str, int]] = []
+        real = os.open
+
+        def spy(file: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+            opened.append((os.fspath(file), flags))
+            return real(file, flags, *args, **kwargs)
+
+        synced: list[int] = []
+        monkeypatch.setattr(os, "open", spy)
+        monkeypatch.setattr(jsonl, "fsync_directory", lambda d: synced.append(1))
+        monkeypatch.setattr(Path, "mkdir", lambda *a, **k: synced.append(2))
+        JsonlWriter(path, create=False, expect=point).close()
+        monkeypatch.undo()
+        assert synced == []
+        assert len(opened) == 3  # the lock, the log, the read handle
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        for name, flags in opened:
+            assert flags & nofollow == nofollow, name
+            assert not flags & os.O_CREAT or name.endswith(".lock"), name
+
+
 class TestSource:
     def test_the_indirections_exist_and_default_to_the_os_calls(self) -> None:
         assert jsonl._write is os.write

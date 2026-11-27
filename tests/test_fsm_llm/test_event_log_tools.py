@@ -601,11 +601,15 @@ class TestTheKilledChild:
     disk (fsynced before the body), no ``tool/result``; ``API.resume`` reports it ``unknown``
     and never runs the tool again."""
 
+    @pytest.mark.parametrize("bound", ["0", "1"])
     def test_a_kill_inside_a_registry_tool_is_unknown_on_resume_and_never_rerun(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bound: str
     ) -> None:
+        """The child runs at ``max_open_writers`` 0 and 1 too (plan 77e5fef9 step 3b): the
+        ``tool/call`` before the body is written through a tail-read re-open at 0."""
         if not can_lock_in_child():
             pytest.skip("this platform cannot start a child that locks a file")
+        monkeypatch.setenv(child.BOUND_ENV, bound)
         root, ready, err = tmp_path / "log", tmp_path / "ready.json", tmp_path / "err"
         args = [CHILD_MODULE, str(root), str(ready), "registry"]
         with child_process(args, err) as proc:

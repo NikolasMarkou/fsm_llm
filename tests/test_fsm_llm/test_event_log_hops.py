@@ -365,8 +365,9 @@ class TestAnOrphanAndTheRelease:
 
 
 class TestAKillAfterTheRequestHop:
+    @pytest.mark.parametrize("bound", ["0", "1"])
     def test_a_kill_blocked_in_an_async_model_call_leaves_the_fsynced_request(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bound: str
     ) -> None:
         """The child writes ``llm/request`` through a lane job, then blocks inside the model
         call on the loop thread; ``Popen.kill()`` there must leave the request on disk and
@@ -375,6 +376,9 @@ class TestAKillAfterTheRequestHop:
         job whose fsync was dropped."""
         if not can_lock_in_child():
             pytest.skip("this platform cannot start a child that locks a file")
+        monkeypatch.setenv(
+            child.BOUND_ENV, bound
+        )  # 0: every append re-opens by tail read
         root, ready, err = tmp_path / "log", tmp_path / "ready.json", tmp_path / "err"
         with child_process([CHILD_MODULE, str(root), str(ready), "async"], err) as proc:
             wait_ready(proc, ready, err)

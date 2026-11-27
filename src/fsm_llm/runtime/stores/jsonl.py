@@ -231,6 +231,52 @@ def _scan(fd: int) -> Iterator[tuple[dict[str, Any], int]]:
             )
 
 
+#: What a re-open reads from the end: a torn tail (under ``MAX_EVENT_BYTES``), the last line (at
+#: most ``MAX_EVENT_BYTES`` with its newline) and the newline before it.
+_TAIL_BYTES = 2 * MAX_EVENT_BYTES + 1
+
+
+def _read_at(fd: int, size: int, offset: int) -> bytes:
+    """Up to *size* bytes of *fd* at *offset* (``os.pread``; a seek and read where it is absent)."""
+    if hasattr(os, "pread"):
+        return os.pread(fd, size, offset)
+    os.lseek(fd, offset, os.SEEK_SET)
+    return os.read(fd, size)
+
+
+# DECISION plan-2026-11-26T213359-77e5fef9/D-005
+# A re-open of an evicted writer trusts the middle of the log and checks the tail: ONE bounded
+# window from the end (never the whole file) gives the `seq` of the last committed line, which the
+# writer compares, with the file identity, to what it recorded at the eviction. Do NOT continue
+# from the recorded `seq` without reading the file (the lock was free while the writer idled:
+# another process may have appended, cut or replaced the log, and the next line would fork it),
+# do NOT guess when the window cannot decide (None: the caller scans), do NOT skip a last line
+# that fails `decode_event`, and do NOT use this for a first open or `resume` (full scan, which
+# also finds a gapped middle). See decisions.md D-005.
+def _tail(fd: int, size: int) -> tuple[int, int] | None:
+    """``(end offset of the last committed line, its seq)`` from the last ``_TAIL_BYTES`` of *fd*.
+
+    Interface contract (caller: ``JsonlWriter._open``): *size* is the ``fstat`` size; no committed
+    line gives ``(0, 0)``; None when the window cannot decide (a short read, fewer than two
+    newlines in a window not at offset 0), so the caller scans; ``LogCorruptError`` when the last
+    committed line fails ``decode_event`` or has no integer ``seq``. Never writes.
+    """
+    start = max(0, size - _TAIL_BYTES)
+    buf = _read_at(fd, size - start, start)
+    end = buf.rfind(b"\n")
+    if len(buf) != size - start or len(buf) - end - 1 >= MAX_EVENT_BYTES:
+        return None
+    if end < 0:
+        return (0, 0) if start == 0 else None
+    before = buf.rfind(b"\n", 0, end)
+    if before < 0 and start > 0:
+        return None
+    seq = decode_event(buf[before + 1 : end + 1])["seq"]
+    if type(seq) is not int:
+        raise LogCorruptError(f"the last log line has seq {seq!r}")
+    return start + end + 1, seq
+
+
 def read_events(path: str | os.PathLike[str]) -> Iterator[dict[str, Any]]:
     """Yield the committed events of the log at *path*, in file order. Never writes.
 
@@ -286,15 +332,29 @@ class JsonlWriter:
           it, so a link at ``<id>.lock`` is ``LogWriteError`` and never followed. Windows has no
           ``O_NOFOLLOW``: there the ``lstat`` check is the whole defense (unverified until the
           Windows run).
+        - ``JsonlWriter(path, create=False, expect=writer.resume_point)`` (a RE-OPEN of an
+          evicted idle writer): every check above is kept, the scan becomes a read of the last
+          ``2 * MAX_EVENT_BYTES + 1`` bytes, so the cost does not grow with the log. A file that
+          is not the one that was closed (another inode) or whose last committed ``seq`` is not
+          the recorded one (appended or cut while the lock was free) is ``LogCorruptError``; a
+          torn tail is cut as for a new writer. The middle is trusted; a first open and ``resume``
+          scan the whole log.
         - ``close()``: idempotent; releases the fd and the lock. The ``.lock`` file stays. A
           writer that is dropped without ``close`` is closed by its finalizer, so a forgotten
           one frees its two descriptors and the lock when the object is collected (do not rely
           on it: a long-running host closes, see ``EventLog``).
     """
 
-    def __init__(self, path: str | os.PathLike[str], *, create: bool = True) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        create: bool = True,
+        expect: tuple[int, int, int] | None = None,
+    ) -> None:
         self.path = Path(path)
         self._create = create
+        self._expect = expect
         name = self.path.name
         if not name.endswith(LOG_SUFFIX):
             raise EventPayloadError(
@@ -328,6 +388,18 @@ class JsonlWriter:
     def last_seq(self) -> int:
         """The ``seq`` of the last committed event (0 for an empty log)."""
         return self._seq
+
+    @property
+    def resume_point(self) -> tuple[int, int, int]:
+        """``(last seq, st_dev, st_ino)`` of the open file: what ``expect=`` of a re-open checks.
+
+        The device and inode are 0 where the platform gives none (no identity check then).
+        """
+        try:
+            held = os.fstat(self._fd)
+        except OSError:
+            return (self._seq, 0, 0)
+        return (self._seq, held.st_dev, held.st_ino)
 
     @property
     def poisoned(self) -> bool:
@@ -380,11 +452,25 @@ class JsonlWriter:
             same = (held.st_dev, held.st_ino) == (scanned.st_dev, scanned.st_ino)
             if held.st_ino and not same:
                 raise LogCorruptError(f"log {self.path.name} changed while opened")
+            expect = self._expect
+            if expect and expect[2] and (held.st_dev, held.st_ino) != expect[1:]:
+                raise LogCorruptError(f"log {self.path.name} was replaced while idle")
             good = 0
-            for event, end in _scan(read_fd):
-                self._seq = event["seq"]
-                good = end
             size = scanned.st_size
+            tail = _tail(read_fd, size) if expect else None
+            if (
+                tail is not None
+            ):  # a re-open: the tail only, the middle is trusted (D-005)
+                good, self._seq = tail
+            else:
+                for event, end in _scan(read_fd):
+                    self._seq = event["seq"]
+                    good = end
+            if expect and self._seq != expect[0]:
+                raise LogCorruptError(
+                    f"log {self.path.name} changed while idle: last seq {self._seq}, "
+                    f"expected {expect[0]}"
+                )
         finally:
             os.close(read_fd)
         if size > good:  # a torn tail: we hold the lock, so cutting it is ours to do

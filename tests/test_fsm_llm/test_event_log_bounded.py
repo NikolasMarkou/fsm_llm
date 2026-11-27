@@ -1,4 +1,4 @@
-"""Row 1.18 tail: open writer handles of an ``EventLog`` (plan 77e5fef9, steps 1 and 3a).
+"""Row 1.18 tail: open writer handles of an ``EventLog`` (plan 77e5fef9, steps 1, 3a and 3b).
 
 One ``JsonlWriter`` (the log descriptor and its lock descriptor) is opened on the first append of
 a conversation tree. Before step 3a it stayed in ``EventLog._writers`` until ``release`` or
@@ -27,6 +27,12 @@ Step 3a rows (the bound, the pins, the lease set; plan D-004):
   file or a held lock), ``TestRaces`` (pin against evict on threads, recorded; an eviction from a
   lane thread; queued lane jobs of an evicted id).
 
+Step 3b rows (the tail-read re-open, D-005): ``TestReopenFailsClosed`` (a log appended to, cut
+or replaced while idle is refused and never forked, the model call is not made, a big log is
+re-opened by reading the window only) and ``TestAKilledChurningChild`` (a kill in the write of
+a re-opened writer, then a lock holder that continues). The equivalence of the tail read and
+the full scan (G2) is in ``test_event_log_jsonl.py`` (``TestTailReopen``).
+
 Interface contract of the shared helper ``open_log(root, bound)``: *bound* is None for the
 unbounded log or a non-negative int for ``max_open_writers``; returns an ``EventLog`` on *root*.
 """
@@ -51,8 +57,9 @@ from fsm_llm.runtime.events import LogCorruptError, LogLockedError, LogWriteErro
 from fsm_llm.runtime.stores import jsonl
 from fsm_llm.runtime.stores.jsonl import JsonlWriter, exclusive_lock, read_events
 from tests.conftest import current_timing_factor, posix_only, symlink_or_skip
-from tests.test_fsm_llm.event_log_support import REPO, child_env
+from tests.test_fsm_llm.event_log_support import REPO, child_env, reopen_after_kill
 from tests.test_fsm_llm.test_event_log_census import _chat, _llm
+from tests.test_fsm_llm.test_event_log_jsonl import can_lock_in_child
 
 IDLE_CONVERSATIONS = 1000
 DESCRIPTORS_PER_IDLE_CONVERSATION = 2  # the log and its lock file
@@ -747,6 +754,219 @@ class TestReopen:
                     proc.stdin.close()
                     proc.wait(timeout=60 * current_timing_factor())
             assert _put(log, "a") == 2
+
+
+def _point_of(log: EventLog, cid: str) -> tuple[int, int, int]:
+    """The resume point the log recorded when it evicted *cid* (``(last seq, dev, inode)``)."""
+    point = log._live[cid]
+    assert point is not None and cid not in log._writers
+    return point
+
+
+class TestReopenFailsClosed:
+    """A re-open trusts the middle of an idle log and checks its tail (D-005): a file another
+    writer changed, cut or replaced while the lock was free is refused, never forked."""
+
+    def _evicted(self, tmp_path: Path) -> tuple[EventLog, Path]:
+        log = open_log(tmp_path, 1)
+        _put(log, "a")
+        _put(log, "a")
+        _put(log, "b")  # evicts "a"
+        assert "a" not in log._writers and log.has_writer("a")
+        return log, tmp_path / "logs" / "a.jsonl"
+
+    def test_the_resume_point_is_recorded_at_the_eviction(self, tmp_path: Path) -> None:
+        log, path = self._evicted(tmp_path)
+        with log:
+            seq, dev, ino = _point_of(log, "a")
+            assert seq == 2
+            assert (dev, ino) == (path.stat().st_dev, path.stat().st_ino)
+            assert log._live["b"] is None  # an open writer has none
+
+    def test_a_log_another_writer_appended_to_is_refused_not_forked(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: continuing from the recorded ``seq`` without reading the file, an expected
+        ``seq`` check dropped (M21): the next append would be a duplicate ``seq`` 3."""
+        log, path = self._evicted(tmp_path)
+        with log:
+            other = JsonlWriter(path)  # the lock is free while "a" idles
+            other.append(
+                {"ts": "t", "conversation_id": "a", "frame": 0, "type": "turn/start"}
+            )
+            other.close()
+            before = path.read_bytes()
+            with pytest.raises(LogCorruptError, match="changed while idle"):
+                _put(log, "a", checkpoint=True)
+            assert path.read_bytes() == before  # we wrote and cut nothing
+            assert log.has_writer("a") and "a" not in log._writers
+            with pytest.raises(LogCorruptError):  # and it stays refused
+                _put(log, "a")
+            log.release("a")  # the way out: a first open, a full scan
+            assert _put(log, "a") == 4
+
+    def test_a_log_cut_back_while_idle_is_refused(self, tmp_path: Path) -> None:
+        log, path = self._evicted(tmp_path)
+        with log:
+            data = path.read_bytes()
+            cut = data[: data.index(b"\n") + 1]
+            path.write_bytes(cut)
+            with pytest.raises(LogCorruptError, match="changed while idle"):
+                _put(log, "a")
+            assert path.read_bytes() == cut
+
+    def test_a_replaced_file_is_refused_though_its_last_seq_is_the_same(
+        self, tmp_path: Path
+    ) -> None:
+        """Kills: a swapped file accepted (M16): a byte copy of the log renamed over it has the
+        recorded last ``seq``, and only its inode says it is not the file that was closed."""
+        log, path = self._evicted(tmp_path)
+        with log:
+            if _point_of(log, "a")[2] == 0:
+                pytest.skip("this file system gives no inode: nothing to compare")
+            copy = path.with_name("copy.tmp")
+            copy.write_bytes(path.read_bytes())
+            os.replace(copy, path)
+            with pytest.raises(LogCorruptError, match="replaced while idle"):
+                _put(log, "a")
+            assert path.read_bytes().count(b"\n") == 2
+            assert not (tmp_path / "logs" / "a.jsonl.tmp").exists()
+
+    def test_the_model_call_is_not_made_when_the_reopen_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """The checkpoint raises before the call it protects: a changed log of an idle
+        conversation refuses its next turn and the double is asked nothing."""
+        llm = _llm()
+        with open_log(tmp_path, 1) as log:
+            api = API.from_definition(
+                _chat(silent=False), llm_interface=llm, event_log=log
+            )
+            first, _ = api.start_conversation()
+            second, _ = api.start_conversation()  # evicts the writer of `first`
+            assert first not in log._writers
+            path = tmp_path / "logs" / f"{first}.jsonl"
+            other = JsonlWriter(path)
+            other.append(
+                {"ts": "t", "conversation_id": first, "frame": 0, "type": "turn/start"}
+            )
+            other.close()
+            asked = len(llm.requests)
+            calls = len(llm.call_history)
+            with pytest.raises(LogCorruptError):
+                api.converse("my name is Ada", first)
+            assert (len(llm.requests), len(llm.call_history)) == (asked, calls)
+            api.converse("my name is Ada", second)  # the other conversation is fine
+            api.close()
+
+    @pytest.mark.timeout(300)
+    def test_a_reopen_of_a_big_log_reads_the_window_and_not_the_log(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Counts, never a clock. Kills: the tail read replaced by a full scan (the equal
+        result at the cost of the log)."""
+        writer = JsonlWriter(tmp_path / "logs" / "a.jsonl")
+        for _ in range(100):
+            writer.append(
+                {
+                    "ts": "t",
+                    "conversation_id": "a",
+                    "frame": 0,
+                    "type": "turn/start",
+                    "pad": "x" * 30_000,
+                }
+            )
+        writer.close()
+        size = (tmp_path / "logs" / "a.jsonl").stat().st_size
+        assert size > 2_900_000
+        with open_log(tmp_path, 1) as log:
+            assert _put(log, "a") == 101  # the first open scans the log, once
+            _put(log, "b")  # evicts "a"
+            me = threading.get_ident()
+            read: list[int] = []
+
+            def counting(real: Any) -> Any:
+                def spy(*args: Any) -> bytes:
+                    data = real(*args)
+                    if threading.get_ident() == me:
+                        read.append(len(data))
+                    return data
+
+                return spy
+
+            monkeypatch.setattr(os, "read", counting(os.read))
+            if hasattr(os, "pread"):
+                monkeypatch.setattr(os, "pread", counting(os.pread))
+            assert _put(log, "a") == 102
+            monkeypatch.undo()
+            assert 0 < sum(read) <= 2 * jsonl.MAX_EVENT_BYTES + 1, sum(read)
+
+
+KILL_CHURN_CHILD = """
+import os, sys
+from fsm_llm.runtime import EventLog
+from fsm_llm.runtime.stores import jsonl
+
+writes = 0
+real = os.write
+
+def torn(fd, data):
+    global writes
+    writes += 1
+    if writes == 21:  # the 11th line of "a", through a re-opened writer: half of it, then stop
+        real(fd, bytes(data)[: len(data) // 2])
+        print("torn", flush=True)
+        sys.stdin.readline()
+    return real(fd, data)
+
+jsonl._write = torn
+log = EventLog(sys.argv[1], max_open_writers=1)
+for _ in range(15):
+    log.append("a", "turn/start")
+    log.append("b", "turn/start")
+"""
+
+
+class TestAKilledChurningChild:
+    @pytest.mark.timeout(300)
+    def test_a_kill_in_the_write_of_a_reopened_writer_leaves_a_log_that_continues(
+        self, tmp_path: Path
+    ) -> None:
+        """Bound 1, two conversations taking turns, so every write after the first two goes
+        through a tail-read re-open; the child dies in the middle of the 11th line of ``a``
+        (``Popen.kill()``). The next lock holder cuts the torn half, continues ``seq`` without a
+        duplicate or a gap, and ``b`` is untouched."""
+        if not can_lock_in_child():
+            pytest.skip("this platform cannot start a child that locks a file")
+        root = tmp_path / "log"
+        with subprocess.Popen(
+            [sys.executable, "-c", KILL_CHURN_CHILD, str(root)],
+            cwd=REPO,
+            env=child_env(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        ) as proc:
+            assert proc.stdout is not None
+            try:
+                assert proc.stdout.readline().strip() == "torn"
+                proc.kill()  # SIGKILL on POSIX, TerminateProcess on Windows
+                proc.wait(timeout=60 * current_timing_factor())
+            finally:
+                if proc.stdin is not None:
+                    proc.stdin.close()
+        path_a = root / "logs" / "a.jsonl"
+        committed = path_a.read_bytes().rfind(b"\n") + 1
+        assert path_a.stat().st_size > committed  # the torn half is on disk
+        with reopen_after_kill(lambda: EventLog(root, max_open_writers=1)) as log:
+            assert [e["seq"] for e in log.read("a")] == list(range(1, 11))
+            assert [e["seq"] for e in log.read("b")] == list(range(1, 11))
+            assert log.open_existing("a") == 10
+            assert _put(log, "a") == 11
+            assert _put(log, "b") == 11
+            assert [e["seq"] for e in log.read("a")] == list(range(1, 12))
+        assert path_a.read_bytes().endswith(b"\n")
 
 
 WORKERS = 6

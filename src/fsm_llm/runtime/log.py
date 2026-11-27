@@ -164,9 +164,10 @@ class EventLog(ToolEventsMixin):
         - ``EventLog(root, *, max_open_writers=DEFAULT_MAX_OPEN_WRITERS)``: at most that many
           idle writers stay open (two file descriptors and the advisory lock each); the least
           recently used idle, unpoisoned one is closed when another is needed and a later
-          append of its id re-opens the same file (a full scan for now), so a host holds about
-          ``2 * max_open_writers`` descriptors however many conversations idle. ``None`` is
-          unbounded (the lock is held for the conversation's life), ``0`` closes a writer the
+          append of its id re-opens the same file (it reads the tail of the log, never the
+          whole file, and refuses a file another process changed or replaced meanwhile), so a
+          host holds about ``2 * max_open_writers`` descriptors however many conversations idle.
+          ``None`` is unbounded (the lock is held for the conversation's life), ``0`` closes a writer the
           moment its append ends (every append re-opens); a bool, a negative or a non-int is a
           ``ValueError``. A closed idle writer holds no lock, so another process can write,
           resume or prune that conversation (a re-open meeting its lock is ``LogLockedError``,
@@ -214,9 +215,9 @@ class EventLog(ToolEventsMixin):
             OrderedDict()
         )  # least recent first
         self._pins: dict[str, int] = {}  # appends in flight per id: never evicted
-        self._live: set[str] = (
-            set()
-        )  # appended to or opened, not released: the owner rule
+        # appended to or opened, not released: the owner rule; the value is the resume point
+        # (last seq, device, inode) recorded when its writer was evicted, None while it is open
+        self._live: dict[str, tuple[int, int, int] | None] = {}
         self._closed = False
         self._lanes = Lanes()  # no thread starts until the first lane_call
 
@@ -256,7 +257,11 @@ class EventLog(ToolEventsMixin):
             if writer is None:
                 self._trim(1)  # room first, so the descriptors never pass the bound
                 try:
-                    writer = self._open(conversation_id, create=not reopen)
+                    writer = self._open(
+                        conversation_id,
+                        create=not reopen,
+                        expect=self._live.get(conversation_id),
+                    )
                 except FileNotFoundError as exc:  # create=False only: the log is gone
                     raise LogCorruptError(
                         f"log {conversation_id}{LOG_SUFFIX} vanished while idle"
@@ -274,13 +279,22 @@ class EventLog(ToolEventsMixin):
                     del self._pins[conversation_id]
                 self._trim(0)
 
-    def _open(self, conversation_id: str, *, create: bool) -> JsonlWriter:
-        """Build, table and lease-mark the writer of an id (under ``_guard``)."""
+    def _open(
+        self,
+        conversation_id: str,
+        *,
+        create: bool,
+        expect: tuple[int, int, int] | None = None,
+    ) -> JsonlWriter:
+        """Build, table and lease-mark the writer of an id (under ``_guard``).
+
+        *expect* is the resume point of a re-open (the tail read of ``JsonlWriter``, D-005).
+        """
         writer = JsonlWriter(
-            self._logs / f"{conversation_id}{LOG_SUFFIX}", create=create
+            self._logs / f"{conversation_id}{LOG_SUFFIX}", create=create, expect=expect
         )
         self._writers[conversation_id] = writer
-        self._live.add(conversation_id)
+        self._live[conversation_id] = None
         return writer
 
     def _trim(self, room: int) -> None:
@@ -295,6 +309,7 @@ class EventLog(ToolEventsMixin):
                 break
             if conversation_id not in self._pins and not writer.poisoned:
                 del self._writers[conversation_id]
+                self._live[conversation_id] = writer.resume_point
                 writer.close()
                 excess -= 1
 
@@ -618,7 +633,7 @@ class EventLog(ToolEventsMixin):
     def _release_now(self, conversation_id: str) -> None:
         with self._guard:
             writer = self._writers.pop(conversation_id, None)
-            self._live.discard(conversation_id)
+            self._live.pop(conversation_id, None)
         if writer is not None:
             writer.close()
 
@@ -641,7 +656,8 @@ class EventLog(ToolEventsMixin):
         with self._guard:
             ids = [cid for cid in self._live if self._lanes.lane_of(cid) == lane]
             writers = [w for cid in ids if (w := self._writers.pop(cid, None))]
-            self._live.difference_update(ids)
+            for cid in ids:
+                del self._live[cid]
         for writer in writers:
             writer.close()
 
