@@ -1783,8 +1783,10 @@ _MODULE_OF = {
 _OLD_MEMBERS = frozenset(
     {
         "__init__",
+        "_agent_catalog",
         "_cache_ended_conversation",
         "_check_agent_capacity",
+        "_check_instance_room",
         "_close_fsm_api",
         "_emit_agent_run_events",
         "_emit_event",

@@ -81,10 +81,21 @@ class LifecycleMixin(_InstanceSurface):
         # Do NOT move ``_make_room`` back to the top of a ``launch_*``: a
         # request that then failed validation had already destroyed the oldest
         # finished instance and its history.
+
+        # DECISION plan-2026-11-27T102400-1f0925d2/D-005
+        # [EXTENDS the D-005 of plan 5980fbb7 above, which stays]
+        # The capacity checks and the insert are ONE ``_lock`` hold: launches run in
+        # worker threads, so a check in an earlier scope lets two launches pass and
+        # both register. Eviction stays OUTSIDE (``_make_room``: a join and an API
+        # close never run under ``_lock``). Do NOT split the scope, take
+        # ``_catalog_lock`` or log here.
         """
         self._make_room()
         instance_id = managed.instance_id
         with self._lock:
+            self._check_instance_room()
+            if isinstance(managed, ManagedAgent):
+                self._check_agent_capacity()
             self._instances[instance_id] = managed
             self._collectors[instance_id] = collector
         self._emit_event(
@@ -102,10 +113,19 @@ class LifecycleMixin(_InstanceSurface):
 
     def end_instance(self, instance_id: str) -> None:
         """End a managed instance (the ``end_*`` verb) and clean up resources."""
+        # An FSM's usage is read ONCE, before the pop (it is still listed, so a metrics
+        # read counts it through its own meter), and folded in the pop's scope: a read
+        # between the two would see it twice or not at all. A launched FSM builds its
+        # own interface, so the fold never repeats a live one; ``close`` folds nothing.
+        with self._lock:
+            listed = self._instances.get(instance_id)
+        found = api_usage(listed.api) if isinstance(listed, ManagedFSM) else None
         with self._lock:
             inst = self._instances.pop(instance_id, None)
             self._collectors.pop(instance_id, None)
             if inst is not None:
+                if found is not None:
+                    self._ended_usage = add_usage(self._ended_usage, found[1])
                 if isinstance(inst, ManagedAgent):
                     inst.cancel_event.set()
                     if inst.status in ACTIVE_AGENT_STATUSES:
@@ -116,15 +136,6 @@ class LifecycleMixin(_InstanceSurface):
         if inst is None:
             raise KeyError(f"Instance not found: {instance_id}")
 
-        if isinstance(inst, ManagedFSM):
-            # Keep what its interface used (a read of its meter), so the
-            # dashboard total does not drop when the instance goes. A launched
-            # FSM builds its own interface, so this never repeats a live one;
-            # ``close`` keeps its instances listed and folds nothing.
-            found = api_usage(inst.api)
-            if found is not None:
-                with self._lock:
-                    self._ended_usage = add_usage(self._ended_usage, found[1])
         self._teardown(inst, join_agent=True)
         self._emit_event(
             EVENT_INSTANCE_DESTROYED,
@@ -199,6 +210,10 @@ class LifecycleMixin(_InstanceSurface):
                 self.end_instance(victim)
             except KeyError:
                 pass
+        self._check_instance_room()
+
+    def _check_instance_room(self) -> None:
+        """Refuse a launch when ``max_instances`` instances are listed."""
         with self._lock:
             if len(self._instances) >= self._config.max_instances:
                 raise MonitorCapacityError(

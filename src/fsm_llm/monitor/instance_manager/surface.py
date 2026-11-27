@@ -84,6 +84,8 @@ class _InstanceSurface:
         # AgentsMixin (agent.py)
         def get_agent_status(self, instance_id: str) -> dict[str, Any]: ...
 
+        def _check_agent_capacity(self) -> None: ...
+
         # LifecycleMixin (lifecycle.py)
         def _register_instance(
             self,

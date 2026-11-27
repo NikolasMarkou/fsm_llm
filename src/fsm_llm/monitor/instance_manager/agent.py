@@ -154,11 +154,13 @@ class AgentsMixin(_InstanceSurface):
     # The registry loads ONCE, lazily, off the loop (callers run this in a worker thread), under the
     # leaf `_catalog_lock` that is never held with `_lock`; a load that raises assigns nothing, so
     # the next call retries. Do NOT load in `__init__`, on the loop thread or under `_lock`.
-    def agent_types(self) -> list[dict[str, Any]]:
-        """One row per ``pattern`` executable of the registry, sorted by id (a copy)."""
+    # The rows and the registry they came from are returned from ONE scope, so a caller that needs
+    # both (a preview, a launch) never pairs the rows of one registry with another (plan 1f0925d2).
+    def _agent_catalog(self) -> tuple[list[dict[str, Any]], ExecutableRegistry]:
+        """The rows (a copy) and the registry they were built from, read in one scope."""
         with self._catalog_lock:
-            if self._agent_rows is None:
-                registry = self._executables
+            registry = self._executables
+            if self._agent_rows is None or registry is None:
                 if registry is None:
                     registry = ExecutableRegistry()
                     registry.load_sources()
@@ -171,13 +173,18 @@ class AgentsMixin(_InstanceSurface):
                     _agent_row(latest[i]) for i in sorted(picked.values())
                 ]
                 self._executables = registry
-            return copy.deepcopy(self._agent_rows)
+            return copy.deepcopy(self._agent_rows), registry
+
+    def agent_types(self) -> list[dict[str, Any]]:
+        """One row per ``pattern`` executable of the registry, sorted by id (a copy)."""
+        return self._agent_catalog()[0]
 
     def agent_preview(self, agent_type: str) -> dict[str, Any] | None:
         """A fresh FSM dict to draw for a listed id, ``None`` when it has no preview; ``KeyError`` when not listed."""
-        if all(row["id"] != agent_type for row in self.agent_types()):
+        rows, registry = self._agent_catalog()
+        if all(row["id"] != agent_type for row in rows):
             raise KeyError(agent_type)
-        return _preview(self._executables.get(agent_type))  # type: ignore[union-attr]
+        return _preview(registry.get(agent_type))
 
     # DECISION plan-2026-11-25T145435-659c07c3/D-009
     # The id is matched EXACTLY against the launchable rows (`create_agent` strips and lowercases, so a
@@ -195,7 +202,8 @@ class AgentsMixin(_InstanceSurface):
         label: str = "",
     ) -> ManagedAgent:
         """Launch an agent in a background thread."""
-        rows = [r for r in self.agent_types() if r["launchable"]]
+        all_rows, executables = self._agent_catalog()
+        rows = [r for r in all_rows if r["launchable"]]
         row = next((r for r in rows if r["id"] == agent_type), None)
         if row is None:
             raise ValueError(
@@ -245,7 +253,7 @@ class AgentsMixin(_InstanceSurface):
 
         thread = threading.Thread(
             target=self._run_agent,
-            args=(managed, config, registry, handlers),
+            args=(managed, config, registry, handlers, executables),
             name=f"agent-{instance_id}",
             daemon=True,
         )
@@ -273,8 +281,10 @@ class AgentsMixin(_InstanceSurface):
         config: AgentConfig,
         tools: ToolRegistry | None,
         handlers: list[Any],
+        executables: ExecutableRegistry,
     ) -> None:
-        """Body of the agent's background thread."""
+        """Body of the agent's background thread; ``executables`` is the registry the launch
+        read its rows from (never re-read: an ``attach_executables`` in between must not change it)."""
         try:
             if managed.cancel_event.is_set():
                 with self._lock:
@@ -284,7 +294,7 @@ class AgentsMixin(_InstanceSurface):
             kwargs: dict[str, Any] = {
                 "config": config,
                 "handlers": handlers,
-                "registry": self._executables,
+                "registry": executables,
             }
             if tools is not None:
                 kwargs["tools"] = tools

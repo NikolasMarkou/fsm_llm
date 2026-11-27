@@ -1294,6 +1294,11 @@
       "delta": 1,
       "reason": "plan 1f0925d2 step 3 D-004: new anchor beside the builder start slot table (routes_builder.py); the D-054 anchor is unchanged",
       "token": "plan-2026-11-27T102400-1f0925d2/D-004"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 1f0925d2 step 4 (S3): new anchor plan-2026-11-27T102400-1f0925d2/D-005 in monitor/instance_manager/lifecycle.py (one lock scope for launch capacity); no existing token moved or lost",
+      "token": "plan-2026-11-27T102400-1f0925d2/D-005"
     }
   ]
 }

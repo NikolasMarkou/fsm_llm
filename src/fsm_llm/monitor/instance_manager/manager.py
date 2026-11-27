@@ -137,12 +137,15 @@ class InstanceManager(
         """Apply a new config: resizes the global collector's buffers and
         re-registers the log sink at ``log_level``. Per-instance collectors
         keep their size (they only hold that instance's events)."""
-        old = self._config
-        self._config = value
-        self._global_collector.resize(value.max_events, value.max_log_lines)
-        if value.log_level != old.log_level:
-            self._global_collector.cleanup()
-            self._setup_loguru_sink()
+        # One scope (the lock ``close`` takes too), so two setters cannot orphan a sink
+        # and a closed manager gets none: ``close`` removed the sink and nobody would.
+        with self._lock:
+            old = self._config
+            self._config = value
+            self._global_collector.resize(value.max_events, value.max_log_lines)
+            if value.log_level != old.log_level and not self._closed:
+                self._global_collector.cleanup()
+                self._setup_loguru_sink()
 
     @property
     def closed(self) -> bool:
