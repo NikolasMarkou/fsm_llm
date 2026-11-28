@@ -47,9 +47,11 @@ api.register_handler(
 
 A CONTEXT_UPDATE handler dispatched by `API.update_context`, and an END_CONVERSATION handler,
 run with no turn in flight. They may read the conversation and call `update_context`, but a
-`converse`, `advance` or stream on their own conversation raises `FSMError` (a nested turn would
+`converse`, `advance` or stream of the same frame raises `FSMError` (a nested turn would
 run two model calls inside the call that is updating or ending it); a handler may start a turn of
-another conversation. START_CONVERSATION handlers are not covered by this refusal.
+another conversation. The refusal covers the frame whose handler runs: a nested `API.converse`
+whose start settle first pushes a pending `call` child runs its turn on the child's own
+conversation id, which is not refused. START_CONVERSATION handlers are not covered by this refusal.
 
 ### PRE_TRANSITION / POST_TRANSITION -- Before/after state change
 ```python

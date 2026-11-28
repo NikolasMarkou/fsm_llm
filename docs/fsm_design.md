@@ -258,6 +258,23 @@ Design rules:
 ]
 ```
 
+- To treat `aborted` (a spent budget or a cancel) differently from `failed`, do not give it an edge of its own beside the failure edge: an edge `status == aborted` to another state with a lower priority number than the failure edge wins at the `aborted` sample, and the loader refuses the state. Make `on_failure` a router state instead. The synthesize state keeps the one failure edge, `status in [failed, aborted]` to the router, and the router state declares its own edges on the same result key, one for `aborted` and one for `failed`, each to its own reply state:
+
+```json
+"sorry": {
+  "id": "sorry", "description": "Tell a stop from a failure", "purpose": "Route the failure",
+  "response_instructions": "",
+  "transitions": [
+    {"target_state": "timed_out", "description": "It was stopped", "priority": 1,
+     "conditions": [{"description": "aborted", "requires_context_keys": ["synthesis_result"],
+                     "logic": {"==": [{"var": "synthesis_result.status"}, "aborted"]}}]},
+    {"target_state": "failed_reply", "description": "It failed", "priority": 2,
+     "conditions": [{"description": "failed", "requires_context_keys": ["synthesis_result"],
+                     "logic": {"==": [{"var": "synthesis_result.status"}, "failed"]}}]}
+  ]
+}
+```
+
 - `on_failure` names the state the failure edge reaches, one of the state's own transition targets. Give that state a reply that apologises or offers an alternative, because a failure is a normal outcome, not an exception.
 - Name what the procedure may use (`inputs`) and what it must return (`return_keys`) with plain key names. Do not use a handler-only key as a return key.
 - The state declares no extraction and no `completion`. Core only loads the field; an engine that would run it needs a `SynthesizeExecutor`: an `API`, `FSMManager` or `MessagePipeline` with none refuses the definition with `MissingExecutorError` (at construction, `push_fsm`, `fork` and `resume` for an `API`, at the first turn for a bare manager), so register the executor on the `API` and drive the host with the core loops. `fsm-llm-validate` and `load_fsm_definition` accept the definition without one.
@@ -302,7 +319,7 @@ api.get_data(conversation_id)["call_result"]["status"]          # "ok"
 Design rules:
 
 - Precondition: `API(targets=...)`, keyword-only and internal like `executors=` (the builders have no setter). A bare `API` refuses a definition that holds a `call` state with `MissingExecutorError` naming the resolver; the loader and `fsm-llm-validate` accept it. Frame mode runs targets of kind `fsm`, `strategy` and `procedure`; any other id, a pattern or a workflow resolves to nothing and the call ends `failed/unknown_target`.
-- Route on `call_result.status` (`ok`, `failed`, `aborted`; `running` while it works) and write the failure edge as `status in [failed, aborted]`, as for `synthesize`: every edge must read the result key and the loader refuses an edge that could fire before a result exists. The failure edge must also win outright at the `failed` and the `aborted` sample (no earlier-priority edge passes there and no tie); put a retry gate on an edge with a lower priority number.
+- Route on `call_result.status` (`ok`, `failed`, `aborted`; `running` while it works) and write the failure edge as `status in [failed, aborted]`, as for `synthesize`: every edge must read the result key and the loader refuses an edge that could fire before a result exists. The failure edge must also win outright at the `failed` and the `aborted` sample (no earlier-priority edge passes there and no tie); put a retry gate on an edge with a lower priority number. An edge of its own for `aborted` (`status == aborted` to another state, ahead of the failure edge) is refused for the same reason: make `on_failure` a router state whose own edges branch on `call_result.status` for `aborted` and `failed`, as in the synthesize section above.
 - The child receives only the declared `inputs` (copied, never the parent's whole context, an internal key or an approval grant) and the parent receives only the declared `returns`. Both lists hold public key names; the loader refuses an internal-prefixed or secret-looking name. A declared return the child did not write ends `failed/return_keys_missing` and merges nothing. A `strategy` target that declares no `returns` hands back every key of its own `results` map that the child wrote.
 - `max_steps` and `max_seconds` are the child frame's lifetime budget. A child that spends it ends `aborted/budget_spent` with no merge, and the parent takes the failure edge. The other reasons are `unknown_target`, `inputs_missing`, `depth_refused`, `push_failed` and `provider_error` (the child's greeting could not be generated).
 - `choose` takes `key` (the context key that holds a target id), a closed non-empty `targets` list and an optional `fallback` from that list. A value outside the list takes the fallback, else the call ends `failed/unknown_target`. Write the key from a handler or an earlier state. If a user message must never pick the target, list the key in `handler_only_keys` (the reasoning orchestrator does so for `classified_problem_type`). `targets_from {capability}` records where the list came from and is never resolved by core.
