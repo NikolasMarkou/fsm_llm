@@ -10,16 +10,23 @@ drop under one ``_stack_lock`` hold) is the contract of the anchors below.
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fsm_llm.core.definitions import ConversationBusyError, FSMError
 from fsm_llm.logging import logger
 
-from .delegated import cancel_delegated_runs
-from .events import release_event_writer
+from .delegated import cancel_delegated_runs, end_runs_of
+from .events import record_pop, release_event_writer
 from .helpers import _read_or_ended, handle_conversation_errors
 from .ledger import release_dropped_frames
 from .surface import _ApiSurface
+
+if TYPE_CHECKING:
+    from .stack import FSMStackFrame
+
+# The ``merge_strategy`` of the ``stack/pop`` of a frame an ``end_conversation`` dropped: it merged
+# nothing (the fold never reads the field; a hand pop writes ``update`` or ``preserve``).
+_DROPPED_MERGE = "none"
 
 # Bound of the per-API cache of ended-conversation snapshots (oldest evicted).
 MAX_ENDED_CONVERSATIONS_CACHE = 10_000
@@ -112,14 +119,24 @@ class LifecycleMixin(_ApiSurface):
         failed end this means the end was refused and nothing was torn down."""
         return self.fsm_manager.has_instance(frame_id)
 
-    def _drop_ended_frames(self, conversation_id: str, ended: set[str]) -> None:
-        """Remove already-ended frames from a conversation's live stack."""
+    def _drop_ended_frames(
+        self, conversation_id: str, ended: set[str]
+    ) -> list[tuple[FSMStackFrame, FSMStackFrame, int]]:
+        """Remove already-ended frames from a conversation's live stack.
+
+        Returns ``(frame, parent, depth)`` for each frame it removed, top first, where ``depth``
+        is the stack length right after that frame's removal (the depth its ``stack/pop`` logs)."""
         if not ended:
-            return
+            return []
+        dropped: list[tuple[FSMStackFrame, FSMStackFrame, int]] = []
         with self._stack_lock:
             stack = self.conversation_stacks.get(conversation_id)
             if stack is not None:
+                for index in range(len(stack) - 1, 0, -1):
+                    if stack[index].conversation_id in ended:
+                        dropped.append((stack[index], stack[index - 1], index))
                 stack[:] = [f for f in stack if f.conversation_id not in ended]
+        return dropped
 
     @handle_conversation_errors("Failed to end conversation")
     def end_conversation(self, conversation_id: str) -> None:
@@ -129,8 +146,9 @@ class LifecycleMixin(_ApiSurface):
         ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, raises
         ``ConversationBusyError`` (an ``FSMError``) and the conversation stays
         active with its remaining frames; retry after the turn. Frames above
-        the refusing one that were already ended are removed from the stack, and their call
-        marks, delegated runs and temp definitions are released.
+        the refusing one that were already ended are removed from the stack, their call
+        marks, delegated runs and temp definitions are released, and the event log gets one
+        ``stack/pop`` per dropped frame and the ``run/end`` of each run it owed, as for a pop.
         Any other failure while reading the ended-conversation cache is
         logged and the end proceeds without a cache entry.
         """
@@ -179,10 +197,28 @@ class LifecycleMixin(_ApiSurface):
                 ended.add(frame_id)
             except Exception as e:
                 if self._frame_instance_present(frame_id):
-                    self._drop_ended_frames(conversation_id, ended)
-                    # the frames above the refusing one are gone: their marks, runs and temp
-                    # defs go the way an end's do (E3); the refusing frame and the root stay
-                    release_dropped_frames(self, ended)
+                    dropped = self._drop_ended_frames(conversation_id, ended)
+                    # The frames above the refusing one are gone, and they leave the way a hand
+                    # pop's frame does (D-006 of plan 8525c797, `pop_fsm`): marks, runs and temp
+                    # defs through the one cleanup (the run marks kept for their `run/end`), then
+                    # one `stack/pop` per frame, top first, then the owed `run/end`. The pop
+                    # merges nothing and does NOT read the parent's state: the refusing frame is
+                    # held by a turn and a read waits for it. The refusing frame and the root stay.
+                    release_dropped_frames(self, ended, keep_run_marks=True)
+                    for frame, parent, depth in dropped:
+                        record_pop(
+                            self,
+                            conversation_id,
+                            frame.conversation_id,
+                            frame.fsm_id,
+                            _DROPPED_MERGE,
+                            0,
+                            depth,
+                            parent_id=parent.conversation_id,
+                            read_parent_state=False,
+                        )
+                    for frame, _parent, _depth in dropped:
+                        end_runs_of(self, conversation_id, frame.conversation_id)
                     raise
                 ended.add(frame_id)
                 if not stack:

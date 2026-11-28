@@ -329,8 +329,13 @@ def record_pop(
     depth: int,
     *,
     parent_id: str,
+    read_parent_state: bool = True,
 ) -> None:
-    """Append ``stack/pop`` for a frame that was just removed (a no-op with the log off)."""
+    """Append ``stack/pop`` for a frame that was just removed (a no-op with the log off).
+
+    ``read_parent_state=False`` leaves out the ``state_ref`` of the parent: for a pop that merged
+    nothing (the parent's state did not change, so the fold keeps its last one) and whose parent
+    may be held by a turn, since reading a state waits for the turn."""
     log = getattr(api, "_event_log", None)
     if log is None:
         return
@@ -340,7 +345,7 @@ def record_pop(
         "merge_strategy": merge_strategy,
         "merged_key_count": merged_keys,
     }
-    if log.stores_values:
+    if log.stores_values and read_parent_state:
         _optional_field(
             fields, "state_ref", lambda: state_ref_of(api.fsm_manager, log, parent_id)
         )

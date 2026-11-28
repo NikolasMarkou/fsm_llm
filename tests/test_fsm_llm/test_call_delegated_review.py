@@ -39,6 +39,7 @@ from fsm_llm.engine.kinds.targets import (
 )
 from fsm_llm.reasoning.executables import SolveExecutable
 from fsm_llm.runtime import EventLog
+from fsm_llm.runtime.stores.stack import fold_stack
 from tests.conftest import current_timing_factor
 from tests.test_fsm_llm.test_async_engine import _CHAT
 from tests.test_fsm_llm.test_call_delegated import _initial_call
@@ -832,6 +833,125 @@ class TestEveryFramesAreGoneExitReleasesItsRuns:
             assert api._call_marks.runs == {}
         finally:
             free.set()
+            if holder is not None:
+                holder.join(10.0)
+            probe.release.set()
+            api.close()
+            log.close()
+
+    @staticmethod
+    def _hold_lock(api: API, frame_id: str):
+        """Hold the turn lock of one frame on a thread; returns (held_wait, free, thread)."""
+        lock = api.fsm_manager._conversation_locks[frame_id]
+        held, free = threading.Event(), threading.Event()
+
+        def hold() -> None:
+            with lock:
+                held.set()
+                free.wait(10.0)
+
+        holder = threading.Thread(target=hold, name="busy-turn")
+        holder.start()
+        assert held.wait(10.0)
+        return free, holder
+
+    def test_a_busy_lower_frame_leaves_a_log_that_folds_to_the_live_depth(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Review concern 1 of plan 8525c797: the refusal dropped the child frame and its run but
+        wrote no ``stack/pop`` and no ``run/end``, so the log folded to depth 2 against a live
+        depth 1 and ``resume`` rebuilt the ended child. One pop and one ``run/end`` per dropped
+        frame, the parent's busy state never read for the pop. Kills: the busy branch without
+        ``record_pop``; without ``end_runs_of``; ``keep_run_marks`` left False; a pop that reads
+        the busy parent's state (it would wait for the held turn)."""
+        monkeypatch.setattr(
+            "fsm_llm.engine.fsm.snapshots.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2
+        )
+        api, _targets, log, probe = self._api(tmp_path, root_call=True)
+        free: threading.Event | None = None
+        holder: threading.Thread | None = None
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            root_frame = api.conversation_stacks[cid][0].conversation_id
+            api.advance(cid)
+            api.push_fsm(cid, _child_definition(), context_to_pass={"topic": "why"})
+            child = api.get_sub_conversation_id(cid)
+            api.advance(cid)
+            child_handle = next(
+                h for h, m in api._call_marks.runs.items() if m.frame_id == child
+            )
+            assert len(_types(log, cid, "stack/push")) == 1
+            free, holder = self._hold_lock(api, root_frame)
+            with pytest.raises(ConversationBusyError):
+                api.end_conversation(cid)
+
+            assert api.get_stack_depth(cid) == 1
+            folded = fold_stack(log.read(cid), log.get_json)
+            assert folded is not None and folded.depth == api.get_stack_depth(cid)
+            pops = _types(log, cid, "stack/pop")
+            assert [(p["child_conversation_id"], p["depth"]) for p in pops] == [
+                (child, 1)
+            ]
+            assert "state_ref" not in pops[0]  # the busy parent was not read
+            ends = [
+                e for e in _types(log, cid, "run/end") if e["handle"] == child_handle
+            ]
+            assert len(ends) == 1 and ends[0]["status"] != "ok"
+            # the order of pop_fsm: the pop, then the run/end
+            assert ends[0]["seq"] > pops[0]["seq"]
+            assert child_handle not in api._call_marks.runs
+            # the refusal changed nothing else: the retry ends the root, and no second pop
+            free.set()
+            holder.join(10.0)
+            api.end_conversation(cid)
+            assert len(_types(log, cid, "stack/pop")) == 1
+        finally:
+            if free is not None:
+                free.set()
+            if holder is not None:
+                holder.join(10.0)
+            probe.release.set()
+            api.close()
+            log.close()
+
+    def test_a_busy_lower_frame_logs_one_pop_per_dropped_frame_top_first(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Two frames dropped above the busy one: pops at depth 3 and 2, in the order the frames
+        ended (top first), and the fold is the live depth. Kills: one pop for the whole group; the
+        pops in stack order (a depth-2 pop first would leave the fold at depth 2 after the
+        depth-3 pop is a no-op to the fold, so the list of depths is the pin)."""
+        monkeypatch.setattr(
+            "fsm_llm.engine.fsm.snapshots.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2
+        )
+        api, _targets, log, probe = self._api(tmp_path, root_call=False)
+        free: threading.Event | None = None
+        holder: threading.Thread | None = None
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.push_fsm(cid, _CHAT(), context_to_pass={"topic": "why"})
+            first = api.get_sub_conversation_id(cid)
+            api.push_fsm(cid, _CHAT(), context_to_pass={"topic": "why"})
+            second = api.get_sub_conversation_id(cid)
+            api.push_fsm(cid, _CHAT(), context_to_pass={"topic": "why"})
+            third = api.get_sub_conversation_id(cid)
+            assert api.get_stack_depth(cid) == 4
+            free, holder = self._hold_lock(api, first)
+            with pytest.raises(ConversationBusyError):
+                api.end_conversation(cid)
+
+            assert api.get_stack_depth(cid) == 2
+            pops = _types(log, cid, "stack/pop")
+            assert [(p["child_conversation_id"], p["depth"]) for p in pops] == [
+                (third, 3),
+                (second, 2),
+            ]
+            folded = fold_stack(log.read(cid), log.get_json)
+            assert folded is not None and folded.depth == 2
+            assert [f.child_conversation_id for f in folded.frames] == [first]
+        finally:
+            if free is not None:
+                free.set()
             if holder is not None:
                 holder.join(10.0)
             probe.release.set()
