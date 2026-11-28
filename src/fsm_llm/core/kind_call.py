@@ -12,7 +12,8 @@ Interface contract:
   whose driver writes ``context[result_key]`` after the state was entered
   (``synthesize`` today). Returns a message (without the ``State '<id>':``
   prefix) or ``None``. *definition* and *state* are read by ``getattr``;
-  *evaluator* is the real ``TransitionEvaluator`` and *logic_keys* is
+  *evaluator* is the real ``TransitionEvaluator`` (``transition_passes`` and
+  ``winning_targets``) and *logic_keys* is
   ``definitions.logic_referenced_keys`` (handed in: this leaf cannot import
   them); *samples* is the tuple of ``(label, result)`` the edges are run on
   (``None`` is "no result yet", each result has a ``status``); *owned* is a
@@ -100,9 +101,12 @@ def check_result_edges(
        or ``aborted``, or no result at all). No edge may pass the absent or the
        ``running`` sample (it would fire before the producer has decided), and an
        edge to ``on_failure`` must pass the ``failed`` sample and an edge to it
-       the ``aborted`` sample (or the parent is stranded after a failure). An
-       edge on a handler-only key alone passes no sample: fine, but it cannot
-       be the failure edge.
+       the ``aborted`` sample (or the parent is stranded after a failure), and
+       it must WIN there: ``evaluator.winning_targets`` is exactly
+       ``[on_failure]`` (a lower priority number that also passes, or a tie at
+       the lowest number, is refused in its own wording). An edge on a
+       handler-only key alone passes no sample: fine, but it cannot be the
+       failure edge.
     3. Host keys a state returns or takes may not be producer-owned: a
        return key merged by ``pop_fsm`` would write a value the child's model
        extracted over a handler-only key, a synthesize result or a completion
@@ -153,6 +157,35 @@ def check_result_edges(
                 f"{outcome} failed or aborted (it does not pass when "
                 f"{result_key!r} is {label}, {result!r})"
             )
+        else:
+            # DECISION plan-2026-11-28T050702-8525c797/D-004: the failure edge
+            # must WIN outright (it is the unique winner of the real ranking),
+            # not just pass. An earlier-priority edge that also passes
+            # misroutes the parent, and a tie sends it to the classifier model
+            # on the path that is meant to be deterministic; `on_failure` has
+            # no runtime reader, so this rule is the whole contract. Do NOT
+            # relax it to "passes" or to "wins or ties", and do NOT copy the
+            # ranking here: ask `winning_targets`, the ranking the runtime
+            # runs. The sampler stays the `"x"` fill (D-005): a failure edge
+            # gated on another key is a known limit, put the gate on the retry
+            # edge at a LOWER priority number.
+            winners = evaluator.winning_targets(state.transitions, context)
+            if winners != [on_failure]:
+                other = next(target for target in winners if target != on_failure)
+                if on_failure in winners:
+                    return (
+                        f"the transition to {on_failure!r} ties with the transition "
+                        f"to {other!r} when {outcome} failed or aborted (a tie "
+                        "goes to the classifier model; the failure edge must win "
+                        f"outright; they tie when {result_key!r} is {label}, "
+                        f"{result!r})"
+                    )
+                return (
+                    f"the transition to {other!r} wins over the failure edge to "
+                    f"{on_failure!r} when {outcome} failed or aborted (the lowest "
+                    "priority number wins and the failure edge must win outright; "
+                    f"it wins when {result_key!r} is {label}, {result!r})"
+                )
     known = owned()
     for entry, names in (
         (return_entry, return_names),

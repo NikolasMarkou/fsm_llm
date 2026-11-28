@@ -525,6 +525,7 @@ fsm_llm.TransitionEvaluator class
   def __init__(self, config: TransitionEvaluatorConfig | None = None)
   def evaluate_transitions(self, current_state: State, context: FSMContext, extracted_data: dict[str, Any] | None = None) -> TransitionEvaluation
   def transition_passes(self, transition: Transition, context: dict[str, Any]) -> bool
+  def winning_targets(self, transitions: list[Transition], context: dict[str, Any]) -> list[str]
 fsm_llm.TransitionEvaluatorConfig class
   def __init__(self, strict_condition_matching: bool = True, detailed_logging: bool = False) -> None
 fsm_llm.TransitionOption class(BaseModel)

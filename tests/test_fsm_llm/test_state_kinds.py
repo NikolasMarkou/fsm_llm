@@ -1195,6 +1195,32 @@ class TestDefinitionCheckHooks:
             "synthesis_result": "result_key of a synthesize state",
         }
 
+    def test_a_failure_edge_that_does_not_win_is_refused_for_synthesize_too(self):
+        """Plan 8525c797 step 3 (D-004): the shared edge rule asks for the unique
+        winner, so the synthesize twin of the call rows refuses a loser and a tie."""
+        rival = _host_edge("end", _host_condition(_FAILED))
+        fail_edge = _host_edge("fail", _host_condition(_FAILED))
+        loser = _host_definition(
+            [{**rival, "priority": 1}, {**fail_edge, "priority": 2}]
+        )
+        with pytest.raises(ValidationError) as excinfo:
+            FSMDefinition(**loser)
+        assert (
+            "the transition to 'end' wins over the failure edge to 'fail' when "
+            "the procedure failed or aborted"
+        ) in str(excinfo.value)
+        tie = _host_definition([rival, fail_edge])
+        with pytest.raises(ValidationError) as excinfo:
+            FSMDefinition(**tie)
+        assert (
+            "the transition to 'fail' ties with the transition to 'end' when "
+            "the procedure failed or aborted"
+        ) in str(excinfo.value)
+        winner = _host_definition(
+            [{**rival, "priority": 2}, {**fail_edge, "priority": 1}]
+        )
+        FSMDefinition(**winner)
+
 
 class TestVerifierHooks:
     """Plan d454fd62 step 51: G4 (through the produced keys), the dry-run gate G6a

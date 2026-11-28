@@ -91,6 +91,7 @@ The loader checks a synthesize state against the real transition evaluator, so a
 - Every edge of the state must read `synthesis_result` (or a `handler_only_keys` entry), or it would fire before a result was written.
 - No edge may pass while the result is absent or `running`.
 - The edge to `on_failure` must pass for `status` `failed` AND for `aborted`. Write it as `status in [failed, aborted]`. A bare `== "failed"` is refused, because an aborted procedure would otherwise strand the host.
+- That edge must also WIN at both samples: it is the unique winner of the real ranking (the lowest `priority` number among the passing edges). An edge with a lower number that also passes, or a tie at the lowest number, is refused (a tie would go to the classifier model on the failure path). The failure edge reads the result key only; a retry gate belongs on a retry edge with a LOWER number.
 - A synthesize state declares no extraction and no `completion`, and `on_failure` must be one of its own transition targets.
 
 A `SynthesizeExecutor` registered on the `API` gives the state its meaning. This runs offline with scripted interfaces (`Strong` stands in for the strong model, `Host` for the host's cheap model); with real models you pass `FSMSynthesizer(model="...")` and an `API` built the usual way:

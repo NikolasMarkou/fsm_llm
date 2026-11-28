@@ -250,7 +250,10 @@ class SynthesizeConfig(BaseModel):
     before the executor wrote a result (no result, or ``status`` ``running``), and
     an edge to ``on_failure`` must pass for ``status`` ``failed`` and for
     ``aborted``, so write it as ``status in [failed, aborted]`` (a bare
-    ``== "failed"`` is refused). ``min_lifecycle`` is the least trusted stored
+    ``== "failed"`` is refused), and it must WIN there: the unique lowest
+    priority number among the passing edges (an earlier edge that also passes
+    and a tie are refused). Keep the failure edge to the result key and put a
+    retry gate on an edge with a LOWER priority number. ``min_lifecycle`` is the least trusted stored
     procedure to run. Frozen, extras refused.
     """
 
@@ -369,7 +372,10 @@ class CallStateConfig(BaseModel):
     pipeline makes handler-only; the loader runs the state's edges on sample results
     (``kind_call.check_result_edges``): no edge may pass before the engine wrote a result
     and an edge to ``on_failure`` must pass for ``failed`` and for ``aborted``, so write it
-    as ``status in [failed, aborted]``. ``max_steps`` and ``max_seconds`` bound the call
+    as ``status in [failed, aborted]``, and it must WIN there (the unique lowest priority
+    number among the passing edges; an earlier edge that also passes and a tie are refused:
+    keep it to the result key and put a retry gate on an edge with a LOWER number).
+    ``max_steps`` and ``max_seconds`` bound the call
     (the budget of the pushed frame). Every key name is public and not secret-looking and
     ``result_key`` is none of the inputs, the parent return keys or the choose key.
     Core only loads it. Frozen; extras refused.

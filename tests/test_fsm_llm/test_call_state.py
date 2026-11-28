@@ -495,6 +495,32 @@ class TestTheFailureEdgeMustExist:
         FSMDefinition(**_parent(transitions=[_ok_edge(), failure]))
 
 
+class TestTheFailureEdgeMustWin:
+    """Plan 8525c797 step 3 (D-004), end to end through the loader."""
+
+    @staticmethod
+    def _rival(priority: int) -> dict[str, Any]:
+        return _edge("done", priority, {"in": [_STATUS, ["ok", "failed", "aborted"]]})
+
+    def test_an_earlier_edge_that_also_passes_the_failure_is_refused(self):
+        definition = _parent(transitions=[self._rival(1), _failure_edge()])
+        message = _refusal(definition)
+        assert "the transition to 'done' wins over the failure edge to 'apology'" in (
+            message
+        )
+
+    def test_a_tie_with_the_failure_edge_is_refused(self):
+        definition = _parent(transitions=[self._rival(2), _failure_edge()])
+        message = _refusal(definition)
+        assert "the transition to 'apology' ties with the transition to 'done'" in (
+            message
+        )
+
+    def test_the_failure_edge_with_the_lowest_number_loads(self):
+        failure = _edge("apology", 1, {"in": [_STATUS, ["failed", "aborted"]]})
+        FSMDefinition(**_parent(transitions=[failure, self._rival(2)]))
+
+
 class TestHostKeysMayNotBeResultOwned:
     def test_a_return_key_that_is_handler_only_is_refused(self):
         message = _refusal(

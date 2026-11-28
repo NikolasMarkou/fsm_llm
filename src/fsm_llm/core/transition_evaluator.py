@@ -239,6 +239,27 @@ class TransitionEvaluator:
             self._evaluate_single_transition(transition, context)["passes_conditions"]
         )
 
+    def winning_targets(
+        self, transitions: list[Transition], context: dict[str, Any]
+    ) -> list[str]:
+        """The targets that win ``transitions`` on ``context``, in definition order.
+
+        Interface contract: *transitions* is a list of ``Transition``, *context*
+        a plain dict (as for ``transition_passes``). Returns the distinct
+        targets of the passing transitions at the lowest ``priority`` number:
+        ``[]`` is BLOCKED, one target is DETERMINISTIC, two or more is
+        AMBIGUOUS (what ``evaluate_transitions`` would send to the classifier).
+        It runs the ranking ``evaluate_transitions`` runs, over the same
+        helper. Never raises on a loaded transition (a failing condition is a
+        non-passing one). The loader uses it to require that the failure edge
+        of a ``call`` or ``synthesize`` state wins outright.
+        """
+        evaluated = self._evaluate_individual_transitions(transitions, context)
+        return [
+            entry["transition"].target_state
+            for entry in self._winning_entries(evaluated)
+        ]
+
     def _evaluate_single_transition(
         self, transition: Transition, context: dict[str, Any]
     ) -> dict[str, Any]:
@@ -360,13 +381,29 @@ class TransitionEvaluator:
         Returns:
             TransitionEvaluation with result and recommendations
         """
-        # Filter to only passing transitions
+        tied = self._winning_entries(evaluated)
+        if not tied:
+            return self._create_blocked_result(evaluated, current_state)
+        if len(tied) == 1:
+            return self._create_deterministic_result(tied[0])
+
+        return self._create_ambiguous_result(tied)
+
+    @staticmethod
+    def _winning_entries(evaluated: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The one ranking: the passing entries at the lowest priority, one per target.
+
+        Empty when none passes (BLOCKED), one entry when the lowest priority
+        has a single target (DETERMINISTIC), two or more for a tie
+        (AMBIGUOUS). ``_determine_evaluation_result`` and ``winning_targets``
+        both read it; do not copy it (a copy with another comparison would
+        let the loader certify what the runtime then routes differently).
+        """
         passing_transitions = [
             entry for entry in evaluated if entry["passes_conditions"]
         ]
-
         if not passing_transitions:
-            return self._create_blocked_result(evaluated, current_state)
+            return []
 
         # DECISION plan-2026-09-21T203800-8a03483a/D-003: priority is decisive.
         # Do NOT rank by confidence, compare confidence gaps against a
@@ -388,11 +425,7 @@ class TransitionEvaluator:
         first_per_target: dict[str, dict[str, Any]] = {}
         for entry in tied:
             first_per_target.setdefault(entry["transition"].target_state, entry)
-        tied = list(first_per_target.values())
-        if len(tied) == 1:
-            return self._create_deterministic_result(tied[0])
-
-        return self._create_ambiguous_result(tied)
+        return list(first_per_target.values())
 
     def _create_deterministic_result(
         self, winner: dict[str, Any]

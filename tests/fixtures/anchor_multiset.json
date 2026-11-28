@@ -1329,6 +1329,11 @@
       "delta": 1,
       "reason": "plan 8525c797 step 2: new D-007 anchors on the chained comparison loops (less, _holds_pairwise) and a D-008 anchor on the numeric operand coercion _number (tokens gained)",
       "token": "plan-2026-11-28T050702-8525c797/D-008"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 8525c797 step 3: new D-004 anchor on the failure-edge winner rule in kind_call.check_result_edges (one anchor token gained)",
+      "token": "plan-2026-11-28T050702-8525c797/D-004"
     }
   ]
 }
