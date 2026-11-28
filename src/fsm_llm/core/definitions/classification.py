@@ -70,7 +70,7 @@ class IntentDefinition(BaseModel):
         # on an FSM that `API.from_file` then refuses to load. A ValueError from a
         # `model_validator` is a `value_error`, which the ALLOW-list DOES promote to
         # ERROR tier. The regex is shared; the enforcement mechanism must not be.
-        if not _ASCII_IDENTIFIER.match(self.name):
+        if not _ASCII_IDENTIFIER.fullmatch(self.name):
             raise ValueError(
                 f"Intent name must be alphanumeric ASCII with underscores, "
                 f"got '{self.name}'"

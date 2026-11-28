@@ -186,8 +186,9 @@ class TestStrategyChoices:
             ),
             (_document("9lives"), "not an ASCII identifier"),
             (_document("two words", ident="user.spaced"), "not an ASCII identifier"),
+            (_document("strat\n", ident="user.strat"), "not an ASCII identifier"),
         ],
-        ids=["deprecated", "inputs", "digit-name", "space-name"],
+        ids=["deprecated", "inputs", "digit-name", "space-name", "newline-name"],
     )
     def test_an_ineligible_strategy_is_skipped_with_one_warning_naming_why(
         self, document: dict[str, Any], why: str

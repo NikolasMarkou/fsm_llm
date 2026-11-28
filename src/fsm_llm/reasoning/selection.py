@@ -176,7 +176,7 @@ def _skip_reason(executable: Any, owners: dict[str, str]) -> str | None:
     if outside:
         return f"its contract asks for inputs outside the problem keys: {outside}"
     name = envelope.name
-    if not _IDENTIFIER.match(name):
+    if not _IDENTIFIER.fullmatch(name):
         return f"its name {name!r} is not an ASCII identifier"
     if name.lower() in owners:
         return f"its name {name!r} is already taken by {owners[name.lower()]!r}"

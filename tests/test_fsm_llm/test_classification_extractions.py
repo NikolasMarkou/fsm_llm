@@ -997,7 +997,7 @@ class TestClassificationPromptConfigValidation:
 
 _NON_ASCII_NAMES = ["café", "名前", "naïve_intent", "буя", "intent_µ"]
 _ASCII_OK_NAMES = ["buy", "buy_now", "_private", "Intent2", "a", "A_1_b"]
-_ASCII_BAD_NAMES = ["2fast", "buy-now", "buy now", "buy!", ""]
+_ASCII_BAD_NAMES = ["2fast", "buy-now", "buy now", "buy!", "", "buy\n", "buy\n\n"]
 
 
 class TestIntentNameCharsetMatchesSiblingIdentifiers:

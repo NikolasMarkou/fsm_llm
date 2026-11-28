@@ -132,7 +132,9 @@ _VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 
 
 def _version_key(label: str) -> tuple[int, ...] | None:
-    return tuple(int(p) for p in label.split(".")) if _VERSION.match(label) else None
+    return (
+        tuple(int(p) for p in label.split(".")) if _VERSION.fullmatch(label) else None
+    )
 
 
 class _Entry(NamedTuple):

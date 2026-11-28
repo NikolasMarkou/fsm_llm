@@ -147,6 +147,13 @@ class TestLookup:
         assert registry.get("v").version == "10"  # 10 above 9, not text order
         assert [e.version for e in registry.list()] == ["1.2", "1.10", "9", "10"]
 
+    @pytest.mark.parametrize("label", ["1\n", "1.2\n", "1\n\n"])
+    def test_a_version_label_with_a_trailing_newline_is_not_an_integer_tuple(
+        self, label: str
+    ) -> None:
+        assert registry_module._version_key(label) is None
+        assert registry_module._version_key(label.strip()) is not None
+
     @pytest.mark.parametrize("order", [("alpha", "1"), ("1", "alpha")])
     def test_an_unparseable_label_is_allowed_only_alone(
         self, order: tuple[str, str]
@@ -895,6 +902,9 @@ class TestAliases:
         registry, one, _ = self._registry()
         assert is_template_identity(one.template_identity)
         assert not is_template_identity("1")
+        # `$` before a final newline must not pass: an identity ends where the key ends
+        assert is_template_identity(one.template_identity)
+        assert not is_template_identity(one.template_identity + "\n")
         registry.set_alias("pick", {one.template_identity: 1}, target="react")
         got = registry.resolve("pick")
         assert got.executable is one and got.route == one.template_identity

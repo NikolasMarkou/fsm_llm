@@ -47,7 +47,7 @@ class AliasSpec:
 
 def is_template_identity(key: str) -> bool:
     """True when *key* is a 64-hex template identity rather than a version label."""
-    return _IDENTITY.match(key) is not None
+    return _IDENTITY.fullmatch(key) is not None
 
 
 def make_alias(
