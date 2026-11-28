@@ -419,7 +419,8 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
         ``internal-key``, ``secret-key``, ``control-text``,
         ``priority-reserved``, ``priority-type``, ``model-setting`` (a
         classification entry's ``model`` or ``prompt_config``), ``regex-pattern``,
-        ``completion-tool-not-allowed``, ``nested-synthesize`` or ``bad-shape``
+        ``completion-tool-not-allowed``, ``nested-synthesize``, ``call-state`` (a state
+        that names a ``call`` target: the policy has no executables allow-list) or ``bad-shape``
         (a part that is not the object or list it must be); ``[]`` means the
         compile passes. Raw versus loaded: a lax load coerces only the
         priority, so only that is type-checked; every other rule reads a
@@ -480,6 +481,18 @@ def check_policy(data: object, policy: SynthesisPolicy) -> list[PolicyFinding]:
             add(code, sid, f"state {_q(sid)} breaks {code}")
         if "synthesize" in state and policy.max_synthesis_depth <= 1:
             add("nested-synthesize", sid, "a nested synthesize is refused at depth 1")
+        # DECISION plan-2026-11-28T050702-8525c797/D-003: a compile may not write a `call` state
+        # (or any state of a kind that names a target). The policy has no allow-list of
+        # executables, so there is nothing to judge a target against, and the host's resolver
+        # serves any registered id. Do NOT pass a call state "because its target looks harmless"
+        # and do NOT add the check to the resolver (no origin there); a new policy field is the
+        # larger decision D-003 declined. V7 judges the targets of a model-origin envelope.
+        if any(spec.raw_declared_targets(state) for spec in raw_kinds(state)):
+            add(
+                "call-state",
+                sid,
+                f"state {_q(sid)} names an executable to call: a compile may not write one",
+            )
         if "transitions" in state and not isinstance(state["transitions"], list):
             add("bad-shape", sid, f"transitions of {_q(sid)} is not a list")
         if len(_items(state.get("transitions"))) > policy.max_transitions_per_state:

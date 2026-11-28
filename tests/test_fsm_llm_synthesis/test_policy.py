@@ -339,6 +339,13 @@ class TestCheckPolicyOneHostileCasePerCode:
                 SynthesisPolicy(),
                 lambda d: d["states"]["ask"].update(synthesize={"goal": "g"}),
             ),
+            (
+                "call-state",
+                SynthesisPolicy(),
+                lambda d: d["states"]["ask"].update(
+                    call={"target": "evil_exec", "on_failure": "done"}
+                ),
+            ),
         ],
     )
     def test_each_structural_code(self, code, policy, mutate):
@@ -347,6 +354,40 @@ class TestCheckPolicyOneHostileCasePerCode:
         findings = check_policy(d, policy)
         assert code in [f.code for f in findings]
         assert all(f.gate == "G5" for f in findings)
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            {"target": "evil_exec", "on_failure": "done"},
+            {"choose": {"key": "k", "targets": ["a", "b"]}, "on_failure": "done"},
+            {"choose": {"key": "k", "targets": [], "fallback": "a"}},
+        ],
+    )
+    def test_a_compile_may_not_write_a_call_state_at_any_depth(self, call):
+        """A call target is resolved by the host registry and the policy has no list of
+        executables to judge it against, so the state is refused whole (D-003)."""
+        d = _good()
+        d["states"]["ask"]["call"] = call
+
+        for policy in (SynthesisPolicy(), SynthesisPolicy(max_synthesis_depth=5)):
+            findings = [f for f in check_policy(d, policy) if f.code == "call-state"]
+            assert [(f.gate, f.state) for f in findings] == [("G5", "ask")]
+
+    def test_a_call_finding_names_no_model_text(self):
+        d = _good()
+        d["states"]["ask"]["call"] = {"target": "evil_exec_secret_name"}
+
+        (finding,) = [
+            f for f in check_policy(d, SynthesisPolicy()) if f.code == "call-state"
+        ]
+
+        assert "evil_exec_secret_name" not in finding.message
+
+    def test_a_malformed_call_value_never_raises(self):
+        for call in ("x", 3, None, [], {"choose": 5}, {"choose": {"targets": "x"}}):
+            d = _good()
+            d["states"]["ask"]["call"] = call
+            check_policy(d, SynthesisPolicy())
 
     def test_depth_above_one_allows_a_nested_synthesize(self):
         d = _good()

@@ -124,6 +124,13 @@ Interface contract:
     name or ``None`` for an entry with no readable name (G5 refuses it). Never
     raises on a malformed ``tools`` value. Called only for a state whose raw
     ``config_field`` value is a dict.
+  - ``raw_declared_targets(state_dict)``: the executable ids the kind's config names as a
+    target (``call``: its ``target``, every ``choose.targets`` entry and the ``choose.fallback``),
+    one entry each, ``None`` for a value with no readable name. The raw judges of a
+    model-written body read it: V7 compares the names with ``allow["executables"]`` and
+    ``requires.executables`` and gate G5 refuses a state of a kind that has any (plan
+    8525c797 D-003). Never raises on a malformed value. Called only for a state whose raw
+    ``config_field`` value is a dict. Empty for a kind that names no target.
   - ``supported_in_procedure``: ``False`` when a stored procedure may not hold a
     state of the kind (``runnable_reason`` refuses it with ``completion_unsupported``).
     Data, not a hook.
@@ -181,6 +188,7 @@ from fsm_llm.core.kind_call import (
     call_check_definition,
     call_check_state,
     call_lint_raw,
+    call_raw_declared_targets,
     call_raw_result_key,
     call_read_keys,
     check_result_edges,
@@ -369,6 +377,10 @@ def _no_raw_declared_tools(state: dict[str, Any]) -> tuple[str | None, ...]:
     return ()
 
 
+def _no_raw_declared_targets(state: dict[str, Any]) -> tuple[str | None, ...]:
+    return ()
+
+
 def _no_read_keys(state: Any) -> tuple[str, ...]:
     return ()
 
@@ -527,6 +539,9 @@ class KindSpec:
     raw_declared_tools: Callable[[dict[str, Any]], tuple[str | None, ...]] = (
         _no_raw_declared_tools
     )
+    raw_declared_targets: Callable[[dict[str, Any]], tuple[str | None, ...]] = (
+        _no_raw_declared_targets
+    )
     supported_in_procedure: bool = True
     requires_executor: bool = False
     requires_targets: bool = False
@@ -610,6 +625,7 @@ CALL = KindSpec(
     lint_raw=call_lint_raw,
     raw_result_key=call_raw_result_key,
     read_keys=call_read_keys,
+    raw_declared_targets=call_raw_declared_targets,
     supported_in_procedure=False,
     requires_targets=True,
 )

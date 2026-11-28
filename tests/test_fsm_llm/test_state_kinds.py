@@ -2217,3 +2217,37 @@ class TestMovedAnchorsStayAnchors:
         block = " ".join(line.strip().lstrip("# ") for line in lines[i : i + 5])
         assert block.startswith("DECISION plan-2026-10-01T093600-944e2692/D-029")
         assert block.endswith("drop it from an explicit `context_to_pass`. See D-029.")
+
+
+class TestRawDeclaredTargets:
+    """Plan 8525c797 D-003: the raw hook beside ``raw_declared_tools``: the targets a RAW
+    state names, one entry each (``None`` for an entry with no readable name)."""
+
+    def test_only_the_call_kind_declares_targets(self):
+        assert sk.CONVERSATION.raw_declared_targets({}) == ()
+        assert sk.COMPLETION.raw_declared_targets({"completion": {"tools": []}}) == ()
+        assert sk.SYNTHESIZE.raw_declared_targets({"synthesize": {"goal": "g"}}) == ()
+
+    @pytest.mark.parametrize(
+        ("call", "expected"),
+        [
+            ({"target": "a"}, ("a",)),
+            ({"choose": {"key": "k", "targets": ["a", "b"]}}, ("a", "b")),
+            (
+                {"choose": {"key": "k", "targets": ["a"], "fallback": "z"}},
+                ("a", "z"),
+            ),
+            (
+                {"target": "a", "choose": {"targets": ["b"], "fallback": "b"}},
+                ("a", "b", "b"),
+            ),
+            ({"choose": {"targets": ["a", 7, "", None]}}, ("a", None, None, None)),
+            ({"target": 5}, (None,)),
+            ({}, ()),
+            ({"choose": {}}, ()),
+            ({"choose": 5}, (None,)),
+            ({"choose": {"targets": "evil"}}, (None,)),
+        ],
+    )
+    def test_the_call_hook_reads_the_raw_dict(self, call, expected):
+        assert sk.CALL.raw_declared_targets({"call": call}) == expected

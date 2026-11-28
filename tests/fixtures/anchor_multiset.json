@@ -1334,6 +1334,11 @@
       "delta": 1,
       "reason": "plan 8525c797 step 3: new D-004 anchor on the failure-edge winner rule in kind_call.check_result_edges (one anchor token gained)",
       "token": "plan-2026-11-28T050702-8525c797/D-004"
+    },
+    {
+      "delta": 2,
+      "reason": "plan 8525c797 step 4: new D-003 anchors on the V7 call-target check (core/verify/executable.py) and the G5 call-state rule (synthesis/policy.py) (two anchor tokens gained)",
+      "token": "plan-2026-11-28T050702-8525c797/D-003"
     }
   ]
 }

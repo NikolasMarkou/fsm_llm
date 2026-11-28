@@ -148,6 +148,18 @@ def _tool_names(fsm: Mapping[str, Any]) -> set[str]:
     return {n for n in _tool_entries(fsm) if isinstance(n, str)}
 
 
+def _target_entries(fsm: Mapping[str, Any]) -> list[str | None]:
+    """The call targets the RAW states declare, one entry per target (``None``: no readable name)."""
+    states = fsm.get("states")
+    entries: list[str | None] = []
+    if isinstance(states, dict):
+        for state in states.values():
+            if isinstance(state, dict):
+                for spec in raw_kinds(state):
+                    entries.extend(spec.raw_declared_targets(state))
+    return entries
+
+
 def _items(value: object) -> list[Any]:
     return value if isinstance(value, list) else []
 
@@ -232,6 +244,25 @@ def _model_problems(
             problems.append("a completion tool of the body has no readable name")
         elif n not in listed["tools"]:
             problems.append(f"body tool {_shown(n)} is not on the allow-list")
+    # DECISION plan-2026-11-28T050702-8525c797/D-003: a call target of the body is judged
+    # like a tool: against the allow-list AND against `requires.executables`, whatever the
+    # claim says (an empty claim beside a body that calls an executable is a disagreement).
+    # Do NOT leave it to the runtime resolver: `ExecutableRegistry.resolve_target` serves any
+    # registered id and has no origin, so a model-written `call` state would reach all of
+    # them. Gate G5 refuses a compiled `call` state outright (`synthesis/policy.py`).
+    claimed = {n for n in requires.executables if isinstance(n, str)}
+    for n in dict.fromkeys(t for body in bodies for t in _target_entries(body)):
+        if n is None:
+            problems.append("a call target of the body has no readable name")
+        elif n not in listed["executables"]:
+            if n not in claimed:  # a claimed name was reported above
+                problems.append(
+                    f"body call target {_shown(n)} is not on the allow-list"
+                )
+        elif n not in claimed:
+            problems.append(
+                f"body call target {_shown(n)} is not in requires.executables"
+            )
     for body in bodies:
         problems += _body_setting_problems(body)
     base = getattr(envelope.body, "extends", None)

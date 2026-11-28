@@ -249,6 +249,31 @@ def _synth_fsm(
     )
 
 
+def _call_fsm(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A host with one ``call`` state: welcome, the call state, then ``done`` or ``apology``.
+
+    *config* overrides the default ``{"target": "child", "on_failure": "apology"}``; the two
+    edges are the ones a call state needs (the failure edge wins outright at ``failed``).
+    """
+    return _fsm(
+        "CallHost",
+        "welcome",
+        _state(
+            "welcome",
+            response_instructions="Greet the user.",
+            transitions=[_go("work")],
+        ),
+        _state(
+            "work",
+            call={"target": "child", "on_failure": "apology", **(config or {})},
+            transitions=_synth_edges("call_result"),
+            response_instructions="",
+        ),
+        _state("done", response_instructions="Tell the user it is done."),
+        _state("apology", response_instructions="Apologise briefly."),
+    )
+
+
 def _plain_fsm() -> dict[str, Any]:
     """Field, bulk and classification extraction, two transitions, no kind field."""
     return _fsm(

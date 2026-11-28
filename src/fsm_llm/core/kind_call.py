@@ -33,6 +33,12 @@ Interface contract:
   ``call`` config (read by ``getattr``; its ``choose`` key is a read, not a result key).
 - ``call_read_keys(state)``: the call kind's ``read_keys``: its ``inputs`` then its ``choose``
   key (duplicates dropped), the keys G3 must find declared on arrival.
+- ``call_raw_declared_targets(state)``: the call kind's ``raw_declared_targets``: the executable ids a
+  RAW call state names (its ``target``, every ``choose.targets`` entry, the ``choose.fallback``),
+  one entry each, ``None`` for a value with no readable name (not a non-empty string). Never
+  raises on a raw dict; a value the loader refuses (a ``choose`` that is not an object, a
+  ``targets`` that is not a list) is one ``None`` entry, so a caller that judges names fails
+  closed. Read by V7 (``core/verify/executable.py``) and gate G5.
 - ``call_raw_result_key(state, services)`` and ``call_lint_raw(state_id, state, fsm_data,
   services)``: the raw twins the validator reads (the result key a call state writes, a
   WARNING when its ``choose`` key can be written by nothing). Never raise on a raw dict
@@ -50,6 +56,7 @@ __all__ = [
     "call_check_definition",
     "call_check_state",
     "call_lint_raw",
+    "call_raw_declared_targets",
     "call_raw_result_key",
     "call_read_keys",
     "check_result_edges",
@@ -288,6 +295,36 @@ def call_raw_result_key(state: dict[str, Any], services: Any) -> str | None:
     """The result key of a RAW call state (the default when absent or not a string)."""
     key = state["call"].get("result_key")
     return key if isinstance(key, str) and key else services.default_call_result_key
+
+
+def _target_name(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def call_raw_declared_targets(state: dict[str, Any]) -> tuple[str | None, ...]:
+    """The targets a RAW call state names, one entry each (``None``: no readable name).
+
+    The raw twin of what ``CallStateConfig`` holds, for the two judges of a model-written
+    body (V7 and gate G5), which read the dict before any ``State`` exists. Called only for
+    a state whose ``call`` value is a dict. Never raises.
+    """
+    config = state["call"]
+    entries: list[str | None] = []
+    if config.get("target") is not None:
+        entries.append(_target_name(config["target"]))
+    choose = config.get("choose")
+    if choose is None:
+        return tuple(entries)
+    if not isinstance(choose, dict):
+        return (*entries, None)
+    listed = choose.get("targets")
+    if isinstance(listed, list):
+        entries.extend(_target_name(name) for name in listed)
+    elif listed is not None:
+        entries.append(None)
+    if choose.get("fallback") is not None:
+        entries.append(_target_name(choose["fallback"]))
+    return tuple(entries)
 
 
 def _declared_names(state: Any) -> set[str]:

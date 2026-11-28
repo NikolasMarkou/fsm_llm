@@ -410,6 +410,112 @@ class TestModelOrigin:
 
         assert any(lifecycle in m for m in _errors(result, "model"))
 
+    @staticmethod
+    def _call_doc(call: dict[str, Any], **header: Any) -> dict[str, Any]:
+        return _doc(kc._call_fsm(call), **header)
+
+    def test_a_call_target_off_the_allow_list_is_refused(self):
+        envelope, result = load_executable(
+            self._call_doc({"target": "evil_exec"}), origin="model", allow=_ALLOW
+        )
+
+        assert envelope is None
+        assert any("evil_exec" in m for m in _errors(result, "model"))
+        assert all(m.startswith("[model] ") for m in _errors(result, "model"))
+
+    def test_every_target_of_a_choose_list_is_judged_and_the_listed_ones_pass(self):
+        call = {
+            "choose": {"key": "picked", "targets": ["ok", "evil_a", "evil_b"]},
+        }
+        _, result = load_executable(
+            self._call_doc(call, requires={"executables": ["ok"]}),
+            origin="model",
+            allow={**_ALLOW, "executables": ["ok"]},
+        )
+
+        model = _errors(result, "model")
+        assert any("evil_a" in m for m in model) and any("evil_b" in m for m in model)
+        assert not any("'ok'" in m and "allow-list" in m for m in model)
+
+    def test_a_fallback_is_judged_too(self):
+        call = {"choose": {"key": "picked", "targets": ["ok"], "fallback": "evil_fb"}}
+        _, result = load_executable(
+            self._call_doc(call, requires={"executables": ["ok"]}),
+            origin="model",
+            allow={**_ALLOW, "executables": ["ok"]},
+        )
+
+        assert any("evil_fb" in m for m in _errors(result, "model"))
+
+    def test_the_body_is_judged_whatever_requires_executables_says(self):
+        """An empty claim beside a body that calls an executable is a disagreement, and the
+        allow-list is read from the body (the claim lists nothing to compare with)."""
+        _, off_list = load_executable(
+            self._call_doc({"target": "evil_exec"}, requires={"executables": []}),
+            origin="model",
+            allow=_ALLOW,
+        )
+        _, undeclared = load_executable(
+            self._call_doc({"target": "ok"}, requires={"executables": []}),
+            origin="model",
+            allow={**_ALLOW, "executables": ["ok"]},
+        )
+
+        assert any("allow-list" in m for m in _errors(off_list, "model"))
+        assert any(
+            "requires.executables" in m and "'ok'" in m
+            for m in _errors(undeclared, "model")
+        )
+
+    def test_a_claim_that_disagrees_with_the_body_is_refused(self):
+        _, result = load_executable(
+            self._call_doc({"target": "ok"}, requires={"executables": ["other"]}),
+            origin="model",
+            allow={**_ALLOW, "executables": ["ok", "other"]},
+        )
+
+        model = _errors(result, "model")
+        assert any("requires.executables" in m and "'ok'" in m for m in model), model
+
+    def test_an_allowed_and_declared_call_target_loads(self):
+        envelope, result = load_executable(
+            self._call_doc({"target": "ok"}, requires={"executables": ["ok"]}),
+            origin="model",
+            allow={**_ALLOW, "executables": ["ok"]},
+        )
+
+        assert _errors(result, "model") == []
+        assert envelope is not None
+
+    def test_the_same_call_from_an_operator_is_not_judged(self):
+        envelope, result = load_executable(
+            self._call_doc({"target": "evil_exec"}), allow=_ALLOW
+        )
+
+        assert _tagged(result, "model") == []
+        assert envelope is not None and result.is_valid
+
+    def test_a_call_target_with_no_readable_name_is_refused(self):
+        call = {"choose": {"key": "picked", "targets": ["ok", 7]}}
+        _, result = load_executable(
+            self._call_doc(call, requires={"executables": ["ok"]}),
+            origin="model",
+            allow={**_ALLOW, "executables": ["ok"]},
+        )
+
+        assert any("no readable name" in m for m in _errors(result, "model"))
+
+    def test_a_call_target_is_capped_and_stripped_in_messages(self):
+        name = "\x1b[31m" + "x" * 500 + "\u202e\x00end"
+        _, result = load_executable(
+            self._call_doc({"target": name}), origin="model", allow=_ALLOW
+        )
+
+        for message in _errors(result, "model"):
+            assert len(message) <= 320 and "\u202e" not in message
+            assert all(ch.isprintable() for ch in message)
+        assert any("allow-list" in m for m in _errors(result, "model"))
+
     def test_model_authored_names_are_capped_and_stripped_in_messages(self):
         name = "\x1b[31m" + "x" * 500 + "‮\x00end"
         _, result = load_executable(
