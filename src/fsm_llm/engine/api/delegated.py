@@ -30,8 +30,9 @@ Interface contract (``api`` is an ``API``, ``root_id`` its root conversation id)
   frame has a started, unfinished run and the launcher has a ``wait`` method, wait at most
   ``DELEGATED_WAIT_SECONDS`` for it to finish, on a worker thread (``aoffload``), holding no lock.
 - ``end_runs_of(api, root_id, frame_id)`` and ``cancel_delegated_runs(targets, conversation_id,
-  frame_ids=())``: what ``pop_fsm`` does for a popped frame (and ``end_conversation`` for the
-  ended ones, ``cancel_delegated_runs`` only): tell the launcher to stop the runs of the frame and write
+  frame_ids=())``: what ``pop_fsm`` does for a popped frame, and what ``end_conversation`` does
+  for the frames it drops when a lower frame refuses (both calls; a clean end calls only
+  ``cancel_delegated_runs``): tell the launcher to stop the runs of the frame and write
   ``run/end`` (``aborted``, ``cancelled``) for each started one, at the top frame (D-056).
 - ``RunMark``: what settle remembers of a started run (``CallMarks.runs``, keyed by handle).
 - ``DELEGATED_WAIT_SECONDS``: the bound of that wait (owner-visible: a run loop over a delegated
@@ -300,8 +301,8 @@ def end_runs_of(api: _ApiSurface, root_id: str, frame_id: str) -> None:
     """Write ``run/end`` (``aborted``/``cancelled``) for each started run of a frame that was just
     popped, at the top frame (the parent), then drop the marks.
 
-    Contract: called by ``pop_fsm`` right after its ``stack/pop`` event, on the engine thread, with
-    no lock held; a frame with no mark writes nothing; a failed append is a WARNING (D-056)."""
+    Contract: called by ``pop_fsm`` and by the busy-lower-frame branch of ``end_conversation``
+    right after the ``stack/pop`` event of the frame, on the engine thread, with no lock held; a frame with no mark writes nothing; a failed append is a WARNING (D-056)."""
     marks = api._call_marks
     with api._stack_lock:
         owed = [

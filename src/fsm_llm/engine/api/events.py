@@ -40,14 +40,16 @@ Interface contract (callers: ``conversation.py`` and ``lifecycle.py``; *api* is 
       frame; the shared no-op context with the log off.
     - ``record_push(api, conversation_id, child_id, fsm_id, definition, depth, *, return_context,
       shared_context_keys, preserve_history)`` and ``record_pop(api, conversation_id, child_id,
-      fsm_id, merge_strategy, merged_keys, depth, *, parent_id)``: append ``stack/push``
+      fsm_id, merge_strategy, merged_keys, depth, *, parent_id, read_parent_state=True)``: append ``stack/push``
       (``child_conversation_id``, ``fsm_id``, ``depth``, ``definition_ref`` to the full definition
       blob, ``state_ref`` of the child's post-greeting state, ``return_context_ref`` (through
       ``filter_context``), ``shared_context_keys``, ``preserve_history`` and the frame's lifetime
       limits ``max_steps`` and ``max_seconds`` when it has them, from ``api.budget.logged_limits``;
       a restore rebuilds the frame with the same limits and a fresh count) and ``stack/pop``
       (``child_conversation_id``, ``fsm_id``, ``merge_strategy``, ``merged_key_count``, ``depth``,
-      ``state_ref`` of the parent *parent_id* after the merge) under the PARENT frame, after the
+      ``state_ref`` of the parent *parent_id* after the merge, left out when ``read_parent_state`` is
+      False: the busy-lower-frame refusal of ``end_conversation`` merges nothing and must not wait
+      for the turn that holds the parent) under the PARENT frame, after the
       stack changed and outside ``_stack_lock``: ``runtime.stores.stack.fold_stack`` rebuilds the
       stack from them. A failed write is a WARNING, not an error: the stack already changed and
       cannot be undone, and the poisoned writer refuses the next checkpoint. An optional field
