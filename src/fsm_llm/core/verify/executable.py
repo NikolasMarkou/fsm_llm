@@ -75,7 +75,7 @@ imports it at module top (``fsm_llm.core.verify.cli`` imports it inside the func
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from fsm_llm.core.codes import Lifecycle
 from fsm_llm.core.definitions.executable import (
@@ -131,33 +131,28 @@ def _shown(value: object) -> str:
     return repr(capped_line(value, _NAME_CHARS))
 
 
-def _tool_entries(fsm: Mapping[str, Any]) -> list[str | None]:
-    """The tools the RAW states declare, one entry per tool (``None``: no readable name)."""
+def _declared_entries(
+    fsm: Mapping[str, Any],
+    reader: Literal["raw_declared_tools", "raw_declared_targets"],
+) -> list[str | None]:
+    """What the RAW states declare through the ``KindSpec`` reader named *reader*
+    (``raw_declared_tools`` or ``raw_declared_targets``): one entry per name, ``None`` for a name
+    that cannot be read."""
     states = fsm.get("states")
     entries: list[str | None] = []
     if isinstance(states, dict):
         for state in states.values():
             if isinstance(state, dict):
                 for spec in raw_kinds(state):
-                    entries.extend(spec.raw_declared_tools(state))
+                    entries.extend(getattr(spec, reader)(state))
     return entries
 
 
 def _tool_names(fsm: Mapping[str, Any]) -> set[str]:
     """The tool names the RAW states declare (so a body that does not load is still read)."""
-    return {n for n in _tool_entries(fsm) if isinstance(n, str)}
-
-
-def _target_entries(fsm: Mapping[str, Any]) -> list[str | None]:
-    """The call targets the RAW states declare, one entry per target (``None``: no readable name)."""
-    states = fsm.get("states")
-    entries: list[str | None] = []
-    if isinstance(states, dict):
-        for state in states.values():
-            if isinstance(state, dict):
-                for spec in raw_kinds(state):
-                    entries.extend(spec.raw_declared_targets(state))
-    return entries
+    return {
+        n for n in _declared_entries(fsm, "raw_declared_tools") if isinstance(n, str)
+    }
 
 
 def _items(value: object) -> list[Any]:
@@ -222,7 +217,11 @@ def _model_problems(
     for category in ("tools", "callables", "executables"):
         names = (allow or {}).get(category, ())
         listed[category] = {names} if isinstance(names, str) else set(names)
-    declared = [entry for body in bodies for entry in _tool_entries(body)]
+    declared = [
+        entry
+        for body in bodies
+        for entry in _declared_entries(body, "raw_declared_tools")
+    ]
     if requires.tools == "some":
         problems.append("requires.tools 'some' cannot be checked; name the tools")
     elif requires.tools == "none" and declared:
@@ -251,7 +250,9 @@ def _model_problems(
     # registered id and has no origin, so a model-written `call` state would reach all of
     # them. Gate G5 refuses a compiled `call` state outright (`synthesis/policy.py`).
     claimed = {n for n in requires.executables if isinstance(n, str)}
-    for n in dict.fromkeys(t for body in bodies for t in _target_entries(body)):
+    for n in dict.fromkeys(
+        t for body in bodies for t in _declared_entries(body, "raw_declared_targets")
+    ):
         if n is None:
             problems.append("a call target of the body has no readable name")
         elif n not in listed["executables"]:
