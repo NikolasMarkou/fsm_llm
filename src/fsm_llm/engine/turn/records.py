@@ -75,32 +75,50 @@ class _TurnSnapshot:
     Interface contract: ``capture(instance, working_memory=True)`` deep-copies
     ``context.data`` and ``context.metadata`` (and ``context.working_memory``
     unless ``working_memory=False``, the per-transition snapshot) and records
-    ``current_state``; it returns the snapshot. ``restore(instance)`` puts them
-    back: ``data`` and ``metadata`` are cleared and refilled in place,
-    ``working_memory`` is rebound to the copy (skipped when it was not
-    captured), ``current_state`` is reassigned. Neither call raises beyond what
-    ``copy.deepcopy`` raises. The one list of what a turn can roll back lives
-    here; the callers keep their own try shapes (07ad3f8c/D-007, D-025).
+    ``current_state``; it returns the snapshot. The whole-turn form also keeps
+    the three introspection records ``last_extraction_response``,
+    ``last_transition_decision`` and ``last_response_generation`` (references:
+    a turn replaces them by assignment, never in place). ``restore(instance)``
+    puts them back: ``data`` and ``metadata`` are cleared and refilled in place,
+    ``working_memory`` and the three records are rebound to the captured values
+    (skipped when ``working_memory=False``: the per-transition rollback keeps
+    the records the turn has already set), ``current_state`` is reassigned.
+    Neither call raises beyond what ``copy.deepcopy`` raises. The one list of
+    what a turn can roll back lives here; the callers keep their own try shapes
+    (07ad3f8c/D-007, D-025).
     """
 
     state: str
     data: dict[str, Any]
     metadata: dict[str, Any]
     working_memory: Any
+    last_extraction_response: Any = _NOT_CAPTURED
+    last_transition_decision: Any = _NOT_CAPTURED
+    last_response_generation: Any = _NOT_CAPTURED
 
     @classmethod
     def capture(
         cls, instance: FSMInstance, *, working_memory: bool = True
     ) -> _TurnSnapshot:
+        whole_turn = working_memory
         return cls(
             state=instance.current_state,
             data=copy.deepcopy(instance.context.data),
             working_memory=(
                 copy.deepcopy(instance.context.working_memory)
-                if working_memory
+                if whole_turn
                 else _NOT_CAPTURED
             ),
             metadata=copy.deepcopy(instance.context.metadata),
+            last_extraction_response=(
+                instance.last_extraction_response if whole_turn else _NOT_CAPTURED
+            ),
+            last_transition_decision=(
+                instance.last_transition_decision if whole_turn else _NOT_CAPTURED
+            ),
+            last_response_generation=(
+                instance.last_response_generation if whole_turn else _NOT_CAPTURED
+            ),
         )
 
     def restore(self, instance: FSMInstance) -> None:
@@ -109,6 +127,9 @@ class _TurnSnapshot:
         instance.context.data.update(self.data)
         if self.working_memory is not _NOT_CAPTURED:
             instance.context.working_memory = self.working_memory
+            instance.last_extraction_response = self.last_extraction_response
+            instance.last_transition_decision = self.last_transition_decision
+            instance.last_response_generation = self.last_response_generation
         instance.context.metadata.clear()
         instance.context.metadata.update(self.metadata)
 

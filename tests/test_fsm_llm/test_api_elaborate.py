@@ -1194,6 +1194,94 @@ class TestBaseExceptionRollsBackUserMessage:
                 api.converse("hello", conv_id)
 
 
+_TWO_STEP_FSM: dict[str, Any] = {
+    "name": "Steps",
+    "description": "a -> b -> c, the first step needs a name",
+    "initial_state": "a",
+    "persona": "p",
+    "states": {
+        "a": {
+            "id": "a",
+            "description": "A",
+            "purpose": "p",
+            "extraction_instructions": "x",
+            "response_instructions": "say a",
+            "required_context_keys": ["name"],
+            "transitions": [
+                {
+                    "target_state": "b",
+                    "description": "go",
+                    "priority": 100,
+                    "conditions": [
+                        {
+                            "description": "has name",
+                            "requires_context_keys": ["name"],
+                            "logic": {"has_context": "name"},
+                        }
+                    ],
+                }
+            ],
+        },
+        "b": {
+            "id": "b",
+            "description": "B",
+            "purpose": "p",
+            "response_instructions": "say b",
+            "transitions": [
+                {"target_state": "c", "description": "go", "priority": 100}
+            ],
+        },
+        "c": {
+            "id": "c",
+            "description": "C",
+            "purpose": "end",
+            "response_instructions": "bye",
+        },
+    },
+}
+
+
+class TestAnInterruptInPassTwoRollsTheWholeTurnBack:
+    """Plan 8525c797 D-002: state, data and history agree after an interrupt, so a retry of
+    the same message repeats the turn instead of taking a second step. The gate is free and
+    the lifetime budget stays counted, as for a cancel."""
+
+    @pytest.mark.parametrize("signal_type", [KeyboardInterrupt, SystemExit])
+    def test_a_retry_repeats_the_turn_and_the_budget_stays_counted(self, signal_type):
+        from fsm_llm.core.definitions import RunBudgetExceededError
+        from fsm_llm.testing import MockLLM2Interface
+
+        class _Interruptible(MockLLM2Interface):
+            armed = False
+
+            def generate_response(self, request):
+                if self.armed:
+                    raise signal_type()
+                return super().generate_response(request)
+
+        llm = _Interruptible(extraction_data={"name": "bob"})
+        api = API.from_definition(_TWO_STEP_FSM, llm_interface=llm)
+        conv_id, _ = api.start_conversation(max_steps=2)
+        instance = api.fsm_manager.instances[conv_id]
+        history = list(api.get_conversation_history(conv_id))
+
+        llm.armed = True
+        with pytest.raises(signal_type):
+            api.converse("hi", conv_id)
+        llm.armed = False
+
+        assert instance.current_state == "a"
+        assert "name" not in instance.context.data
+        assert api.get_conversation_history(conv_id) == history
+
+        # The gate is free; the retry is the first step, not the second.
+        api.converse("hi", conv_id)
+        assert instance.current_state == "b"
+        # The interrupted turn was counted: one more turn spends the budget of two.
+        with pytest.raises(RunBudgetExceededError):
+            api.converse("again", conv_id)
+
+
 # ======================================================================
 # F-SU-02: the prompt history window follows max_history_size
 # ======================================================================

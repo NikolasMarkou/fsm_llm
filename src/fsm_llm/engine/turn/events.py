@@ -21,9 +21,12 @@ Interface contract (callers: ``pass1.py`` and ``transitions.py``):
       state it exactly, ``priority`` (an AMBIGUOUS tie: the tied priority; a DETERMINISTIC win:
       the priority of the one edge to the target, omitted when several edges share the target
       and the evaluation does not say which one passed) and ``candidates`` (the tied targets).
-    - Failure mode: a failing executor or transition append raises ``EventLogError``
-      (``runtime.emit``); the writer is poisoned, so the next checkpoint refuses the turn. The
-      extraction pair never raises (a WARNING).
+    - Failure mode: a failing executor append raises ``EventLogError`` (``runtime.emit``);
+      the writer is poisoned, so the next checkpoint refuses the turn. The extraction pair
+      and ``transition`` never raise (a WARNING, ``warn_on_failure``): ``transition`` is written
+      AFTER the state moved, so a failed write must not fail a committed turn (D-009 of plan
+      8525c797); a speaking state still refuses at its next checkpoint, a silent one ships with
+      the line missing.
 """
 
 from __future__ import annotations
@@ -150,11 +153,12 @@ def record_transition(
     """Append ``transition`` for one evaluation of *state* (no-op with the log off)."""
     if current_scope() is None:
         return
-    emit(
-        EventType.TRANSITION,
-        from_state=state.id,
-        to_state=target,
-        outcome=evaluation.result_type.value,
-        executed=executed,
-        **_priority(state, evaluation, target),
-    )
+    with warn_on_failure(EventType.TRANSITION):
+        emit(
+            EventType.TRANSITION,
+            from_state=state.id,
+            to_state=target,
+            outcome=evaluation.result_type.value,
+            executed=executed,
+            **_priority(state, evaluation, target),
+        )

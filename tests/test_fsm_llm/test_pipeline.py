@@ -900,6 +900,137 @@ class TestProcessPass2FailureIsAtomic:
             "Pass-2 failure left the metadata mutation committed"
         )
 
+    # -- 8525c797 D-002: an interrupt rolls the whole turn back, like a cancel --------
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    def test_an_interrupt_in_pass2_reverts_transition_and_extraction(self, interrupt):
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        llm.generate_response.side_effect = interrupt()
+
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+
+        # The interrupt is the exact type that was raised: never wrapped or swallowed.
+        with pytest.raises(interrupt):
+            pipeline.process(instance, "My name is Alice", "conv-1")
+
+        assert instance.current_state == "start", (
+            "an interrupt in Pass 2 left the Pass-1 transition committed"
+        )
+        assert "user_name" not in instance.context.data, (
+            "an interrupt in Pass 2 left the Pass-1 extraction committed"
+        )
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    async def test_an_interrupt_in_async_pass2_reverts_transition_and_extraction(
+        self, interrupt
+    ):
+        class _Interrupting(MockLLM2Interface):
+            async def agenerate_response(self, request):
+                raise interrupt()
+
+        llm = _Interrupting(extraction_data={"user_name": "Alice"})
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+
+        # Caught inside the coroutine: an interrupt that left the task would leave the loop.
+        with pytest.raises(interrupt):
+            await pipeline.aprocess(instance, "My name is Alice", "conv-1")
+
+        assert instance.current_state == "start"
+        assert "user_name" not in instance.context.data
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    def test_an_interrupt_in_post_processing_reverts_pass_1_too(self, interrupt):
+        class _Interrupting(BaseHandler):
+            def __init__(self):
+                super().__init__(name="interrupting", priority=100)
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return timing is HandlerTiming.POST_PROCESSING
+
+            def execute(self, context):
+                raise interrupt()
+
+        hs = HandlerSystem(handler_error_mode="continue")
+        hs.register_handler(_Interrupting())
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        pipeline = _make_pipeline(
+            llm=llm, fsm_def=self._transition_fsm(), handler_system=hs
+        )
+        instance = _make_instance()
+
+        with pytest.raises(interrupt):
+            pipeline.process(instance, "My name is Alice", "conv-1")
+
+        assert instance.current_state == "start"
+        assert "user_name" not in instance.context.data
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    def test_a_rolled_back_turn_keeps_the_previous_turns_records(self, interrupt):
+        """The three introspection records are part of what a turn rolls back: a failed
+        turn must not leave its own extraction, transition decision or reply visible."""
+        from fsm_llm.core.definitions import (
+            ClassificationResult,
+            DataExtractionResponse,
+        )
+
+        prior = {
+            "last_extraction_response": DataExtractionResponse(
+                extracted_data={"old": 1}, confidence=0.5
+            ),
+            "last_transition_decision": ClassificationResult(
+                reasoning="old", intent="stay", confidence=0.5
+            ),
+            "last_response_generation": ResponseGenerationResponse(
+                message="old reply", message_type="response", reasoning="old"
+            ),
+        }
+        instance = _make_instance()
+        for name, record in prior.items():
+            setattr(instance, name, record)
+
+        class _Overwriting(BaseHandler):
+            """Stands in for what Pass 1 and Pass 2 do: replace the three records."""
+
+            def __init__(self):
+                super().__init__(name="overwriting", priority=100)
+
+            def should_execute(
+                self, timing, current_state, target_state, context, updated_keys=None
+            ):
+                return timing is HandlerTiming.POST_PROCESSING
+
+            def execute(self, context):
+                instance.last_extraction_response = DataExtractionResponse(
+                    extracted_data={"new": 2}, confidence=0.9
+                )
+                instance.last_transition_decision = ClassificationResult(
+                    reasoning="new", intent="go", confidence=0.9
+                )
+                instance.last_response_generation = ResponseGenerationResponse(
+                    message="new reply", message_type="response", reasoning="new"
+                )
+                return {}
+
+        hs = HandlerSystem(handler_error_mode="continue")
+        hs.register_handler(_Overwriting())
+        llm = _make_mock_llm()
+        llm.generate_response.side_effect = interrupt()
+        pipeline = _make_pipeline(llm=llm, handler_system=hs)
+
+        with pytest.raises(interrupt):
+            pipeline.process(instance, "Hello", "conv-1")
+
+        for name, record in prior.items():
+            assert getattr(instance, name) is record, (
+                f"a rolled back turn left its own {name} behind"
+            )
+
 
 class TestProcessStreamPass2FailureIsAtomic:
     """NC2: the H2 turn-atomicity contract must hold for the STREAMING path too.
@@ -1082,6 +1213,85 @@ class TestProcessStreamPass2FailureIsAtomic:
         assert "turn_meta" not in instance.context.metadata, (
             "Mid-stream Pass-2 failure left the metadata mutation committed"
         )
+
+    # -- 8525c797 D-002 and D-010: interrupts and the stream's reply record ----------
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    def test_stream_interrupt_after_chunks_reverts_the_whole_turn(self, interrupt):
+        def _yield_then_interrupt(_request):
+            yield "Hel"
+            raise interrupt()
+
+        llm = _make_mock_llm()
+        configure_mock_extract_field(llm, {"user_name": "Alice"})
+        llm.generate_response_stream.side_effect = _yield_then_interrupt
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+
+        delivered: list[str] = []
+        with pytest.raises(interrupt):
+            for chunk in pipeline.process_stream(
+                instance, "My name is Alice", "conv-1"
+            ):
+                delivered.append(chunk)
+
+        assert delivered == ["Hel"]
+        assert instance.current_state == "start"
+        assert "user_name" not in instance.context.data
+        # No partial reply is kept for an interrupt.
+        assert not any("system" in e for e in instance.context.conversation.exchanges)
+
+    @pytest.mark.parametrize("interrupt", [KeyboardInterrupt, SystemExit])
+    async def test_async_stream_interrupt_reverts_the_whole_turn(self, interrupt):
+        class _Interrupting(MockLLM2Interface):
+            async def agenerate_response_stream(self, request):
+                yield "Hel"
+                raise interrupt()
+
+        llm = _Interrupting(extraction_data={"user_name": "Alice"})
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+
+        delivered: list[str] = []
+        with pytest.raises(interrupt):
+            async for chunk in pipeline.aprocess_stream(
+                instance, "My name is Alice", "conv-1"
+            ):
+                delivered.append(chunk)
+
+        assert delivered == ["Hel"]
+        assert instance.current_state == "start"
+        assert "user_name" not in instance.context.data
+
+    def test_a_stream_turn_does_not_leave_the_previous_reply_as_its_own(self):
+        """A stream has no response object: the record is cleared at the start of the turn
+        and stays `None`, instead of showing the reply of an earlier non-stream turn."""
+        llm = _make_mock_llm()
+        llm.generate_response_stream.side_effect = lambda _request: iter(["str", "eam"])
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+        instance.last_response_generation = ResponseGenerationResponse(
+            message="previous reply", message_type="response", reasoning="old"
+        )
+
+        assert "".join(pipeline.process_stream(instance, "Hi", "conv-1")) == "stream"
+
+        assert instance.last_response_generation is None
+
+    def test_a_rolled_back_stream_turn_restores_the_previous_reply_record(self):
+        llm = _make_mock_llm()
+        llm.generate_response_stream.side_effect = RuntimeError("stream boom")
+        pipeline = _make_pipeline(llm=llm, fsm_def=self._transition_fsm())
+        instance = _make_instance()
+        previous = ResponseGenerationResponse(
+            message="previous reply", message_type="response", reasoning="old"
+        )
+        instance.last_response_generation = previous
+
+        with pytest.raises(RuntimeError, match="stream boom"):
+            list(pipeline.process_stream(instance, "Hi", "conv-1"))
+
+        assert instance.last_response_generation is previous
 
 
 # ══════════════════════════════════════════════════════════════

@@ -288,7 +288,7 @@ class DriverMixin(_PipelineSurface):
                     # it originated in Pass 2.
                     snapshot.restore(instance)
                     raise
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 # DECISION plan-2026-11-19T193704-f150ec28/D-002
                 # [SUPERSEDES the "Pass 1 stays outside" shape of 9925aa3a/D-012,
                 # 089d0ec7/D-002 and D-017 for a cancel only]
@@ -298,6 +298,17 @@ class DriverMixin(_PipelineSurface):
                 # its committed transition and extraction), do NOT merge it into them (their
                 # shapes stay as D-017 says) and never swallow or convert it: restore, then
                 # re-raise. The manager pops the user message and fires no ERROR handler.
+                #
+                # DECISION plan-2026-11-28T050702-8525c797/D-002
+                # An interrupt (KeyboardInterrupt, SystemExit) is a whole-turn failure like a
+                # cancel: the manager already pops the user message for it (a02151fe/D-014),
+                # so leaving Pass 1's transition and data committed made a retry step twice.
+                # Do NOT widen this to `BaseException` (GeneratorExit is the abandonment
+                # signal of a stream and keeps the partial reply: e3131cc2/D-004 clause c),
+                # do NOT touch the inner `except Exception` arms, do NOT swallow or wrap the
+                # interrupt (restore, then bare re-raise: a signal must stay uncatchable by an
+                # upstream `except Exception`). Handler side effects of Pass 1 already run
+                # (an email sent) are not undone, as for a cancel.
                 snapshot.restore(instance)
                 raise
 
@@ -375,8 +386,9 @@ class DriverMixin(_PipelineSurface):
         Contract: ``user_message`` is the user's text, or ``None`` for a turn
         with no user message. ``process_stream`` is the entry for a message,
         ``advance_stream`` the entry for ``None``. Yields the reply chunks. On
-        an ``Exception`` the pre-turn snapshot is restored as described below
-        and the exception propagates; ``GeneratorExit`` restores nothing. The
+        an ``Exception``, a cancel, a ``KeyboardInterrupt`` or a ``SystemExit`` the
+        pre-turn snapshot is restored as described below and the exception
+        propagates; ``GeneratorExit`` restores nothing. The
         entries wrap it in ``_logged_as`` (the logger context is bound per step).
         """
         # DECISION plan-2026-09-30T062855-07ad3f8c/D-025
@@ -405,13 +417,15 @@ class DriverMixin(_PipelineSurface):
         #      never restores current_state / context.data / working_memory /
         #      metadata. Those four survive a mid-stream failure uncorrupted
         #      without this block.
-        #  (c) `except Exception` (NOT BaseException) is deliberate, matching
-        #      process() and the D-015 streaming-abandonment contract:
-        #      GeneratorExit / KeyboardInterrupt from a consumer that stopped
-        #      iterating must NOT trigger rollback — the partial reply the
-        #      user already saw is kept (documented boundary; a yielded chunk
-        #      cannot be un-yielded, same as H2's "external side effects not
-        #      undone").
+        #  (c) The inner `except Exception` is deliberate (NOT BaseException),
+        #      matching process() and the D-015 streaming-abandonment contract:
+        #      GeneratorExit from a consumer that stopped iterating must NOT
+        #      trigger rollback: the partial reply the user already saw is kept
+        #      (documented boundary; a yielded chunk cannot be un-yielded, same
+        #      as H2's "external side effects not undone"). A KeyboardInterrupt
+        #      or SystemExit raised inside the turn is NOT abandonment: the OUTER
+        #      arm below restores the snapshot for it (D-002 of plan 8525c797), as for a
+        #      cancel.
         snapshot = _TurnSnapshot.capture(instance)
 
         try:
@@ -422,6 +436,10 @@ class DriverMixin(_PipelineSurface):
             # to the turn that produced it (after the snapshot: a rolled-back
             # turn restores the prior one).
             instance.context.data.pop(CONTEXT_KEY_CUT_OFF, None)
+            # A stream turn has no response object to record, so the previous
+            # turn's reply must not stay visible as this turn's (D-010 of plan 8525c797;
+            # after the snapshot: a rolled-back turn restores the prior one).
+            instance.last_response_generation = None
 
             # DECISION plan-2026-09-12T065608-089d0ec7/D-002
             # Widened turn-atomicity, streaming mirror of process()'s guard
@@ -493,10 +511,11 @@ class DriverMixin(_PipelineSurface):
                 # D-013). GeneratorExit deliberately does NOT reach here.
                 snapshot.restore(instance)
                 raise
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
             # DECISION plan-2026-11-19T193704-f150ec28/D-002
-            # The stream mirror of the arm in `_run_turn` (read it there): a cancel rolls the
-            # whole turn back and no partial reply is kept (`pass2` drops it for any
-            # BaseException but GeneratorExit); `aclose` stays the abandonment rule.
+            # The stream mirror of the arm in `_run_turn` (read it there, with the interrupt
+            # rule of D-002 of plan 8525c797): a cancel or an interrupt rolls the whole turn back and
+            # no partial reply is kept (`pass2` drops it for any BaseException but
+            # GeneratorExit); `aclose` stays the abandonment rule and never reaches this arm.
             snapshot.restore(instance)
             raise

@@ -775,6 +775,46 @@ class TestFailClosedAtTheSites:
         assert llm.calls("extract_field") == []
         assert llm.calls("generate_response") == llm.calls("generate_response")[:1]
 
+    def test_a_failing_transition_event_is_a_warning_and_the_turn_stays_committed(
+        self, log: EventLog
+    ):
+        """Plan 8525c797 D-009: `transition` is written AFTER the state moved, so like the
+        extraction and handler events it is evidence: a refused write is one WARNING, the turn
+        returns, the state stays moved and nothing is restored. (A silent state: a speaking one
+        still refuses at its next checkpoint, the model call after the poisoned write.)
+        Kills: `record_transition` without `warn_on_failure` (the turn raises `LogWriteError`)."""
+        definition = {
+            "name": "Quiet",
+            "description": "Two silent states",
+            "initial_state": "a",
+            "states": {
+                "a": _state(
+                    "a", transitions=[{"target_state": "b", "description": "go"}]
+                ),
+                "b": _state("b"),
+            },
+        }
+        api = API(definition, llm_interface=ScriptedLLM(), event_log=log)
+        cid, _ = api.start_conversation()
+        real_write = jsonl._write
+
+        def refuse_transition(fd: int, data: Any) -> int:
+            if b'"type":"transition"' in bytes(data).replace(b" ", b""):
+                raise OSError("disk full")
+            return real_write(fd, data)
+
+        with (
+            patch.object(jsonl, "_write", side_effect=refuse_transition),
+            patch("fsm_llm.runtime.log.logger") as warned,
+        ):
+            assert api.converse("hi", cid) == ""
+        assert api.get_current_state(cid) == "b"
+        assert any(
+            "transition not written" in call.args[0]
+            for call in warned.warning.call_args_list
+        )
+        assert not _events(log, cid, "transition")
+
     def test_a_failing_stack_event_is_a_warning_and_the_push_stands(
         self, log: EventLog
     ):
