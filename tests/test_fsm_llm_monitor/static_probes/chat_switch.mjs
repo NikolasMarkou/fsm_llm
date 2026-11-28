@@ -137,5 +137,23 @@ r.send = {
     away_typed: await sending(true, true, 'draft B'),
     ok: await sending(false, false),
 };
+// Plan c9d908d4 step 2 (C5): opening a conversation of the attached API leaves no selected Control row, a plain
+// title while it loads and no Back to an empty panel; a managed conversation keeps its own row, title and Back.
+const mkRow = id => { const cl = new Set(); return { dataset: { instanceId: id }, cl, classList: { add: c => cl.add(c), remove: c => cl.delete(c), contains: c => cl.has(c) } }; };
+const rows = [mkRow(MANAGED), mkRow('other')];
+const selectedRows = () => rows.filter(x => x.cl.has('selected')).map(x => x.dataset.instanceId);
+document.querySelectorAll = sel => (sel === 'tr.clickable-row.selected' ? rows.filter(x => x.cl.has('selected')) : []);
+document.querySelector = sel => { const m = sel.match(/^tr\[data-instance-id="(.*)"\]$/); return m ? rows.find(x => x.dataset.instanceId === m[1]) ?? null : null; };
+async function drawerRows(instanceId, convId, owner) {
+    fresh();
+    snaps[convId] = snap(convId, owner);
+    control.openDrawer(MANAGED, 'fsm', { fetchDetail: false });
+    const row_before = selectedRows();
+    conv.showConversationInDrawer(instanceId, convId);
+    const title_loading = el('ctrl-drawer-title').textContent;
+    await flush();
+    return { row_before, selected_rows: selectedRows(), title_loading, back_display: el('ctrl-drawer-back').style.display };
+}
+r.drawer_rows = { attached: await drawerRows('', 'att1', ''), managed: await drawerRows(MANAGED, 'c1', MANAGED) };
 out(r);
 process.exit(0);

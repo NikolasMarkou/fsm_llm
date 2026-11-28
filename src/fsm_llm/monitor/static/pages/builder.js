@@ -438,21 +438,6 @@ function _renderInternalState(state) {
         html += '</div>';
     }
 
-    // Requirements / Context
-    const reqData = state.requirements || state.context;
-    if (reqData && Object.keys(reqData).length > 0) {
-        html += '<div class="builder-state-section builder-state-context">';
-        html += '<h4>Requirements</h4>';
-        html += '<div class="builder-state-kv">';
-        for (const [k, v] of Object.entries(reqData)) {
-            if (v != null) {
-                const display = Array.isArray(v) ? v.join(', ') : String(v);
-                html += `<span class="key">${esc(k.replace(/^artifact_/, ''))}</span><span class="val">${esc(display)}</span>`;
-            }
-        }
-        html += '</div></div>';
-    }
-
     // Artifact Preview
     if (state.artifact_preview && Object.keys(state.artifact_preview).length > 0) {
         html += '<div class="builder-state-section builder-state-artifact">';
@@ -462,7 +447,7 @@ function _renderInternalState(state) {
     }
 
     // Raw state fallback — always show something
-    if (!state.builder_progress && !state.builder_summary && !reqData) {
+    if (!state.builder_progress && !state.builder_summary) {
         html += '<div class="builder-state-section builder-state-context">';
         html += '<h4>Raw</h4>';
         html += jsonViewHtml(JSON.stringify(state, null, 2), 'pre');

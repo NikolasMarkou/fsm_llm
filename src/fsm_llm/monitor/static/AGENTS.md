@@ -72,7 +72,7 @@ Control flow in `app.js`:
 `utils/`:
 - `dom.js`: `fillSelect(select, groups, emptyText, preferred)` (options built with `createElement` and `textContent` only; keeps the current choice, else `preferred`; no rows leaves one disabled option reading `emptyText`), `esc`, `$`, `showError`, `showStatus`, `showToast`, `levelClass`, `statusBadge`, `openDialog`/`closeDialog` (focus restore), `renderResultBanner`, `renderLLMData`, `jsonViewHtml`, `highlightText`, `renderPagination(el, page, totalPages, action)`, `showDrawerDetailView`, `hashInstances` (hash over `instance_id:status:conversation_count:active_workflows`), `numVal`, `intVal`, `copyToClipboard`.
 - `format.js`: `formatTime`, `relativeTime`, `formatNumber`.
-- `markdown.js`: `renderMarkdown(text)`; escapes first, then a fixed regex sequence (code, headings as bold, bold, italic, lists, rules). No links or tables.
+- `markdown.js`: `renderMarkdown(text)`; escapes first, then a fixed regex sequence (code, headings as bold, bold, italic, rules, lists). No links or tables.
 - `json_highlight.js`: `tokenizeJson(text)`, `renderJson(el, text)`, `highlightJsonIn(root)`; colours JSON text by building `span.json-key|string|number|bool|null|punct` nodes with `textContent` only (never `innerHTML`), so the element's text stays the input byte for byte. A text that does not parse, or is over `JSON_HIGHLIGHT_MAX_CHARS` (200000), stays plain. The colours are the `--json-*` variables of `style.css`.
 - `graph.js`: `renderGraph(svgId, {nodes, edges}, opts)`; BFS layers from the first `is_initial` node, rows of at most 5 columns (a row starts below the tallest layer of the row before), writes `x`/`y` onto the passed nodes.
 

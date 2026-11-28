@@ -138,6 +138,24 @@ class TestChatAndTargets:
         }
         assert out["after_open_drawer"] is False
 
+    def test_an_attached_conversation_leaves_no_selected_row_and_no_back_to_nothing(
+        self, probe
+    ):
+        """Plan c9d908d4 step 2 (C5): the row the user had open in the Control table is cleared (the
+        early return of `openDrawer` used to skip it), the title has no empty instance prefix while the
+        snapshot loads, and Back (which leads to no panel) is hidden for an entry with no instance id."""
+        out = probe("chat_switch")["drawer_rows"]["attached"]
+        assert out["row_before"] == ["managedFSM"]
+        assert out["selected_rows"] == []
+        assert out["title_loading"] == "Conversation"
+        assert out["back_display"] == "none"
+
+    def test_a_managed_conversation_keeps_its_row_title_and_back(self, probe):
+        out = probe("chat_switch")["drawer_rows"]["managed"]
+        assert out["selected_rows"] == ["managedFSM"]
+        assert out["title_loading"] == "M \u2192 Conversation"
+        assert out["back_display"] == "inline-block"
+
     def test_a_managed_conversation_keeps_chat_and_end_on_its_own_instance(self, probe):
         out = probe("chat_switch")["managed"]
         assert out == {
@@ -1384,6 +1402,43 @@ class TestMarkdownFencesAndItalicRuns:
         ]
 
 
+class TestMarkdownStarEmphasisAndRule:
+    """Plan c9d908d4 step 2 (C1): a star opens emphasis before a non-space and closes after one; the rule
+    pass runs before the list passes. `markdown.mjs` and `markdown_blocks.mjs` stay as they were."""
+
+    def test_a_list_marker_star_is_not_an_emphasis_opener(self, probe):
+        out = probe("markdown_fences")
+        assert out["star_item"] == (
+            "<ul><li>item with <em>emph</em></li><li>two</li></ul>"
+        )
+        assert out["star_bold"] == "<ul><li><strong>b</strong> x</li></ul>"
+
+    def test_spaced_stars_stay_text_and_tight_ones_still_emphasise(self, probe):
+        out = probe("markdown_fences")
+        assert out["star_spaced"] == "<p>2 * 3 * 4</p>"
+        assert out["star_inside"] == "<p>a<em>b</em>c</p>"
+        assert out["star_pair"] == "<p><em>a</em> <em>b</em></p>"
+        # a star beside a space opens nothing and closes nothing, whichever side the space is on
+        assert out["star_flank"] == ["<p>x * a* y</p>", "<p>x *a * b</p>"]
+
+    @pytest.mark.parametrize(
+        "key", ["rule_dash_list", "rule_star_list", "rule_ordered"]
+    )
+    def test_a_rule_between_two_lists_is_a_rule(self, probe, key):
+        html = probe("markdown_fences")[key]
+        assert html.count('<hr class="md-hr">') == 1
+        assert html.count("<ul>") + html.count("<ol>") == 2
+        assert "---" not in html and "***" not in html
+        assert "<p>" not in html
+
+    def test_hostile_text_beside_stars_is_still_escaped(self, probe):
+        for html in probe("markdown_fences")["star_hostile"]:
+            assert "<script" not in html and "<img" not in html and "<b>" not in html
+
+    def test_a_seeded_fuzz_keeps_every_inline_and_list_tag_paired(self, probe):
+        assert probe("markdown_fences")["fuzz"] == {"unpaired": 0, "rawTag": 0}
+
+
 class TestDrawerDirectOpen:
     """A conversation opened straight in the drawer fetches no hidden detail."""
 
@@ -1531,3 +1586,19 @@ class TestJsonColouring:
             for surface in surfaces:
                 hi, lo = sorted((lum, colour(surface)), reverse=True)
                 assert (hi + 0.05) / (lo + 0.05) >= 4.5, (kind, surface)
+
+
+class TestCosmeticSourceRows:
+    """Plan c9d908d4 step 2 (C2, C3): rows over the source text, no browser."""
+
+    def test_the_json_overlay_draws_no_webkit_scrollbar_thumb(self):
+        css = (_STATIC / "style.css").read_text(encoding="utf-8")
+        rule = re.search(r"\.json-overlay::-webkit-scrollbar-thumb\s*\{([^}]*)\}", css)
+        assert rule and re.search(r"background:\s*transparent", rule[1])
+        # its scroll gutter must equal the textarea's: the overlay is never taken out of the layout
+        for block in re.findall(r"\.json-overlay\s*\{([^}]*)\}", css):
+            assert "display: none" not in block and "scrollbar-width: none" not in block
+
+    def test_the_builder_state_panel_has_no_requirements_branch(self):
+        src = (_STATIC / "pages" / "builder.js").read_text(encoding="utf-8")
+        assert "requirements" not in src and "state.context" not in src

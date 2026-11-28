@@ -1894,6 +1894,8 @@ button.btn.btn-warning:hover {
     scrollbar-color: transparent transparent;
 }
 
+.json-overlay::-webkit-scrollbar-thumb { background: transparent; }
+
 .json-overlay::after { content: "\A"; }
 
 

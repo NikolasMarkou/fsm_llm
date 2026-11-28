@@ -45,7 +45,7 @@ export function showConversationInDrawer(instanceId, convId) {
     const drawerContent = $('ctrl-drawer-content');
     const convWrapper = $('conv-detail-wrapper');
     const eventsWrapper = $('ctrl-drawer-events-wrapper');
-    if (backBtn) backBtn.style.display = 'inline-block';
+    if (backBtn) backBtn.style.display = instanceId ? 'inline-block' : 'none';  // an attached conversation has no panel to go back to
     if (drawerContent) drawerContent.style.display = 'none';
     if (convWrapper) convWrapper.style.display = 'block';
     if (eventsWrapper) eventsWrapper.style.display = 'none';
@@ -53,7 +53,7 @@ export function showConversationInDrawer(instanceId, convId) {
     const titleEl = $('ctrl-drawer-title');
     const inst = state.instances.find(i => i.instance_id === instanceId);
     const instLabel = inst ? (inst.label || instanceId.substring(0, 12)) : instanceId.substring(0, 12);
-    if (titleEl) titleEl.textContent = `${instLabel} \u2192 Conversation`;
+    if (titleEl) titleEl.textContent = instanceId ? `${instLabel} \u2192 Conversation` : 'Conversation';
 
     showConversationDetail(convId);
 }

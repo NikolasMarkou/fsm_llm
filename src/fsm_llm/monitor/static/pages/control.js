@@ -189,6 +189,7 @@ function _resetDetailRequests() {
 
 export function openDrawer(instanceId, type, { fetchDetail = true } = {}) {
     state.selectedConvReadOnly = false;
+    document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
     if (!instanceId) {
         // An attached-API conversation has no instance: nothing stale may stay selected or shown behind it.
         state.selectedDetailId = null;
@@ -198,7 +199,6 @@ export function openDrawer(instanceId, type, { fetchDetail = true } = {}) {
     }
     const switching = state.selectedDetailId !== instanceId || state.selectedDetailType !== type;
 
-    document.querySelectorAll('tr.clickable-row.selected').forEach(r => r.classList.remove('selected'));
     const row = document.querySelector(`tr[data-instance-id="${CSS.escape(instanceId)}"]`);
     if (row) row.classList.add('selected');
 

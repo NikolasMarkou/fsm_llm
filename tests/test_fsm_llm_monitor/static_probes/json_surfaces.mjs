@@ -67,6 +67,12 @@ serve(() => ({ session_id: 's', response: 'hi', internal_state: {}, is_complete:
 builder.startBuilderSession(); await sleep(30);
 const failedBuild = [resultPre.textContent, (resultPre.children ?? []).map(c => c.className)];
 
+// Builder: a key the server never sends (`requirements`) is shown by the Raw block, as JSON (plan c9d908d4 step 2, C3)
+serve(url => url.startsWith('/api/fsm/visualize') ? { nodes: [], edges: [] } : ({ session_id: 's', response: 'hi', internal_state: { phase: 'x', requirements: { n: { a: 1 } } }, is_complete: true, artifact: fsm, artifact_json: JSON.stringify(fsm), artifact_type: 'fsm', is_valid: true }));
+builder.startBuilderSession(); await sleep(30);
+const requirementsState = view(stateSeen);
+const requirementsHtml = el('builder-state-content').innerHTML;
+
 // Control drawer: workflow context and step data, agent tool-call parameters and context
 const workflow = { workflow_instance_id: 'w1', status: 'running', current_step: 's', context: { cfg: { a: 1 }, s: 'x' }, history: [{ step_id: 's', data: { k: 1 } }] };
 serve(url => {
@@ -92,6 +98,7 @@ out({
     conversation: same(texts(conversationRow), ['{"a":[1,"<i>x</i>"]}', '{\n  "q": 1\n}']) && coloured(conversationRow) && !conversationRow.raw,
     builderResult: builderRow.result.every(Boolean),
     builderRawState: same(texts({ views: rawState }), ['{\n  "note": {\n    "k": [\n      1\n    ]\n  }\n}']) && coloured({ views: rawState }),
+    builderUnknownKeyIsRaw: same(texts({ views: requirementsState }), ['{\n  "phase": "x",\n  "requirements": {\n    "n": {\n      "a": 1\n    }\n  }\n}']) && coloured({ views: requirementsState }) && !requirementsHtml.includes('[object Object]') && requirementsHtml.includes('<h4>Raw</h4>') && !requirementsHtml.includes('<h4>Requirements</h4>'),
     builderApplied: applied.every(Boolean),
     builderFailed: same(failedBuild, ['{}', ['json-punct']]),
     builderState: same(texts({ views: builderRow.state }), ['{\n  "x": 1\n}']) && coloured({ views: builderRow.state }) && !builderRow.stateRaw,

@@ -31,9 +31,12 @@ export function renderMarkdown(text) {
     s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
 
-    // Italic
-    s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    // Italic (a star opens before a non-space and closes after one: `* item` and `2 * 3 * 4` are not emphasis)
+    s = s.replace(/\*(?=\S)([^*\n]*[^*\s])\*/g, '<em>$1</em>');
     s = s.replace(/(^|[^a-zA-Z0-9])_([^_\n]+)_(?![a-zA-Z0-9])/g, '$1<em>$2</em>');
+
+    // Horizontal rule (before the list passes: they eat the newline after an item run)
+    s = s.replace(/^(?:---|\*\*\*)$/gm, '<hr class="md-hr">');
 
     // Unordered lists
     s = s.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
@@ -42,9 +45,6 @@ export function renderMarkdown(text) {
     // Ordered lists (a distinct item marker keeps them out of the <ul> pass above)
     s = s.replace(/^\d+\. (.+)$/gm, '<oli>$1</oli>');
     s = s.replace(/((?:<oli>.*<\/oli>\n?)+)/g, m => `<ol>${m.replace(/\n/g, '').replace(/<(\/?)oli>/g, '<$1li>')}</ol>`);
-
-    // Horizontal rule
-    s = s.replace(/^(?:---|\*\*\*)$/gm, '<hr class="md-hr">');
 
     // Line breaks
     s = s.replace(/\n\n+/g, '</p><p>');
