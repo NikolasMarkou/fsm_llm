@@ -149,7 +149,8 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         # Conversation ids whose update_context or END handlers are being dispatched OUT of
         # a turn (no ``_active_turns`` entry, which ``peek_turn`` reports as "turn in flight").
         # ``_enter_turn`` refuses a turn on such an id, so a handler cannot start a nested turn
-        # of its own conversation. Set and discarded by the dispatching call, taking no lock.
+        # of the same frame (a turn that first pushes a call child runs on the child's id and
+        # is not refused, D-016). Set and discarded by the dispatching call, taking no lock.
         self._out_of_turn_handlers: set[str] = set()
         # Lifetime turn budgets (plan 5a6a1f80 D-010, ``budget.py``): one record per manager
         # conversation id that was given a limit. Written under ``_lock`` with the instance,
