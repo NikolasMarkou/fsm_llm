@@ -48,9 +48,15 @@ class StateExecutor:
         conversation_id: str,
         state: State,
     ) -> DataExtractionResponse:
+        name = type(self).__name__
+        if type(self).aextract is not StateExecutor.aextract:
+            raise NotImplementedError(
+                f"{name} does not override extract: a sync converse needs extract "
+                "(aextract serves async callers only)"
+            )
         raise NotImplementedError(
-            f"{type(self).__name__} overrides neither extract (sync callers) nor aextract "
-            "(async only): a sync converse needs extract"
+            f"{name} overrides neither extract (sync callers) nor aextract (async callers): "
+            "override one of them"
         )
 
     async def aextract(

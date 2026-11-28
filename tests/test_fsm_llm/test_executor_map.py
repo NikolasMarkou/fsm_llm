@@ -16,6 +16,7 @@ On the parent commit the keyword does not exist, so every test that passes
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from types import MappingProxyType
 from typing import Any
@@ -261,7 +262,34 @@ class TestIsolation:
         conversation_id, _ = api.start_conversation()
         with pytest.raises(Exception, match="AsyncOnlyConversation") as raised:
             api.converse("hello", conversation_id)
-        assert "extract" in str(raised.value)
+        # the text is true for this class: it DOES override aextract (plan 8525c797, step 11.1)
+        assert "AsyncOnlyConversation does not override extract" in str(raised.value)
+        assert "aextract serves async callers only" in str(raised.value)
+        assert "neither" not in str(raised.value)
+
+    def test_an_executor_with_neither_method_says_so_in_sync_and_async_mode(self):
+        """A class that overrides neither ``extract`` nor ``aextract`` gets its own true text,
+        in a sync converse and in an async one (the default ``aextract`` reaches ``extract``)."""
+
+        class EmptyConversation(ex.StateExecutor):
+            pass
+
+        for use_async in (False, True):
+            api = API.from_definition(
+                _plain_definition(),
+                llm_interface=_llm(),
+                executors={"conversation": EmptyConversation()},
+            )
+            conversation_id, _ = api.start_conversation()
+            with pytest.raises(Exception, match="EmptyConversation") as raised:
+                if use_async:
+                    asyncio.run(api.aconverse("hello", conversation_id))
+                else:
+                    api.converse("hello", conversation_id)
+            text = str(raised.value)
+            assert "EmptyConversation overrides neither extract" in text
+            assert "nor aextract" in text
+            assert "does not override extract" not in text
 
     def test_the_map_is_a_read_only_copy(self, marker_kind):
         given: dict[str, ex.StateExecutor] = {_KIND: _MarkerExecutor("one")}
