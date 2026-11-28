@@ -1028,3 +1028,35 @@ class TestSubstituteVariablesCycles:
         out = ei.substitute_variables(tree, {"v": "X"})
 
         assert out == [[["X"]], [[["X"]]], ["X"]]
+
+    def test_a_mapping_that_builds_its_values_on_access_is_not_a_cycle(self):
+        """The walk keeps a container alive while its id is on the current path: a view that
+        builds a fresh list on each access would otherwise hand a later container the id of one
+        already dropped, and the later one would be refused as a cycle (review pass 2, concern 2;
+        the old recursive walk filled this input)."""
+        from collections.abc import Mapping
+
+        class Fresh(Mapping):
+            def __init__(self, depth: int) -> None:
+                self.depth = depth
+
+            def __getitem__(self, key: str) -> Any:
+                if key != "v":
+                    raise KeyError(key)
+                nested = [Fresh(self.depth - 1)] if self.depth else []
+                return ["{{x}}", *nested]
+
+            def __iter__(self):
+                return iter(["v"])
+
+            def __len__(self) -> int:
+                return 1
+
+        for _ in range(20):
+            out = ei.substitute_variables(Fresh(30), {"x": "X"})
+
+        node: Any = out
+        for _ in range(31):
+            assert node["v"][0] == "X"
+            node = node["v"][1] if len(node["v"]) > 1 else None
+        assert node is None

@@ -213,7 +213,9 @@ def substitute_variables(node: Any, values: Mapping[str, str]) -> Any:
     # Do NOT walk a container once and share its copy (the `seen` rule of the sibling walks that
     # only READ): this one BUILDS, and a shared container must be filled in every place. A cycle
     # is told from a shared container by the containers of the CURRENT path (`active`), left by an
-    # exit marker pushed under the children.
+    # exit marker pushed under the children. The marker HOLDS the container: a Mapping that builds
+    # its values on access makes temporaries whose id a later container would reuse and be refused
+    # as a cycle. Do NOT keep only `id(item)` there.
     holder: list[Any] = [None]
     stack: list[tuple[Any, Any, Any]] = [(node, holder, 0)]
     rebuilt: list[tuple[Any, Any, list[Any], type]] = []  # list or tuple subclasses
@@ -234,7 +236,7 @@ def substitute_variables(node: Any, values: Mapping[str, str]) -> Any:
                     "the structure to fill is cyclic: it has no finite copy"
                 )
             active.add(id(item))
-            stack.append((None, _LEAVE, id(item)))
+            stack.append((item, _LEAVE, id(item)))  # alive while its id is on the path
         if isinstance(item, Mapping):
             target: Any
             parent[slot] = target = {}
