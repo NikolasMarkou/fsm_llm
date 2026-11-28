@@ -8,6 +8,7 @@ from typing import Any
 
 from .arithmetic import _minus, _safe_div, _safe_mod
 from .comparison import (
+    _number,
     greater,
     greater_or_equal,
     hard_equals,
@@ -38,14 +39,14 @@ operations: dict[str, Callable[..., Any]] = {
     "in": _membership,
     "contains": lambda a, b: _membership(b, a),
     # Arithmetic operators
-    "+": lambda *args: sum(float(arg) for arg in args),
+    "+": lambda *args: sum(_number(arg) for arg in args),
     "-": _minus,
-    "*": lambda *args: reduce(lambda x, y: float(x) * float(y), args, 1.0),
+    "*": lambda *args: reduce(lambda x, y: _number(x) * _number(y), args, 1.0),
     "/": _safe_div,
     "%": _safe_mod,
     # Min/max operators (with numeric coercion like other arithmetic ops)
-    "min": lambda *args: min(float(a) for a in args) if args else None,
-    "max": lambda *args: max(float(a) for a in args) if args else None,
+    "min": lambda *args: min(_number(a) for a in args) if args else None,
+    "max": lambda *args: max(_number(a) for a in args) if args else None,
     # String operators
     "cat": cat,
 }

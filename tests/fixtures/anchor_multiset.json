@@ -1319,6 +1319,16 @@
       "delta": 1,
       "reason": "plan 9283c1fd review F5: new D-008 anchor beside cli_support.load_env_file (one anchor token gained)",
       "token": "plan-2026-11-27T201735-9283c1fd/D-008"
+    },
+    {
+      "delta": 2,
+      "reason": "plan 8525c797 step 2: new D-007 anchors on the chained comparison loops (less, _holds_pairwise) and a D-008 anchor on the numeric operand coercion _number (tokens gained)",
+      "token": "plan-2026-11-28T050702-8525c797/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 8525c797 step 2: new D-007 anchors on the chained comparison loops (less, _holds_pairwise) and a D-008 anchor on the numeric operand coercion _number (tokens gained)",
+      "token": "plan-2026-11-28T050702-8525c797/D-008"
     }
   ]
 }

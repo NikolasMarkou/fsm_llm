@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 
@@ -180,6 +181,35 @@ def less(a: Any, b: Any, *args: Any) -> bool:
           from the native comparison) give False, and an ``int`` past float
           range is compared as the exact ``int`` (``_as_float``)
     """
+    # DECISION plan-2026-11-28T050702-8525c797/D-007: the chain is a LOOP with
+    # an early exit, never a recursion: one frame per argument turned a TRUE
+    # chain of 1000+ operands into a RecursionError that the evaluator logged
+    # and read as False. Do NOT write it recursively again, do NOT copy the
+    # tail (`args[1:]`, `(b, *args)`) per pair, and do NOT drop the early
+    # return (a late violation must not cost a full pass of coercions). The
+    # coerced right side is carried into the next pair, as the old recursion
+    # did (`less(b, *args)` with the rebound `b`).
+    previous, current = a, b
+    for position in range(len(args) + 1):
+        previous, current = _coerce_for_order(previous, current)
+        try:
+            ordered = previous < current
+        except TypeError:
+            return False
+        if not ordered:
+            return False
+        if position < len(args):
+            previous, current = current, args[position]
+    return True
+
+
+def _coerce_for_order(a: Any, b: Any) -> tuple[Any, Any]:
+    """The numeric coercion of one ordered pair, shared by every chain operator.
+
+    Interface contract: ``a``/``b`` any values; returns the pair as floats (or
+    the exact ``int`` past float range, ``_as_float``) when each string side is
+    a plain number after ``strip()``, else the pair unchanged. Never raises.
+    """
     # Numeric conversion is attempted unless a string side is not a plain
     # number: bare `float()` accepts "inf", "1_000" and non-ASCII digits that
     # `==` refuses (D-048). Padding is trimmed, so " 25" still orders.
@@ -188,22 +218,32 @@ def less(a: Any, b: Any, *args: Any) -> bool:
         for side in (a, b)
     ):
         try:
-            a, b = _as_float(a), _as_float(b)
+            return _as_float(a), _as_float(b)
         except (TypeError, ValueError):
             pass  # Fall back to native comparison
+    return a, b
 
-    # Perform the primary comparison
-    try:
-        result = a < b
-    except TypeError:
+
+def _holds_pairwise(
+    pair: Callable[[Any, Any], bool], a: Any, b: Any, args: tuple[Any, ...]
+) -> bool:
+    """True when ``pair`` holds for every adjacent pair of ``a, b, *args``.
+
+    Interface contract: ``pair(x, y) -> bool`` is total (never raises). The
+    walk stops at the first pair that fails and copies nothing, so a chain of
+    any length costs one pass and no recursion depth.
+    """
+    # DECISION plan-2026-11-28T050702-8525c797/D-007: loop with an early exit,
+    # same rule as `less` (see the anchor there). Do NOT turn it back into a
+    # recursive call per pair.
+    if not pair(a, b):
         return False
-
-    # If primary comparison fails or no additional args, return result
-    if not result or not args:
-        return bool(result)
-
-    # Recursively check the chain: b < args[0] < args[1] < ...
-    return bool(result) and less(b, *args)
+    previous = b
+    for current in args:
+        if not pair(previous, current):
+            return False
+        previous = current
+    return True
 
 
 def _numeric_equal(a: Any, b: Any) -> bool:
@@ -261,6 +301,32 @@ _PLAIN_NUMBER_RE = re.compile(
 )
 
 
+def _number(value: Any) -> float:
+    """The one operand coercion of the arithmetic operators.
+
+    Interface contract: ``value`` any object; returns a ``float``. A ``str``
+    must be a plain number after ``strip()`` (``_PLAIN_NUMBER_RE``, the rule
+    ``<`` and ``>`` apply to a string side: not "inf", "nan", "1_000" or
+    non-ASCII digits); anything else raises ``ValueError`` whose text names no
+    value. Every other type goes through ``float()`` as before (``int``,
+    ``float``, ``bool``), so ``None`` and containers raise ``TypeError``. The
+    caller is ``evaluate_logic``, which reads either error as UNDEFINED.
+    """
+    # DECISION plan-2026-11-28T050702-8525c797/D-008: ONE numeric-string rule
+    # for every JsonLogic operand. Do NOT go back to bare `float()` in `+ - * /
+    # % min max` ("inf" and "nan" became numbers, `{">": [{"+": ["inf", 1]},
+    # 5]}` was True), do NOT put the offending value in the error text (the
+    # evaluator logs the exception class only, and a message would leak it),
+    # and do NOT reuse `core/coerce.py` here: that layer coerces an EXTRACTED
+    # field value and accepts "1_000" on purpose.
+    if isinstance(value, str):
+        text = value.strip()
+        if not _PLAIN_NUMBER_RE.fullmatch(text):
+            raise ValueError("operand is not a plain number")
+        return float(text)
+    return float(value)
+
+
 def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
     """
     Implement the '<=' operator with type coercion and chaining support.
@@ -288,35 +354,36 @@ def less_or_equal(a: Any, b: Any, *args: Any) -> bool:
         Uses less(), soft_equals() and numeric equality (``1 <= "1.0"`` is True).
         Supports the same type coercion as the less() function.
     """
-    # Check if a <= b (either a < b or a == b)
+    return _holds_pairwise(_less_or_equal_pair, a, b, args)
+
+
+def _less_or_equal_pair(a: Any, b: Any) -> bool:
+    """One ``a <= b`` pair: ``<``, ``==`` or numeric equality."""
     # DECISION plan-2026-11-06T093029-0068b055/D-005: the third term is kept on
     # purpose and is why `"01" <= "1"` is True while `"01" == "1"` is False.
     # Do NOT drop it as "redundant with soft_equals": a numeric-string gate such
     # as `>= "50"` on an extracted "50.0" would flip to False, silently. Do NOT
     # add it to `==` either (ids rule, D-013 of plan-2026-09-21T203800-8a03483a).
-    primary_result = less(a, b) or soft_equals(a, b) or _numeric_equal(a, b)
+    return less(a, b) or soft_equals(a, b) or _numeric_equal(a, b)
 
-    # If no additional args or primary comparison fails, return result
-    if not args or not primary_result:
-        return primary_result
 
-    # Recursively check the chain
-    return primary_result and less_or_equal(b, *args)
+def _greater_pair(a: Any, b: Any) -> bool:
+    """One ``a > b`` pair."""
+    return less(b, a)
+
+
+def _greater_or_equal_pair(a: Any, b: Any) -> bool:
+    """One ``a >= b`` pair: ``>``, ``==`` or numeric equality."""
+    # DECISION plan-2026-11-06T093029-0068b055/D-005: same kept third term as
+    # `_less_or_equal_pair`; see the anchor there before touching it.
+    return less(b, a) or soft_equals(a, b) or _numeric_equal(a, b)
 
 
 def greater(a: Any, b: Any, *args: Any) -> bool:
     """Implement '>' with chaining support (a > b > c)."""
-    result = less(b, a)
-    if not result or not args:
-        return result
-    return result and greater(b, *args)
+    return _holds_pairwise(_greater_pair, a, b, args)
 
 
 def greater_or_equal(a: Any, b: Any, *args: Any) -> bool:
     """Implement '>=' with chaining support (a >= b >= c)."""
-    # DECISION plan-2026-11-06T093029-0068b055/D-005: same kept third term as
-    # `less_or_equal`; see the anchor there before touching it.
-    result = less(b, a) or soft_equals(a, b) or _numeric_equal(a, b)
-    if not args or not result:
-        return result
-    return result and greater_or_equal(b, *args)
+    return _holds_pairwise(_greater_or_equal_pair, a, b, args)

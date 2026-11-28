@@ -1,4 +1,7 @@
-"""Arithmetic helpers of the operator table: safe division and modulo, unary and binary minus."""
+"""Arithmetic helpers of the operator table: safe division and modulo, unary and binary minus.
+
+Every operand goes through ``comparison._number``, the one numeric-string rule.
+"""
 
 from __future__ import annotations
 
@@ -6,13 +9,15 @@ from typing import Any
 
 from fsm_llm.core.definitions import TransitionEvaluationError
 
+from .comparison import _number
+
 
 def _safe_div(a: Any, b: Any) -> float:
     """Division with error on zero divisor."""
-    divisor = float(b)
+    divisor = _number(b)
     if divisor == 0:
         raise TransitionEvaluationError("Division by zero in JsonLogic expression")
-    return float(a) / divisor
+    return _number(a) / divisor
 
 
 def _safe_mod(a: Any, b: Any) -> float:
@@ -24,10 +29,10 @@ def _safe_mod(a: Any, b: Any) -> float:
     purpose: changing it would silently flip deployed conditions on negative
     operands (audit B8).
     """
-    divisor = float(b)
+    divisor = _number(b)
     if divisor == 0:
         raise TransitionEvaluationError("Modulo by zero in JsonLogic expression")
-    return float(a) % divisor
+    return _number(a) % divisor
 
 
 def _minus(*args: Any) -> float:
@@ -40,6 +45,6 @@ def _minus(*args: Any) -> float:
     (an arithmetic operator that cannot compute never satisfies a comparison).
     """
     if len(args) == 1:
-        return -float(args[0])
+        return -_number(args[0])
     a, b = args
-    return float(a) - float(b)
+    return _number(a) - _number(b)

@@ -9,6 +9,7 @@ from fsm_llm.core.definitions import TransitionEvaluationError
 from fsm_llm.logging import logger
 
 from .access import _op_missing, _op_missing_some, _op_var, get_var
+from .logic_and_text import _type_names
 from .registry import _SHORT_CIRCUIT_OPERATORS, operations
 from .undefined import (
     _NONE_IS_FALSE_OPERATORS,
@@ -308,8 +309,13 @@ def _evaluate_logic(logic: Any, data: dict[str, Any] | None, _depth: int) -> Any
     except TransitionEvaluationError:
         raise
     except Exception as e:
+        # Operator, count, type names and exception class only: never the
+        # operands (extracted user text, credentials) and never `{e}` (a
+        # ValueError text quotes the operand). See `_type_names`.
         logger.warning(
-            f"Error evaluating operation '{operator}' with args {evaluated_values}: {e}"
+            f"Error evaluating operation '{operator}' with "
+            f"{len(evaluated_values)} argument(s) of type "
+            f"{_type_names(evaluated_values)}: {type(e).__name__}"
         )
         # DECISION plan-2026-11-05T134105-5ed71cf2/D-007: a failed ARITHMETIC
         # operator (non-numeric operand such as an extracted "N/A", wrong

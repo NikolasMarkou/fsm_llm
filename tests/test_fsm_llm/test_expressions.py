@@ -1356,3 +1356,220 @@ class TestOrderingUsesThePlainNumberGate:
     def test_two_non_numeric_strings_still_order_natively(self):
         assert evaluate_logic({"<": ["abc", "abd"]}) is True
         assert evaluate_logic({"<": ["5", "abc"]}) is True
+
+
+_SECRET_CONTEXT = {"api_key": "sk-LEAK-4242", "password": "hunter2-LEAK"}
+_SECRET_TEXTS = ("sk-LEAK-4242", "hunter2-LEAK", "could not convert")
+
+
+class TestOperatorLogLinesCarryNoValues:
+    """C4: the WARNING of a failed operator and of a surplus ``!`` operand
+    named every evaluated operand and the exception text, so a secret-bearing
+    context reached the log of a host that enabled library logging. Only the
+    operator, the count, the type names and the exception class may appear."""
+
+    @pytest.mark.parametrize(
+        "logic",
+        [
+            {"+": [{"var": ""}, 1]},
+            {"-": [{"var": "api_key"}, 1]},
+            {"*": [{"var": "password"}, 2]},
+            {"!": [{"var": "password"}, {"var": "api_key"}]},
+        ],
+    )
+    def test_no_record_holds_a_value_or_the_exception_text(self, logic):
+        with _captured_fsm_llm_warnings() as records:
+            evaluate_logic(logic, _SECRET_CONTEXT)
+        assert records, "vacuity guard: the failing operator must still warn"
+        for record in records:
+            for text in _SECRET_TEXTS:
+                assert text not in record, record
+
+    def test_the_failed_operator_line_names_operator_count_types_and_class(self):
+        with _captured_fsm_llm_warnings() as records:
+            evaluate_logic({"-": [{"var": "api_key"}, 1]}, _SECRET_CONTEXT)
+        (line,) = [r for r in records if "'-'" in r]
+        assert "2" in line
+        assert "str" in line and "int" in line
+        assert "ValueError" in line
+
+    def test_the_surplus_not_line_keeps_its_count_words(self):
+        with _captured_fsm_llm_warnings() as records:
+            evaluate_logic(
+                {"!": [{"var": "password"}, {"var": "api_key"}]}, _SECRET_CONTEXT
+            )
+        (line,) = [r for r in records if "'!'" in r]
+        assert "received 2" in line and "discarding 1" in line
+
+
+def _chain(op: str, n: int, *, violation_at: int | None = None) -> dict:
+    """An ``n``-argument chain that is TRUE for ``op`` (equal pairs for the
+    inclusive operators), with one value pushed past its neighbours on demand."""
+    ascending = op in ("<", "<=")
+    inclusive = op in ("<=", ">=")
+    values = [i // 2 if inclusive else i for i in range(n)]
+    if not ascending:
+        values.reverse()
+    if violation_at is not None:
+        values[violation_at] = -1 if ascending else n + 10
+    return {op: values}
+
+
+class TestLongChainsAreLengthSafe:
+    """C5: a chained comparison recursed once per argument, so a TRUE chain of
+    1000 or more arguments hit ``RecursionError`` and silently became False."""
+
+    @pytest.mark.parametrize("op", ["<", "<=", ">", ">="])
+    @pytest.mark.parametrize("n", [1500, 5000])
+    def test_a_true_chain_is_true_with_no_warning(self, op, n):
+        with _captured_fsm_llm_warnings() as records:
+            assert evaluate_logic(_chain(op, n)) is True
+        assert records == []
+
+    @pytest.mark.parametrize("op", ["<", "<=", ">", ">="])
+    @pytest.mark.parametrize("at", [1, 4999])
+    def test_a_violation_anywhere_is_false_with_no_warning(self, op, at):
+        with _captured_fsm_llm_warnings() as records:
+            assert evaluate_logic(_chain(op, 5000, violation_at=at)) is False
+        assert records == []
+
+    @pytest.mark.parametrize(
+        "fn,ascending",
+        [
+            (comparison.less, True),
+            (comparison.less_or_equal, True),
+            (comparison.greater, False),
+            (comparison.greater_or_equal, False),
+        ],
+    )
+    def test_the_helpers_take_a_long_chain_directly(self, fn, ascending):
+        values = list(range(6000)) if ascending else list(range(6000, 0, -1))
+        assert fn(*values) is True
+
+    def test_numeric_strings_chain_like_numbers(self):
+        assert comparison.less("1", "2", 3, " 4") is True
+        assert comparison.less("1", "3", "2") is False
+        assert comparison.greater_or_equal("3.0", 3, "2") is True
+        assert comparison.less_or_equal("01", "1", 1.0) is True
+
+    def test_a_chain_of_two_and_three_keep_their_results(self):
+        assert evaluate_logic({"<": [1, 2, 3]}) is True
+        assert evaluate_logic({"<": [1, 3, 2]}) is False
+        assert evaluate_logic({">=": [3, 3, 2]}) is True
+        assert evaluate_logic({">": [3, 3, 2]}) is False
+
+
+_ARITHMETIC_CALLS = {
+    "+": lambda x, y: {"+": [x, y]},
+    "-": lambda x, y: {"-": [x, y]},
+    "*": lambda x, y: {"*": [x, y]},
+    "/": lambda x, y: {"/": [x, y]},
+    "%": lambda x, y: {"%": [x, y]},
+    "min": lambda x, y: {"min": [x, y]},
+    "max": lambda x, y: {"max": [x, y]},
+}
+
+
+_BAD_OPERANDS = [
+    "inf",
+    "-inf",
+    "Infinity",
+    "nan",
+    "NaN",
+    "1_000",
+    "١٠٠٠",
+    "1,5",
+    "0x10",
+]
+
+
+class TestArithmeticOperandsUseThePlainNumberRule:
+    """C8: ``+ - * / % min max`` coerced with bare ``float()``, so ``"inf"``,
+    ``"nan"``, ``"1_000"`` and non-ASCII digits became numbers although the
+    comparisons refuse them (D-048). A refused operand is UNDEFINED, as any
+    other operand that cannot compute."""
+
+    @pytest.mark.parametrize("bad", _BAD_OPERANDS)
+    @pytest.mark.parametrize("op", sorted(_ARITHMETIC_CALLS))
+    def test_a_refused_operand_is_undefined_in_either_position(self, op, bad):
+        make = _ARITHMETIC_CALLS[op]
+        assert evaluate_logic(make(bad, 2)) is None
+        assert evaluate_logic(make(2, bad)) is None
+
+    @pytest.mark.parametrize("bad", _BAD_OPERANDS)
+    def test_a_refused_operand_never_satisfies_the_enclosing_comparison(self, bad):
+        assert evaluate_logic({">": [{"+": [bad, 1]}, 5]}) is False
+        assert evaluate_logic({"<": [{"*": [bad, 1]}, 5]}) is False
+        assert evaluate_logic({"==": [{"max": [bad, 1]}, 1]}) is False
+        assert evaluate_logic({">": [{"+": [{"var": "v"}, 1]}, 5]}, {"v": bad}) is False
+
+    def test_a_refused_unary_minus_is_undefined(self):
+        assert evaluate_logic({"-": ["inf"]}) is None
+        assert evaluate_logic({"-": ["١"]}) is None
+
+    @pytest.mark.parametrize(
+        "op,expected",
+        [
+            ("+", 5.0),
+            ("-", 1.0),
+            ("*", 6.0),
+            ("/", 1.5),
+            ("%", 1.0),
+            ("min", 2.0),
+            ("max", 3.0),
+        ],
+    )
+    def test_a_plain_or_padded_number_string_still_computes(self, op, expected):
+        make = _ARITHMETIC_CALLS[op]
+        for three in ("3", " 3 ", "\t3\n", "+3", "3.0", "3e0", ".3e1"):
+            assert evaluate_logic(make(three, 2)) == pytest.approx(expected)
+
+    def test_numbers_bools_and_the_empty_forms_keep_their_results(self):
+        assert evaluate_logic({"+": [1, 2.5, True]}) == pytest.approx(4.5)
+        assert evaluate_logic({"-": [True, 1]}) == 0.0
+        assert evaluate_logic({"*": []}) == 1.0
+        assert evaluate_logic({"+": []}) == 0
+        assert evaluate_logic({"min": []}) is None
+        assert evaluate_logic({"max": [1, 5, "3"]}) == 5.0
+
+    def test_division_by_zero_still_raises_its_own_error(self):
+        with pytest.raises(TransitionEvaluationError):
+            evaluate_logic({"/": [1, "0"]})
+        with pytest.raises(TransitionEvaluationError):
+            evaluate_logic({"%": [1, 0]})
+
+    def test_the_refusal_names_no_value(self):
+        with pytest.raises(ValueError) as caught:
+            comparison._number("SECRET-1_000")
+        assert "SECRET" not in str(caught.value)
+
+
+class _CountingProbe:
+    """An operand that counts every ordering comparison made against it."""
+
+    touched = 0
+
+    def __lt__(self, other):
+        type(self).touched += 1
+        return True
+
+    __gt__ = __le__ = __ge__ = __lt__
+
+
+class TestChainsStopAtTheFirstBrokenPair:
+    """C5: the loop returns at the first pair that fails (no pass over the
+    rest of a long chain) for every chain operator."""
+
+    @pytest.mark.parametrize(
+        "fn,first,second",
+        [
+            (comparison.less, 2, 1),
+            (comparison.less_or_equal, 2, 1),
+            (comparison.greater, 1, 2),
+            (comparison.greater_or_equal, 1, 2),
+        ],
+    )
+    def test_nothing_after_the_broken_pair_is_compared(self, fn, first, second):
+        _CountingProbe.touched = 0
+        assert fn(first, second, *[_CountingProbe() for _ in range(2000)]) is False
+        assert _CountingProbe.touched == 0

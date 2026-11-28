@@ -7,6 +7,16 @@ from typing import Any
 from fsm_llm.logging import logger
 
 
+def _type_names(values: Any) -> str:
+    """The distinct type names of ``values``, in first-seen order, for a log line.
+
+    Interface contract: ``values`` any iterable; returns text such as
+    ``"str, int"`` and never a value. The evaluator logs an operand's TYPE and
+    never the operand: a context holds extracted user text and credentials.
+    """
+    return ", ".join(dict.fromkeys(type(value).__name__ for value in values))
+
+
 def cat(*args: Any) -> str:
     """
     Concatenate the string representation of all arguments.
@@ -85,7 +95,7 @@ def _logical_not(*args: Any) -> bool:
         # it is not a precedent to copy. See decisions.md D-023.
         logger.warning(
             f"JsonLogic '!' takes a single operand but received {len(args)}; "
-            f"negating the first and discarding {len(args) - 1} argument(s): "
-            f"{list(args[1:])}. Use 'and'/'or' to combine multiple conditions."
+            f"negating the first and discarding {len(args) - 1} argument(s) of type "
+            f"{_type_names(args[1:])}. Use 'and'/'or' to combine multiple conditions."
         )
     return not args[0]
