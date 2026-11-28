@@ -84,7 +84,7 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         max_history_size: int = DEFAULT_MAX_HISTORY_SIZE,
         max_message_length: int = DEFAULT_MAX_MESSAGE_LENGTH,
         handler_system: HandlerSystem | None = None,
-        handler_error_mode: HandlerErrorMode | str = HandlerErrorMode.CONTINUE,
+        handler_error_mode: HandlerErrorMode | str | None = None,
         max_fsm_cache_size: int = DEFAULT_MAX_FSM_CACHE_SIZE,
         *,
         executors: ExecutorsArg | None = None,
@@ -100,6 +100,10 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         the kind extension point is public. ``targets`` is the ``TargetResolver`` of the
         ``call`` kind (``engine.kinds.targets.check_targets``: ``TypeError`` for a value with no
         callable ``resolve_target``), keyword-only, handed to the pipeline.
+
+        ``handler_error_mode`` (default ``None``: ``continue``) configures the manager's own
+        ``HandlerSystem``; a ``ValueError`` when given beside ``handler_system``, whose own mode
+        applies.
         """
         if llm_interface is None:
             raise ValueError("llm_interface is required and cannot be None")
@@ -166,8 +170,17 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         self.max_message_length = max_message_length
 
         # Handler system
+        if handler_system is not None and handler_error_mode is not None:
+            raise ValueError(
+                "handler_error_mode is ignored beside handler_system: "
+                "set the mode on the HandlerSystem"
+            )
         self.handler_system = handler_system or HandlerSystem(
-            handler_error_mode=handler_error_mode
+            handler_error_mode=(
+                HandlerErrorMode.CONTINUE
+                if handler_error_mode is None
+                else handler_error_mode
+            )
         )
 
         # Prompt builders (stored for attribute access by tests/API)
@@ -596,10 +609,10 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
                     ),
                 )
         finally:
-            try:
-                conv_lock.release()
-            except RuntimeError:
-                pass  # Lock was already released or cleaned up
+            # The gate is ticket-owned: a cleanup never frees it, so this release cannot meet
+            # a released lock. A mismatched release is a defect and surfaces, as at the
+            # other release sites (no swallow).
+            conv_lock.release()
 
     # ----------------------------------------------------------
     # Conversation lifecycle (end / cleanup)

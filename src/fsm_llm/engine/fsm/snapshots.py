@@ -222,7 +222,7 @@ class SnapshotsMixin:
 
         is_ended = not current_state.transitions
         if is_ended:
-            log.info(f"Conversation reached terminal state: {instance.current_state}")
+            log.debug(f"Conversation reached terminal state: {instance.current_state}")
 
         return is_ended
 
@@ -444,6 +444,10 @@ class SnapshotsMixin:
         record}) and, for the latest turn only, ``transition_classification``
         (the ambiguous-transition classifier record). Both are JSON-native and
         replaced, never mutated in place, so a returned snapshot stays stable.
+
+        ``collected_data`` is the RAW context, internal-prefixed and secret-looking keys
+        included: the HITL gate needs the full context. A caller that shows it redacts it
+        first (the monitor snapshot does).
         """
         # Snapshot every mutable container (+ fsm_id/state_id and the debug-model
         # refs) in ONE pass under conv_lock, so collected_data / history / metadata

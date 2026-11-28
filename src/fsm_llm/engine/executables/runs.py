@@ -309,7 +309,8 @@ class RunHost:
     def _refuse_locked(self, run: _Run) -> None:
         """Store a FINISHED ``failed/push_failed`` result for a run that could not start (a full
         host, a thread the process cannot start): the poll answers it, settle ends the call at
-        once and nothing is ever logged as started (D-058). Caller holds the lock."""
+        once (D-058). For a full host nothing was logged as started; for a thread that could
+        not start, ``announce`` had already written ``run/start``. Caller holds the lock."""
         run.result = RunResult(status=Status.FAILED, reason=Reason.PUSH_FAILED)
         self._finished[run.handle] = run
         while len(self._finished) > MAX_FINISHED_RUNS:
@@ -322,11 +323,6 @@ class RunHost:
             self._reserved[run.handle] = run
             while len(self._reserved) > MAX_RESERVED_RUNS:
                 self._reserved.popitem(last=False)
-
-    def _drop_running(self, run: _Run) -> None:
-        with self._lock:
-            self._running.pop(run.handle, None)
-        run.finished.set()
 
     def _known_locked(self, handle: str) -> bool:
         return (

@@ -2792,3 +2792,62 @@ class TestApiImportsNoRunContext:
             [sys.executable, "-c", code], env=env, capture_output=True, text=True
         )
         assert done.returncode == 0, done.stderr
+
+
+class TestAdoptRunContextChecksTheClashFirst:
+    """``adopt_run_context`` refuses a keyword that clashes with the context BEFORE it calls
+    ``resolve_llm()`` (a user ``llm_factory`` may run, or raise, there). Plan 8525c797 step 11."""
+
+    @staticmethod
+    def _context(resolve: Any, *, event_log: Any = None, registry: Any = None) -> Any:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            resolve_llm=resolve,
+            step_hook=lambda: None,
+            event_log=event_log,
+            registry=registry,
+            cancel=None,
+            budget=None,
+            max_steps=None,
+            max_seconds=None,
+        )
+
+    def test_a_clash_on_the_log_is_refused_without_calling_the_factory(self) -> None:
+        from fsm_llm.engine.api.helpers import adopt_run_context
+
+        calls: list[int] = []
+        ctx = self._context(lambda: calls.append(1), event_log=object())
+        with pytest.raises(ValueError, match="event_log"):
+            adopt_run_context(ctx, llm_interface=None, event_log=object(), targets=None)
+        assert calls == []
+
+    def test_a_factory_that_raises_does_not_mask_the_clash(self) -> None:
+        from fsm_llm.engine.api.helpers import adopt_run_context
+
+        def broken() -> Any:
+            raise RuntimeError("factory down")
+
+        ctx = self._context(broken, registry=object())
+        with pytest.raises(ValueError, match="targets"):
+            adopt_run_context(ctx, llm_interface=None, event_log=None, targets=object())
+
+    def test_a_clash_on_the_interface_is_still_refused(self) -> None:
+        from fsm_llm.engine.api.helpers import adopt_run_context
+
+        ctx = self._context(lambda: object())
+        with pytest.raises(ValueError, match="llm_interface"):
+            adopt_run_context(ctx, llm_interface=object(), event_log=None, targets=None)
+
+    def test_without_a_clash_the_context_fills_what_the_caller_left_out(self) -> None:
+        from fsm_llm.engine.api.helpers import adopt_run_context
+
+        llm, log, registry = object(), object(), object()
+        ctx = self._context(lambda: llm, event_log=log, registry=registry)
+        assert adopt_run_context(
+            ctx, llm_interface=None, event_log=None, targets=None
+        ) == (llm, log, registry)
+        own = object()
+        assert adopt_run_context(
+            self._context(lambda: None), llm_interface=own, event_log=None, targets=None
+        ) == (own, None, None)

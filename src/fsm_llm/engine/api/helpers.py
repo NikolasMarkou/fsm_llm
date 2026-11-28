@@ -249,14 +249,30 @@ def adopt_run_context(
             f"context must provide {', '.join(missing)} (callable: resolve_llm, step_hook), "
             f"got {type(context).__name__}"
         )
-    offered = (context.resolve_llm(), context.event_log, context.registry)
-    names = ("llm_interface", "event_log", "targets")
-    given = (llm_interface, event_log, targets)
-    pairs = {n: (a, b) for n, a, b in zip(names, offered, given, strict=True)}
-    both = [n for n, (a, b) in pairs.items() if None not in (a, b)]
-    if both:
-        raise ValueError(f"API(context=...) already supplies {both}: drop the keyword")
-    return tuple(b if b is not None else a for a, b in pairs.values())
+    # A clash that needs no model is refused BEFORE `resolve_llm()` runs: it may call a user
+    # factory, and a factory that raises must not mask the clash message.
+    clashes = [
+        n
+        for n, offered, given in (
+            ("event_log", context.event_log, event_log),
+            ("targets", context.registry, targets),
+        )
+        if None not in (offered, given)
+    ]
+    if clashes:
+        raise ValueError(
+            f"API(context=...) already supplies {clashes}: drop the keyword"
+        )
+    offered_llm = context.resolve_llm()
+    if None not in (offered_llm, llm_interface):
+        raise ValueError(
+            "API(context=...) already supplies ['llm_interface']: drop the keyword"
+        )
+    return (
+        llm_interface if llm_interface is not None else offered_llm,
+        event_log if event_log is not None else context.event_log,
+        targets if targets is not None else context.registry,
+    )
 
 
 def refuse_stopped_context(context: Any) -> None:

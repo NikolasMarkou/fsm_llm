@@ -850,6 +850,26 @@ class TestClassifierMalformedResponseShape:
         assert isinstance(exc.value.__cause__.__cause__, KeyError)
 
 
+class TestMultiIntentIntentsMustBeAList:
+    """``_parse_multi``: a non-list ``intents`` is a ``ClassificationResponseError`` (a bare
+    ``TypeError`` for ``5`` or ``True`` before)."""
+
+    @pytest.mark.parametrize("bad", [5, True, 2.5, "buy", {"intent": "positive"}])
+    def test_a_non_list_is_a_response_error(self, bad):
+        with pytest.raises(ClassificationResponseError, match="list"):
+            _classifier()._parse_multi({"intents": bad})
+
+    def test_an_empty_value_keeps_its_own_message(self):
+        with pytest.raises(ClassificationResponseError, match="no intents"):
+            _classifier()._parse_multi({"intents": []})
+
+    def test_a_list_still_parses(self):
+        result = _classifier()._parse_multi(
+            {"intents": [{"intent": "positive", "confidence": 0.9}]}
+        )
+        assert result.intents[0].intent == "positive"
+
+
 # ----------------------------------------------------------
 # F-16: multi-intent truncation observability
 # ----------------------------------------------------------

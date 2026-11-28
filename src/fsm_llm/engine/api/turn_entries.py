@@ -91,7 +91,9 @@ def _with_greetings(
 # session only after the settle (an error or a cancel there would skip it), and do NOT catch
 # `BaseException` or `CancelledError` here: a cancel after the commit leaves the turn committed
 # with the request `running`, which the next entry heals (D-023). A START settle is not guarded:
-# it runs before the turn, so a raise loses nothing and a retry is safe.
+# it runs before the turn, so a raise loses no turn of the user and a retry is safe. It can lose
+# the greeting of a child the START settle already pushed, when the turn after it raises (the
+# child stays pushed and its greeting is not returned: a carried limit, not a guarantee).
 async def _settle_after(api: _ApiSurface, conversation_id: str) -> Settled:
     """The END settle of a turn entry, after the committed turn was saved.
 

@@ -245,6 +245,24 @@ class TestIsolation:
         assert counting.extract_calls == 1
         assert ex._EXECUTORS.resolve("conversation") is not counting
 
+    def test_an_async_only_executor_in_sync_mode_names_its_class(self):
+        """A sync converse over an executor that overrides only ``aextract`` fails with a
+        message naming the class (it used to be an empty ``Failed to process message: ``)."""
+
+        class AsyncOnlyConversation(ex.StateExecutor):
+            async def aextract(self, *args: Any, **kwargs: Any) -> Any:
+                return DataExtractionResponse(extracted_data={}, confidence=1.0)
+
+        api = API.from_definition(
+            _plain_definition(),
+            llm_interface=_llm(),
+            executors={"conversation": AsyncOnlyConversation()},
+        )
+        conversation_id, _ = api.start_conversation()
+        with pytest.raises(Exception, match="AsyncOnlyConversation") as raised:
+            api.converse("hello", conversation_id)
+        assert "extract" in str(raised.value)
+
     def test_the_map_is_a_read_only_copy(self, marker_kind):
         given: dict[str, ex.StateExecutor] = {_KIND: _MarkerExecutor("one")}
         api = API.from_definition(_definition(), llm_interface=_llm(), executors=given)

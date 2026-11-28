@@ -31,6 +31,7 @@ from fsm_llm.core.names import NameRegistry
 from fsm_llm.core.results import RunResult
 from fsm_llm.engine.context import RunContext
 from fsm_llm.engine.executables import (
+    EXECUTABLE_KINDS,
     MAX_DOCUMENT_BYTES,
     MAX_RETAINED_TEMPLATES,
     ExecutableCollisionError,
@@ -712,6 +713,78 @@ class TestSources:
         assert "boom" in report.failed and "mixed" in report.failed
         assert len(report.collisions) == 1 and "'ok'" in report.collisions[0]
         assert [e.id for e in registry.list()] == ["ok"]
+
+    def test_a_factory_exception_text_is_not_reported_or_logged(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A source factory's exception text may carry a secret: the report and the log name
+        the class only. Kills: the text back in the message."""
+        sources: NameRegistry[Any] = NameRegistry("executable_sources")
+
+        def leak() -> list[Any]:
+            raise RuntimeError("DB password=hunter2 in dsn")
+
+        sources.register("leak", leak)
+        warned: list[str] = []
+        monkeypatch.setattr(registry_module.logger, "warning", warned.append)
+        report = ExecutableRegistry(sources=sources).load_sources()
+        assert report.failed == {"leak": ("RuntimeError",)}
+        assert warned and all("hunter2" not in w for w in warned)
+        assert "hunter2" not in repr(report)
+
+    def test_an_adapter_that_raises_a_type_error_is_reported_by_class_only(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An adapter or item raising something that is not an ``ExecutableError`` is reported,
+        never raised, by ``load_sources``. Kills: ``except ExecutableError`` only."""
+        kinds: NameRegistry[Any] = NameRegistry("executable_kinds")
+
+        def adapter(envelope: Any, *, pins: Any) -> Any:
+            raise TypeError("token=s3cret in an adapter")
+
+        kinds.register("fsm", adapter)
+        sources: NameRegistry[Any] = NameRegistry("executable_sources")
+        sources.register("docs", lambda: [_doc("x")])
+        warned: list[str] = []
+        monkeypatch.setattr(registry_module.logger, "warning", warned.append)
+        report = ExecutableRegistry(kinds=kinds, sources=sources).load_sources()
+        assert report.failed == {"docs": ("TypeError",)}
+        assert warned and all("s3cret" not in w for w in warned)
+
+    def test_a_file_whose_adapter_raises_is_reported_and_the_rest_load(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``reload`` and ``_load_file``: the same rule for a path source. Kills: the old
+        ``except ExecutableError`` only (a ``TypeError`` aborted every file)."""
+        kinds: NameRegistry[Any] = NameRegistry("executable_kinds")
+
+        def adapter(envelope: Any, *, pins: Any) -> Any:
+            if envelope.id == "bad":
+                raise TypeError("token=s3cret in an adapter")
+            return EXECUTABLE_KINDS.resolve("fsm")(envelope, pins=pins)
+
+        kinds.register("fsm", adapter)
+        _write(tmp_path / "bad.json", _doc("bad"))
+        _write(tmp_path / "good.json", _doc("good"))
+        warned: list[str] = []
+        monkeypatch.setattr(registry_module.logger, "warning", warned.append)
+        registry = ExecutableRegistry([tmp_path], kinds=kinds)
+        report = registry.reload()
+        assert {Path(k).name: v for k, v in report.failed.items()} == {
+            "bad.json": ("unusable: TypeError",)
+        }
+        assert [e.id for e in registry.list()] == ["good"]
+        assert warned and all("s3cret" not in w for w in warned)
+
+    def test_a_keyboard_interrupt_from_a_factory_is_not_caught(self) -> None:
+        sources: NameRegistry[Any] = NameRegistry("executable_sources")
+
+        def stop() -> list[Any]:
+            raise KeyboardInterrupt
+
+        sources.register("stop", stop)
+        with pytest.raises(KeyboardInterrupt):
+            ExecutableRegistry(sources=sources).load_sources()
 
     def test_the_default_sources_namespace_has_no_l6_package_behind_it(self) -> None:
         """D4: the engine registers built-ins by name only. A fresh interpreter that imports the

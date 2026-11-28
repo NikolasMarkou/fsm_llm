@@ -354,7 +354,8 @@ class ExecutableRegistry:
             try:
                 produced = list(factory())
             except Exception as error:
-                failed[name] = [f"{type(error).__name__}: {error}"]
+                # The class name only: a factory's exception text may carry a secret.
+                failed[name] = [type(error).__name__]
                 continue
             for item in produced:
                 try:
@@ -366,6 +367,9 @@ class ExecutableRegistry:
                     refused.append(f"source {name!r}: {error}")
                 except ExecutableError as error:
                     failed.setdefault(name, []).append(str(error))
+                except Exception as error:
+                    # An adapter or an item that is not an engine error: the class only.
+                    failed.setdefault(name, []).append(type(error).__name__)
         for name, messages in failed.items():
             logger.warning(f"executable source {name!r}: {'; '.join(messages)}")
         return self._report(failed, refused)
@@ -495,6 +499,8 @@ class ExecutableRegistry:
             loaded[label] = self._executable_of(data)
         except ExecutableError as error:
             return str(error)[:600]
+        except Exception as error:
+            return f"unusable: {type(error).__name__}"
         return None
 
     def _report(

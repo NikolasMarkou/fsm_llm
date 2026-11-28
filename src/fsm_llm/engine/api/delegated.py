@@ -190,8 +190,9 @@ async def settle_delegated(
     if polled is None:
         return await end(Reason.RUN_LOST, delegated)  # a handle the host never saw
     if polled.finished and polled.result is not None:
-        # refused at start (a full host, a thread that cannot start): nothing was started and
-        # nothing was logged, so the call ends now with the host's reason (D-058)
+        # refused at start (a full host, a thread that cannot start): no run is live, so the
+        # call ends now with the host's reason (D-058); a full host logged nothing, a thread
+        # that could not start had already written its `run/start`
         _forget_result(api, handle, top.conversation_id)
         return await end(polled.result.reason or Reason.PUSH_FAILED, delegated)
     return False  # already running (or finished and landing): nothing to start

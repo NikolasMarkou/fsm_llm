@@ -476,6 +476,11 @@ class Classifier:
             raise ClassificationResponseError(
                 "Multi-intent response contained no intents"
             )
+        if not isinstance(raw_intents, list):
+            raise ClassificationResponseError(
+                "Multi-intent response 'intents' must be a list, "
+                f"got {type(raw_intents).__name__}"
+            )
 
         scored: list[IntentScore] = []
         for item in raw_intents:

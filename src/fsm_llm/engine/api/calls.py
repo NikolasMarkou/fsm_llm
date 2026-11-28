@@ -16,8 +16,10 @@ Interface contract:
   pushed (a ``list`` of text, empty when it pushed none; ``changed`` is true when a round
   pushed, popped or wrote a record); the caller joins them to the reply of its step (D-023
   item 9, D-026 (4): the START greetings before it, the END greetings after it). A stack with no frame whose definition holds a call state costs one list copy.
-  Never blocks: it reads frames through ``FSMManager.peek_turn`` (no conversation lock) and
-  does NOTHING while a turn of the frame is in flight. A second driver on the same root while
+  It takes no wait on the conversation gate: it reads frames through ``FSMManager.peek_turn``
+  (no conversation lock) and does NOTHING while a turn of the frame is in flight. It is not
+  wait-free: a pop (``pop_fsm``) can wait behind a lock a thread holds, up to 30 seconds, and
+  the event log writes it makes are synchronous. A second driver on the same root while
   one is settling is refused with ``FSMError`` (the root mark, released in ``finally``).
 - Rule (a), the pop: the top frame T sits above a parent P whose current state is a call state
   with a ``running`` record of ``mode == frame`` (or T is in ``CallMarks.ending``): when T has

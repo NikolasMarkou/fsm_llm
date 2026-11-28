@@ -868,3 +868,68 @@ class TestExecuteHandlersTakesItsStateArgumentsByKeyword:
         pipeline.execute_handlers(
             instance, HandlerTiming.PRE_PROCESSING, current_state="s"
         )
+
+
+class _Recorder:
+    """A stand-in for the bound logger: records the level of every call."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def __getattr__(self, level: str):
+        return lambda message, *a, **k: self.calls.append((level, str(message)))
+
+
+class TestManagerNits:
+    """Small manager defects of plan 8525c797 step 11."""
+
+    def test_has_conversation_ended_logs_at_debug_not_info(self):
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+        cid, _ = api.start_conversation()
+        api.fsm_manager.instances[cid].current_state = "e"  # the terminal state
+        log = _Recorder()
+        assert api.fsm_manager.has_conversation_ended(cid, log=log) is True
+        assert [level for level, _ in log.calls] == ["debug"]
+
+    def test_a_mode_beside_a_handler_system_is_refused(self):
+        from fsm_llm.engine.fsm.manager import FSMManager
+        from fsm_llm.handlers import HandlerSystem
+
+        llm = MockLLM2Interface()
+        system = HandlerSystem(handler_error_mode="raise")
+        with pytest.raises(ValueError, match="handler_error_mode"):
+            FSMManager(
+                llm_interface=llm, handler_system=system, handler_error_mode="raise"
+            )
+        with pytest.raises(ValueError, match="handler_error_mode"):
+            FSMManager(
+                llm_interface=llm, handler_system=system, handler_error_mode="continue"
+            )
+        assert FSMManager(llm_interface=llm, handler_system=system).handler_system is (
+            system
+        )
+
+    def test_a_mode_alone_still_configures_the_manager_system(self):
+        from fsm_llm.engine.fsm.manager import FSMManager
+
+        llm = MockLLM2Interface()
+        raising = FSMManager(llm_interface=llm, handler_error_mode="raise")
+        assert raising.handler_system.handler_error_mode.value == "raise"
+        default = FSMManager(llm_interface=llm)
+        assert default.handler_system.handler_error_mode.value == "continue"
+
+    def test_a_mismatched_release_in_update_context_surfaces(self, monkeypatch):
+        """The gate is ticket-owned, so a release that raises is a defect: it is no longer
+        swallowed (``except RuntimeError: pass``)."""
+        api = API.from_definition(_TWO_STATE, llm_interface=MockLLM2Interface())
+        cid, _ = api.start_conversation()
+        gate = api.fsm_manager._conversation_locks[cid]
+        real_release = gate.release
+
+        def mismatched(*args, **kwargs):
+            real_release(*args, **kwargs)
+            raise RuntimeError("mismatched release")
+
+        monkeypatch.setattr(gate, "release", mismatched)
+        with pytest.raises(RuntimeError, match="mismatched release"):
+            api.fsm_manager.update_conversation_context(cid, {"k": 1})
