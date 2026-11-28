@@ -933,3 +933,98 @@ class TestDeepDocumentsNeverRaiseRecursionError:
 
         assert type(out["a"]) is Items and out["a"] == ["X"]
         assert out["b"] == ("X", ["X"]) and type(out["b"]) is tuple
+
+
+class _CountingValues(dict):
+    """Fill values that stop a runaway walk: every placeholder lookup is counted (CPU bound)."""
+
+    LIMIT = 10_000
+
+    def __init__(self, **values: str) -> None:
+        super().__init__(**values)
+        self.lookups = 0
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self.lookups += 1
+        if self.lookups > self.LIMIT:
+            raise AssertionError("the walk did not stop: it looped on a cycle")
+        return super().get(key, default)
+
+
+class TestSubstituteVariablesCycles:
+    """A cyclic structure is refused, a shared acyclic container is filled in both places
+    (plan 8525c797, step 9.1, concern 6): the old recursive walk raised `RecursionError` on a
+    cycle and copied a container reached twice once per place; the iterative walk must keep
+    both, with a clean `ValueError` for the cycle instead of an endless loop."""
+
+    def test_a_cyclic_list_is_refused_not_looped_on(self):
+        cyc: list[Any] = [
+            None,
+            "{{v}}",
+        ]  # the leaf last: it is the one the walk meets each lap
+        cyc[0] = cyc
+        values = _CountingValues(v="X")
+
+        with pytest.raises(ValueError, match="cycl"):
+            ei.substitute_variables({"a": cyc}, values)
+
+        assert values.lookups <= 2
+
+    def test_a_cyclic_dict_is_refused_not_looped_on(self):
+        cyc: dict[str, Any] = {"self": None, "k": "{{v}}"}
+        cyc["self"] = cyc
+        values = _CountingValues(v="X")
+
+        with pytest.raises(ValueError, match="cycl"):
+            ei.substitute_variables([cyc], values)
+
+        assert values.lookups <= 2
+
+    def test_a_cycle_through_a_tuple_is_refused(self):
+        inner: list[Any] = [None, "{{v}}"]
+        outer = (inner, "{{v}}")
+        inner[0] = outer
+
+        with pytest.raises(ValueError, match="cycl"):
+            ei.substitute_variables(outer, _CountingValues(v="X"))
+
+    def test_a_cycle_at_the_root_is_refused(self):
+        cyc: list[Any] = [None, "{{v}}"]
+        cyc[0] = cyc
+
+        with pytest.raises(ValueError, match="cycl"):
+            ei.substitute_variables(cyc, _CountingValues(v="X"))
+
+    def test_the_refusal_names_no_value(self):
+        cyc: list[Any] = [None, "a-secret-token", "{{v}}"]
+        cyc[0] = cyc
+
+        with pytest.raises(ValueError) as caught:
+            ei.substitute_variables(cyc, _CountingValues(v="X"))
+
+        assert "a-secret-token" not in str(caught.value)
+
+    def test_a_shared_acyclic_container_is_filled_in_both_places(self):
+        shared = ["{{v}}", {"k": "{{v}}"}]
+        tree = {"a": shared, "b": [shared, shared], "c": (shared,)}
+
+        out = ei.substitute_variables(tree, {"v": "X"})
+
+        filled = ["X", {"k": "X"}]
+        assert out == {"a": filled, "b": [filled, filled], "c": (filled,)}
+        assert shared == ["{{v}}", {"k": "{{v}}"}]  # the input is a copy source only
+
+    def test_the_same_leaf_object_twice_is_not_a_cycle(self):
+        leaf = "{{v}} and {{v}}"
+
+        out = ei.substitute_variables([leaf, leaf, {"k": leaf}], {"v": "X"})
+
+        assert out == ["X and X", "X and X", {"k": "X and X"}]
+
+    def test_a_container_left_and_met_again_after_a_sibling_is_not_a_cycle(self):
+        shared: list[Any] = ["{{v}}"]
+        tree = [[shared], [[shared]], shared]
+
+        out = ei.substitute_variables(tree, {"v": "X"})
+
+        assert out == [[["X"]], [[["X"]]], ["X"]]

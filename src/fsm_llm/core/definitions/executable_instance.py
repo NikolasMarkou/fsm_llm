@@ -194,25 +194,48 @@ def identity_of(
     return Identity(template_identity=canonical_digest(dump), instance_identity=digest)
 
 
+_LEAVE = object()  # the stack entry that closes a container of `substitute_variables`
+
+
 def substitute_variables(node: Any, values: Mapping[str, str]) -> Any:
     """A copy of *node* with ``{{name}}`` replaced by ``values[name]`` in every string LEAF.
 
     Keys are left alone, an unknown ``{{name}}`` stays as text and a replacement is never
-    rescanned. A Mapping becomes a dict, a list stays a list and a tuple a tuple. Walked with an
-    explicit stack, as ``_json_tree`` is (a host that is already deep in its own stack must not
-    meet ``RecursionError``); the caller still bounds the depth (``MAX_DOCUMENT_DEPTH``), which
-    also stops a cyclic structure.
+    rescanned. A Mapping becomes a dict, a list stays a list and a tuple a tuple. A container
+    reached twice by two paths (a shared, acyclic one) is filled and copied in both places, as the
+    old recursive walk did. Walked with an explicit stack, as ``_json_tree`` is (a host that is
+    already deep in its own stack must not meet ``RecursionError``); the caller still bounds the
+    depth (``MAX_DOCUMENT_DEPTH``). Raises ``ValueError`` (no value in the text) for a cyclic
+    structure: it has no finite copy, and the old walk ended it with ``RecursionError``.
     """
     # DECISION plan-2026-11-28T050702-8525c797/D-007: do NOT make this recursive again: a
     # document under the depth cap raised `RecursionError` when its caller stood deep in the stack.
+    # Do NOT walk a container once and share its copy (the `seen` rule of the sibling walks that
+    # only READ): this one BUILDS, and a shared container must be filled in every place. A cycle
+    # is told from a shared container by the containers of the CURRENT path (`active`), left by an
+    # exit marker pushed under the children.
     holder: list[Any] = [None]
     stack: list[tuple[Any, Any, Any]] = [(node, holder, 0)]
     rebuilt: list[tuple[Any, Any, list[Any], type]] = []  # list or tuple subclasses
+    active: set[int] = (
+        set()
+    )  # the containers between the root and the item being walked
     while stack:
         item, parent, slot = stack.pop()
+        if parent is _LEAVE:  # every child of the container `item` is done
+            active.discard(slot)
+            continue
         if isinstance(item, str):
             parent[slot] = _PLACEHOLDER.sub(lambda m: values.get(m[1], m[0]), item)
-        elif isinstance(item, Mapping):
+            continue
+        if isinstance(item, (Mapping, list, tuple)):
+            if id(item) in active:
+                raise ValueError(
+                    "the structure to fill is cyclic: it has no finite copy"
+                )
+            active.add(id(item))
+            stack.append((None, _LEAVE, id(item)))
+        if isinstance(item, Mapping):
             target: Any
             parent[slot] = target = {}
             for key, child in item.items():
