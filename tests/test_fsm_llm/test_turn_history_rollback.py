@@ -64,9 +64,8 @@ def _signal_after_the_reply(signal: type[BaseException]) -> Iterator[None]:
         yield
 
 
-# One signal per row: the driver arms list `KeyboardInterrupt` and `SystemExit` in one tuple, and
-# dropping `SystemExit` from it is killed by the retry row of `test_api_elaborate.py`.
-_SIGNAL = KeyboardInterrupt
+# One signal per row (`KeyboardInterrupt`): dropping `SystemExit` from the driver arms is killed
+# by the retry rows of `test_api_elaborate.py` and the atomic rows of `test_pipeline.py`.
 
 
 class TestAnInterruptAfterTheReplyIsAdded:
@@ -81,8 +80,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         before = _history(api, cid)
         assert [next(iter(e)) for e in before] == ["system", "user", "system"]
 
-        with _signal_after_the_reply(_SIGNAL):
-            with pytest.raises(_SIGNAL):
+        with _signal_after_the_reply(KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
                 api.converse("hello", cid)
 
         assert _history(api, cid) == before
@@ -95,8 +94,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         await api.aconverse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(_SIGNAL):
-            with pytest.raises(_SIGNAL):
+        with _signal_after_the_reply(KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
                 await api.aconverse("hello", cid)
 
         assert _history(api, cid) == before
@@ -110,8 +109,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         api.converse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(_SIGNAL):
-            with pytest.raises(_SIGNAL):
+        with _signal_after_the_reply(KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
                 list(api.converse_stream("hello", cid))
 
         assert _history(api, cid) == before
@@ -123,8 +122,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         await api.aconverse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(_SIGNAL):
-            with pytest.raises(_SIGNAL):
+        with _signal_after_the_reply(KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
                 await _collect(api.aconverse_stream("hello", cid))
 
         assert _history(api, cid) == before
@@ -137,8 +136,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         api.converse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(_SIGNAL):
-            with pytest.raises(_SIGNAL):
+        with _signal_after_the_reply(KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
                 api.advance(cid)
 
         assert _history(api, cid) == before
@@ -156,8 +155,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         before = _history(api, cid)
         before_summary = _summary(api, cid)
 
-        with _signal_after_the_reply(_SIGNAL):
-            with pytest.raises(_SIGNAL):
+        with _signal_after_the_reply(KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
                 api.converse("third", cid)
 
         assert _history(api, cid) == before
