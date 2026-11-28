@@ -1088,6 +1088,7 @@
     "fsm_llm.engine.api.delegated",
     "fsm_llm.engine.api.events",
     "fsm_llm.engine.api.forks",
+    "fsm_llm.engine.api.ledger",
     "fsm_llm.engine.api.registration",
     "fsm_llm.engine.api.sessions",
     "fsm_llm.engine.api.surface",

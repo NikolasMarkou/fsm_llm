@@ -18,6 +18,7 @@ from fsm_llm.logging import logger
 from .delegated import cancel_delegated_runs
 from .events import release_event_writer
 from .helpers import _read_or_ended, handle_conversation_errors
+from .ledger import release_dropped_frames
 from .surface import _ApiSurface
 
 # Bound of the per-API cache of ended-conversation snapshots (oldest evicted).
@@ -128,7 +129,8 @@ class LifecycleMixin(_ApiSurface):
         ``END_CONVERSATION_LOCK_TIMEOUT_SECONDS``, raises
         ``ConversationBusyError`` (an ``FSMError``) and the conversation stays
         active with its remaining frames; retry after the turn. Frames above
-        the refusing one that were already ended are removed from the stack.
+        the refusing one that were already ended are removed from the stack, and their call
+        marks, delegated runs and temp definitions are released.
         Any other failure while reading the ended-conversation cache is
         logged and the end proceeds without a cache entry.
         """
@@ -178,6 +180,9 @@ class LifecycleMixin(_ApiSurface):
             except Exception as e:
                 if self._frame_instance_present(frame_id):
                     self._drop_ended_frames(conversation_id, ended)
+                    # the frames above the refusing one are gone: their marks, runs and temp
+                    # defs go the way an end's do (E3); the refusing frame and the root stay
+                    release_dropped_frames(self, ended)
                     raise
                 ended.add(frame_id)
                 if not stack:

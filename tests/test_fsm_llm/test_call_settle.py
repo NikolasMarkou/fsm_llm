@@ -1334,3 +1334,25 @@ class TestThePostTurnSettleNeverLosesTheTurn:
         await flow.api.aadvance(flow.cid)
         saved = store.load(flow.cid)
         assert saved is not None and saved.stack_depth == 2
+
+
+class TestAHandPopForgetsTheMarksSettleKept:
+    """M1 (D-006 of plan 8525c797): a host that pops a frame settle pushed by hand left the
+    marks of that frame (a ``ResolvedTarget`` and its definition among them) in
+    ``_call_marks`` for the life of the ``API``: only the settle pop and the root end forgot
+    them."""
+
+    async def test_a_hand_pop_drops_what_settle_kept_for_the_child(self):
+        flow = await _flow(steps=3)
+        api, cid = flow.api, flow.cid
+        await api.aadvance(cid)  # the request is written and settle pushes the child
+        child = flow.child_frame()
+        marks = api._call_marks
+        assert child in marks.pushed  # precondition: settle kept the target
+        api.pop_fsm(cid)  # a host pops it by hand (public API)
+        assert child not in marks.pushed
+        assert child not in marks.errors
+        assert child not in marks.signals
+        assert child not in marks.ending
+        api.end_conversation(cid)
+        assert marks.pushed == {}

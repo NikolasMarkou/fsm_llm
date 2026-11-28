@@ -15,6 +15,13 @@ package; the old dotted path is gone. Modules:
 - ``lifecycle.py``: ``LifecycleMixin``, the ended-conversation cache, the getters,
   ``end_conversation`` and the idle sweep.
 - ``sessions.py``: ``SessionsMixin``, ``save_session``, ``load_session``, ``restore_session``.
+- ``ledger.py``: ``release_dropped_frames``, the one cleanup of "these frames are gone" (the call
+  marks, the delegated runs, the temp definitions) that ``pop_fsm`` and the refused branch of
+  ``end_conversation`` share.
+- ``calls.py``, ``delegated.py``: ``settle`` (the call record applied after the turn) and its
+  delegated part (start the run after the commit, the run events, the one bounded wait).
+- ``forks.py``, ``events.py``, ``budget.py``, ``registration.py``: ``fork`` and ``resume``, the
+  event-log opt-in, the lifetime turn budget of a conversation, and the handler registration.
 - ``helpers.py``: the module-level helpers (``handle_conversation_errors``, ``llm_settings_for``
   and the private error and read helpers).
 - ``surface.py``: ``_ApiSurface``, the mypy-only declarations the mixins share.

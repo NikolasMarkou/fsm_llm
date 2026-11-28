@@ -23,7 +23,7 @@ from fsm_llm.core.state_kinds import kind_of
 from fsm_llm.logging import logger
 
 from .budget import budget_kwargs
-from .delegated import cancel_delegated_runs, end_runs_of
+from .delegated import end_runs_of
 from .events import (
     child_event_scope,
     record_context_update,
@@ -36,6 +36,7 @@ from .helpers import (
     _require_target_resolver,
     _unexpected_error,
 )
+from .ledger import release_dropped_frames
 from .surface import _ApiSurface
 
 
@@ -52,8 +53,8 @@ class FSMStackFrame(BaseModel):
     # default so serialized frames / restore_session predating this field still
     # load. `_release_unreferenced_temp_definitions` counts refs across all live
     # frames by this id: a frame that leaves it None UNDER-COUNTS and can let
-    # cleanup evict a def another frame still needs. If you add a THIRD
-    # FSMStackFrame construction site, you MUST set fsm_id there too. See D-011.
+    # cleanup evict a def another frame still needs. Every construction site (the root in
+    # turn_entries.py, `apush_fsm`, forks.py) sets it; a NEW site MUST too. See D-011.
     fsm_id: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}
@@ -397,7 +398,9 @@ class StackMixin(_ApiSurface):
         """Pop current FSM from stack and return to previous with enhanced context handling.
 
         On ``ConversationBusyError`` (ending the child was refused) the frame stays, but the
-        parent may already hold the merged return keys; a retry merges again.
+        parent may already hold the merged return keys; a retry merges again. An end that fails
+        AFTER the teardown (an END handler raised) drops the frame, logs the pop and releases its
+        runs, marks and temp definitions, then raises that error.
         """
         # DECISION plan_2026-05-29_d9092060/D-001 [STALE]
         # Narrow lock scope: snapshot frame references under _stack_lock, then release
@@ -439,50 +442,46 @@ class StackMixin(_ApiSurface):
                     current_frame, previous_frame, current_fsm_context
                 )
 
-            refused = False
+            end_error: BaseException | None = None
             try:
                 self.fsm_manager.end_conversation(current_frame.conversation_id)
-            except Exception:
+            except BaseException as error:
                 # A REFUSED end (`ConversationBusyError`: a turn holds the child's lock past the
-                # timeout) tears nothing down, so the child instance is still registered: keep
-                # its frame, as `API.end_conversation` does (D-050 and D-053 of plan 8a03483a,
-                # anchored in lifecycle.py). Dropping it orphans a live child that no stack
-                # entry reaches and that ending the root never ends. `has_instance` is read
-                # HERE, outside `_stack_lock` (never held across a manager call).
-                refused = self.fsm_manager.has_instance(current_frame.conversation_id)
-                raise
-            finally:
-                if not refused:
-                    # Re-acquire lock only to mutate the stack
-                    with self._stack_lock:
-                        inner_stack = (
-                            self.conversation_stacks.get(conversation_id) or []
-                        )
-                        for idx in range(len(inner_stack) - 1, -1, -1):
-                            if inner_stack[idx] is current_frame:
-                                del inner_stack[idx]
-                                break
-                        else:
-                            logger.debug(
-                                f"pop_fsm: frame {current_frame.conversation_id} already "
-                                f"absent from stack {conversation_id}; nothing to remove"
-                            )
-                        # the depth this pop logs: the stack right after ITS removal
-                        stack_depth = len(inner_stack)
-                    # DECISION plan-2026-11-23T122249-baa37f40/D-056
-                    # A popped frame's delegated runs are told to stop HERE (this pop ends the
-                    # child through the manager, not through `API.end_conversation`, so the hook
-                    # of D-050 never ran for it) and its `run/end` is written right after the
-                    # `stack/pop` event below. Do NOT drop the run marks of the frame without a
-                    # `run/end` (a `run/start` with no end after a CLEAN pop reads as lost), do NOT
-                    # call the launcher under `_stack_lock`, do NOT join the thread, and do NOT run
-                    # the hook for a REFUSED end (the frame stays and so does its run).
-                    cancel_delegated_runs(self._targets, current_frame.conversation_id)
+                # timeout) or an interrupt before the teardown tears nothing down, so the child
+                # instance is still registered: keep its frame, as `API.end_conversation` does
+                # (D-050 and D-053 of plan 8a03483a, anchored in lifecycle.py). Dropping it
+                # orphans a live child that no stack entry reaches. `has_instance` is read HERE,
+                # outside `_stack_lock` (never held across a manager call). An end that failed
+                # AFTER the teardown (an END handler raised) left no instance: the frame is
+                # gone, the bookkeeping below runs, then the error is raised (E1).
+                if self.fsm_manager.has_instance(current_frame.conversation_id):
+                    raise
+                end_error = error
 
-            # The popped frame is gone; release any temp def it was the last
-            # frame to reference (D-011). Reference-aware, so a sub-FSM shared
-            # with another live conversation survives this pop.
-            self._release_unreferenced_temp_definitions()
+            with self._stack_lock:  # re-acquired only to mutate the stack
+                inner_stack = self.conversation_stacks.get(conversation_id) or []
+                for idx in range(len(inner_stack) - 1, -1, -1):
+                    if inner_stack[idx] is current_frame:
+                        del inner_stack[idx]
+                        break
+                else:
+                    logger.debug(
+                        f"pop_fsm: frame {current_frame.conversation_id} already "
+                        f"absent from stack {conversation_id}; nothing to remove"
+                    )
+                # the depth this pop logs: the stack right after ITS removal
+                stack_depth = len(inner_stack)
+            # DECISION plan-2026-11-23T122249-baa37f40/D-056
+            # A popped frame's delegated runs are told to stop HERE (this pop ends the child
+            # through the manager, not through `API.end_conversation`, so the hook of D-050 never
+            # ran for it) and its `run/end` is written right after the `stack/pop` event below.
+            # Do NOT drop the run marks of the frame without a `run/end` (`keep_run_marks`), do
+            # NOT call the launcher under `_stack_lock`, do NOT join the thread, and do NOT run
+            # the hook for a REFUSED end (the frame stays and so does its run). The cleanup is
+            # the one of `ledger.release_dropped_frames` (D-006 of plan 8525c797, D-011).
+            release_dropped_frames(
+                self, [current_frame.conversation_id], keep_run_marks=True
+            )
 
             response = self._generate_resume_message(context_to_merge)
             record_pop(
@@ -496,6 +495,8 @@ class StackMixin(_ApiSurface):
                 parent_id=previous_frame.conversation_id,
             )
             end_runs_of(self, conversation_id, current_frame.conversation_id)
+            if end_error is not None:
+                raise end_error
             logger.info(
                 f"Popped FSM from conversation {conversation_id}, "
                 f"stack depth: {stack_depth}"

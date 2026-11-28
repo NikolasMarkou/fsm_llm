@@ -23,7 +23,7 @@ import fsm_llm
 from fsm_llm import API
 from fsm_llm.aio import aoffload
 from fsm_llm.core.codes import Reason, Status
-from fsm_llm.core.definitions import FSMDefinition, FSMError
+from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, FSMError
 from fsm_llm.core.definitions.executable import Contract
 from fsm_llm.core.results import RunResult
 from fsm_llm.engine.api import delegated
@@ -676,6 +676,166 @@ class TestAPoppedFrameCancelsAndEndsItsRun:
         finally:
             api.close()
             assert log is not None
+            log.close()
+
+
+def _record_cancels(api: API, targets: ExecutableTargets) -> list[tuple[str, bool]]:
+    """Wrap ``targets.cancel_for``: every call is recorded as ``(owner id, stack lock free)``,
+    so a row asserts the launcher is never reached with ``_stack_lock`` held (recorded, not
+    assumed: a plain ``Lock`` held by this very thread is not free)."""
+    calls: list[tuple[str, bool]] = []
+    real = targets.cancel_for
+
+    def spy(conversation_id: str) -> int:
+        calls.append((conversation_id, _lock_free(api._stack_lock)))
+        return real(conversation_id)
+
+    targets.cancel_for = spy  # type: ignore[method-assign]
+    return calls
+
+
+class TestEveryFramesAreGoneExitReleasesItsRuns:
+    """E1 and E3 (D-006 of plan 8525c797): the same cleanup (forget the marks, cancel the runs
+    outside ``_stack_lock``, release the temp definitions) on every exit that drops a frame: a
+    pop whose end failed after the teardown, and an ``end_conversation`` refused by a busy LOWER
+    frame, which had already ended the frames above it."""
+
+    @staticmethod
+    def _api(tmp_path: Path, *, root_call: bool):
+        probe = _Probe(hold=True)
+        registry = ExecutableRegistry()
+        registry.register(probe)
+        log = EventLog(tmp_path / "logs")
+        targets = ExecutableTargets(registry, RunContext(event_log=log))
+        root = (
+            _initial_call(
+                _parent(
+                    _call(target=_TARGET, inputs=["topic"]), response_instructions=""
+                )
+            )
+            if root_call
+            else _CHAT()
+        )
+        api = API.from_definition(
+            root,
+            llm_interface=_Gate(default_response="r"),
+            targets=targets,
+            event_log=log,
+        )
+        return api, targets, log, probe
+
+    def test_an_end_that_fails_after_the_teardown_still_cancels_and_ends_the_run(
+        self, tmp_path
+    ) -> None:
+        """The seed ``e1d_fail``: token cancelled, the mark gone, ONE ``run/end`` and ONE
+        ``stack/pop`` in the log, the launcher called outside ``_stack_lock``."""
+        api, targets, log, probe = self._api(tmp_path, root_call=False)
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.push_fsm(cid, _child_definition(), context_to_pass={"topic": "why"})
+            api.advance(cid)
+            assert len(probe.runs) == 1 and len(api._call_marks.runs) == 1
+            cancels = _record_cancels(api, targets)
+            real_end = api.fsm_manager.end_conversation
+
+            def end_then_fail(frame_id, *args, **kwargs):
+                real_end(frame_id, *args, **kwargs)
+                raise FSMError("failed after the teardown")
+
+            api.fsm_manager.end_conversation = end_then_fail
+            with pytest.raises(FSMError, match="after the teardown"):
+                api.pop_fsm(cid)
+
+            assert probe.runs[0]["context"].cancel.cancelled is True
+            assert api._call_marks.runs == {}
+            assert [e["type"] for e in _types(log, cid, "run/end")] == ["run/end"]
+            assert len(_types(log, cid, "stack/pop")) == 1
+            assert api.get_stack_depth(cid) == 1
+            assert cancels and all(free for _, free in cancels)
+        finally:
+            probe.release.set()
+            api.close()
+            log.close()
+
+    def test_a_clean_hand_pop_calls_the_launcher_outside_the_stack_lock(
+        self, tmp_path
+    ) -> None:
+        api, targets, log, probe = self._api(tmp_path, root_call=False)
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            api.push_fsm(cid, _child_definition(), context_to_pass={"topic": "why"})
+            api.advance(cid)
+            child = api.get_sub_conversation_id(cid)
+            cancels = _record_cancels(api, targets)
+            api.pop_fsm(cid)
+            assert cancels == [(child, True)]
+            assert len(_types(log, cid, "run/end")) == 1
+        finally:
+            probe.release.set()
+            api.close()
+            log.close()
+
+    def test_a_busy_lower_frame_still_cancels_the_runs_of_the_dropped_frames(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The seed ``e3``: the root frame is busy, the frames above it are ended and dropped
+        before the refusal. Their runs are told to stop and their marks are gone; the root's
+        own run is untouched and a retry still ends the root (and then its run)."""
+        monkeypatch.setattr(
+            "fsm_llm.engine.fsm.snapshots.END_CONVERSATION_LOCK_TIMEOUT_SECONDS", 0.2
+        )
+        api, targets, log, probe = self._api(tmp_path, root_call=True)
+        held, free = threading.Event(), threading.Event()
+        holder: threading.Thread | None = None
+        try:
+            cid, _ = api.start_conversation({"topic": "why"})
+            root_frame = api.conversation_stacks[cid][0].conversation_id
+            api.advance(cid)  # the root's own call state starts the root run
+            api.push_fsm(cid, _child_definition(), context_to_pass={"topic": "why"})
+            child = api.get_sub_conversation_id(cid)
+            api.advance(cid)  # the child's call state starts the child run
+            assert len(probe.runs) == 2
+            root_token, child_token = (r["context"].cancel for r in probe.runs)
+            assert {m.frame_id for m in api._call_marks.runs.values()} == {
+                root_frame,
+                child,
+            }
+            cancels = _record_cancels(api, targets)
+
+            lock = api.fsm_manager._conversation_locks[root_frame]
+
+            def hold() -> None:
+                with lock:
+                    held.set()
+                    free.wait(10.0)
+
+            holder = threading.Thread(target=hold, name="root-turn")
+            holder.start()
+            assert held.wait(10.0)
+            with pytest.raises(ConversationBusyError):
+                api.end_conversation(cid)
+
+            assert api.get_stack_depth(cid) == 1  # the child frame was dropped
+            assert child_token.cancelled is True
+            assert root_token.cancelled is False
+            assert {m.frame_id for m in api._call_marks.runs.values()} == {root_frame}
+            assert [owner for owner, _ in cancels] == [child]
+            assert all(lock_free for _, lock_free in cancels)
+            assert api._temp_fsm_definitions == {}
+
+            free.set()
+            holder.join(10.0)
+            assert not holder.is_alive()
+            api.end_conversation(cid)  # the retry succeeds and ends the root
+            assert root_token.cancelled is True
+            assert api.fsm_manager.instances == {}
+            assert api._call_marks.runs == {}
+        finally:
+            free.set()
+            if holder is not None:
+                holder.join(10.0)
+            probe.release.set()
+            api.close()
             log.close()
 
 

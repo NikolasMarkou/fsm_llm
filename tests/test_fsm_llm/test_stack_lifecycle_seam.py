@@ -253,6 +253,164 @@ class TestPopKeepsTheFrameWhenTheEndIsRefused:
         assert api.fsm_manager.instances.keys() == {conv_id}
 
 
+def _seed_call_marks(api, child_id):
+    """Fill every per-frame call mark of *child_id* (what settle keeps for a pushed child)."""
+    marks = api._call_marks
+    marks.ending.add(child_id)
+    marks.pushed[child_id] = object()
+    marks.errors[child_id] = lambda: 0
+    marks.signals[child_id] = lambda: None
+
+
+def _marks_of(api, child_id):
+    marks = api._call_marks
+    return {
+        "ending": child_id in marks.ending,
+        "pushed": child_id in marks.pushed,
+        "errors": child_id in marks.errors,
+        "signals": child_id in marks.signals,
+    }
+
+
+class TestPopFinishesTheBookkeepingWhenTheEndFailsAfterTheTeardown:
+    """E1 and M1 (D-006 of plan 8525c797): an END handler that raises (``handler_error_mode=
+    "raise"``) fails ``FSMManager.end_conversation`` AFTER its ``finally`` tore the child down.
+    ``pop_fsm`` used to skip the temp-definition release, the ``stack/pop`` event and the
+    run and call marks of that frame (and the log then folded to a depth the live stack no
+    longer had), and a CLEAN hand pop never forgot the call marks of a frame settle had pushed."""
+
+    @staticmethod
+    def _logged_api(tmp_path, raising):
+        from fsm_llm import HandlerTiming, create_handler
+        from fsm_llm.runtime import EventLog
+
+        log = EventLog(tmp_path / "logs")
+
+        def boom(context):
+            if raising[0]:
+                raise RuntimeError("end handler boom")
+
+        instance = API(
+            fsm_definition=_make_fsm("main"),
+            llm_interface=MockLLM2Interface(),
+            event_log=log,
+            handler_error_mode="raise",
+        )
+        instance.register_handler(
+            create_handler("end_boom").at(HandlerTiming.END_CONVERSATION).do(boom)
+        )
+        return instance, log
+
+    def test_a_failing_end_handler_after_the_teardown_leaves_a_consistent_ledger(
+        self, tmp_path
+    ):
+        from fsm_llm.runtime.stores import fold_stack
+
+        raising = [False]
+        instance, log = self._logged_api(tmp_path, raising)
+        try:
+            conv_id, _ = instance.start_conversation()
+            instance.push_fsm(conv_id, _make_fsm("sub1"))
+            child_id = instance.get_sub_conversation_id(conv_id)
+            _seed_call_marks(instance, child_id)
+            raising[0] = True
+            with pytest.raises(FSMError):
+                instance.pop_fsm(conv_id)
+            raising[0] = False
+
+            assert instance.get_stack_depth(conv_id) == 1
+            assert instance.fsm_manager.instances.keys() == {conv_id}
+            assert instance._temp_fsm_definitions == {}
+            assert not any(_marks_of(instance, child_id).values())
+            events = [e["type"] for e in log.read(conv_id)]
+            assert events.count("stack/push") == 1
+            assert events.count("stack/pop") == 1
+            assert fold_stack(log.read(conv_id), log.get_json).depth == 1
+        finally:
+            raising[0] = False
+            instance.close()
+            log.close()
+
+    def test_a_clean_hand_pop_forgets_the_call_marks_of_the_frame(self, api):
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        child_id = api.get_sub_conversation_id(conv_id)
+        _seed_call_marks(api, child_id)
+        api.pop_fsm(conv_id)
+        assert not any(_marks_of(api, child_id).values())
+        assert api._temp_fsm_definitions == {}
+
+    def test_a_refused_end_keeps_the_marks_and_the_temp_definition(
+        self, api, monkeypatch
+    ):
+        """The refused end tore nothing down: the frame, its marks and its definition stay."""
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        child_id = api.get_sub_conversation_id(conv_id)
+        _seed_call_marks(api, child_id)
+
+        def refuse(frame_id, *args, **kwargs):
+            raise ConversationBusyError("a turn holds the child")
+
+        monkeypatch.setattr(api.fsm_manager, "end_conversation", refuse)
+        with pytest.raises(ConversationBusyError):
+            api.pop_fsm(conv_id)
+        monkeypatch.undo()
+        assert api.get_stack_depth(conv_id) == 2
+        assert all(_marks_of(api, child_id).values())
+        assert api._temp_fsm_definitions
+        api.end_conversation(conv_id)
+        assert api.fsm_manager.instances == {}
+
+
+class TestAnInterruptedEndIsJudgedByTheInstance:
+    """M2 (D-006 of plan 8525c797): a ``BaseException`` from the end of the child (``Ctrl-C``)
+    is not caught by ``except Exception``, so the old pop took it for "not refused" and removed
+    the frame of a child that was still alive: a live conversation no stack entry reached."""
+
+    def test_an_interrupt_before_the_teardown_keeps_the_frame_and_the_child(self, api):
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        child_id = api.get_sub_conversation_id(conv_id)
+        real_end = api.fsm_manager.end_conversation
+
+        def interrupted(frame_id, *args, **kwargs):
+            raise KeyboardInterrupt
+
+        api.fsm_manager.end_conversation = interrupted
+        with pytest.raises(KeyboardInterrupt):
+            api.pop_fsm(conv_id)
+        api.fsm_manager.end_conversation = real_end
+
+        assert api.get_stack_depth(conv_id) == 2
+        assert child_id in api.fsm_manager.instances
+        api.end_conversation(conv_id)  # the root still reaches and ends the child
+        assert api.fsm_manager.instances == {}
+
+    def test_an_interrupt_after_the_teardown_still_drops_the_frame_and_raises(
+        self, api
+    ):
+        conv_id, _ = api.start_conversation()
+        api.push_fsm(conv_id, _make_fsm("sub1"))
+        child_id = api.get_sub_conversation_id(conv_id)
+        _seed_call_marks(api, child_id)
+        real_end = api.fsm_manager.end_conversation
+
+        def end_then_interrupt(frame_id, *args, **kwargs):
+            real_end(frame_id, *args, **kwargs)
+            raise KeyboardInterrupt
+
+        api.fsm_manager.end_conversation = end_then_interrupt
+        with pytest.raises(KeyboardInterrupt):
+            api.pop_fsm(conv_id)
+        api.fsm_manager.end_conversation = real_end
+
+        assert api.get_stack_depth(conv_id) == 1
+        assert api.fsm_manager.instances.keys() == {conv_id}
+        assert api._temp_fsm_definitions == {}
+        assert not any(_marks_of(api, child_id).values())
+
+
 class _AfterReleaseLock:
     """The ``_stack_lock`` of an ``API``, calling *hook* right after every release: a test forces
     another push or pop into the exact gap between two holds of one operation."""

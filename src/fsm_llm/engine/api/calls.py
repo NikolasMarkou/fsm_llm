@@ -141,16 +141,18 @@ class CallMarks:
     signals: dict[str, Callable[[], FrameSignals]] = field(default_factory=dict)
     runs: dict[str, RunMark] = field(default_factory=dict)
 
-    def forget(self, frame_ids: Iterable[str]) -> None:
-        """Drop what is kept for these frames (the caller holds ``_stack_lock``)."""
+    def forget(self, frame_ids: Iterable[str], *, runs: bool = True) -> None:
+        """Drop what is kept for these frames (the caller holds ``_stack_lock``); ``runs=False``
+        keeps the ``runs`` marks, whose ``run/end`` is still owed (``pop_fsm``)."""
         gone = set(frame_ids)
         for frame_id in gone:
             self.ending.discard(frame_id)
             self.pushed.pop(frame_id, None)
             self.errors.pop(frame_id, None)
             self.signals.pop(frame_id, None)
-        for handle in [h for h, mark in self.runs.items() if mark.frame_id in gone]:
-            del self.runs[handle]
+        if runs:
+            for handle in [h for h, m in self.runs.items() if m.frame_id in gone]:
+                del self.runs[handle]
 
 
 # DECISION plan-2026-11-23T122249-baa37f40/D-023
@@ -355,7 +357,8 @@ async def _try_pop(
         landed = now.get(result_key)
         with api._stack_lock:
             # only a frame that is still on the stack can be retried: an end that raised after
-            # the teardown removed it leaves nothing for a mark to point at (D-028 (4))
+            # the teardown removed it, and `pop_fsm` already forgot its marks (D-006 of plan
+            # 8525c797, `ledger.release_dropped_frames`, D-028 (4)); a clean pop did the same
             on_stack = any(
                 frame.conversation_id == top.conversation_id
                 for frame in api.conversation_stacks.get(root_id) or ()
@@ -366,11 +369,7 @@ async def _try_pop(
                 and not _is_request(landed, state.id)
             ):
                 api._call_marks.ending.add(top.conversation_id)
-            elif not on_stack:
-                api._call_marks.forget([top.conversation_id])
         raise
-    with api._stack_lock:
-        api._call_marks.forget([top.conversation_id])
     if final is None:
         final = parent_data.get(result_key) or {}
     await executor.on_ended(
