@@ -60,14 +60,24 @@ def _entries(value: Any) -> list[Any]:
 
 
 def _string_literals(node: Any) -> set[str]:
-    """Every ``str`` leaf of a JsonLogic expression (keys excluded)."""
-    if isinstance(node, str):
-        return {node}
-    if isinstance(node, dict):
-        return set().union(*(_string_literals(v) for v in node.values()))
-    if isinstance(node, list):
-        return set().union(*(_string_literals(v) for v in node))
-    return set()
+    """Every ``str`` leaf of a JsonLogic expression (keys excluded).
+
+    Walked with an explicit stack: a deeply nested data list must not raise ``RecursionError``
+    (a validator never raises on a mapping).
+    """
+    # DECISION plan-2026-11-28T050702-8525c797/D-007: do NOT make this recursive again (a
+    # condition's data list is not depth-checked, so the nesting is the caller's to choose).
+    found: set[str] = set()
+    seen: set[int] = set()
+    stack = [node]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            found.add(item)
+        elif isinstance(item, (dict, list)) and id(item) not in seen:
+            seen.add(id(item))
+            stack.extend(item.values() if isinstance(item, dict) else item)
+    return found
 
 
 def _condition_keys(state: dict[str, Any]) -> set[str]:

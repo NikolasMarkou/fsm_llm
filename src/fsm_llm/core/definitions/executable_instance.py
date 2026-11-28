@@ -198,16 +198,37 @@ def substitute_variables(node: Any, values: Mapping[str, str]) -> Any:
     """A copy of *node* with ``{{name}}`` replaced by ``values[name]`` in every string LEAF.
 
     Keys are left alone, an unknown ``{{name}}`` stays as text and a replacement is never
-    rescanned. A Mapping becomes a dict, a list stays a list and a tuple a tuple. Recursive: the
-    caller bounds the depth (``MAX_DOCUMENT_DEPTH``).
+    rescanned. A Mapping becomes a dict, a list stays a list and a tuple a tuple. Walked with an
+    explicit stack, as ``_json_tree`` is (a host that is already deep in its own stack must not
+    meet ``RecursionError``); the caller still bounds the depth (``MAX_DOCUMENT_DEPTH``), which
+    also stops a cyclic structure.
     """
-    if isinstance(node, str):
-        return _PLACEHOLDER.sub(lambda m: values.get(m[1], m[0]), node)
-    if isinstance(node, Mapping):
-        return {key: substitute_variables(item, values) for key, item in node.items()}
-    if isinstance(node, (list, tuple)):
-        return type(node)(substitute_variables(item, values) for item in node)
-    return node
+    # DECISION plan-2026-11-28T050702-8525c797/D-007: do NOT make this recursive again: a
+    # document under the depth cap raised `RecursionError` when its caller stood deep in the stack.
+    holder: list[Any] = [None]
+    stack: list[tuple[Any, Any, Any]] = [(node, holder, 0)]
+    rebuilt: list[tuple[Any, Any, list[Any], type]] = []  # list or tuple subclasses
+    while stack:
+        item, parent, slot = stack.pop()
+        if isinstance(item, str):
+            parent[slot] = _PLACEHOLDER.sub(lambda m: values.get(m[1], m[0]), item)
+        elif isinstance(item, Mapping):
+            target: Any
+            parent[slot] = target = {}
+            for key, child in item.items():
+                target[key] = None  # the slot, so the key order is the original one
+                stack.append((child, target, key))
+        elif isinstance(item, (list, tuple)):
+            parent[slot] = target = [None] * len(item)
+            for index, child in enumerate(item):
+                stack.append((child, target, index))
+            if type(item) is not list:
+                rebuilt.append((parent, slot, target, type(item)))
+        else:
+            parent[slot] = item
+    for parent, slot, items, kind in reversed(rebuilt):  # a child before its parent
+        parent[slot] = kind(items)
+    return holder[0]
 
 
 # DECISION plan-2026-11-24T043150-a555dcfe/D-033

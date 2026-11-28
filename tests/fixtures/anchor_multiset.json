@@ -1354,6 +1354,11 @@
       "delta": 1,
       "reason": "plan 8525c797 step 7: new D-002 anchor on the widened outer arm of engine/turn/driver.py _run_turn (an interrupt rolls the whole turn back; one anchor token gained)",
       "token": "plan-2026-11-28T050702-8525c797/D-002"
+    },
+    {
+      "delta": 3,
+      "reason": "plan 8525c797 step 9: three D-007 anchors on the iterative walks _models_in (core/definitions/schema.py), _string_literals (core/verify/structure.py) and substitute_variables (core/definitions/executable_instance.py); three anchor tokens gained",
+      "token": "plan-2026-11-28T050702-8525c797/D-007"
     }
   ]
 }

@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import copy
 import json
+import random
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from fsm_llm import API
 from fsm_llm.core.definitions import FieldExtractionConfig, FSMDefinition, FSMError
-from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT
+from fsm_llm.core.definitions.schema import SCHEMA_VERSION_DEFAULT, _models_in
+from fsm_llm.core.loaders import load_fsm_definition
 from fsm_llm.core.verify import FSMValidator
 from tests.test_fsm_llm.support import _a2026_09_22_api, _fsm
 from tests.test_fsm_llm.test_completion_state import _RESULT, _tool_fsm
@@ -304,3 +307,127 @@ class TestFsmIdIgnoresDefaults:
             API.process_fsm_definition(str(path))[1],
         }
         assert len(ids) == 1
+
+
+def _nested(depth: int, leaf: Any = "a") -> Any:
+    node = leaf
+    for _ in range(depth):
+        node = [node]
+    return node
+
+
+def _fsm_with_data_list(data: Any) -> dict[str, Any]:
+    """An FSM whose only condition tests a key against a (free-form) data list."""
+    return {
+        "name": "t",
+        "description": "d",
+        "initial_state": "a",
+        "states": {
+            "a": {
+                "id": "a",
+                "description": "a",
+                "purpose": "p",
+                "transitions": [
+                    {
+                        "target_state": "b",
+                        "description": "go",
+                        "conditions": [
+                            {
+                                "description": "in the list",
+                                "logic": {"in": [{"var": "k"}, data]},
+                            }
+                        ],
+                    }
+                ],
+            },
+            "b": {"id": "b", "description": "b", "purpose": "p"},
+        },
+    }
+
+
+class _Model(BaseModel):
+    n: int = 0
+
+
+def _recursive_models_in(value: Any) -> list[BaseModel]:
+    """The recursive walk `_models_in` replaced (plan 8525c797, step 9): the reference."""
+    if isinstance(value, BaseModel):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [m for item in value for m in _recursive_models_in(item)]
+    if isinstance(value, dict):
+        return [m for item in value.values() for m in _recursive_models_in(item)]
+    return []
+
+
+def _random_tree(rng: random.Random, depth: int) -> Any:
+    """A seeded random tree of lists, tuples, dicts, models and plain leaves, no shared node."""
+    kind = rng.randrange(7) if depth > 0 else rng.randrange(3)
+    if kind == 0:
+        return _Model(n=rng.randrange(100))
+    if kind == 1:
+        return rng.choice(["x", "{{v}}", 7, None, 1.5, True])
+    if kind == 2:
+        return _Model(n=rng.randrange(100)) if rng.random() < 0.5 else "leaf"
+    width = rng.randrange(4)
+    items = [_random_tree(rng, depth - 1) for _ in range(width)]
+    if kind in (3, 4):
+        return items
+    if kind == 5:
+        return tuple(items)
+    return {f"k{i}": item for i, item in enumerate(items)}
+
+
+class TestDeeplyNestedDataNeverRaisesRecursionError:
+    """A condition's data list is free-form and not depth-checked (D-014 of plan 8a03483a), so
+    the walks over a loaded definition must not recurse (plan 8525c797, step 9)."""
+
+    _DEPTH = 2 * sys.getrecursionlimit()
+
+    def test_a_data_list_twice_the_recursion_limit_deep_loads(self):
+        definition = FSMDefinition(**_fsm_with_data_list(_nested(self._DEPTH)))
+
+        assert definition.initial_state == "a"
+
+    def test_a_deep_list_inside_another_operand_loads_too(self):
+        data = _fsm_with_data_list(None)
+        data["states"]["a"]["transitions"][0]["conditions"][0]["logic"] = {
+            "==": [{"var": "k"}, _nested(self._DEPTH, "x")]
+        }
+
+        assert FSMDefinition(**data).states["a"].transitions
+
+    def test_the_loader_reads_a_deep_file_the_parser_accepts(self, tmp_path: Path):
+        depth = 900  # the json parser's own limit is near sys.getrecursionlimit()
+        raw = json.dumps(_fsm_with_data_list("MARK"))
+        path = tmp_path / "deep.json"
+        path.write_text(
+            raw.replace('"MARK"', "[" * depth + '"a"' + "]" * depth), encoding="utf-8"
+        )
+
+        assert load_fsm_definition(str(path)).initial_state == "a"
+
+    def test_the_validator_accepts_the_deep_definition(self):
+        result = FSMValidator(_fsm_with_data_list(_nested(self._DEPTH))).validate()
+
+        assert result.is_valid, result.errors
+
+    @pytest.mark.parametrize("seed", range(40))
+    def test_the_iterative_walk_equals_the_recursive_one_on_shallow_trees(
+        self, seed: int
+    ):
+        tree = _random_tree(random.Random(seed), depth=5)
+
+        assert [id(m) for m in _models_in(tree)] == [
+            id(m) for m in _recursive_models_in(tree)
+        ]
+
+    def test_a_cycle_ends_and_a_shared_container_is_walked_once(self):
+        first, second = _Model(n=1), _Model(n=2)
+        cyclic: list[Any] = [first]
+        cyclic.append(cyclic)
+        cyclic.append(second)
+        shared = [first]
+
+        assert _models_in(cyclic) == [first, second]
+        assert _models_in({"a": shared, "b": shared}) == [first]

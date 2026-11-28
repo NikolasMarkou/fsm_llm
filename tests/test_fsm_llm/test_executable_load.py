@@ -11,9 +11,11 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import random
 import subprocess
 import sys
 import types
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -819,3 +821,115 @@ class TestFsmLlmValidateReadsExecutables:
         )
 
         assert done.stdout.strip().splitlines()[-1] == "MODS []"
+
+
+def _stack_depth() -> int:
+    depth, frame = 0, sys._getframe()
+    while frame is not None:
+        depth, frame = depth + 1, frame.f_back
+    return depth
+
+
+def _from_a_deep_host(headroom: int, call: Callable[[], Any]) -> Any:
+    """`call()` from a stack that has only `headroom` frames left before the recursion limit."""
+
+    def descend(left: int) -> Any:
+        return descend(left - 1) if left > 0 else call()
+
+    return descend(sys.getrecursionlimit() - _stack_depth() - headroom)
+
+
+def _recursive_substitute(node: Any, values: dict[str, str]) -> Any:
+    """The recursive body `substitute_variables` replaced (plan 8525c797, step 9): the reference."""
+    if isinstance(node, str):
+        return ei._PLACEHOLDER.sub(lambda m: values.get(m[1], m[0]), node)
+    if isinstance(node, dict):
+        return {k: _recursive_substitute(v, values) for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        return type(node)(_recursive_substitute(item, values) for item in node)
+    return node
+
+
+def _random_document(rng: random.Random, depth: int) -> Any:
+    kind = rng.randrange(7) if depth > 0 else rng.randrange(2)
+    if kind == 0:
+        return rng.choice(
+            ["{{v}}", "a {{v}} b", "{{unknown}}", "{{v}}{{w}}", "plain", ""]
+        )
+    if kind == 1:
+        return rng.choice([7, None, 1.5, True, b"raw"])
+    items = [_random_document(rng, depth - 1) for _ in range(rng.randrange(4))]
+    if kind in (2, 3):
+        return items
+    if kind == 4:
+        return tuple(items)
+    return {f"{{{{k{i}}}}}": item for i, item in enumerate(items)}
+
+
+class TestDeepDocumentsNeverRaiseRecursionError:
+    """A document under the V1 depth cap loaded by a host that is already deep in its own stack
+    (plan 8525c797, step 9): the variable fill is iterative, as `_json_tree` is."""
+
+    _NEST = 150  # under MAX_DOCUMENT_DEPTH (200)
+
+    def _deep_doc(self) -> dict[str, Any]:
+        data: Any = "{{v}}"
+        for _ in range(self._NEST):
+            data = [data]
+        fsm = _fsm()
+        fsm["states"]["a"]["transitions"][0]["conditions"] = [
+            {"description": "c", "logic": {"in": [{"var": "k"}, data]}}
+        ]
+        return _doc(fsm, variables=["v"])
+
+    def test_the_load_from_a_deep_host_stack_is_valid(self):
+        document = self._deep_doc()
+
+        envelope, result = _from_a_deep_host(
+            250, lambda: load_executable(document, variables={"v": "hi"})
+        )
+
+        assert envelope is not None and result.is_valid, result.errors
+
+    def test_the_fill_alone_from_a_deep_host_stack_keeps_the_nesting(self):
+        node: Any = "{{v}}"
+        for _ in range(self._NEST):
+            node = [node]
+
+        out = _from_a_deep_host(250, lambda: ei.substitute_variables(node, {"v": "X"}))
+
+        for _ in range(self._NEST):
+            out = out[0]
+        assert out == "X"
+
+    def test_a_tree_far_past_the_depth_cap_is_still_filled_without_a_crash(self):
+        node: Any = {"k": "{{v}}"}
+        for _ in range(5 * sys.getrecursionlimit()):
+            node = {"k": node}
+
+        out = ei.substitute_variables(node, {"v": "X"})
+
+        while out != {"k": "X"}:
+            out = out["k"]
+
+    @pytest.mark.parametrize("seed", range(40))
+    def test_the_iterative_fill_equals_the_recursive_one_on_shallow_trees(
+        self, seed: int
+    ):
+        tree = _random_document(random.Random(seed), depth=6)
+        values = {"v": "V", "w": "W{{v}}"}
+
+        assert ei.substitute_variables(tree, values) == _recursive_substitute(
+            tree, values
+        )
+
+    def test_a_list_subclass_keeps_its_type_and_a_tuple_a_tuple(self):
+        class Items(list):
+            pass
+
+        out = ei.substitute_variables(
+            {"a": Items(["{{v}}"]), "b": ("{{v}}", ["{{v}}"])}, {"v": "X"}
+        )
+
+        assert type(out["a"]) is Items and out["a"] == ["X"]
+        assert out["b"] == ("X", ["X"]) and type(out["b"]) is tuple

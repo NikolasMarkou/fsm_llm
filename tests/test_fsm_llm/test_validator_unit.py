@@ -15,6 +15,7 @@ import importlib
 import inspect
 import io
 import json
+import random
 import sys
 import typing
 from contextlib import contextmanager, redirect_stdout
@@ -49,6 +50,7 @@ from fsm_llm.core.verify import (
     validate_fsm_from_file,
 )
 from fsm_llm.core.verify.cli import main_cli
+from fsm_llm.core.verify.structure import _string_literals
 from fsm_llm.engine.api.conversation import API
 from fsm_llm.handlers import HandlerTiming
 from tests.test_fsm_llm.support import _fsm, _Prov, _typed_fsm
@@ -3668,3 +3670,67 @@ class TestValidatorWarnsOnCompletionStates:
             "'intake' required_context_keys names 'verdict'" in w
             for w in result.warnings
         )
+
+
+def _recursive_string_literals(node: Any) -> set[str]:
+    """The recursive walk `_string_literals` replaced (plan 8525c797, step 9): the reference."""
+    if isinstance(node, str):
+        return {node}
+    if isinstance(node, dict):
+        return set().union(*(_recursive_string_literals(v) for v in node.values()))
+    if isinstance(node, list):
+        return set().union(*(_recursive_string_literals(v) for v in node))
+    return set()
+
+
+def _random_logic(rng: random.Random, depth: int) -> Any:
+    """A seeded random JsonLogic-shaped tree of dicts, lists and plain leaves."""
+    kind = rng.randrange(6) if depth > 0 else rng.randrange(2)
+    if kind == 0:
+        return rng.choice(["a", "b", "buy", "", "k.x", 3, None, 2.5, False])
+    if kind == 1:
+        return f"s{rng.randrange(20)}"
+    items = [_random_logic(rng, depth - 1) for _ in range(rng.randrange(4))]
+    if kind in (2, 3):
+        return items
+    if kind == 4:
+        return tuple(items)
+    return {f"op{i}": item for i, item in enumerate(items)}
+
+
+class TestDeeplyNestedLogicNeverRaisesRecursionError:
+    """The string-literal walk of the validator is iterative (plan 8525c797, step 9)."""
+
+    _DEPTH = 2 * sys.getrecursionlimit()
+
+    def test_a_list_twice_the_recursion_limit_deep_yields_its_leaf(self):
+        node: Any = "leaf"
+        for _ in range(self._DEPTH):
+            node = {"in": [node]}
+
+        assert _string_literals(node) == {"leaf"}
+
+    def test_the_validator_reports_a_deep_data_list_as_valid(self):
+        node: Any = "deep"
+        for _ in range(self._DEPTH):
+            node = [node]
+        data = _fsm_with_condition_logic({"in": [{"var": "email"}, node]})
+
+        result = FSMValidator(data).validate()
+
+        assert result.is_valid, result.errors
+        assert not any("RecursionError" in e for e in result.errors)
+
+    @pytest.mark.parametrize("seed", range(40))
+    def test_the_iterative_walk_equals_the_recursive_one_on_shallow_trees(
+        self, seed: int
+    ):
+        tree = _random_logic(random.Random(seed), depth=6)
+
+        assert _string_literals(tree) == _recursive_string_literals(tree)
+
+    def test_a_cycle_ends(self):
+        cyclic: dict[str, Any] = {"a": "x"}
+        cyclic["b"] = [cyclic, "y"]
+
+        assert _string_literals(cyclic) == {"x", "y"}

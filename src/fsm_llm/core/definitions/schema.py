@@ -207,11 +207,31 @@ def _walk(
 
 
 def _models_in(value: Any) -> list[BaseModel]:
-    """The pydantic models held directly by a value, a list or a dict."""
-    if isinstance(value, BaseModel):
-        return [value]
-    if isinstance(value, (list, tuple)):
-        return [m for item in value for m in _models_in(item)]
-    if isinstance(value, dict):
-        return [m for item in value.values() for m in _models_in(item)]
-    return []
+    """The pydantic models held directly by a value, a list or a dict.
+
+    Walked with an explicit stack, in the order a recursive walk visits them: a deeply nested
+    data list (a JsonLogic ``in`` list is free-form data) must not raise ``RecursionError``.
+    A container met twice is walked once, which also ends a cycle.
+    """
+    # DECISION plan-2026-11-28T050702-8525c797/D-007: do NOT make this recursive again. A
+    # condition's data list is never depth-checked (D-014 of plan 8a03483a), so a list 500
+    # deep reached `FSMDefinition(**d)` and raised a raw `RecursionError` from here.
+    found: list[BaseModel] = []
+    seen: set[int] = set()
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, BaseModel):
+            found.append(node)
+            continue
+        if isinstance(node, (list, tuple)):
+            children: Any = node
+        elif isinstance(node, dict):
+            children = node.values()
+        else:
+            continue
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        stack.extend(reversed(list(children)))
+    return found
