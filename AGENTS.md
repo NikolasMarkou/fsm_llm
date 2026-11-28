@@ -114,7 +114,7 @@ Model resolution: `model=` argument, then env `LLM_MODEL`, then nothing: no code
 ```bash
 fsm-llm --fsm <path.json> [--model M] [--env-file PATH]  # Run FSM interactively (needs LLM_MODEL, --model or --env-file)
 fsm-llm-visualize --fsm <path.json> [--format ascii|mermaid|dot]  # Diagram
-fsm-llm-validate --fsm <path.json> [--upgrade]  # Validate FSM definition (--upgrade validates first, rewrites a file of any version from 4.0 up to below the default (4.0, 4.1 and 4.2 today); exit 1 if refused)
+fsm-llm-validate --fsm <path.json> [--upgrade]  # Validate FSM definition (--upgrade validates first and reports that pre-upgrade result, then rewrites a file of any version from 4.0 up to below the default (4.0, 4.1 and 4.2 today); exit 1 if refused)
 fsm-llm-monitor [--env-file PATH] [--executables DIR]     # Web dashboard at http://127.0.0.1:8420 (--executables adds pattern files as launchable agent ids)
 fsm-llm-meta [--model M] [--env-file PATH]  # Interactive artifact builder (fsm_llm.agents.meta_cli)
 python -m fsm_llm.reasoning "problem" [--type T] [--executables DIR] [--model M] [--env-file PATH]    # Reasoning CLI (no console script)

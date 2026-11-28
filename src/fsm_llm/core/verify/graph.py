@@ -17,6 +17,12 @@ from .flow import strongly_connected_components
 if TYPE_CHECKING:
     from .result import FSMValidationResult
 
+# Caps of the cycle search (a dense graph has factorially many simple cycles):
+# the most cycles reported, and the most steps of work (one step is one
+# transition looked at, plus the states each start can still return through).
+MAX_REPORTED_CYCLES = 100
+MAX_CYCLE_SEARCH_STEPS = 200_000
+
 
 class GraphMixin:
     """The graph analysis of ``FSMValidator`` (stages 4 to 6 of ``validate``): complexity, cycles, paths."""
@@ -83,17 +89,22 @@ class GraphMixin:
         state can be reached: a conversation that enters it can never end.
         One WARNING per trap component; cycles outside traps are INFO.
         """
-        cycles = self._find_cycles()
+        cycles, capped = self._search_cycles()
         traps = self._find_trap_components()
         trapped = {state_id for component in traps for state_id in component}
 
-        if not cycles and not traps:
+        if not cycles and not traps and not capped:
             self.result.add_info("No cycles detected in the FSM")
             return
 
         for cycle in cycles:
             if not set(cycle) <= trapped:
                 self.result.add_info(f"Cycle detected: {' → '.join(cycle)}")
+        if capped:
+            self.result.add_info(
+                f"Cycle search stopped at its cap ({MAX_REPORTED_CYCLES} cycles or "
+                f"{MAX_CYCLE_SEARCH_STEPS} steps): more cycles may exist than are listed"
+            )
         for component in traps:
             states_str = ", ".join(f"'{state_id}'" for state_id in component)
             self.result.add_warning(
@@ -201,74 +212,100 @@ class GraphMixin:
 
     def _find_cycles(self) -> list[list[str]]:
         """
-        Find all simple cycles in the FSM using DFS.
+        Find every simple cycle reachable from the initial state, up to the caps.
 
-        Fixed to preserve cycle order and avoid using frozenset.
-
-        A cycle is a path that starts and ends at the same state,
-        passing through at least one other state.
+        A cycle is a closed path that repeats no state; a self-loop is a cycle
+        of one state. Each cycle is listed once, starting at its member the
+        depth-first walk from the initial state reaches first. The search is
+        capped: at most ``MAX_REPORTED_CYCLES`` cycles and ``MAX_CYCLE_SEARCH_STEPS``
+        steps of work (see ``_search_cycles`` for the capped flag).
 
         Returns:
             List of cycles, where each cycle is a list of state IDs
         """
+        return self._search_cycles()[0]
 
+    def _search_cycles(self) -> tuple[list[list[str]], bool]:
+        """``(cycles, capped)``: the simple cycles reachable from the initial
+        state and whether a cap stopped the search before it was complete.
+
+        Contract: ``cycles`` holds at most ``MAX_REPORTED_CYCLES`` entries, in
+        order of their start state (the DFS discovery order from the initial
+        state), then in the order of the transitions. ``capped`` is True only
+        when more cycles may exist (a further cycle was found past the report
+        cap, or the work cap of ``MAX_CYCLE_SEARCH_STEPS`` was spent). Never
+        raises on a state with a missing or unknown target.
+        """
         # DECISION plan_2026-05-29_73c30922/D-002 [STALE] (RWM-002)
-        # Iterative DFS with an explicit (node, is_exit) frame stack -- avoids
-        # RecursionError on FSMs with ~1000+ chained states. Faithfully
-        # reproduces the prior recursive traversal: children are pushed in
-        # reverse so the first transition is processed first, path/on_stack are
-        # maintained via enter/exit frames, and a back-edge (target on_stack)
-        # records the same cycle path the recursion did. Do NOT revert to a
-        # recursive inner dfs() (Python recursion limit ~1000).
+        # Iterative everywhere (an explicit stack, never a recursive dfs()) so an
+        # FSM of ~1000+ chained states does not hit the Python recursion limit.
+        # Start-ordered search: each cycle is found once, from its member of
+        # smallest order, over the states of larger order only. Do NOT skip a
+        # target because it was visited before (the old `finished` set): that
+        # skip dropped real cycles (a second path into a finished state).
+        # Do NOT remove the two caps: a dense graph has factorially many cycles.
+        adjacency: dict[str, list[str]] = {}
+        for state_id, state in self.states.items():
+            targets: list[str] = []
+            for transition in state.get("transitions", []):
+                target = transition.get("target_state", "")
+                if target in self.states and target not in targets:
+                    targets.append(target)
+            adjacency[state_id] = targets
+
+        # Discovery order of a depth-first walk from the initial state.
+        order: dict[str, int] = {}
+        pending = [self.initial_state]
+        while pending:
+            node = pending.pop()
+            if node in order or node not in adjacency:
+                continue
+            order[node] = len(order)
+            pending.extend(reversed(adjacency[node]))
+        reverse: dict[str, list[str]] = {node: [] for node in order}
+        for node in order:
+            for target in adjacency[node]:
+                reverse[target].append(node)
+
         cycles: list[list[str]] = []
-        path: list[str] = []
-        on_stack: set[str] = set()
-        finished: set[str] = set()
-        # frame = (node, is_exit)
-        stack: list[tuple[str, bool]] = [(self.initial_state, False)]
-        while stack:
-            node, is_exit = stack.pop()
-            if is_exit:
-                path.pop()
-                on_stack.discard(node)
-                finished.add(node)
+        steps = 0
+        for start in order:
+            floor = order[start]
+            # A cycle needs a way back into `start` from a state of larger order.
+            if not any(order[p] >= floor for p in reverse[start]):
                 continue
-            if node in on_stack:
-                cycle_start = path.index(node)
-                cycles.append([*path[cycle_start:], node])
-                continue
-            if node in finished:
-                continue
-
-            path.append(node)
-            on_stack.add(node)
-            stack.append((node, True))  # schedule exit (backtrack) after children
-
-            state = self.states.get(node, {})
-            targets = [t.get("target_state", "") for t in state.get("transitions", [])]
-            for target in reversed(targets):  # reversed → original transition order
-                if target:
-                    stack.append((target, False))
-
-        # Remove duplicates while preserving order
-        # Use tuple representation for comparison but keep lists
-        unique_cycles = []
-        seen_cycles = set()
-
-        for cycle in cycles:
-            # Every cycle is `[*path[cycle_start:], node]`: two or more entries,
-            # the last equal to the first. Drop the repeat, then normalize to
-            # start from the smallest state ID so one cycle found from two entry
-            # points (or twice through parallel transitions) is kept once.
-            simple_cycle = cycle[:-1]
-            min_idx = simple_cycle.index(min(simple_cycle))
-            cycle_tuple = tuple(simple_cycle[min_idx:] + simple_cycle[:min_idx])
-
-            if cycle_tuple not in seen_cycles:
-                seen_cycles.add(cycle_tuple)
-                unique_cycles.append(simple_cycle)
-
-        return unique_cycles
+            # Only states of larger order that can get back to `start` matter.
+            allowed = {start}
+            queue = [start]
+            while queue:
+                for pred in reverse[queue.pop()]:
+                    steps += 1
+                    if order[pred] >= floor and pred not in allowed:
+                        allowed.add(pred)
+                        queue.append(pred)
+            if steps > MAX_CYCLE_SEARCH_STEPS:
+                return cycles, True
+            path = [start]
+            on_path = {start}
+            frames = [iter(adjacency[start])]
+            while frames:
+                for target in frames[-1]:
+                    steps += 1
+                    if steps > MAX_CYCLE_SEARCH_STEPS:
+                        return cycles, True
+                    if target == start:
+                        if len(cycles) == MAX_REPORTED_CYCLES:
+                            return cycles, True
+                        cycles.append(list(path))
+                    elif target in allowed and target not in on_path:
+                        path.append(target)
+                        on_path.add(target)
+                        frames.append(iter(adjacency[target]))
+                        break
+                else:
+                    frames.pop()
+                    on_path.discard(path.pop())
+        return cycles, False
 
     def _find_shortest_path(self, start: str, end: str) -> list[str] | None:
         """

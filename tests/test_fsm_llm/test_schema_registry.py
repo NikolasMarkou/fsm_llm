@@ -1221,7 +1221,7 @@ class TestUpgradeFsmFile:
 
 
 class TestValidateMainUpgrade:
-    """`main(path, upgrade=True)` and `--upgrade` rewrite, then validate."""
+    """`main(path, upgrade=True)` and `--upgrade` validate, report that result, then rewrite."""
 
     @pytest.fixture(autouse=True)
     def _keep_logging_state(self, monkeypatch):
@@ -1251,7 +1251,11 @@ class TestValidateMainUpgrade:
             == SCHEMA_VERSION_DEFAULT
         )
 
-    def test_the_report_describes_the_upgraded_file(self, tmp_path, capsys):
+    def test_the_report_is_the_pre_upgrade_one_and_a_second_run_sees_the_upgrade(
+        self, tmp_path, capsys
+    ):
+        # plan 8525c797 step 10: validate first, so the version warnings of the
+        # file as handed in stay in the report; the rewrite shows on the next run.
         from fsm_llm.core.verify.cli import main
 
         path = tmp_path / "fsm.json"
@@ -1261,8 +1265,52 @@ class TestValidateMainUpgrade:
         before = json.loads(capsys.readouterr().out)
         assert any("needs definition version" in w for w in before["warnings"])
         assert main(str(path), upgrade=True) == 0
+        during = json.loads(capsys.readouterr().out)
+        assert during == before
+        assert (
+            json.loads(path.read_text(encoding="utf-8"))["version"]
+            == SCHEMA_VERSION_DEFAULT
+        )
+        assert main(str(path), upgrade=False) == 0
         after = json.loads(capsys.readouterr().out)
         assert not any("needs definition version" in w for w in after["warnings"])
+
+    def test_a_4_0_file_with_a_call_state_keeps_its_version_finding_under_upgrade(
+        self, tmp_path, capsys
+    ):
+        from fsm_llm.core.verify.cli import main
+
+        path = tmp_path / "fsm.json"
+        body = _declared_body("4.0", with_synthesize=False)
+        body["states"]["work"] = _call_state()
+        body["states"]["start"]["transitions"].append(
+            {"target_state": "work", "description": "call", "priority": 3}
+        )
+        path.write_text(json.dumps(body), encoding="utf-8")
+        assert main(str(path), upgrade=True) == 0  # upgraded: the validation's exit
+        report = json.loads(capsys.readouterr().out)
+        assert any(
+            "State.call" in w and "needs definition version 4.3" in w
+            for w in report["warnings"]
+        )
+        assert (
+            json.loads(path.read_text(encoding="utf-8"))["version"]
+            == SCHEMA_VERSION_DEFAULT
+        )
+
+    def test_an_invalid_file_is_reported_and_never_rewritten_under_upgrade(
+        self, tmp_path, capsys
+    ):
+        from fsm_llm.core.verify.cli import main
+
+        path = tmp_path / "fsm.json"
+        body = _declared_body("4.1", with_synthesize=False)
+        body["states"]["orphan"] = _state("orphan")  # an orphaned state: refused
+        text = json.dumps(body)
+        path.write_text(text, encoding="utf-8")
+        assert main(str(path), upgrade=True) == 1
+        assert json.loads(capsys.readouterr().out)["is_valid"] is False
+        assert path.read_text(encoding="utf-8") == text
 
     def test_without_the_flag_nothing_is_written(self, tmp_path, capsys):
         from fsm_llm.core.verify.cli import main

@@ -76,9 +76,13 @@ def main(fsm_path, upgrade: bool = False):
             fsm_path, executable, upgrade
         )
     else:
-        upgrade_refused = upgrade and upgrade_fsm_file(fsm_path).refusal is not None
-        # Run validation
+        # Validate FIRST, then upgrade (D-016 below): the report describes the file
+        # as it was handed in, its version warnings included. Upgrading first
+        # stamped the version and the report lost the findings it exists to show.
+        # An invalid file is never rewritten: `upgrade_fsm_file` loads the
+        # definition itself and refuses one that does not load.
         validation_result = validate_fsm_from_file(fsm_path)
+        upgrade_refused = upgrade and upgrade_fsm_file(fsm_path).refusal is not None
 
     # Format output based on user preference
     output = json.dumps(validation_result.as_dict(), indent=2)
@@ -124,7 +128,8 @@ def main_cli():
         "--upgrade",
         action="store_true",
         help=(
-            "Validate the file, then rewrite it in place to the current "
+            "Validate the file (the report is that of the file as handed in), "
+            "then rewrite it in place to the current "
             f"definition version ({SCHEMA_VERSION_DEFAULT}) when it is an FSM "
             f"declaring {SCHEMA_VERSION_OLDEST} up to the current one. "
             "Never downgrades or touches another version (an omitted version is "

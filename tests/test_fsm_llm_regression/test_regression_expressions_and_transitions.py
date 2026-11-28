@@ -254,6 +254,146 @@ class TestCycleNormalization:
         assert len(cycles) == 1, f"Expected 1 unique cycle, got {len(cycles)}: {cycles}"
 
 
+class TestEveryCycleIsFound:
+    """plan 8525c797 step 10: `_find_cycles` lists every simple cycle reachable from
+    the initial state, once each, and stops at its caps on a dense graph."""
+
+    @staticmethod
+    def _validator(edges, count):
+        from fsm_llm.core.verify import FSMValidator
+
+        states = {
+            f"s{i}": {
+                "id": f"s{i}",
+                "transitions": [
+                    {"target_state": f"s{j}", "description": "go"}
+                    for j in edges.get(i, [])
+                ],
+            }
+            for i in range(count)
+        }
+        return FSMValidator(
+            {
+                "name": "g",
+                "description": "d",
+                "initial_state": "s0",
+                "states": states,
+            }
+        )
+
+    @staticmethod
+    def _canon(cycle):
+        start = cycle.index(min(cycle))
+        return tuple(cycle[start:] + cycle[:start])
+
+    @classmethod
+    def _brute_force(cls, edges):
+        """Reference: every simple cycle reachable from s0, found from its smallest state."""
+        reached, pending = set(), [0]
+        while pending:
+            node = pending.pop()
+            if node not in reached:
+                reached.add(node)
+                pending.extend(edges.get(node, []))
+        found = set()
+
+        def walk(start, node, path):
+            for target in edges.get(node, []):
+                if target == start:
+                    found.add(cls._canon([f"s{i}" for i in path]))
+                elif target > start and target not in path:
+                    walk(start, target, [*path, target])
+
+        for start in sorted(reached):
+            walk(start, start, [start])
+        return found
+
+    def test_the_smallest_shown_miss_is_found(self):
+        # The old `finished` skip lost s0 -> s3 -> s2 -> s5 -> s0.
+        edges = {0: [2, 3], 1: [], 2: [5], 3: [1, 2], 4: [1], 5: [0, 1, 2, 3]}
+        cycles = self._validator(edges, 6)._find_cycles()
+        assert ("s0", "s3", "s2", "s5") in {self._canon(c) for c in cycles}
+
+    def test_the_cycles_match_a_brute_force_enumeration_on_random_graphs(self):
+        import random
+
+        rng = random.Random(1)
+        for _ in range(600):
+            count = rng.randint(3, 6)
+            edges = {
+                i: [j for j in range(count) if rng.random() < 0.3] for i in range(count)
+            }
+            cycles = self._validator(edges, count)._find_cycles()
+            expected = self._brute_force(edges)
+            assert len(cycles) == len(expected), (edges, cycles)
+            assert {self._canon(c) for c in cycles} == expected, edges
+
+    def test_parallel_transitions_and_self_loops_each_give_one_cycle(self):
+        edges = {0: [1, 1], 1: [0, 1]}
+        cycles = self._validator(edges, 2)._find_cycles()
+        assert sorted(self._canon(c) for c in cycles) == [("s0", "s1"), ("s1",)]
+
+    def test_a_long_chain_with_a_back_edge_stays_iterative(self):
+        count = 5000
+        edges = {i: [i + 1] for i in range(count - 1)}
+        edges[count - 1] = [0]
+        cycles = self._validator(edges, count)._find_cycles()
+        assert len(cycles) == 1 and len(cycles[0]) == count
+
+    def test_a_dense_graph_is_capped_fast_and_the_info_line_says_so(self):
+        import time
+
+        from fsm_llm.core.verify.graph import (
+            MAX_CYCLE_SEARCH_STEPS,
+            MAX_REPORTED_CYCLES,
+        )
+
+        count = 14  # a complete digraph: far more simple cycles than any cap
+        edges = {i: [j for j in range(count) if j != i] for i in range(count)}
+        validator = self._validator(edges, count)
+        started = time.monotonic()
+        cycles, capped = validator._search_cycles()
+        assert time.monotonic() - started < 5
+        assert capped is True
+        assert len(cycles) <= MAX_REPORTED_CYCLES
+        assert len({self._canon(c) for c in cycles}) == len(cycles)
+        assert len(validator._find_cycles()) == len(cycles)
+        validator._detect_cycles()
+        infos = [m for m in validator.result.info if m.startswith("Cycle detected")]
+        assert len(infos) <= MAX_REPORTED_CYCLES
+        assert any(
+            "Cycle search stopped at its cap" in m and str(MAX_CYCLE_SEARCH_STEPS) in m
+            for m in validator.result.info
+        )
+
+    def test_exponentially_many_dead_paths_are_stopped_by_the_work_cap(self):
+        import time
+
+        # s0 <-> s1 is the one cycle. Past s1 sits a chain of 40 diamonds that all
+        # lead back to s1, a state already on the path: 2**40 paths, none a cycle,
+        # and the can-return pruning keeps them all. Only the work cap ends it.
+        edges = {0: [1], 1: [0, 2]}
+        diamonds = 40
+        for i in range(diamonds):
+            head = 2 + 3 * i
+            edges[head] = [head + 1, head + 2]
+            edges[head + 1] = [head + 3]
+            edges[head + 2] = [head + 3]
+        edges[2 + 3 * diamonds] = [1]
+        validator = self._validator(edges, 3 + 3 * diamonds)
+        started = time.monotonic()
+        cycles, capped = validator._search_cycles()
+        assert time.monotonic() - started < 10
+        assert capped is True
+        assert cycles == [["s0", "s1"]]
+
+    def test_a_search_that_completes_is_not_flagged_as_capped(self):
+        validator = self._validator({0: [1], 1: [0]}, 2)
+        assert validator._search_cycles() == ([["s0", "s1"]], False)
+        validator._detect_cycles()
+        assert not any("stopped at its cap" in m for m in validator.result.info)
+
+
 # ── B10: Transition info ignored in response prompt ───────────
 
 
