@@ -335,10 +335,10 @@ class StackMixin(_ApiSurface):
     ) -> None:
         """Clean up after a failed push; *pending_id* is the id THIS attempt counted in flight."""
         # DECISION plan-2026-07-21T045419-9925aa3a/D-011
-        # Do NOT unconditionally pop `processed_fsm_id` here. A failed push can
-        # share its content-hash id with a live frame in ANOTHER conversation
-        # (two conversations pushing the same sub-FSM); an unconditional pop
-        # would evict a def that conversation still needs. Release by reference
+        # Do NOT unconditionally pop the temp definition of this push (`pending_id`)
+        # here. A failed push can share its content-hash id with a live frame in
+        # ANOTHER conversation (two conversations pushing the same sub-FSM); an
+        # unconditional pop would evict a def that conversation still needs. Release by reference
         # instead — the helper drops the id iff no live frame references it.
         if new_conversation_id:
             try:

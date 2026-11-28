@@ -341,7 +341,7 @@ class API(
         # yet referenced by a live FSMStackFrame. `push_fsm` releases `_stack_lock`
         # between registering the temp def and appending the frame (to run
         # `start_conversation`, which may make a greeting LLM call). Without this
-        # set, a concurrent `pop_fsm`/`end_conversation` on ANOTHER conversation
+        # guard, a concurrent `pop_fsm`/`end_conversation` on ANOTHER conversation
         # calls `_release_unreferenced_temp_definitions` in that window, sees the
         # id as unreferenced (no frame yet), and evicts it — bricking the in-flight
         # sub-conversation with `FSMDefinitionNotFoundError` (a `ValueError`,
