@@ -60,7 +60,11 @@ const widget = (id, { visible = true, disabled = false } = {}) => {
     Object.assign(w, { disabled, getClientRects: () => (visible ? [1] : []), focus: () => { document.activeElement = w; } });
     return w;
 };
-const dialog = (id, kids) => { const d = widget(id); d.style.display = 'none'; d.querySelectorAll = () => kids; return d; };
+const dialog = (id, kids, inside = []) => {            // inside: focusable nodes the selector does not list
+    const d = widget(id); d.style.display = 'none'; d.querySelectorAll = () => kids;
+    d.contains = n => n === d || kids.includes(n) || inside.includes(n);
+    return d;
+};
 const focused = () => document.activeElement?.id ?? null;
 const press = (shift = false) => {                     // one Tab keydown to every registered listener
     const e = { key: 'Tab', shiftKey: shift, prevented: false, preventDefault() { this.prevented = true; } };
@@ -118,5 +122,35 @@ const reopened = listeners.size;
 dom.openDialog(d1, 'flex'); d1.style.display = 'none'; dom.closeDialog(d1);
 t.hidden_by_hand_is_popped = { reopened, closed: listeners.size };
 t.close_removes_listener = { listeners: listeners.size, adds, removes, after_close: press() };
+
+// Plan 9283c1fd review F1: "outside" is decided by the dialog's own subtree, never by membership in the focusable list.
+// A <summary> (the Context Data toggle of the drawer) is in the selector; the stub honours the selector by tag.
+const tagged = (id, tag) => Object.assign(widget(id), { tag });
+const selects = (sel, kids) => sel.split(',').map(x => x.trim()).includes('summary') ? kids : kids.filter(k => k.tag !== 'summary');
+const [wClose, wAdv, wSum, wEv, wSend] = [['wclose', 'button'], ['wadv', 'button'], ['wsum', 'summary'], ['wev', 'input'], ['wsend', 'button']].map(a => tagged(...a));
+const wf = dialog('ctrl-drawer', []);
+wf.querySelectorAll = sel => selects(sel, [wClose, wAdv, wSum, wEv, wSend]);
+wf.contains = n => [wf, wClose, wAdv, wSum, wEv, wSend].includes(n);
+outside.focus(); dom.openDialog(wf, 'block');
+wSum.focus(); const sumMid = press();
+wSend.focus(); const sendWraps = press();
+t.tab_from_summary_reaches_next_control = { sumMid, sendWraps };
+dom.closeDialog(wf);
+// The summary is the LAST control: it is in the list, so Tab on it wraps and Shift+Tab on the first reaches it.
+const wf2 = dialog('ctrl-drawer', []);
+wf2.querySelectorAll = sel => selects(sel, [wClose, wAdv, wSum]);
+wf2.contains = n => [wf2, wClose, wAdv, wSum].includes(n);
+outside.focus(); dom.openDialog(wf2, 'block');
+wSum.focus(); const lastWraps = press(); wClose.focus(); const firstBack = press(true);
+t.summary_last_is_in_the_trap = { lastWraps, firstBack };
+dom.closeDialog(wf2);
+// A focusable inside that the selector does not list (a scroller): Tab and Shift+Tab are left to the browser.
+const scroller = tagged('scroller', 'div');
+const d5 = dialog('launch-modal', [a, b, c], [scroller]);
+outside.focus(); dom.openDialog(d5, 'flex');
+scroller.focus(); const unlistedTab = press(); scroller.focus(); const unlistedShift = press(true);
+t.tab_from_unlisted_focusable_inside_is_not_redirected = { unlistedTab, unlistedShift, focused_after: focused() };
+outside.focus(); t.tab_from_outside_still_enters = press();
+dom.closeDialog(d5);
 r.trap = t;
 out(r);

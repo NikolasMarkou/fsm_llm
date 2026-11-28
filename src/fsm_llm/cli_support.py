@@ -100,6 +100,10 @@ def add_env_file(parser: argparse.ArgumentParser) -> None:
     )
 
 
+# DECISION plan-2026-11-27T201735-9283c1fd/D-008
+# The one place an unreadable or non-UTF-8 ``--env-file`` becomes a one-line failure for every model CLI.
+# Do NOT translate inside the public ``load_env`` (a host must see the original exception), do NOT let a CLI
+# call ``load_env`` directly for ``--env-file`` (it prints a traceback), do NOT echo any byte of the file.
 def load_env_file(path: str | os.PathLike[str]) -> None:
     """``load_env(path)`` with a one-line failure for every CLI.
 

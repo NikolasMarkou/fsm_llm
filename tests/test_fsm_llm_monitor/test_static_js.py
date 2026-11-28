@@ -505,6 +505,31 @@ class TestDialogFocusTrap:
             "display": "none",
         }
 
+    def test_tab_from_a_summary_reaches_the_next_control(self, trap):
+        # the Context Data toggle of the workflow drawer is a <summary>: in the trap list
+        row = trap["tab_from_summary_reaches_next_control"]
+        assert row["sumMid"] == {"prevented": False, "focused": "wsum"}
+        assert row["sendWraps"] == {"prevented": True, "focused": "wclose"}
+
+    def test_a_summary_as_the_last_control_is_part_of_the_wrap(self, trap):
+        assert trap["summary_last_is_in_the_trap"] == {
+            "lastWraps": {"prevented": True, "focused": "wclose"},
+            "firstBack": {"prevented": True, "focused": "wsum"},
+        }
+
+    def test_tab_from_an_unlisted_focusable_inside_is_not_redirected(self, trap):
+        # inside is decided by the dialog subtree, not by list membership: the browser moves focus
+        kept = {"prevented": False, "focused": "scroller"}
+        assert trap["tab_from_unlisted_focusable_inside_is_not_redirected"] == {
+            "unlistedTab": kept,
+            "unlistedShift": kept,
+            "focused_after": "scroller",
+        }
+        assert trap["tab_from_outside_still_enters"] == {
+            "prevented": True,
+            "focused": "ta",
+        }
+
     def test_every_dialog_the_trap_covers_is_a_modal_dialog_in_the_template(self):
         html = (_STATIC.parent / "templates" / "index.html").read_text(encoding="utf-8")
         for dialog_id in (
@@ -1261,6 +1286,15 @@ class TestLogsClearWaitsAndSearchMatchesWhatIsShown:
         assert out["shown_before"] == 1
         assert out["during"] == 0  # the rebuild waits for the cursor
         assert out["after_landing"] == 0  # and drops the record from before the Clear
+
+    def test_a_cursor_request_that_never_answers_does_not_freeze_a_refresh(self, probe):
+        out = probe("stale_state")["logs_clear_hung_cursor"]
+        # while the bounded timer is pending the refresh waits; once it fires the refresh fetches and settles
+        assert out["ms_in_range"] is True
+        assert out["settled_before_timer"] is False
+        assert out["requests_before_timer"] == 0
+        assert out["settled_after_timer"] is True
+        assert out["requests_after_timer"] == 1
 
     def test_the_search_matches_the_module_and_the_conversation_id_and_the_message(
         self, probe

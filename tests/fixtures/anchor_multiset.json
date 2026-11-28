@@ -1314,6 +1314,11 @@
       "delta": 1,
       "reason": "plan 9283c1fd step 9: new anchor plan-2026-11-27T201735-9283c1fd/D-007 in monitor/static/utils/dom.js (dialog focus trap)",
       "token": "plan-2026-11-27T201735-9283c1fd/D-007"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 9283c1fd review F5: new D-008 anchor beside cli_support.load_env_file (one anchor token gained)",
+      "token": "plan-2026-11-27T201735-9283c1fd/D-008"
     }
   ]
 }

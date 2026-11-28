@@ -83,7 +83,7 @@ const _returnFocus = new Map();
 const _open = [];  // the dialogs and drawers opened with openDialog, the top one last
 
 function _focusables(el) {
-    const cands = el.querySelectorAll('button, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
+    const cands = el.querySelectorAll('button, summary, [href], input:not([type="hidden"]), select, textarea, [tabindex]:not([tabindex="-1"])');
     return [...cands].filter(c => !c.disabled && c.getClientRects().length > 0);
 }
 
@@ -96,14 +96,16 @@ function _firstFocusable(el) {
 // is the one place that pops. Do NOT trap with `inert` on the page behind alone (no browser proof, older engines
 // lack it), do NOT leave the listener after the last close, do NOT let a closed dialog trap (pop it in closeDialog
 // even when it is already hidden), do NOT trap the bottom dialog of a stack (the API key modal opens over the
-// launch modal on a 401), do NOT preventDefault when the browser's own Tab move stays inside.
+// launch modal on a 401), do NOT preventDefault when the browser's own Tab move stays inside, do NOT decide "outside" by
+// membership in the focusable list (a focusable the selector misses, inside the dialog, is not outside: Tab moves on by itself).
 function _trap(e) {
     if (e.key !== 'Tab') return;
     const top = _open[_open.length - 1];
     const list = _focusables(top);
     if (!list.length) { e.preventDefault(); top.setAttribute('tabindex', '-1'); top.focus(); return; }
+    const outside = !top.contains(document.activeElement);
     const at = list.indexOf(document.activeElement);
-    const to = e.shiftKey ? (at <= 0 ? list[list.length - 1] : null) : (at < 0 || at === list.length - 1 ? list[0] : null);
+    const to = e.shiftKey ? (outside || at === 0 ? list[list.length - 1] : null) : (outside || at === list.length - 1 ? list[0] : null);
     if (to) { e.preventDefault(); to.focus(); }
 }
 

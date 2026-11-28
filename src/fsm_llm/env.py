@@ -20,8 +20,9 @@ def load_env(
 ) -> Path | None:
     """Read a dotenv file into ``os.environ`` and return the file used.
 
-    Interface contract (callers: the ``fsm-llm`` runner and, from plan d454fd62
-    step 18, the other CLIs through ``cli_support.apply_env_file``; hosts):
+    Interface contract (callers: hosts, and the ``--env-file`` flag of every
+    model CLI, the ``fsm-llm`` runner included, through
+    ``cli_support.load_env_file``, which turns an unreadable file into one line):
         - *path*: a file to read. ``None`` searches for a file named ``.env``
           from the CURRENT WORKING DIRECTORY upward (never from the package
           location, so a checkout's own ``.env`` is not found from elsewhere).

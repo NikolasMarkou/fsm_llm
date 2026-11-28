@@ -24,6 +24,9 @@ let _clearedKeys = new Set();
 let _clearedBefore = '';
 // The request Clear sent for that cursor (it never rejects): a rebuild waits for it before it filters.
 let _clearCursorPending = Promise.resolve();
+// A cursor request that never answers must not freeze every later refresh: the wait is bounded; the cursor, when it
+// lands late, still applies from the next rebuild (the Clear keys stay the guard meanwhile).
+const _CURSOR_WAIT_MS = 3000;
 
 function _logKey(r) {
     return `${r.timestamp}|${r.level}|${r.module}:${r.line}|${r.message}`;
@@ -313,7 +316,9 @@ export async function syncLogs() {
 }
 
 export async function refreshLogs() {
-    await _clearCursorPending;
+    let waitTimer;
+    await Promise.race([_clearCursorPending, new Promise(r => { waitTimer = setTimeout(r, _CURSOR_WAIT_MS); })]);
+    clearTimeout(waitTimer);
     const activeLevels = getActiveLogLevels();
     const minLevel = getMinLogLevel();
     const filter = $('log-filter')?.value.trim().toLowerCase();

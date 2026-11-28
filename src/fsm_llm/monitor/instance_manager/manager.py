@@ -143,8 +143,9 @@ class InstanceManager(
             if value.log_level != self._config.log_level and not self._closed:
                 # DECISION plan-2026-11-27T201735-9283c1fd/D-006
                 # Register the new sink BEFORE the old one goes, and assign the config
-                # LAST: records between a remove and an add are lost (a record inside the
-                # overlap may arrive twice, accepted), and a registration that raises must
+                # LAST: this class leaves no gap of its own between a remove and an add (a
+                # record inside the overlap may arrive twice, accepted; loguru can still drop
+                # a record already in flight to the old sink, a known limit), and a registration that raises must
                 # leave the old config, buffer sizes and sink as they were (the route
                 # answers 500). Do NOT remove the old sink first, assign ``_config`` or
                 # resize before the swap succeeded, or restore the old sink on failure.

@@ -822,6 +822,24 @@ const asks = () => calls.filter(c => c.startsWith('GET /api/eventlog'));
     logs.toggleLogPill(debugPill); await flush();               // Debug off again
     route.custom = real;
     result.logs_clear_pending = hold;
+    // A cursor request that never answers does not freeze later refreshes (review F4): the wait is a bounded timer
+    // (the fake scheduler here, never a real sleep); once it fires the refresh proceeds and fetches.
+    const hungSeen = [];
+    route.custom = async url => { hungSeen.push(url); return url.includes('limit=1&') ? new Promise(() => {}) : real(url); };
+    const timersBefore = timers.length;
+    logs.clearLogs();
+    let settled = false;
+    logs.refreshLogs().then(() => { settled = true; });
+    await flush();
+    const wait = timers.slice(timersBefore).filter(t => t.live && t.ms >= 1000 && t.ms <= 10000);
+    const bounded = { timers: wait.length, ms_in_range: wait.length === 1, settled_before_timer: settled, requests_before_timer: hungSeen.filter(u => !u.includes('limit=1&')).length };
+    for (const t of wait) { t.live = false; t.fn(); }
+    await flush();                                             // never await the refresh itself: on a tree with no bound it hangs
+    bounded.settled_after_timer = settled;
+    bounded.requests_after_timer = hungSeen.filter(u => !u.includes('limit=1&')).length;
+    route.custom = real;
+    logs.clearLogs(); await flush();                            // a Clear that lands replaces the hung cursor request
+    result.logs_clear_hung_cursor = bounded;
     // The search matches what the entry shows: module:line, [conversation id] and message, on the refresh and the append path
     const sr = (n, extra = {}) => ({ timestamp: `2026-11-27T12:00:0${n}Z`, level: 'INFO', module: 'mod.x', line: n, message: `srec${n}`, ...extra });
     server = [sr(1, { conversation_id: 'conv-abc-123' }), sr(2, { module: 'other.y' }), sr(3, { message: 'has a(b inside' })];
