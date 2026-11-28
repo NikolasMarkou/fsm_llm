@@ -550,7 +550,7 @@ class TransitionsMixin(_PipelineSurface):
         # its digest permanently gone -- data and metadata desynced. Do NOT
         # snapshot `data` only "because metadata isn't touched here" -- that
         # premise is no longer true. See decisions.md D-024.
-        snapshot = _TurnSnapshot.capture(instance, working_memory=False)
+        snapshot = _TurnSnapshot.capture(instance, whole_turn=False)
 
         instance.current_state = target_state
         instance.context.data.update(

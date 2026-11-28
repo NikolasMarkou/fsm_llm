@@ -291,7 +291,7 @@ class DriverMixin(_PipelineSurface):
             except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                 # DECISION plan-2026-11-19T193704-f150ec28/D-002
                 # [SUPERSEDES the "Pass 1 stays outside" shape of 9925aa3a/D-012,
-                # 089d0ec7/D-002 and D-017 for a cancel only]
+                # 089d0ec7/D-002 and D-017 for a cancel and an interrupt (D-002 of plan 8525c797)]
                 # A cancelled turn is rolled back WHOLE, Pass 1 included: this ONE arm wraps
                 # everything after the snapshot. Do NOT narrow it to the two `except
                 # Exception` blocks inside (Pass 1 sits outside them, so a cancel there kept

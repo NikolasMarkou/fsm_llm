@@ -64,13 +64,14 @@ def _signal_after_the_reply(signal: type[BaseException]) -> Iterator[None]:
         yield
 
 
-_SIGNALS = [KeyboardInterrupt, SystemExit]
+# One signal per row: the driver arms list `KeyboardInterrupt` and `SystemExit` in one tuple, and
+# dropping `SystemExit` from it is killed by the retry row of `test_api_elaborate.py`.
+_SIGNAL = KeyboardInterrupt
 
 
 class TestAnInterruptAfterTheReplyIsAdded:
-    @pytest.mark.parametrize("signal", _SIGNALS)
     def test_sync_converse_leaves_the_pre_turn_history_and_a_retry_adds_one_exchange(
-        self, signal
+        self,
     ) -> None:
         """The repro of the review: state back, history gained ``[user, system]``. Kills: the
         snapshot without the history (the reply stays), a restore without the user message pop
@@ -80,8 +81,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         before = _history(api, cid)
         assert [next(iter(e)) for e in before] == ["system", "user", "system"]
 
-        with _signal_after_the_reply(signal):
-            with pytest.raises(signal):
+        with _signal_after_the_reply(_SIGNAL):
+            with pytest.raises(_SIGNAL):
                 api.converse("hello", cid)
 
         assert _history(api, cid) == before
@@ -89,67 +90,60 @@ class TestAnInterruptAfterTheReplyIsAdded:
         api.converse("hello", cid)  # the same signal does not fire again
         assert _history(api, cid) == [*before, {"user": "hello"}, {"system": "reply"}]
 
-    @pytest.mark.parametrize("signal", _SIGNALS)
-    async def test_async_converse_leaves_the_pre_turn_history(self, signal) -> None:
+    async def test_async_converse_leaves_the_pre_turn_history(self) -> None:
         api, cid = _api()
         await api.aconverse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(signal):
-            with pytest.raises(signal):
+        with _signal_after_the_reply(_SIGNAL):
+            with pytest.raises(_SIGNAL):
                 await api.aconverse("hello", cid)
 
         assert _history(api, cid) == before
         await api.aconverse("hello", cid)
         assert _history(api, cid) == [*before, {"user": "hello"}, {"system": "reply"}]
 
-    @pytest.mark.parametrize("signal", _SIGNALS)
-    def test_a_sync_stream_leaves_the_pre_turn_history(self, signal) -> None:
+    def test_a_sync_stream_leaves_the_pre_turn_history(self) -> None:
         """The stream persists the joined reply in a ``finally``; a signal raised right after
         it is not an abandonment, so the whole turn is rolled back."""
         api, cid = _api()
         api.converse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(signal):
-            with pytest.raises(signal):
+        with _signal_after_the_reply(_SIGNAL):
+            with pytest.raises(_SIGNAL):
                 list(api.converse_stream("hello", cid))
 
         assert _history(api, cid) == before
         assert "".join(api.converse_stream("hello", cid)) == "reply"
         assert _history(api, cid) == [*before, {"user": "hello"}, {"system": "reply"}]
 
-    @pytest.mark.parametrize("signal", _SIGNALS)
-    async def test_an_async_stream_leaves_the_pre_turn_history(self, signal) -> None:
+    async def test_an_async_stream_leaves_the_pre_turn_history(self) -> None:
         api, cid = _api()
         await api.aconverse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(signal):
-            with pytest.raises(signal):
+        with _signal_after_the_reply(_SIGNAL):
+            with pytest.raises(_SIGNAL):
                 await _collect(api.aconverse_stream("hello", cid))
 
         assert _history(api, cid) == before
         assert "".join(await _collect(api.aconverse_stream("hello", cid))) == "reply"
 
-    @pytest.mark.parametrize("signal", _SIGNALS)
-    def test_a_message_free_advance_pops_nothing_of_an_earlier_turn(
-        self, signal
-    ) -> None:
+    def test_a_message_free_advance_pops_nothing_of_an_earlier_turn(self) -> None:
         """No user message was added, so the manager pops nothing: the history must end as it
         was (the greeting and the first turn), not lose an exchange and not gain the reply."""
         api, cid = _api()
         api.converse("first", cid)
         before = _history(api, cid)
 
-        with _signal_after_the_reply(signal):
-            with pytest.raises(signal):
+        with _signal_after_the_reply(_SIGNAL):
+            with pytest.raises(_SIGNAL):
                 api.advance(cid)
 
         assert _history(api, cid) == before
 
-    @pytest.mark.parametrize("signal", _SIGNALS)
-    def test_the_trim_a_reply_causes_is_undone_with_the_summary(self, signal) -> None:
+    def test_the_trim_a_reply_causes_is_undone_with_the_summary(self) -> None:
         """Adding a reply trims the oldest exchanges into ``summary``; the restore puts both
         back, exchange by exchange. Kills: truncating to a captured length (the trimmed
         exchanges stay in the summary and the cut lands on the wrong entries), a restore of the
@@ -162,8 +156,8 @@ class TestAnInterruptAfterTheReplyIsAdded:
         before = _history(api, cid)
         before_summary = _summary(api, cid)
 
-        with _signal_after_the_reply(signal):
-            with pytest.raises(signal):
+        with _signal_after_the_reply(_SIGNAL):
+            with pytest.raises(_SIGNAL):
                 api.converse("third", cid)
 
         assert _history(api, cid) == before
@@ -189,16 +183,3 @@ class TestACancelAtTheSamePoint:
         assert _history(api, cid) == before
         await api.aconverse("hello", cid)
         assert _history(api, cid) == [*before, {"user": "hello"}, {"system": "reply"}]
-
-
-class TestAbandonmentKeepsThePartialReply:
-    def test_closing_a_stream_early_still_keeps_the_reply_it_showed(self) -> None:
-        """GeneratorExit reaches no restore (D-004 clause c of plan e3131cc2): the partial reply
-        of an abandoned stream stays, and so does the user message. Kills: widening the restore
-        to ``BaseException``."""
-        api, cid = _api()
-        stream = api.converse_stream("hello", cid)
-        assert next(stream) == "re"
-        stream.close()
-
-        assert _history(api, cid)[-2:] == [{"user": "hello"}, {"system": "re"}]

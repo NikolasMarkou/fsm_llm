@@ -72,11 +72,12 @@ _NOT_CAPTURED: Any = object()
 class _TurnSnapshot:
     """The in-memory instance state a failed turn rolls back (internal).
 
-    Interface contract: ``capture(instance, working_memory=True)`` deep-copies
-    ``context.data`` and ``context.metadata`` (and ``context.working_memory``
-    unless ``working_memory=False``, the per-transition snapshot) and records
-    ``current_state``; it returns the snapshot. The whole-turn form also keeps
-    the three introspection records ``last_extraction_response``,
+    Interface contract: ``capture(instance, whole_turn=True)`` deep-copies
+    ``context.data`` and ``context.metadata`` and records ``current_state``; it
+    returns the snapshot. The whole-turn form (the default; ``whole_turn=False`` is the
+    per-transition snapshot, which keeps none of the following) also deep-copies
+    ``context.working_memory`` and keeps the three introspection records
+    ``last_extraction_response``,
     ``last_transition_decision`` and ``last_response_generation`` (references:
     a turn replaces them by assignment, never in place) and the conversation
     history: a copy of ``exchanges`` and the ``summary`` as they stand at the
@@ -85,7 +86,7 @@ class _TurnSnapshot:
     into the summary. ``restore(instance)`` puts them back: ``data`` and
     ``metadata`` are cleared and refilled in place, ``working_memory``, the three
     records and the history are rebound to the captured values (``exchanges``
-    refilled in place; all skipped when ``working_memory=False``: the
+    refilled in place; all skipped when ``whole_turn=False``: the
     per-transition rollback keeps the records the turn has already set and
     touches no history), ``current_state`` is reassigned. A restore leaves that
     user message in place: the manager arms pop it.
@@ -106,9 +107,8 @@ class _TurnSnapshot:
 
     @classmethod
     def capture(
-        cls, instance: FSMInstance, *, working_memory: bool = True
+        cls, instance: FSMInstance, *, whole_turn: bool = True
     ) -> _TurnSnapshot:
-        whole_turn = working_memory
         return cls(
             state=instance.current_state,
             data=copy.deepcopy(instance.context.data),
@@ -150,6 +150,7 @@ class _TurnSnapshot:
         instance.current_state = self.state
         instance.context.data.clear()
         instance.context.data.update(self.data)
+        # A whole-turn capture sets all six fields below; the per-transition one sets none.
         if self.working_memory is not _NOT_CAPTURED:
             instance.context.working_memory = self.working_memory
             instance.last_extraction_response = self.last_extraction_response
