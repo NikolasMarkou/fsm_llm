@@ -45,6 +45,12 @@ api.register_handler(
         .do(validate_email))
 ```
 
+A CONTEXT_UPDATE handler dispatched by `API.update_context`, and an END_CONVERSATION handler,
+run with no turn in flight. They may read the conversation and call `update_context`, but a
+`converse`, `advance` or stream on their own conversation raises `FSMError` (a nested turn would
+run two model calls inside the call that is updating or ending it); a handler may start a turn of
+another conversation. START_CONVERSATION handlers are not covered by this refusal.
+
 ### PRE_TRANSITION / POST_TRANSITION -- Before/after state change
 ```python
 api.register_handler(
@@ -99,7 +105,7 @@ The fluent API returned by `api.create_handler(name)`:
 
 ## Error Handling
 
-The `HandlerSystem` takes a `handler_error_mode`, a `HandlerErrorMode` (importable from `fsm_llm`) or its string value. `API`, `FSMManager` and the builders' `set_handler_error_mode` take the same value under the same name, and an unknown value raises `ValueError` naming `handler_error_mode`:
+The `HandlerSystem` takes a `handler_error_mode`, a `HandlerErrorMode` (importable from `fsm_llm`) or its string value. `API`, `FSMManager` and the builders' `set_handler_error_mode` take the same value under the same name, and an unknown value raises `ValueError` naming `handler_error_mode`. `FSMManager` takes `handler_error_mode=None` (its own system then runs in `continue`) and refuses a value beside a `handler_system`, because the system carries its own mode: set it on the `HandlerSystem`:
 - **`HandlerErrorMode.CONTINUE`** / `"continue"` (default) -- Log error, skip failed handler, continue with others
 - **`HandlerErrorMode.RAISE`** / `"raise"` -- Stop execution, propagate exception
 

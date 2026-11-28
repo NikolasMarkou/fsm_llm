@@ -241,6 +241,23 @@ Design rules:
 - Route on `synthesis_result.status` (`ok`, `failed`, `aborted`; `running` while it works). Every edge must read the result key, or it would fire before a result was written.
 - Write the failure edge as `status in [failed, aborted]`. A procedure that spends its turn budget ends `aborted`, so a bare `== "failed"` would strand the host: the loader runs the edges on sample results and refuses it.
 - The failure edge must also WIN. At the `failed` and the `aborted` sample the unique winner of the real ranking (the lowest `priority` number among the passing edges) must be the edge to `on_failure`: an edge with a lower number that also passes, or a second edge to another state at the same number (a tie goes to the classifier model), is refused. Let the failure edge read the result key only, and put any other gate (an attempt counter, a retry condition) on a retry edge with a LOWER priority number than the failure edge: the retry edge wins only when its gate passes, and the failure edge wins otherwise. A failure edge gated on another key is refused, because the loader fills every other key with a placeholder string.
+- A retry that depends on a counter looks like this: the gate is on the retry edge, with a lower number than the failure edge, and the failure edge reads the result key only.
+
+```json
+"transitions": [
+  {"target_state": "done", "description": "It finished", "priority": 1,
+   "conditions": [{"description": "ok", "requires_context_keys": ["synthesis_result"],
+                   "logic": {"==": [{"var": "synthesis_result.status"}, "ok"]}}]},
+  {"target_state": "ask_again", "description": "It failed and fewer than 3 attempts were made", "priority": 2,
+   "conditions": [{"description": "retry", "requires_context_keys": ["synthesis_result", "attempts"],
+                   "logic": {"and": [{"==": [{"var": "synthesis_result.status"}, "failed"]},
+                                     {"<": [{"var": "attempts"}, 3]}]}}]},
+  {"target_state": "sorry", "description": "It failed or was stopped", "priority": 3,
+   "conditions": [{"description": "not ok", "requires_context_keys": ["synthesis_result"],
+                   "logic": {"in": [{"var": "synthesis_result.status"}, ["failed", "aborted"]]}}]}
+]
+```
+
 - `on_failure` names the state the failure edge reaches, one of the state's own transition targets. Give that state a reply that apologises or offers an alternative, because a failure is a normal outcome, not an exception.
 - Name what the procedure may use (`inputs`) and what it must return (`return_keys`) with plain key names. Do not use a handler-only key as a return key.
 - The state declares no extraction and no `completion`. Core only loads the field; an engine that would run it needs a `SynthesizeExecutor`: an `API`, `FSMManager` or `MessagePipeline` with none refuses the definition with `MissingExecutorError` (at construction, `push_fsm`, `fork` and `resume` for an `API`, at the first turn for a bare manager), so register the executor on the `API` and drive the host with the core loops. `fsm-llm-validate` and `load_fsm_definition` accept the definition without one.
