@@ -213,7 +213,7 @@ class TestTheSitesThatRefuse:
             api.push_fsm(conversation_id, _parent())
         assert len(api.conversation_stacks[conversation_id]) == 1
         assert api._temp_fsm_definitions == {}
-        assert api._pending_push_ids == set()
+        assert api._pending_push_ids == {}
         assert api.get_current_state(conversation_id) == "a"
 
     def test_push_fsm_accepts_it_when_the_api_holds_the_executor(self):

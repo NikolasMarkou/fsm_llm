@@ -97,6 +97,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -345,8 +346,8 @@ class API(
         # id as unreferenced (no frame yet), and evicts it — bricking the in-flight
         # sub-conversation with `FSMDefinitionNotFoundError` (a `ValueError`,
         # "Unknown FSM ID ..."). Cleanup treats
-        # pending ids as referenced. See D-011.
-        self._pending_push_ids: set[str] = set()
+        # pending ids as referenced. See D-011. A COUNT per id (ledger.py), not a set.
+        self._pending_push_ids: Counter[str] = Counter()
         # What `settle` keeps in memory (the one-driver mark per root, refused child ends).
         self._call_marks = CallMarks()
 

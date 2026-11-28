@@ -27,7 +27,9 @@ import pytest
 
 from fsm_llm import FileSessionStore
 from fsm_llm.core.definitions import ConversationBusyError, FSMDefinition, FSMError
+from fsm_llm.engine.api import stack as stack_module
 from fsm_llm.engine.api.conversation import API
+from fsm_llm.engine.api.ledger import register_pending_push, release_pending_push
 from fsm_llm.testing import MockLLM2Interface
 from tests.conftest import bind_api_clock
 from tests.test_fsm_llm.support import _blocked_fsm, _correction_fsm, _Prov
@@ -685,8 +687,7 @@ class TestPushRegisterAppendRace:
         referencing it yet."""
         pending_id = "pending-hash-xyz"
         with api._stack_lock:
-            api._temp_fsm_definitions[pending_id] = _make_fsm("pending")
-            api._pending_push_ids.add(pending_id)
+            register_pending_push(api, pending_id, _make_fsm("pending"))
 
         api._release_unreferenced_temp_definitions()
 
@@ -697,10 +698,134 @@ class TestPushRegisterAppendRace:
 
         # Once no longer pending and unreferenced, it IS releasable.
         with api._stack_lock:
-            api._pending_push_ids.discard(pending_id)
+            release_pending_push(api, pending_id)
         api._release_unreferenced_temp_definitions()
         with api._stack_lock:
             assert pending_id not in api._temp_fsm_definitions
+
+    # plan 8525c797 step 6 (D-006): `_pending_push_ids` is a count per id. Two pushes of ONE
+    # content-hash definition share an id; the first to finish used to discard the guard of the
+    # second, a cleanup then evicted the definition and the second child failed mid-greeting.
+    @staticmethod
+    def _interleave(squeeze: str, *, break_a_before_it_counts: bool = False) -> dict:
+        """Push B is held inside `start_conversation` (counted, frame not appended) by Events, no
+        sleeps; push A of the SAME definition finishes, A pops (a cleanup runs), the cache is
+        squeezed, then B is released. Every step records the pending ids and the temp defs."""
+        cache = {"max_fsm_cache_size": 1} if squeeze == "cache of one" else {}
+        instance = API(
+            fsm_definition=_make_fsm("main"),
+            llm_interface=MockLLM2Interface(),
+            **cache,
+        )
+        rec: dict = {}
+        try:
+            root_a, _ = instance.start_conversation()
+            root_b, _ = instance.start_conversation()
+            sub = _make_fsm("sub")
+            real_start = instance.fsm_manager.start_conversation
+            b_in_start, release_b = threading.Event(), threading.Event()
+
+            def hold_push_b(*args, **kwargs):
+                if threading.current_thread().name == "push-B":
+                    b_in_start.set()
+                    rec["b_released"] = release_b.wait(WAIT_TIMEOUT)
+                return real_start(*args, **kwargs)
+
+            instance.fsm_manager.start_conversation = hold_push_b
+
+            def push_b():
+                try:
+                    instance.push_fsm(root_b, sub)
+                    rec["B"] = "ok"
+                except Exception as e:  # recorded, asserted by the caller
+                    rec["B"] = f"{type(e).__name__}: {e}"
+
+            def look(name: str) -> None:
+                with instance._stack_lock:
+                    rec[name] = {
+                        "pending": list(instance._pending_push_ids),
+                        "temp": set(instance._temp_fsm_definitions),
+                    }
+
+            thread_b = threading.Thread(target=push_b, name="push-B")
+            thread_b.start()
+            assert b_in_start.wait(WAIT_TIMEOUT), "push B never reached its greeting"
+            look("b_in_flight")
+            (rec["sub_id"],) = rec["b_in_flight"]["pending"]
+            if break_a_before_it_counts:
+                real_require = stack_module._require_target_resolver
+
+                def refuse(*args, **kwargs):
+                    raise FSMError("refused before the push counted itself")
+
+                stack_module._require_target_resolver = refuse
+                try:
+                    with pytest.raises(FSMError, match="refused before"):
+                        instance.push_fsm(root_a, sub)
+                finally:
+                    stack_module._require_target_resolver = real_require
+                look("after_a_failed")
+            else:
+                instance.push_fsm(root_a, sub)  # A: the same content-hash id
+                look("after_a_push")
+                instance.pop_fsm(root_a)  # A pops: a cleanup runs
+                look("after_a_pop")
+                if squeeze == "cache of one":
+                    instance.start_conversation()  # a load that evicts the sub definition
+            release_b.set()
+            thread_b.join(WAIT_TIMEOUT)
+            assert not thread_b.is_alive()
+            look("after_b")
+            if squeeze == "70 other ids":
+                for i in range(70):
+                    other, _ = instance.start_conversation()
+                    instance.push_fsm(other, _make_fsm(f"other{i}"))
+            rec["converse"] = instance.converse("hello there", root_b)
+            return rec
+        finally:
+            instance.close()
+
+    @pytest.mark.parametrize("squeeze", ["cache of one", "70 other ids"])
+    def test_two_pushes_of_one_definition_never_lose_it(self, squeeze):
+        """20 rounds of the Event interleave. The second push's guard must outlive the first push's
+        finish and pop, the definition must stay resolvable, and the second push must complete."""
+        for round_no in range(20):
+            rec = self._interleave(squeeze)
+            where = f"{squeeze}, round {round_no}: {rec}"
+            sub_id = rec["sub_id"]
+            assert rec["b_released"] is True, where
+            assert sub_id in rec["b_in_flight"]["pending"], where
+            assert sub_id in rec["after_a_push"]["pending"], (
+                where
+            )  # B is still in flight
+            assert sub_id in rec["after_a_pop"]["pending"], where
+            assert sub_id in rec["after_a_pop"]["temp"], where  # the cleanup kept it
+            assert rec["B"] == "ok", where  # no FSMDefinitionNotFoundError
+            assert rec["after_b"]["pending"] == [], where  # nothing leaks
+            assert sub_id in rec["after_b"]["temp"], where  # B's frame references it
+            assert isinstance(rec["converse"], str), where
+
+    def test_a_push_refused_before_it_counted_does_not_uncount_another_push(self):
+        """The rollback uncounts only what THIS call counted: push A fails before its register, and
+        push B (same id, in flight) keeps its guard."""
+        rec = self._interleave("cache of one", break_a_before_it_counts=True)
+        sub_id = rec["sub_id"]
+        assert sub_id in rec["b_in_flight"]["pending"]
+        assert sub_id in rec["after_a_failed"]["pending"], rec
+        assert rec["B"] == "ok", rec
+        assert rec["after_b"]["pending"] == [], rec
+
+    def test_the_count_goes_at_zero_and_never_negative(self, api):
+        with api._stack_lock:
+            register_pending_push(api, "same-id", _make_fsm("one"))
+            register_pending_push(api, "same-id", _make_fsm("one"))
+            release_pending_push(api, "same-id")
+            assert "same-id" in api._pending_push_ids
+            assert api._pending_push_ids["same-id"] == 1
+            release_pending_push(api, "same-id")
+            assert api._pending_push_ids == {}
+            release_pending_push(api, "same-id")  # nothing counted: a no-op
+            assert api._pending_push_ids == {}
 
     def test_pending_guard_is_cleared_after_push_completes(self, api):
         """No leak: a completed push must leave `_pending_push_ids` empty so the
@@ -708,11 +833,11 @@ class TestPushRegisterAppendRace:
         conv_id, _ = api.start_conversation()
         api.push_fsm(conv_id, _make_fsm("sub1"))
         with api._stack_lock:
-            assert api._pending_push_ids == set(), "push left a leaked pending-id entry"
+            assert api._pending_push_ids == {}, "push left a leaked pending-id entry"
         api.end_conversation(conv_id)
         with api._stack_lock:
             assert api._temp_fsm_definitions == {}
-            assert api._pending_push_ids == set()
+            assert api._pending_push_ids == {}
 
 
 # ==========================================================================================

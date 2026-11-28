@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import os
+    from collections import Counter
     from collections.abc import AsyncGenerator, Callable, Iterator, Mapping
 
     from fsm_llm.core.definitions import AdvanceResult, FSMDefinition
@@ -44,7 +45,7 @@ class _ApiSurface:
         _targets: TargetResolver | None
         _context: Any
         _temp_fsm_definitions: dict[str, FSMDefinition]
-        _pending_push_ids: set[str]
+        _pending_push_ids: Counter[str]
         _call_marks: CallMarks
         _stack_lock: threading.Lock
         conversation_stacks: dict[str, list[FSMStackFrame]]
@@ -61,7 +62,7 @@ class _ApiSurface:
         def _release_unreferenced_temp_definitions(self) -> None: ...
 
         def _rollback_push(
-            self, processed_fsm_id: str | None, new_conversation_id: str | None
+            self, pending_id: str | None, new_conversation_id: str | None
         ) -> None: ...
 
         def _restore_conversation(

@@ -1344,6 +1344,11 @@
       "delta": 1,
       "reason": "plan 8525c797 step 5: new D-006 anchor on engine/api/ledger.release_dropped_frames (one anchor token gained)",
       "token": "plan-2026-11-28T050702-8525c797/D-006"
+    },
+    {
+      "delta": 1,
+      "reason": "plan 8525c797 step 6: second D-006 anchor on the pending-push count functions in engine/api/ledger.py (one anchor token gained)",
+      "token": "plan-2026-11-28T050702-8525c797/D-006"
     }
   ]
 }

@@ -17,7 +17,8 @@ package; the old dotted path is gone. Modules:
 - ``sessions.py``: ``SessionsMixin``, ``save_session``, ``load_session``, ``restore_session``.
 - ``ledger.py``: ``release_dropped_frames``, the one cleanup of "these frames are gone" (the call
   marks, the delegated runs, the temp definitions) that ``pop_fsm`` and the refused branch of
-  ``end_conversation`` share.
+  ``end_conversation`` share, and ``register_pending_push`` and ``release_pending_push``, the count
+  of pushes in flight per definition id.
 - ``calls.py``, ``delegated.py``: ``settle`` (the call record applied after the turn) and its
   delegated part (start the run after the commit, the run events, the one bounded wait).
 - ``forks.py``, ``events.py``, ``budget.py``, ``registration.py``: ``fork`` and ``resume``, the

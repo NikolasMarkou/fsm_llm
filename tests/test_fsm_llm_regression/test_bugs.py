@@ -7,6 +7,7 @@ import inspect
 import os
 import re
 import tempfile
+from collections import Counter
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -504,7 +505,7 @@ class TestConversationMemoryLeak:
         api._temp_fsm_definitions = {"temp_fsm_1": MagicMock()}
         # _release_unreferenced_temp_definitions (reached via end_conversation)
         # reads _pending_push_ids; __new__ bypasses __init__, so mirror it here.
-        api._pending_push_ids = set()
+        api._pending_push_ids = Counter()
         api._stack_lock = __import__("threading").Lock()
         api._last_accessed = {"conv1": 0.0}
         # end_conversation writes the ended-conversation cache after the frames

@@ -459,7 +459,7 @@ class TestSurface:
         with pytest.raises(ValueError, match="max_s"):
             manager.start_conversation(api.fsm_id, **kw)
         assert list(manager.instances) == [cid] and api.get_stack_depth(cid) == 1
-        assert api._temp_fsm_definitions == {} and api._pending_push_ids == set()
+        assert api._temp_fsm_definitions == {} and api._pending_push_ids == {}
 
     def test_the_builder_sets_the_defaults_and_build_refuses_a_bad_one(self) -> None:
         builder = APIBuilder().set_definition(_CHAT).set_llm_interface(_llm())

@@ -67,6 +67,7 @@ from .helpers import (
     _require_state_executors,
     _require_target_resolver,
 )
+from .ledger import register_pending_push, release_pending_push
 from .stack import FSMStackFrame
 from .surface import _ApiSurface
 
@@ -296,11 +297,11 @@ class ForkMixin(_ApiSurface):
             self, prepared.frame.max_steps, prepared.frame.max_seconds
         )
         child_id: str | None = None
-        added = False
+        pending: str | None = None  # the id THIS call counted in flight
         try:
             with self._stack_lock:
-                self._temp_fsm_definitions[fsm_id] = prepared.definition
-                self._pending_push_ids.add(fsm_id)
+                register_pending_push(self, fsm_id, prepared.definition)
+                pending = fsm_id
             kept: dict[str, Any] = (
                 {"conversation_id": prepared.frame.child_conversation_id}
                 if keep_id
@@ -336,12 +337,12 @@ class ForkMixin(_ApiSurface):
                         fsm_id=fsm_id,
                     )
                 )
-                self._pending_push_ids.discard(fsm_id)
+                release_pending_push(self, fsm_id)
+                pending = None
                 depth = len(stack)
-            added = True
         finally:
-            if not added:
-                self._rollback_push(fsm_id, child_id)
+            if pending is not None:
+                self._rollback_push(pending, child_id)
         if keep_id:
             return
         record_restored_frame(

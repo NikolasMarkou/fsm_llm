@@ -36,7 +36,7 @@ from .helpers import (
     _require_target_resolver,
     _unexpected_error,
 )
-from .ledger import release_dropped_frames
+from .ledger import register_pending_push, release_dropped_frames, release_pending_push
 from .surface import _ApiSurface
 
 
@@ -161,7 +161,7 @@ class StackMixin(_ApiSurface):
                 raise FSMError(f"Conversation not found: {conversation_id}")
             self._validate_stack_depth(conversation_id)
 
-        processed_fsm_id = None
+        pending_id = None
         new_conversation_id = None
         push_succeeded = False
         try:
@@ -172,13 +172,13 @@ class StackMixin(_ApiSurface):
             _require_state_executors(processed_fsm_def, self._executors)
             _require_target_resolver(processed_fsm_def, self._targets)
             with self._stack_lock:
-                self._temp_fsm_definitions[processed_fsm_id] = processed_fsm_def
                 # DECISION plan-2026-07-21T045419-9925aa3a/D-011
                 # Mark this id in-flight BEFORE releasing the lock for
                 # start_conversation. Cleared atomically with frame append below;
                 # this closes the register→append window where a concurrent
                 # cleanup would otherwise evict the still-unreferenced def.
-                self._pending_push_ids.add(processed_fsm_id)
+                register_pending_push(self, processed_fsm_id, processed_fsm_def)
+                pending_id = processed_fsm_id
 
             current_fsm_id = self._get_current_fsm_conversation_id(conversation_id)
             initial_context = self._build_push_context(
@@ -228,7 +228,8 @@ class StackMixin(_ApiSurface):
                 stack_depth = len(stack)
                 # Frame now references the def; clear the in-flight guard
                 # atomically with the append (same _stack_lock hold). See D-011.
-                self._pending_push_ids.discard(processed_fsm_id)
+                release_pending_push(self, processed_fsm_id)
+                pending_id = None
                 push_succeeded = True
 
             record_push(
@@ -256,7 +257,7 @@ class StackMixin(_ApiSurface):
         finally:
             if not push_succeeded:
                 try:
-                    self._rollback_push(processed_fsm_id, new_conversation_id)
+                    self._rollback_push(pending_id, new_conversation_id)
                 except Exception as rollback_err:
                     logger.error(
                         f"Rollback after failed push_fsm also failed: {rollback_err}"
@@ -330,9 +331,9 @@ class StackMixin(_ApiSurface):
         return initial_context
 
     def _rollback_push(
-        self, processed_fsm_id: str | None, new_conversation_id: str | None
+        self, pending_id: str | None, new_conversation_id: str | None
     ) -> None:
-        """Clean up resources after a failed push_fsm attempt."""
+        """Clean up after a failed push; *pending_id* is the id THIS attempt counted in flight."""
         # DECISION plan-2026-07-21T045419-9925aa3a/D-011
         # Do NOT unconditionally pop `processed_fsm_id` here. A failed push can
         # share its content-hash id with a live frame in ANOTHER conversation
@@ -346,12 +347,11 @@ class StackMixin(_ApiSurface):
                 logger.debug(
                     f"Failed to clean up orphaned conversation {new_conversation_id}: {cleanup_err}"
                 )
-        # A failed push never appended a frame, so clear its in-flight guard so
-        # the id can be released below (otherwise it leaks as permanently
-        # "pending" and its temp def is never freed). See D-011.
-        if processed_fsm_id is not None:
+        # A failed push never appended a frame: uncount ITS in-flight mark (and only that one: the
+        # count is shared with other pushes of the same id) so the id can be released below.
+        if pending_id is not None:
             with self._stack_lock:
-                self._pending_push_ids.discard(processed_fsm_id)
+                release_pending_push(self, pending_id)
         self._release_unreferenced_temp_definitions()
 
     def _release_unreferenced_temp_definitions(self) -> None:
@@ -382,7 +382,7 @@ class StackMixin(_ApiSurface):
                 for stack in self.conversation_stacks.values()
                 for frame in stack
                 if frame.fsm_id is not None
-            } | self._pending_push_ids
+            } | self._pending_push_ids.keys()
             stale = [
                 fsm_id for fsm_id in self._temp_fsm_definitions if fsm_id not in used
             ]
