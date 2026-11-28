@@ -1333,10 +1333,11 @@ class TestASecondConcurrentEndOfOneConversationIsRefused:
         t, outcome = self._start(lambda: rig.mgr.end_conversation("f1", "c1"))
         assert rig.entered.wait(_BOUND_SECONDS)
 
-        with pytest.raises(ConversationBusyError):
+        with pytest.raises(ConversationBusyError) as raised:
             rig.mgr.end_conversation("f1", "c1")
         self._finish(rig, t)
 
+        assert type(raised.value).__name__ == "ConversationEndingError"
         assert outcome == [None]
         rig.api.end_conversation.assert_called_once_with("c1")
         assert rig.held == [False]  # never under the manager lock
@@ -1448,7 +1449,7 @@ class TestTheEndRouteAnswers409ForTheLoser:
         assert first.status_code == 200 and first.json() == {"status": "ok"}
         assert second.status_code == 409
         assert second.headers["content-type"].startswith("application/json")
-        assert second.json() == {"detail": "conversation is busy with another turn"}
+        assert second.json() == {"detail": "conversation is already being ended"}
         end.api.end_conversation.assert_called_once_with("c1")
 
 

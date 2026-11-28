@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fsm_llm import API, ConversationBusyError
+from fsm_llm import API
 from fsm_llm.core.codes import MessageSource, message_source
 from fsm_llm.llm import resolve_model
 from fsm_llm.logging import logger
@@ -20,7 +20,7 @@ from ..constants import (
 from ..definitions import (
     ConversationSnapshot,
 )
-from ..exceptions import MonitorCapacityError
+from ..exceptions import ConversationEndingError, MonitorCapacityError
 from .examples import load_preset_json
 from .handlers import register_monitor_handlers
 from .managed import ManagedFSM, _new_instance_id
@@ -139,8 +139,9 @@ class FsmMixin(_InstanceSurface):
             if conversation_id in inst.ended_conversation_ids:
                 return
             if conversation_id in inst.ending_conversation_ids:
-                raise ConversationBusyError(
-                    "conversation is already being ended", conversation_id
+                raise ConversationEndingError(
+                    "conversation is already being ended",
+                    conversation_id=conversation_id,
                 )
             inst.ending_conversation_ids.add(conversation_id)
         try:

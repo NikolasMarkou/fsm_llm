@@ -13,7 +13,7 @@ from starlette.requests import Request
 from fsm_llm.core.definitions import ConversationBusyError
 from fsm_llm.logging import logger
 
-from ..exceptions import MonitorCapacityError
+from ..exceptions import ConversationEndingError, MonitorCapacityError
 from .application import _require_api_key
 
 _T = TypeVar("_T")
@@ -26,7 +26,7 @@ def _raise_http(e: Exception, action: str) -> NoReturn:
     """Map a manager exception to an HTTP error (one mapping for all routes).
 
     KeyError -> 404, TypeError (wrong instance type) / ValueError -> 400,
-    ConversationBusyError -> 409, MonitorCapacityError -> 429,
+    ConversationEndingError / ConversationBusyError -> 409, MonitorCapacityError -> 429,
     NotImplementedError -> 501, anything else -> 500
     with a generic detail (the exception text is logged, never returned).
     """
@@ -36,6 +36,10 @@ def _raise_http(e: Exception, action: str) -> NoReturn:
         raise HTTPException(status_code=404, detail="not found") from e
     if isinstance(e, FileNotFoundError):
         raise HTTPException(status_code=404, detail="not found") from e
+    if isinstance(e, ConversationEndingError):  # before its base class below
+        raise HTTPException(
+            status_code=409, detail="conversation is already being ended"
+        ) from e
     if isinstance(e, ConversationBusyError):
         raise HTTPException(
             status_code=409, detail="conversation is busy with another turn"

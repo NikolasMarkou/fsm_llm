@@ -4,7 +4,7 @@ Exception hierarchy for fsm_llm.monitor package.
 
 from __future__ import annotations
 
-from fsm_llm.core.definitions import FSMError
+from fsm_llm.core.definitions import ConversationBusyError, FSMError
 
 
 class MonitorError(FSMError):
@@ -36,3 +36,9 @@ class MonitorCapacityError(MonitorError):
     (``max_instances``, ``max_running_agents``, builder sessions)."""
 
     pass
+
+
+class ConversationEndingError(ConversationBusyError):
+    """Raised when a conversation is already being ended by another caller (HTTP 409
+    ``conversation is already being ended``). A core ``ConversationBusyError`` (a turn
+    holds the gate) keeps its own 409 text."""

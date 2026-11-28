@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from fsm_llm.core.definitions import ConversationBusyError
+from fsm_llm.monitor import exceptions as monitor_exceptions
 from fsm_llm.monitor.collector import EventCollector
 from fsm_llm.monitor.constants import MAX_QUERY_LIMIT
 from fsm_llm.monitor.definitions import MonitorConfig, MonitorEvent
@@ -194,8 +195,30 @@ class TestErrorMapping:
         resp = TestClient(app).post("/api/fsm/f1/end", json={"conversation_id": "c1"})
 
         assert resp.status_code == 409
-        assert resp.json() == {"detail": "conversation is busy with another turn"}
+        assert resp.json() == {"detail": "conversation is already being ended"}
         inst.api.end_conversation.assert_not_called()
+
+    def test_the_ending_error_is_a_busy_error_and_keeps_the_id_out_of_the_body(self):
+        # C4 of plan c9d908d4: a subclass (a catcher of the base still works), no id echoed
+        ending = monitor_exceptions.ConversationEndingError(
+            "conversation is already being ended", conversation_id="conv-secret-77"
+        )
+        assert isinstance(ending, ConversationBusyError)
+        client = _client()
+        with mock.patch.object(InstanceManager, "end_conversation", side_effect=ending):
+            resp = client.post("/api/fsm/f1/end", json={"conversation_id": "c1"})
+        assert resp.status_code == 409
+        assert resp.json() == {"detail": "conversation is already being ended"}
+        assert "conv-secret-77" not in resp.text
+
+    def test_a_core_busy_error_keeps_its_own_409_text_and_no_id(self):
+        busy = ConversationBusyError("turn in flight", "conv-secret-77")
+        client = _client()
+        with mock.patch.object(InstanceManager, "end_conversation", side_effect=busy):
+            resp = client.post("/api/fsm/f1/end", json={"conversation_id": "c1"})
+        assert resp.status_code == 409
+        assert resp.json() == {"detail": "conversation is busy with another turn"}
+        assert "conv-secret-77" not in resp.text
 
     def test_capacity_is_429(self):
         client = _client()
