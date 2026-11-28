@@ -68,8 +68,9 @@ class WorkingMemory:
     greeting), the Pass-1 per-field extraction prompt (a field whose
     ``FieldExtractionConfig.context_keys`` is left at ``None``), and both
     classifier call sites; prompts are scoped by the state's ``read_keys``.
-    A field with explicit ``context_keys`` reads raw ``context.data`` only,
-    and the bulk extraction pass sees ``data`` only. Hidden buffers reach
+    A field with explicit ``context_keys`` reads raw ``context.data`` only
+    (narrowed by the state's ``read_keys`` first), and the bulk extraction
+    pass sees ``data`` only. Hidden buffers reach
     none of these. ``API.update_context`` and handler return values write
     ``context.data`` only; nothing syncs a buffer into ``data`` or back.
 

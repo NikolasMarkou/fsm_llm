@@ -370,29 +370,36 @@ class Pass2Mixin(_PipelineSurface):
         context: dict[str, Any],
         state: State,
         conversation_id: str,
+        context_keys: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Filter context by state's context_scope if defined.
+        """Filter context by state's context_scope if defined, then narrow it.
 
-        If the state has ``context_scope`` with ``read_keys``, returns
-        only the keys listed. Missing keys are silently skipped (states
-        may be entered before all keys are populated).
+        If the state has ``context_scope`` with ``read_keys``, keeps only the
+        keys listed. Missing keys are silently skipped (states may be entered
+        before all keys are populated). If ``context_scope`` is ``None``, the
+        full context is kept.
 
-        If ``context_scope`` is ``None``, returns the full context
-        unchanged.
+        ``context_keys`` (a field's or a classification field's own list; ``None``
+        means no narrowing) is applied AFTER the scope and returns a new dict: the
+        intersection, so a ``context_keys`` entry can never expose a key
+        ``read_keys`` hides. With ``context_keys`` of ``None`` the scope-free
+        result is ``context`` itself, as before.
         """
-        if state.context_scope is None:
-            return context
-
-        read_keys = state.context_scope.read_keys
-        if not read_keys:
-            return context
-
-        scoped = {k: v for k, v in context.items() if k in read_keys}
-        missing = [k for k in read_keys if k not in context]
-        if missing:
-            log = logger.bind(conversation_id=conversation_id)
-            log.debug(
-                f"Context scope: state '{state.id}' requested keys "
-                f"{missing} but they are not in context"
-            )
+        # The one scoping rule of the classifier call sites and of the field
+        # extraction (read_keys first, context_keys narrows; D-047 of plan
+        # 8a03483a, anchored at ``_build_classifier_context``): do not copy it
+        # into a caller.
+        scoped = context
+        if state.context_scope is not None and state.context_scope.read_keys:
+            read_keys = state.context_scope.read_keys
+            scoped = {k: v for k, v in context.items() if k in read_keys}
+            missing = [k for k in read_keys if k not in context]
+            if missing:
+                log = logger.bind(conversation_id=conversation_id)
+                log.debug(
+                    f"Context scope: state '{state.id}' requested keys "
+                    f"{missing} but they are not in context"
+                )
+        if context_keys is not None:
+            scoped = {k: v for k, v in scoped.items() if k in context_keys}
         return scoped

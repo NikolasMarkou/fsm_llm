@@ -26,6 +26,7 @@ from fsm_llm.logging import logger
 
 from .helpers import (
     _conversation_entry,
+    _require_registered,
     _strip_internal_mapping,
     with_conversation_context,
 )
@@ -167,11 +168,16 @@ class SnapshotsMixin:
                 self, conversation_id, missing_lock="raise"
             )
 
+        # The wait for the gate is where an end_conversation queued before this reader
+        # removes the conversation: re-check, lock-free, once the gate is held (both
+        # branches) and raise the not-found error. Do NOT take `_lock` for it (D-005).
         if not bounded:
             with conv_lock:
+                _require_registered(self, conversation_id, instance)
                 return snapshot_fn(instance)
         self._acquire_or_refuse(conv_lock, conversation_id)
         try:
+            _require_registered(self, conversation_id, instance)
             return snapshot_fn(instance)
         finally:
             conv_lock.release()
@@ -279,6 +285,7 @@ class SnapshotsMixin:
 
         if conv_lock is not None:
             with conv_lock:
+                _require_registered(self, conversation_id, instance)
                 instance.current_state = state_name
         else:
             instance.current_state = state_name

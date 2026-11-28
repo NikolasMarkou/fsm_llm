@@ -13,7 +13,7 @@ import asyncio
 import threading
 import traceback
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
-from contextlib import aclosing
+from contextlib import aclosing, contextmanager
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from fsm_llm.aio import acall, acall_stream, iterate_sync, run_sync
@@ -106,6 +106,7 @@ class TurnsMixin:
         _lock: threading.Lock
         _conversation_locks: dict[str, TurnGate]
         _active_turns: set[str]
+        _out_of_turn_handlers: set[str]
         _turn_budgets: dict[str, TurnBudget]
         instances: dict[str, FSMInstance]
         _pipeline: MessagePipeline
@@ -144,6 +145,15 @@ class TurnsMixin:
         # ``conv_lock`` and invert the hard ``_lock -> conv_lock`` order.
         if conversation_id in self._active_turns:
             raise FSMError(f"Conversation {conversation_id} is already being processed")
+        # The same rule for the two timings with no turn in flight: update_context and
+        # end_conversation dispatch handlers under the gate with nothing in
+        # ``_active_turns`` (so ``peek_turn`` keeps reporting "no turn"), and the gate
+        # lets their thread back in. A second set, never ``_active_turns`` itself.
+        if conversation_id in self._out_of_turn_handlers:
+            raise FSMError(
+                f"Conversation {conversation_id} is already being processed "
+                "by an update_context or end_conversation handler"
+            )
         if not conv_lock.acquire(blocking=False):
             raise FSMError(
                 f"Conversation {conversation_id} is already being processed by another thread"
@@ -168,6 +178,24 @@ class TurnsMixin:
                 _release_turn(self, conversation_id, conv_lock, ticket)
                 raise
         return ticket
+
+    @contextmanager
+    def _handlers_out_of_turn(self, conversation_id: str) -> Iterator[None]:
+        """Mark ``conversation_id`` while handlers run with no turn in flight.
+
+        Contract: wraps the handler dispatch of ``update_conversation_context`` and
+        ``end_conversation``, which hold the gate and have no ``_active_turns`` entry; while
+        the mark is set ``_enter_turn`` refuses a turn on the id (``FSMError``). Takes no lock.
+        A nested dispatch (an END handler that calls ``update_context``) finds the mark
+        already set and leaves it to the outer call: only the call that set it clears it.
+        """
+        outermost = conversation_id not in self._out_of_turn_handlers
+        self._out_of_turn_handlers.add(conversation_id)
+        try:
+            yield
+        finally:
+            if outermost:
+                self._out_of_turn_handlers.discard(conversation_id)
 
     @with_conversation_context
     def process_message(

@@ -151,17 +151,18 @@ class ConversationClassificationMixin(_ConversationSurface):
                     schema, prompt_config, model=config.model
                 )
 
+                classifier_context = self._services._build_classifier_context(
+                    instance,
+                    current_state,
+                    conversation_id,
+                    config.context_keys,
+                    user_message=user_message,
+                )
                 result: ClassificationResult = await acall(
                     classifier,
                     "classify",
                     user_message,
-                    context=self._services._build_classifier_context(
-                        instance,
-                        current_state,
-                        conversation_id,
-                        config.context_keys,
-                        user_message=user_message,
-                    ),
+                    context=classifier_context,
                 )
 
                 log.debug(
@@ -177,8 +178,10 @@ class ConversationClassificationMixin(_ConversationSurface):
                     result, config.confidence_threshold
                 )
                 if config.context_keys:
+                    # what the classifier SAW: the scoped dict it was given (read_keys
+                    # first, then context_keys), never raw context.data
                     full_result["context_snapshot"] = _json_native_values(
-                        instance.context.data, config.context_keys
+                        classifier_context["data"], config.context_keys
                     )
                 _record_classification_result(instance, config.field_name, full_result)
 

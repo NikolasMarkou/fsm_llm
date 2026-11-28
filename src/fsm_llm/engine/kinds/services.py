@@ -52,6 +52,7 @@ class _PipelineServices(Protocol):
         context: dict[str, Any],
         state: State,
         conversation_id: str,
+        context_keys: list[str] | None = None,
     ) -> dict[str, Any]: ...
 
     def _build_classifier_context(

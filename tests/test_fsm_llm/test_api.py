@@ -1137,6 +1137,112 @@ class TestSameConversationReentrancyIsBounded:
             ]
             assert users == ["hello"]
 
+    def test_update_context_handler_calling_converse_is_refused(self):
+        """No turn is in flight while ``update_context`` dispatches its CONTEXT_UPDATE
+        handlers, so ``_active_turns`` does not refuse the nested turn: the out-of-turn
+        marker does. Mutant: the marker not set around the dispatch."""
+        from fsm_llm.core.definitions import FSMError
+
+        seen: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+            armed = {"on": False}
+            calls_before: list[int] = []
+
+            def on_update(ctx):
+                if armed["on"]:
+                    armed["on"] = False
+                    calls_before.append(s.provider.calls)
+                    try:
+                        s.api.converse("nested", s.cid)
+                    except FSMError as e:
+                        seen.append(e)
+                return {}
+
+            s.on(HandlerTiming.CONTEXT_UPDATE, on_update)
+            armed["on"] = True
+            s.api.update_context(s.cid, {"x": 1})
+            assert len(seen) == 1
+            assert "already being processed" in str(seen[0])
+            assert s.provider.calls == calls_before[0]  # no model call, no nested turn
+            users = [
+                m["user"] for m in s.api.get_conversation_history(s.cid) if "user" in m
+            ]
+            assert users == []
+            assert s.api.get_current_state(s.cid) == "chat"
+            # the marker is gone with the dispatch: the next turn is not refused
+            assert not s.api.fsm_manager._out_of_turn_handlers
+            assert s.api.converse("after", s.cid)
+
+    def test_update_context_marker_is_released_when_the_handler_raises(self):
+        from fsm_llm.core.definitions import FSMError
+
+        with _Session(_reentry_fsm()) as s:
+
+            def boom(ctx):
+                raise RuntimeError("handler failed")
+
+            s.api.register_handler(
+                s.api.create_handler("boom")
+                .at(HandlerTiming.CONTEXT_UPDATE)
+                .with_priority(1)
+                .do(boom)
+            )
+            try:
+                s.api.update_context(s.cid, {"x": 1})
+            except (FSMError, RuntimeError):
+                pass
+            assert not s.api.fsm_manager._out_of_turn_handlers
+
+    def test_a_nested_update_context_does_not_clear_the_outer_marker(self):
+        """``update_context`` must stay re-entrant from a handler (the ERROR-handler row
+        below), and the inner call must not drop the marker the outer one set. Mutant:
+        an unconditional discard in the inner ``finally``."""
+        from fsm_llm.core.definitions import FSMError
+
+        seen: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+            state = {"inner": False}
+
+            def on_update(ctx):
+                if not state["inner"]:
+                    state["inner"] = True
+                    s.api.update_context(s.cid, {"y": 2})  # re-enters, fires this again
+                    try:
+                        s.api.converse("nested", s.cid)
+                    except FSMError as e:
+                        seen.append(e)
+                return {}
+
+            s.on(HandlerTiming.CONTEXT_UPDATE, on_update)
+            s.api.update_context(s.cid, {"x": 1})
+            assert len(seen) == 1
+            assert "already being processed" in str(seen[0])
+            assert s.api.get_data(s.cid).get("y") == 2
+
+    def test_end_handler_calling_converse_is_refused(self):
+        """The END_CONVERSATION timing of the same rule: ``end_conversation`` holds the gate
+        and no turn is in flight. Mutant: the marker not set around the END dispatch."""
+        from fsm_llm.core.definitions import FSMError
+
+        seen: list[BaseException] = []
+        with _Session(_reentry_fsm()) as s:
+            calls_before: list[int] = []
+
+            def on_end(ctx):
+                calls_before.append(s.provider.calls)
+                try:
+                    s.api.converse("nested", s.cid)
+                except FSMError as e:
+                    seen.append(e)
+                return {}
+
+            s.on(HandlerTiming.END_CONVERSATION, on_end)
+            s.api.end_conversation(s.cid)
+            assert len(seen) == 1
+            assert "already being processed" in str(seen[0])
+            assert s.provider.calls == calls_before[0]
+            assert not s.api.fsm_manager._out_of_turn_handlers
+
     def test_error_handler_can_still_write_via_update_context(self):
         from fsm_llm.core.definitions import FSMError
 

@@ -532,3 +532,88 @@ class TestStateExtractionFields:
         )
         assert state.extraction_retries == 1
         assert state.extraction_confidence_threshold == 0.0
+
+
+# ══════════════════════════════════════════════════════════════
+# 5. A field extraction obeys context_scope.read_keys
+# ══════════════════════════════════════════════════════════════
+
+
+def _scoped_field_fsm(read_keys, field_keys):
+    """One state with a field extraction that names ``field_keys``; a state-level
+    ``context_scope`` with ``read_keys`` is added when it is not ``None``."""
+    state = {
+        "id": "a",
+        "description": "A",
+        "purpose": "p",
+        "response_instructions": "say a",
+        "field_extractions": [
+            {
+                "field_name": "note",
+                "field_type": "str",
+                "extraction_instructions": "get the note",
+                "context_keys": field_keys,
+            }
+        ],
+        "required_context_keys": ["note"],
+        "transitions": [{"target_state": "b", "description": "go", "priority": 100}],
+    }
+    if read_keys is not None:
+        state["context_scope"] = {"read_keys": read_keys}
+    return {
+        "name": "ScopedField",
+        "description": "d",
+        "initial_state": "a",
+        "persona": "p",
+        "states": {
+            "a": state,
+            "b": {
+                "id": "b",
+                "description": "B",
+                "purpose": "end",
+                "response_instructions": "bye",
+            },
+        },
+    }
+
+
+def _field_requests(fsm, initial_context):
+    from fsm_llm import API
+    from fsm_llm.testing import MockLLM2Interface
+
+    llm = MockLLM2Interface(extraction_data={"note": "n"})
+    api = API.from_definition(fsm, llm_interface=llm)
+    cid, _ = api.start_conversation(initial_context=initial_context)
+    llm.call_history.clear()
+    api.converse("hi", cid)
+    return [req for name, req in llm.call_history if name == "extract_field"]
+
+
+class TestFieldExtractionObeysReadKeys:
+    """A field with explicit ``context_keys`` is narrowed by the state's ``read_keys``
+    first (the classifier rule, D-047 of plan 8a03483a); it used to read raw data.
+    Mutant: the scoping skipped in ``fields.py``."""
+
+    def test_a_key_outside_read_keys_never_reaches_the_field_request(self):
+        requests = _field_requests(
+            _scoped_field_fsm(["city"], ["salary", "city"]),
+            {"salary": 123456, "city": "Paris"},
+        )
+        assert len(requests) == 1
+        request = requests[0]
+        assert request.context == {"city": "Paris"}
+        assert "123456" not in request.system_prompt
+        assert "Paris" in request.system_prompt
+
+    def test_read_keys_is_the_upper_bound_and_context_keys_narrows_it(self):
+        requests = _field_requests(
+            _scoped_field_fsm(["city", "salary"], ["city"]),
+            {"salary": 123456, "city": "Paris"},
+        )
+        assert requests[0].context == {"city": "Paris"}
+
+    def test_without_a_scope_context_keys_picks_the_keys(self):
+        requests = _field_requests(
+            _scoped_field_fsm(None, ["salary"]), {"salary": 123456, "city": "Paris"}
+        )
+        assert requests[0].context == {"salary": 123456}

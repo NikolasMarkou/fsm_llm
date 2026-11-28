@@ -441,10 +441,12 @@ class TransitionsMixin(_PipelineSurface):
         # applies first; context_keys only narrows it. Do NOT return to
         # "context_keys replaces read_keys" (it sent a read_keys-hidden salary
         # to the classifier). See decisions.md D-047.
-        visible = instance.context.get_user_visible_data()
-        data = self._apply_context_scope(visible, state, conversation_id)
-        if context_keys is not None:
-            data = {k: v for k, v in data.items() if k in context_keys}
+        data = self._apply_context_scope(
+            instance.context.get_user_visible_data(),
+            state,
+            conversation_id,
+            context_keys,
+        )
         return {"history": history, "purpose": state.purpose, "data": data}
 
     # ----------------------------------------------------------

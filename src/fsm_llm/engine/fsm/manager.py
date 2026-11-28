@@ -142,6 +142,11 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         # under ``_lock`` after ``conv_lock`` is acquired; discarded WITHOUT any
         # lock in the ``finally`` (a lone ``set.discard`` is atomic under the GIL).
         self._active_turns: set[str] = set()
+        # Conversation ids whose update_context or END handlers are being dispatched OUT of
+        # a turn (no ``_active_turns`` entry, which ``peek_turn`` reports as "turn in flight").
+        # ``_enter_turn`` refuses a turn on such an id, so a handler cannot start a nested turn
+        # of its own conversation. Set and discarded by the dispatching call, taking no lock.
+        self._out_of_turn_handlers: set[str] = set()
         # Lifetime turn budgets (plan 5a6a1f80 D-010, ``budget.py``): one record per manager
         # conversation id that was given a limit. Written under ``_lock`` with the instance,
         # charged in ``_enter_turn``, dropped with the instance; a conversation with no limit
@@ -570,14 +575,20 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
                 # The snapshot is SHALLOW on purpose: see
                 # `commit_with_key_rollback` (context/commit.py), which holds the
                 # BOUNDARY note and does the commit.
+                def dispatch_context_update() -> None:
+                    # no turn is in flight here: the marker is what refuses a
+                    # converse() from these handlers (see `_enter_turn`)
+                    with self._handlers_out_of_turn(conversation_id):
+                        self._execute_handlers(
+                            HandlerTiming.CONTEXT_UPDATE,
+                            conversation_id,
+                            updated_keys=set(context_update.keys()),
+                        )
+
                 commit_with_key_rollback(
                     instance.context,
                     context_update,
-                    lambda: self._execute_handlers(
-                        HandlerTiming.CONTEXT_UPDATE,
-                        conversation_id,
-                        updated_keys=set(context_update.keys()),
-                    ),
+                    dispatch_context_update,
                     lambda handler_err: log.error(
                         f"CONTEXT_UPDATE handler failed "
                         f"({type(handler_err).__name__}: {handler_err}), rolling "
@@ -660,7 +671,8 @@ class FSMManager(TurnsMixin, SnapshotsMixin):
         if conv_lock is not None:
             self._acquire_or_refuse(conv_lock, conversation_id)
         try:
-            self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
+            with self._handlers_out_of_turn(conversation_id):
+                self._execute_handlers(HandlerTiming.END_CONVERSATION, conversation_id)
         finally:
             # Clean up while holding conv_lock to prevent race with process_message.
             # Lock ordering is safe: process_message uses non-blocking conv_lock

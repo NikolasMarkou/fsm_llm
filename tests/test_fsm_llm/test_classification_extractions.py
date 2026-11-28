@@ -1429,6 +1429,22 @@ class TestStep04A4:
             "profile": {"name": "Ada"},
         }
 
+    def test_a4_context_snapshot_holds_only_what_the_classifier_saw(self):
+        """The record shows the SCOPED dict of the classifier call: a key outside
+        ``context_scope.read_keys`` is never sent, so it is never recorded (it was:
+        the snapshot read raw ``context.data``). Mutant: the snapshot back on raw data."""
+        from fsm_llm.core.definitions import ContextScope
+
+        fsm = _a3_extraction_fsm(context_keys=["topic", "other"])
+        fsm.states["triage"].context_scope = ContextScope(read_keys=["topic"])
+        api, conv_id = _a3_api(fsm)
+        with _ClassifierCapture("browse", 0.95) as capture:
+            api.converse("just looking", conv_id)
+
+        assert "hidden-value-xyz" not in json.dumps(capture.calls)
+        record = _a4_metadata(api, conv_id)[_A4_RESULTS_KEY]["intent"]
+        assert record["context_snapshot"] == {"topic": "running shoes"}
+
     def test_a4_transition_record_in_metadata(self):
         api, conv_id, _ = _api(_ambiguous_then_blocked_fsm())
         with patch("fsm_llm.engine.turn.transitions.Classifier") as mock_cls:

@@ -453,6 +453,70 @@ class TestManagerLevel:
         assert seen == {"state": "chat"}
 
 
+class TestAReaderQueuedBehindATurnMeetsAnEndedConversation:
+    """A reader looks the conversation up under ``_lock``, lets go (D-005 of plan 9925aa3a: never
+    block on ``conv_lock`` holding ``_lock``) and waits on the gate. An ``end_conversation``
+    queued before it removes the conversation first, so the reader that gets the gate next must
+    refuse with the not-found error of ``_conversation_entry`` and not return the data of a
+    conversation that no longer exists. Kills: the re-check after the gate removed in either
+    branch of ``_read_under_lock`` (the unbounded and the bounded reader) or in
+    ``set_conversation_state``. The order is read, not assumed: both threads are seen in the
+    gate queue (``_wait_queued``, the one poll of this file) before the turn lets go."""
+
+    @pytest.mark.parametrize(
+        "name",
+        ["data", "state", "history", "ended", "end_snapshot", "set_state"],
+    )
+    def test_the_reader_raises_not_found_and_returns_nothing(self, name: str):
+        manager, cid = _manager()
+        readers: dict[str, Callable[[], Any]] = {
+            "data": lambda: manager.get_conversation_data(cid),
+            "state": lambda: manager.get_conversation_state(cid),
+            "history": lambda: manager.get_conversation_history(cid),
+            "ended": lambda: manager.has_conversation_ended(cid),
+            "end_snapshot": lambda: manager.get_end_snapshot(cid),
+            "set_state": lambda: manager.set_conversation_state(cid, "chat"),
+        }
+        gate = manager._conversation_locks[cid]
+        outcome: dict[str, Any] = {}
+
+        def run(label: str, fn: Callable[[], Any]) -> threading.Thread:
+            def body() -> None:
+                try:
+                    outcome[label] = ("returned", fn())
+                except BaseException as error:  # judged on the main thread
+                    outcome[label] = ("raised", error)
+
+            # an empty Context: a build whose plain threads inherit the Context would
+            # inherit the ticket of the turn and re-enter instead of queueing
+            ctx = contextvars.Context()
+            thread = threading.Thread(target=lambda: ctx.run(body), daemon=True)
+            thread.start()
+            return thread
+
+        claim = _claim_turn(manager, cid)  # a turn is in flight
+        try:
+            ender = run("end", lambda: manager.end_conversation(cid))
+            _wait_queued(gate, 1)
+            reader = run("read", readers[name])
+            _wait_queued(gate, 2)
+            assert len(gate._queue) == 2  # ender first, reader behind it
+        finally:
+            _release_turn(manager, cid, *claim)
+        for thread in (ender, reader):
+            thread.join(BOUND_SECONDS)
+            assert not thread.is_alive()
+
+        assert outcome["end"] == ("returned", None)
+        assert cid not in manager.instances
+        kind, error = outcome["read"]
+        assert kind == "raised", (
+            f"the reader returned {error!r} for an ended conversation"
+        )
+        assert isinstance(error, FSMError)
+        assert str(error) == f"Conversation {cid} not found"
+
+
 class TestKnownLimits:
     """Behaviour the docs name as a limit (plan f150ec28 D-020). A row that fails here means
     the limit was fixed: remove its doc sentence and this row together."""

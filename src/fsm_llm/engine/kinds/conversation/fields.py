@@ -231,15 +231,19 @@ class ConversationFieldsMixin(_ConversationSurface):
             )
 
             # Build dynamic context from config.context_keys
+            # The state's read_keys scope applies first and the field's own
+            # context_keys only narrows it (the classifier rule, one helper). An
+            # explicit list reads raw context.data (memory.py documents it), a field
+            # without one reads the user-visible merged view.
+            current_state = self._services.get_state(instance, conversation_id)
             if field_config.context_keys is not None:
-                dynamic_context = {
-                    k: v
-                    for k, v in instance.context.data.items()
-                    if k in field_config.context_keys
-                }
+                dynamic_context = self._services._apply_context_scope(
+                    instance.context.data,
+                    current_state,
+                    conversation_id,
+                    field_config.context_keys,
+                )
             else:
-                # Apply state-level context_scope as default filter
-                current_state = self._services.get_state(instance, conversation_id)
                 dynamic_context = self._services._apply_context_scope(
                     instance.context.get_user_visible_data(),
                     current_state,

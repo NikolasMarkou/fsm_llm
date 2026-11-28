@@ -154,7 +154,7 @@ def _conversation_entry(
     (``set_conversation_state``, ``end_conversation``).
     """
     if conversation_id not in manager.instances:
-        raise FSMError(f"Conversation {conversation_id} not found")
+        raise _not_found(conversation_id)
     conv_lock = manager._conversation_locks.get(conversation_id)
     if conv_lock is None:
         if missing_lock == "raise":
@@ -165,3 +165,24 @@ def _conversation_entry(
         if missing_lock == "keyerror":
             raise KeyError(conversation_id)
     return manager.instances[conversation_id], conv_lock
+
+
+def _not_found(conversation_id: str) -> FSMError:
+    """The error of an unknown or ended conversation (one text for every lookup)."""
+    return FSMError(f"Conversation {conversation_id} not found")
+
+
+def _require_registered(
+    manager: _ConversationRegistry, conversation_id: str, instance: FSMInstance
+) -> None:
+    """Refuse a conversation that ended while the caller waited on its gate.
+
+    Contract: call it AFTER ``conv_lock`` is held, on the ``instance`` the earlier lookup
+    returned. Raises ``_not_found`` when ``instances`` no longer holds that very object
+    (ended, or ended and started again under the id). Takes NO lock: ``end_conversation``
+    removes the instance while it holds the gate, so a read here is ordered after the
+    removal, and taking ``_lock`` under ``conv_lock`` would invert the ``_lock -> conv_lock``
+    order (D-005 of plan 9925aa3a).
+    """
+    if manager.instances.get(conversation_id) is not instance:
+        raise _not_found(conversation_id)
